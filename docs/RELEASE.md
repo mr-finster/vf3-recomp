@@ -35,9 +35,9 @@ the YouTube post link to it.
 ## 4. The site (vf3-recomp.pages.dev, Cloudflare Pages)
 
 ```
-tools/site/media.py "Virtua Fighter 3 Recomp - trailer (1080p60).mp4"   # once: the cabinet's screen, the poster
+tools/site/media.py TRAILER.mp4                         # once: the cabinet's screen, the poster
 tools/site/build.py --youtube <the trailer's video ID>                    # build/site, checked against the tag
-npx wrangler pages deploy build/site --project-name vf3-recomp --branch main
+npx wrangler pages deploy build/site --project-name vf3-recomp --branch claude/adoring-feynman-rsrxic
 ```
 
 `build.py` needs the three packages from step 2 in `build/release`, `build/win` and `build/deck` (it only checks
@@ -48,3 +48,11 @@ at the repo root, and the `REF_KEY` secret on the Pages project.
 
 - The VF1 and VF2 sites' More ports menus: Virtua Fighter 3 linked to https://vf3-recomp.pages.dev/.
 - The README: the trailer's link.
+
+## Never re-spin a release
+
+Once a release is published, its files and its tag never change: a fix is a new version (v0.1.1-alpha, ...). Quiver
+checks releases, and swapping the files of a published one, or moving its tag, put VF1 and VF2 on hold there.
+
+The Cloudflare project's production branch is `claude/adoring-feynman-rsrxic` (the name the first page went up
+under): a deploy with any other `--branch` is only a preview.
