@@ -1792,7 +1792,10 @@ int main(int argc, char **argv)
 		// pictures shown, for the same reason). Over 10% of a window's: taken as pictures over their time.
 		uint64_t win_t0 = 0;
 		int win_passes = 0, win_missed = 0;
-		bool missing = false, kept = false;   // (kept: a cut made for refreshes missed stays for this run, as VF2's)
+		bool missing = false, kept = false;   // (kept: a cut made for refreshes missed stays for this run, as VF2's,
+		int missed_cuts = 0;                  // from the third: the first two lift again when calm. A first start's
+		                                      // warm-up (the new exe scanned, the driver's shaders built, a stage's
+		                                      // first textures) missed refreshes on a fast PC, held at 60 all run)
 		uint64_t grace_until = 0, calm_since = 0;
 		double emu_ms = 3.0;   // a game frame's cost, smoothed over frames (not the pace line's window, which restarts)
 		int pictures = 0;
@@ -1809,6 +1812,7 @@ int main(int argc, char **argv)
 		if (gov.smooth_off || gov.scale_cut || gov_aa_cut) fprintf(stderr, "governor: a setting changed: its cuts lifted\n");
 		gov.smooth_off = false;
 		gov.kept = false;
+		gov.missed_cuts = 0;
 		gov.scale_cut = 0;
 		scale = chosen_scale();   // (not cfg.scale: 0 on a first start, and the picture's size loop never ended)
 		gov_aa_cut = 0;
@@ -2566,7 +2570,7 @@ int main(int argc, char **argv)
 				const double budget = smooth ? 1000.0 / hz - emu * std::min(1.0, FRAME_HZ / hz) : frame_ms - emu;
 				if (gov.pictures > 30) {
 					if (gov.avg_ms > 0.9 * budget || gov.missing) {
-						if (gov.missing) gov.kept = true;
+						if (gov.missing && ++gov.missed_cuts >= 3) gov.kept = true;
 						if (gov.missing) fprintf(stderr, "governor: %d of %d refreshes missed (the GPU or the present, not the pictures' %.1f ms)\n", gov.win_missed, gov.win_passes, gov.avg_ms);
 						if (smooth && !gov.smooth_off && hz > 65) {
 							gov.smooth_off = true;
