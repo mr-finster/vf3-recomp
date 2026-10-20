@@ -238,6 +238,7 @@ void game_menu::move(int d)
 
 void game_menu::change(int d)
 {
+	if (m_stack.empty() || size_t(m_sel) >= m_stack.back().items.size()) return;   // (closed by a change before)
 	auto f = m_stack.back().items[m_sel].change;   // a copy: it may rebuild the pages
 	if (!f) return;
 	f(d);

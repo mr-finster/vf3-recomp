@@ -376,8 +376,11 @@ dialog .x:hover{background:rgba(255,255,255,.2)}
       <div class="pop" role="dialog" aria-label="Changelog">
         <p><b>%VERSION%</b> &middot; %DATE%</p>
         <ul>
-          <li>No more crash when clicking an option that restarts the game (Play style) with the mouse.</li>
+          <li>Windows: the GPU renderer starts on Vulkan for every graphics card (it was AMD only), where Direct3D 12 could be far slower on NVIDIA cards. Direct3D 12 is still used by itself if Vulkan fails, and Display &gt; Graphics driver chooses it.</li>
         </ul>
+        <details><summary>v0.1.4-alpha</summary><ul>
+          <li>No more crash when clicking an option that restarts the game (Play style) with the mouse.</li>
+        </ul></details>
         <details><summary>v0.1.3-alpha</summary><ul>
           <li>The menu with a mouse: clicking an option's &lt; steps it down, and a click at either end goes round to the other (the render scale and the difficulty looked stuck at their top, #3).</li>
         </ul></details>

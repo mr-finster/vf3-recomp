@@ -421,6 +421,7 @@ struct settings
 	bool sharp_textures = true;   // the 3D's textures' mipmap levels for the picture's size (false: the arcade's, video::Raster::arcade_lod)
 	int filter = 0;          // the screen filter: 0 off, 1 scanlines, 2 CRT
 	int crt_colours = 0;     // an arcade monitor's colours: 0 off, 1-5 as Supermodel's (CRT_COLOURS)
+	int graphics = 0;        // Windows: the GPU renderer's driver, 0 Auto (Vulkan first, Direct3D 12 if it fails), 1 Direct3D 12 first
 	int aa = 1;              // antialiasing: the 3D drawn aa times larger each way and averaged (1 off)
 	player_controls ctl[2] = { player_controls::defaults(0), player_controls::defaults(1) };
 
@@ -457,6 +458,7 @@ struct settings
 		flag("sharp_textures", sharp_textures);
 		num("screen_filter", filter, 0, 2);
 		num("crt_colours", crt_colours, 0, 5);
+		num("graphics", graphics, 0, 1);
 		num("antialiasing", aa, 0, 3);
 		if (aa == 0) aa = 1;   // (VF2's Low, edges smoothed after drawing: not in this game's renderer)
 		for (int p = 0; p < 2; p++) ctl[p].load(kv, p);
@@ -505,6 +507,7 @@ struct settings
 		if (!roms_folder.empty()) fprintf(f, "roms_folder = %s\n", roms_folder.c_str());
 		if (!gpu3d_failed.empty()) fprintf(f, "gpu_3d_failed = %s\n", gpu3d_failed.c_str());
 		fprintf(f, "crt_colours = %d\nsharp_textures = %d\n", crt_colours, int(sharp_textures));
+		if (graphics) fprintf(f, "graphics = %d\n", graphics);
 		fprintf(f, "screen_filter = %d\nantialiasing = %d\nmusic_volume = %d\neffects_volume = %d\narcade_coins = %d\nframe_timings = %d\n", filter, aa, music, effects, arcade_coin, int(timings));
 		for (int p = 0; p < 2; p++) ctl[p].save(f, p);
 		const bool flushed = flush_to_disk(f);
@@ -1132,19 +1135,21 @@ int main(int argc, char **argv)
 			if (SDL_IOStream *io = SDL_IOFromFile(marker.c_str(), "w")) SDL_CloseIO(io);
 			// (a driver whose 3D failed its check here before is passed over: Direct3D 12's for Vulkan, SDL's other on
 			// Windows: some older cards draw nothing on one and are fine on the other. SDL_GPU_DRIVER chooses over this.)
-			// (as VF2's, vf2-recomp #19: an RX 9070 on Direct3D 12 took 15 s to start and ~29 ms to take each picture,
-			// 30 a second at any scale; on Vulkan 6x ran at the screen's rate. A Radeon's Vulkan first then; Direct3D
-			// 12 if Vulkan won't start or draws no 3D, remembered)
+			// (as VF1's and VF2's: Vulkan first on Windows for every card, Direct3D 12 if Vulkan won't start or draws no
+			// 3D, remembered. A Radeon's first (vf2-recomp #19: an RX 9070 on Direct3D 12 took ~29 ms a picture, 30 a
+			// second at any scale), then NVIDIA's too: vf2-recomp #21 and #22 (an RTX 3060: ~100 ms a 3D picture on
+			// Direct3D 12, 57 a second on Vulkan), vf1-recomp #28 (17 ms a 2D layer's upload), #29 and #16. The player's
+			// Display > Graphics driver: Direct3D 12 first instead.)
 #ifdef _WIN32
-			const std::string cards = sysinfo::gpu_names();
-			const bool radeon = cards.find("AMD") != std::string::npos || cards.find("Radeon") != std::string::npos;
+			const std::string cards = sysinfo::gpu_names();   // (the hardware's: software adapters left out)
+			const bool any_card = !cards.empty() && cards.find("Microsoft Basic Render") == std::string::npos;
 #else
-			const bool radeon = false;
+			const bool any_card = false;
 #endif
-			const bool vk_first = radeon && !failed_before("vulkan") && !getenv("SDL_GPU_DRIVER");
+			const bool vk_first = any_card && cfg.graphics == 0 && !failed_before("vulkan") && !getenv("SDL_GPU_DRIVER");
 			const bool try_vulkan = (failed_before("direct3d12") || vk_first) && !failed_before("vulkan") && !getenv("SDL_GPU_DRIVER");
 			if (try_vulkan) {
-				fprintf(stderr, "SDL's gpu renderer: Vulkan (%s)\n", failed_before("direct3d12") ? "the 3D failed on Direct3D 12 here before" : "a Radeon: its Vulkan first");
+				fprintf(stderr, "SDL's gpu renderer: Vulkan (%s)\n", failed_before("direct3d12") ? "the 3D failed on Direct3D 12 here before" : "Windows, first");
 				SDL_SetHint(SDL_HINT_GPU_DRIVER, "vulkan");
 			}
 			ren = SDL_CreateRenderer(win, "gpu");
@@ -1203,7 +1208,7 @@ int main(int argc, char **argv)
 				SDL_GPUDevice *gd = SDL_GetGPURendererDevice(ren);
 				const char *drv = gd ? SDL_GetGPUDeviceDriver(gd) : nullptr;
 				if (drv && !strcmp(drv, "vulkan") && vk_first && !failed_before("direct3d12") && draws_3d(ren) == 0) {
-					// (a Radeon's Vulkan chosen first draws nothing: Direct3D 12, as before)
+					// (Vulkan chosen first draws nothing: Direct3D 12, as before)
 					fprintf(stderr, "SDL's gpu renderer: Vulkan draws no 3D here: Direct3D 12 instead\n");
 					cfg.gpu3d_failed += (cfg.gpu3d_failed.empty() ? "" : " ") + std::string("vulkan");
 					cfg_dirty = true;
@@ -1984,6 +1989,12 @@ int main(int argc, char **argv)
 			"The colours as an arcade monitor showed them, as Supermodel's CRT colours. Sega arcade is a Japanese cabinet's: bluer whites and richer colours. The others are a Sony studio monitor and the TV standards of Japan, the US and Europe. Off: the game's colours as they are.",
 			[&] { return std::string(CRT_COLOURS[cfg.crt_colours].name) + (cfg.crt_colours && crt_failed ? " (not with this renderer)" : ""); },
 			[&](int d) { cfg.crt_colours = wrap(cfg.crt_colours + d, N_CRT_COLOURS); cfg_dirty = true; } });
+#ifdef _WIN32
+		p.items.push_back({ "Graphics driver",
+			"Auto starts on Vulkan, and goes to Direct3D 12 by itself if Vulkan won't start or draws wrongly. Direct3D 12 starts on Direct3D 12 instead. Applies from the next start.",
+			[&] { return std::string(cfg.graphics ? "Direct3D 12" : "Auto (Vulkan first)"); },
+			[&](int) { cfg.graphics = !cfg.graphics; cfg_dirty = true; } });
+#endif
 		p.items.push_back({ "Show FPS", "Shows the frame rate in the top right corner.",
 			[&] { return on_off(cfg.show_fps); },
 			[&](int) { cfg.show_fps = !cfg.show_fps; cfg_dirty = true; if (!cfg.show_fps) menu.set_fps(""); } });
