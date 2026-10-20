@@ -249,12 +249,18 @@ void game_menu::change(int d)
 // couldn't come back down from them: the option looked stuck (#3).
 void game_menu::click_change(int d)
 {
-	auto value = [&] { const menu_item &it = m_stack.back().items[m_sel]; return it.value ? it.value() : std::string(); };
+	// (a change can close the menu: the play style restarts the game, the pages gone)
+	auto value = [&] {
+		if (m_stack.empty() || size_t(m_sel) >= m_stack.back().items.size()) return std::string("\x01gone");
+		const menu_item &it = m_stack.back().items[m_sel];
+		return it.value ? it.value() : std::string();
+	};
 	const std::string was = value();
 	change(d);
 	if (value() != was) return;
 	for (int n = 0; n < 64; n++) {   // (at an end: to the other one)
 		const std::string at = value();
+		if (at == "\x01gone") break;
 		change(-d);
 		if (value() == at) break;
 	}
