@@ -12,7 +12,7 @@ mkdir -p $OUT
 DXC=${DXC:-dxc}
 SPIRV_CROSS=${SPIRV_CROSS:-spirv-cross}
 NAMES=""
-for s in vs_poly fs_opq fs_tr vs_quad fs_fog fs_out; do
+for s in vs_poly fs_opq fs_tr vs_quad fs_fog fs_out fs_colour; do
 	case $s in
 		vs_poly) D="-D VS_POLY"; P=vs_6_0;;
 		fs_opq) D="-D FS_POLY -D FS_LAYER=0"; P=ps_6_0;;
@@ -20,6 +20,7 @@ for s in vs_poly fs_opq fs_tr vs_quad fs_fog fs_out; do
 		vs_quad) D="-D VS_QUAD"; P=vs_6_0;;
 		fs_fog) D="-D FS_FOG"; P=ps_6_0;;
 		fs_out) D="-D FS_OUT"; P=ps_6_0;;
+		fs_colour) D="-D FS_COLOUR"; P=ps_6_0;;
 	esac
 	$DXC -T $P -E main -HV 2021 -O3 $D -spirv -fspv-target-env=vulkan1.0 -fvk-use-dx-position-w -Fo $OUT/$s.spv src/gpu/r3d.hlsl
 	$DXC -T $P -E main -HV 2021 -O3 $D -Fo $OUT/$s.dxil src/gpu/r3d.hlsl

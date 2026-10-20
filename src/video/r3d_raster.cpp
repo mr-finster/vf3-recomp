@@ -199,6 +199,8 @@ void Raster::gather(const Viewport &vp, int layer, bool overlay, std::vector<int
 		}
 }
 
+bool Raster::arcade_lod = false;
+
 void Raster::prepare_mesh(int di, std::vector<Tri> &result) const
 {
 	const Draw &d = draws[size_t(di)];
@@ -208,6 +210,8 @@ void Raster::prepare_mesh(int di, std::vector<Tri> &result) const
 	const int x0 = d.x0, y0 = d.y0, x1 = d.x1, y1 = d.y1;
 	const float sx0 = d.vx, sy0 = d.vy, sw = d.vw, sh = d.vh, l = d.l, r = d.r, b = d.b, t = d.t;
 	const Mat4 &M = m.matrix;
+	// (the LOD base scaled by the lines drawn to the arcade's: each doubling a mipmap level finer, see arcade_lod)
+	const float lod_k = arcade_lod ? 1.0f : std::max(1.0f, float(h) / 384.0f);   // (the arcade's 384 lines)
 	float nmat[9];
 	for (int c = 0; c < 3; c++) {
 		for (int rr = 0; rr < 3; rr++) nmat[c * 3 + rr] = M.m[c * 4 + rr] / m.scale;
@@ -228,7 +232,7 @@ void Raster::prepare_mesh(int di, std::vector<Tri> &result) const
 				for (int q = 0; q < 3; q++)
 					fn[q] = M.m[q] * s.face_normal[0] + M.m[4 + q] * s.face_normal[1] + M.m[8 + q] * s.face_normal[2];
 				o[9] = o[0] * fn[0] + o[1] * fn[1] + o[2] * fn[2];
-				o[10] = o[9] * -vp.cota * s.texture_np;
+				o[10] = o[9] * -vp.cota * s.texture_np * lod_k;
 			}
 			if (v[0][9] > 0 && v[1][9] > 0 && v[2][9] > 0)
 				continue;   // facing away

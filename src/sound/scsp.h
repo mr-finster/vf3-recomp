@@ -48,6 +48,7 @@ public:
 	void midi_in_byte(u8 data);
 
 	void timer_fired(int timer);
+	static u32 timer_samples(u16 reg);   // timers A-C: samples from a write of the register to the interrupt
 	// Brings the stream up to now (sound_stream::update)
 	void update();
 

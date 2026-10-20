@@ -376,9 +376,18 @@ dialog .x:hover{background:rgba(255,255,255,.2)}
       <div class="pop" role="dialog" aria-label="Changelog">
         <p><b>%VERSION%</b> &middot; %DATE%</p>
         <ul>
+          <li>Hold Start while choosing a character for their second outfit, as on the cabinet (Start reached the game only as a tap).</li>
+          <li>Music at the arcade's tempo: it ran 0.8% fast (the sound chip's timers a sample short). Pai's theme has its missing instrument back from 9 seconds in (an FM voice's depth, as Supermodel's).</li>
+          <li>No more crash on leaving the arcade's test menu (after changing the coin settings, for one) in the PC play style.</li>
+          <li>Sharper textures in the distance at higher render scales: their detail now picked for the picture's size, not the arcade's 384 lines (Display &gt; Distant textures: Arcade for the original's).</li>
+          <li>Smooth motion no longer stuck at 60 fps after the character select or a fight's intro: the settings now always stay as you set them (as in VF1 and VF2 Recomp), nothing lowered by itself.</li>
+          <li>Smoother motion in throws and on the beach and desert stages (no more stop-then-jump there), and no more fighters' pieces flying across the screen at the attract's camera cuts.</li>
+          <li>CRT colours (Display): the colours as an arcade monitor showed them, as Supermodel's presets. Sega arcade is a Japanese cabinet's 9300 K: bluer whites and richer colours.</li>
+        </ul>
+        <details><summary>v0.1.1-alpha</summary><ul>
           <li>Windows with an AMD Radeon: the GPU renderer starts on Vulkan, where Direct3D 12 could hold the game to 30 fps at any render scale. If Vulkan doesn't work, the game goes back to Direct3D 12 by itself.</li>
           <li>Smooth motion no longer stuck at 60 fps for a whole session after a slow first launch (Windows scanning the new exe, the driver building its shaders).</li>
-        </ul>
+        </ul></details>
         <details><summary>v0.1.0-alpha</summary><ul>
           <li>First alpha release, for Mac, Windows and Steam Deck.</li>
           <li>Up to 6x, widescreen and ultrawide, smooth motion up to 120 fps, and the 3D on the GPU.</li>

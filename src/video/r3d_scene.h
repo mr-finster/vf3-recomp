@@ -102,6 +102,9 @@ struct Scene
 // too far in a frame is shown where it is in b; if most did (a cut), out is b and the result false.
 struct InterpStats { size_t total = 0, no_key = 0, turned = 0, moved = 0, matched = 0, blended = 0, not_blended = 0; };
 bool interpolate(const Scene &a, const Scene &b, float t, Scene &out, InterpStats *stats = nullptr);
+// (tests: the pairing interpolate last made between a and b: for each viewport, each of b's models' partner in a,
+// blended or not (-1: none), in a's viewport given in viewports (-1: none); null if it was made between others)
+const std::vector<std::vector<int>> *interp_paired(const Scene &a, const Scene &b, std::vector<int> *viewports = nullptr);
 // The camera's move between two frames' viewport (b = camera a for what stands still), from the models alone at their
 // address in both; false if too few agree on one
 bool camera_move(const Viewport &a, const Viewport &b, Mat4 &camera);

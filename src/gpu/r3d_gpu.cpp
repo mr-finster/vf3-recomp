@@ -60,6 +60,21 @@ void R3dGpu::shutdown()
 	dev = nullptr;
 }
 
+SDL_GPUShader *colour_shader(SDL_GPUDevice *dev)
+{
+	const SDL_GPUShaderFormat have = SDL_GetGPUShaderFormats(dev);
+	SDL_GPUShaderCreateInfo ci = {};
+	if (have & SDL_GPU_SHADERFORMAT_SPIRV) { ci.format = SDL_GPU_SHADERFORMAT_SPIRV; ci.code = r3d_fs_colour_spv; ci.code_size = sizeof(r3d_fs_colour_spv); }
+	else if (have & SDL_GPU_SHADERFORMAT_DXIL) { ci.format = SDL_GPU_SHADERFORMAT_DXIL; ci.code = r3d_fs_colour_dxil; ci.code_size = sizeof(r3d_fs_colour_dxil); }
+	else if (have & SDL_GPU_SHADERFORMAT_MSL) { ci.format = SDL_GPU_SHADERFORMAT_MSL; ci.code = r3d_fs_colour_msl; ci.code_size = sizeof(r3d_fs_colour_msl) - 1; }
+	else { SDL_SetError("no shader format this build has"); return nullptr; }
+	ci.entrypoint = ci.format == SDL_GPU_SHADERFORMAT_MSL ? "main0" : "main";
+	ci.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
+	ci.num_samplers = 1;
+	ci.num_uniform_buffers = 1;
+	return SDL_CreateGPUShader(dev, &ci);
+}
+
 const char *R3dGpu::driver() const { return dev ? SDL_GetGPUDeviceDriver(dev) : "none"; }
 
 bool R3dGpu::init(SDL_GPUDevice *device)

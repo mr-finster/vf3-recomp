@@ -99,7 +99,12 @@ scsp_device::attotime from_ticks(u64 ticks, u32 frequency)
 #define LFORE(slot)     ((slot->udata.data[0x9] >> 0x0) & 0x8000)
 #define LFOF(slot)      ((slot->udata.data[0x9] >> 0xA) & 0x001F)
 #define PLFOWS(slot)    ((slot->udata.data[0x9] >> 0x8) & 0x0003)
-#define PLFOS(slot)     ((slot->udata.data[0x9] >> 0x5) & 0x0007)
+// PLFOS without its low bit, as Supermodel's (its SCSP.cpp: "& 0x000E", set for VF3 by ear, as its FM depth): VF3's
+// music has voices with PLFOS 1 (+-7 cents of vibrato), plain in Supermodel. With it, and MAME's pitch LFO table
+// (truncated: its steps average 0.19% under the note), they played 3 cents flat against Supermodel, and the reverb
+// they feed (DSP input 1) rang up to 10 dB longer on Lion's theme; PLFOS 3, 5, 7 come out as 2, 4, 6. (The table
+// stays MAME's, as Supermodel's: its voices with PLFOS 2 and up are 0.19% flat in both.)
+#define PLFOS(slot)     ((slot->udata.data[0x9] >> 0x5) & 0x0006)
 #define ALFOWS(slot)    ((slot->udata.data[0x9] >> 0x3) & 0x0003)
 #define ALFOS(slot)     ((slot->udata.data[0x9] >> 0x0) & 0x0007)
 
@@ -354,6 +359,18 @@ void scsp_device::ResetInterrupts()
 	}
 
 	CheckPendingIRQ();
+}
+
+// A timer's time from a write of its register to its interrupt, in samples: the count goes up from the value
+// written, one every 2^prescale samples (the first a sample after the write), and the interrupt comes as it passes
+// 0xFF: ((255 - value) << prescale) + 1 samples. (The 68000's interrupt handler writes the value again, so the
+// period is this plus the handler's time to that write. MAME's (255 - value) << prescale, from the write's exact
+// time, made VF3's sound driver's tick, timer A at 0xCE: 50 samples, 882 a second, a sample short: its music
+// 0.8% fast against Supermodel's, whose timers count this way at the samples; the board puts the interrupt on a
+// sample, SoundBoard::reset.)
+u32 scsp_device::timer_samples(u16 reg)
+{
+	return ((255u - (reg & 0xff)) << ((reg >> 8) & 7)) + 1;
 }
 
 void scsp_device::timerA_cb()
@@ -734,13 +751,7 @@ void scsp_device::UpdateReg(int reg)
 				m_TimCnt[0] = (m_udata.data[0x18/2] & 0xff) << 8;
 
 				if ((m_udata.data[0x18/2] & 0xff) != 255)
-				{
-					u32 time = (clock() / m_TimPris[0]) / (255 - (m_udata.data[0x18/2] & 0xff));
-					if (time)
-					{
-						m_host.timer_adjust(TIMER_A, from_ticks(512, time), 0);
-					}
-				}
+					m_host.timer_adjust(TIMER_A, from_ticks(512 * timer_samples(m_udata.data[0x18/2]), clock()), 0);
 			}
 			break;
 		case 0x1a:
@@ -751,13 +762,7 @@ void scsp_device::UpdateReg(int reg)
 				m_TimCnt[1] = (m_udata.data[0x1A/2] & 0xff) << 8;
 
 				if ((m_udata.data[0x1A/2] & 0xff) != 255)
-				{
-					u32 time = (clock() / m_TimPris[1]) / (255 - (m_udata.data[0x1A/2] & 0xff));
-					if (time)
-					{
-						m_host.timer_adjust(TIMER_B, from_ticks(512, time), 0);
-					}
-				}
+					m_host.timer_adjust(TIMER_B, from_ticks(512 * timer_samples(m_udata.data[0x1A/2]), clock()), 0);
 			}
 			break;
 		case 0x1c:
@@ -768,13 +773,7 @@ void scsp_device::UpdateReg(int reg)
 				m_TimCnt[2] = (m_udata.data[0x1C/2] & 0xff) << 8;
 
 				if ((m_udata.data[0x1C/2] & 0xff) != 255)
-				{
-					u32 time = (clock() / m_TimPris[2]) / (255 - (m_udata.data[0x1C/2] & 0xff));
-					if (time)
-					{
-						m_host.timer_adjust(TIMER_C, from_ticks(512, time), 0);
-					}
-				}
+					m_host.timer_adjust(TIMER_C, from_ticks(512 * timer_samples(m_udata.data[0x1C/2]), clock()), 0);
 			}
 			break;
 		case 0x1e: // SCIEB
@@ -1089,7 +1088,11 @@ inline s32 scsp_device::UpdateSlot(SCSP_SLOT *slot)
 		s32 smp = (m_RINGBUF[(m_BUFPTR + MDXSL(slot)) & 63] + m_RINGBUF[(m_BUFPTR + MDYSL(slot)) & 63]) / 2;
 
 		smp <<= 0xA; // associate cycle with 1024
-		smp >>= 0x1A - MDL(slot); // ex. for MDL=0xF, sample range corresponds to +/- 64 pi (32=2^5 cycles) so shift by 11 (16-5 == 0x1A-0xF)
+		// The modulation's depth as Supermodel's, set by ear for VF3 (its SCSP.cpp: MDL's low bit dropped, and a
+		// range of 24, not MAME's 26): MAME's MDL=0xF (shift 11) is half of Supermodel's (shift 10). Pai's stage's
+		// theme has an FM voice (the second SCSP, MDL 0xF, MDXSL 0x20: its own last sample) from 9.4 s that came out
+		// dull, 1.5-3 dB down at 500 Hz-2 kHz and above 8 kHz until 22 s, an instrument missing (issue #1)
+		smp >>= 0x18 - (MDL(slot) & 0xE);
 		if (!PCM8B(slot)) smp <<= 1;
 
 		addr1 += smp; addr2 += smp;

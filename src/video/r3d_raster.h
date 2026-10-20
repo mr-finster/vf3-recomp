@@ -30,6 +30,11 @@ public:
 
 	void render(const Scene &scene, const uint16_t *tex_ram);
 
+	// The textures' mipmap levels as the arcade picks them, for its 384 lines (true), or for the picture's own
+	// height (false, the default): the level by distance alone, the same at any size, left the distance's textures
+	// a level coarser for each doubling of the render scale than the arcade showed them on its screen
+	static bool arcade_lod;
+
 	// The 3D over `under` (RGBA8, the tile generator's lower layer at this size), into out (may be `under`)
 	void compose(const uint32_t *under, uint32_t *out) const;
 

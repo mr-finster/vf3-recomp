@@ -110,6 +110,8 @@ void SoundBoard::reset()
 			};
 			tm.on = true;
 			tm.at = cycles_now() + std::max<uint64_t>(1, to_cycles(delay));
+			// timers A-C count the samples: due on one (the 68000's cycles at 256 a sample), as Supermodel's
+			if (t < scsp_device::TIMER_RCV) tm.at = std::max(tm.at / 256 * 256, cycles_now() + 1);
 			tm.period = period ? std::max<uint64_t>(1, to_cycles(period)) : 0;
 		};
 		h.sample_index = [this] { return cycles_now() / 256; };

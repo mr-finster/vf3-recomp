@@ -35,10 +35,9 @@
 // boot and takes coins (the 5 and 6 keys, or the Coin bindings).
 //
 // --scale N (1-6) draws the 3D at N times the arcade's 384 lines; the 2D (text, the HUD) is the arcade's,
-// enlarged. Until one is chosen, the scale fits the window as it first opens. F5 steps through them. If the
-// computer can't keep up, the governor first shows only the game's own frames (no in-between pictures), then
-// lowers the scale; it lifts both again once things are calm (and doesn't count the first seconds after a start
-// or a change).
+// enlarged. Until one is chosen, the scale fits the window as it first opens. F5 steps through them.
+// The player's settings are kept as set (as VF1's and VF2's): the governor that held smooth motion to 60 and lowered the
+// scale when the computer couldn't keep up runs only in tests (VF3_GOVERN).
 //
 // --aspect sets the picture's shape; F6 steps through them. The default, fit, follows the window's shape (between
 // 4:3 and 48:9). Wider than 4:3, the 3D's view opens out to the sides (the same vertical view) where it covers the
@@ -80,7 +79,7 @@
 //                        fast as it goes) to VF3_RECORD_TO, 60 pictures a second by the game's clock, not the
 //                        real one (smooth motion's in-betweens), the window's whole picture to dir/video.mp4 (by
 //                        ffmpeg) and the sound to dir/sound.wav, in step. Use with VF3_HIDDEN and VF3_WINDOW.
-//   VF3_GOVERN=1         the governor in test runs too (VF3_QUIT_AFTER: off, the settings as set)
+//   VF3_GOVERN=1         the governor on (off for players and tests: the settings as set)
 //   VF3_THREADS=N        threads drawing the 3D (default: the cores less 1, 12 at most)
 //   VF3_TEST_LOAD=ms:s   each picture ms longer (by the scale's square, from 1x) for the first s seconds after the
 //                        start's grace (the governor's tests)
@@ -281,6 +280,7 @@ hotkey read_inputs(m3::Controls &c, SDL_Gamepad *pads[2], pad_state ps[2], const
 		for (int a = 0; a < C_START; a++)
 			if (key(ctl[p].key[a])) act(a);
 		const bool kstart = key(ctl[p].key[C_START]);
+		bool start_held = kstart;   // (held, as the cabinet's: a character chosen with Start held is in the 2P outfit)
 		if (kstart && !key_start_was[p]) press_start();
 		key_start_was[p] = kstart;
 		const bool kcoin = key(ctl[p].key[C_COIN]);
@@ -330,6 +330,7 @@ hotkey read_inputs(m3::Controls &c, SDL_Gamepad *pads[2], pad_state ps[2], const
 				for (int a = C_GUARD; a < C_START; a++)
 					if (player_controls::pad_down(gp, ctl[p].pad[a])) act(a);
 				if (start && !st.start_was) press_start();
+				start_held |= start;
 			}
 			// View tapped on its own: whichever of Menu and Coin it's set as
 			if (!back && st.back_was && !st.back_combo) {
@@ -349,6 +350,7 @@ hotkey read_inputs(m3::Controls &c, SDL_Gamepad *pads[2], pad_state ps[2], const
 			if (s < 6) c.start[p] = true;
 			else st.start_seq = -1;
 		}
+		if (start_held) c.start[p] = true;
 	}
 	return hk;
 }
@@ -416,7 +418,9 @@ struct settings
 	bool fullscreen = false, arcade = false, show_fps = false, smooth = true;
 	bool timings = false;    // F9: the timings in the title bar
 	bool smooth_bg = true;   // the 2D backgrounds (the layers below the 3D) scaled smoothly, not as blocks
+	bool sharp_textures = true;   // the 3D's textures' mipmap levels for the picture's size (false: the arcade's, video::Raster::arcade_lod)
 	int filter = 0;          // the screen filter: 0 off, 1 scanlines, 2 CRT
+	int crt_colours = 0;     // an arcade monitor's colours: 0 off, 1-5 as Supermodel's (CRT_COLOURS)
 	int aa = 1;              // antialiasing: the 3D drawn aa times larger each way and averaged (1 off)
 	player_controls ctl[2] = { player_controls::defaults(0), player_controls::defaults(1) };
 
@@ -450,7 +454,9 @@ struct settings
 		flag("smooth_motion", smooth);
 		flag("smooth_backgrounds", smooth_bg);
 		flag("background_filter", smooth_bg);   // (VF1's and VF2's name)
+		flag("sharp_textures", sharp_textures);
 		num("screen_filter", filter, 0, 2);
+		num("crt_colours", crt_colours, 0, 5);
 		num("antialiasing", aa, 0, 3);
 		if (aa == 0) aa = 1;   // (VF2's Low, edges smoothed after drawing: not in this game's renderer)
 		for (int p = 0; p < 2; p++) ctl[p].load(kv, p);
@@ -498,6 +504,7 @@ struct settings
 				int(smooth), renderer3d, int(smooth_bg));
 		if (!roms_folder.empty()) fprintf(f, "roms_folder = %s\n", roms_folder.c_str());
 		if (!gpu3d_failed.empty()) fprintf(f, "gpu_3d_failed = %s\n", gpu3d_failed.c_str());
+		fprintf(f, "crt_colours = %d\nsharp_textures = %d\n", crt_colours, int(sharp_textures));
 		fprintf(f, "screen_filter = %d\nantialiasing = %d\nmusic_volume = %d\neffects_volume = %d\narcade_coins = %d\nframe_timings = %d\n", filter, aa, music, effects, arcade_coin, int(timings));
 		for (int p = 0; p < 2; p++) ctl[p].save(f, p);
 		const bool flushed = flush_to_disk(f);
@@ -1324,6 +1331,7 @@ int main(int argc, char **argv)
 	};
 	make_2d(tex_below, video::WW);
 	SDL_SetTextureScaleMode(tex_below, cfg.smooth_bg ? SDL_SCALEMODE_LINEAR : SDL_SCALEMODE_NEAREST);
+	video::Raster::arcade_lod = !cfg.sharp_textures;
 	make_2d(tex_above, video::W);
 	// A picture into a streaming texture: on Direct3D 11 into the texture itself, mapped (d3d11_map.h: SDL's
 	// lock and update would make a new staging texture each time), else locked; write(pixels, pitch)
@@ -1666,7 +1674,63 @@ int main(int argc, char **argv)
 		}
 		SDL_RenderTexture(ren, glass, nullptr, &r);   // over the picture, under the menu
 	};
+	// CRT colours (as Supermodel's CRT colours, issue #2): the picture as an arcade monitor showed its colours, its
+	// phosphors' and its white's (a Japanese cabinet's 9300 K: bluer whites, deeper reds) on today's sRGB screen. The
+	// picture is put together in a texture, then drawn into the window through r3d.hlsl's FS_COLOUR: the monitor's
+	// gamma (or sRGB's curve) to linear light, the matrix (Dan Mons' colour_matrix_adaptations, as Supermodel's), and
+	// sRGB's curve out. On SDL's GPU renderer only (its custom render state): not on SDL's other renderers.
+	struct crt_colours { const char *name; float gamma; float m[9]; };   // (gamma 0: sRGB's curve)
+	static const crt_colours CRT_COLOURS[] = {
+		{ "Off", 0, {} },
+		{ "Sega arcade (ARI, 9300 K)", 2.5f, { 1.3272128f, -0.3802109f, -0.1003608f, -0.0241849f, 0.9544506f, 0.0807359f, -0.0239586f, -0.0409736f, 1.4076564f } },
+		{ "Sony PVM-20M2U (9300 K)", 2.25f, { 0.9241392f, -0.0690701f, -0.0084279f, 0.0231962f, 0.9729222f, 0.0148832f, -0.0054876f, 0.0098221f, 1.3383897f } },
+		{ "BT.601 NTSC (9300 K, Japan)", 0, { 0.7822491f, 0.0506169f, 0.0137752f, 0.0147969f, 0.9741745f, 0.0220302f, -0.0013501f, -0.0044077f, 1.3484820f } },
+		{ "BT.601 NTSC (6500 K, US)", 0, { 0.9395421f, 0.0501814f, 0.0102766f, 0.0177722f, 0.9657929f, 0.0164349f, -0.0016216f, -0.0043697f, 1.0059913f } },
+		{ "BT.601 PAL (6500 K, Europe, Australia)", 0, { 1.0440432f, -0.0440432f, 0, 0, 1, 0, 0, 0.0117934f, 0.9882066f } },
+	};
+	const int N_CRT_COLOURS = int(sizeof CRT_COLOURS / sizeof CRT_COLOURS[0]);
+	SDL_GPURenderState *crt_state = nullptr;
+	SDL_GPUShader *crt_shader = nullptr;
+	SDL_Texture *crt_tex = nullptr;
+	int crt_tex_w = 0, crt_tex_h = 0, crt_set = -1;
+	bool crt_failed = false;
+	// the texture to put the picture together in, the CRT colours on (null: straight into the window)
+	auto crt_target = [&]() -> SDL_Texture * {
+		if (!cfg.crt_colours || crt_failed) return nullptr;
+		if (!crt_state) {
+			SDL_GPUDevice *gd = SDL_GetGPURendererDevice(ren);
+			if (gd) crt_shader = colour_shader(gd);
+			SDL_GPURenderStateCreateInfo ci = {};
+			ci.fragment_shader = crt_shader;
+			if (crt_shader) crt_state = SDL_CreateGPURenderState(ren, &ci);
+			if (!crt_state) {
+				fprintf(stderr, "CRT colours: not on this renderer (%s)\n", gd ? SDL_GetError() : "SDL's GPU renderer only");
+				crt_failed = true;
+				return nullptr;
+			}
+		}
+		if (crt_set != cfg.crt_colours) {
+			const crt_colours &c = CRT_COLOURS[cfg.crt_colours];
+			const float u[12] = { c.m[0], c.m[1], c.m[2], c.gamma, c.m[3], c.m[4], c.m[5], 0, c.m[6], c.m[7], c.m[8], 0 };
+			SDL_SetGPURenderStateFragmentUniforms(crt_state, 0, u, sizeof u);
+			crt_set = cfg.crt_colours;
+		}
+		int pw = 0, ph = 0;
+		SDL_GetRenderOutputSize(ren, &pw, &ph);
+		if (pw < 1 || ph < 1) return nullptr;
+		if (!crt_tex || pw != crt_tex_w || ph != crt_tex_h) {
+			if (crt_tex) SDL_DestroyTexture(crt_tex);
+			crt_tex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_TARGET, pw, ph);
+			if (!crt_tex) return nullptr;
+			SDL_SetTextureScaleMode(crt_tex, SDL_SCALEMODE_NEAREST);
+			SDL_SetTextureBlendMode(crt_tex, SDL_BLENDMODE_NONE);
+			crt_tex_w = pw; crt_tex_h = ph;
+		}
+		return crt_tex;
+	};
 	auto compose = [&](bool filter = true) {
+		SDL_Texture *crt = crt_target();
+		if (crt) SDL_SetRenderTarget(ren, crt);
 		SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
 		SDL_RenderClear(ren);
 		SDL_FRect all, mid;
@@ -1689,6 +1753,12 @@ int main(int argc, char **argv)
 				if (bar.w > 0) SDL_RenderFillRect(ren, &bar);
 			}
 		SDL_RenderTexture(ren, tex_above, nullptr, &mid);
+		if (crt) {
+			SDL_SetRenderTarget(ren, nullptr);
+			SDL_SetGPURenderState(ren, crt_state);
+			SDL_RenderTexture(ren, crt, nullptr, nullptr);
+			SDL_SetGPURenderState(ren, nullptr);
+		}
 		if (filter) draw_filter(all);
 	};
 	auto read_window = [&](const std::string &path, const SDL_Rect *area = nullptr) {
@@ -1775,7 +1845,7 @@ int main(int argc, char **argv)
 	bool running = true, paused = false;
 	pad_state pstate[2];
 
-	// ---- the governor ----
+	// ---- the governor (tests only: VF3_GOVERN) ----
 	// The pictures' cost: if they leave too little of the screen's refresh (smooth motion) or of the game's
 	// frame, the in-between pictures go first, then the scale a step at a time. Each cut lifts again once the
 	// pictures have been well within their time for a while; the first seconds after a start or a change don't
@@ -1792,10 +1862,13 @@ int main(int argc, char **argv)
 		// pictures shown, for the same reason). Over 10% of a window's: taken as pictures over their time.
 		uint64_t win_t0 = 0;
 		int win_passes = 0, win_missed = 0;
-		bool missing = false, kept = false;   // (kept: a cut made for refreshes missed stays for this run, as VF2's,
-		int missed_cuts = 0;                  // from the third: the first two lift again when calm. A first start's
-		                                      // warm-up (the new exe scanned, the driver's shaders built, a stage's
-		                                      // first textures) missed refreshes on a fast PC, held at 60 all run)
+		int was_passes = 0, was_missed = 0;   // (the last window's, closed: what gov.missing was judged on, for the log)
+		bool missing = false;
+		int missed_cuts = 0;   // cuts made for refreshes missed this run: each waits longer to lift (10 s, 20, 40, then
+		                       // 60), never kept for the run (as VF2's since its #3). Kept from the third, the character
+		                       // select's and the intros' loads (a stage, a fighter) held a fast Mac at 60 for good by the
+		                       // second match; kept at once, a first start's warm-up (the new exe scanned, the driver's
+		                       // shaders built) held a fast PC at 60 all run
 		uint64_t grace_until = 0, calm_since = 0;
 		double emu_ms = 3.0;   // a game frame's cost, smoothed over frames (not the pace line's window, which restarts)
 		int pictures = 0;
@@ -1811,7 +1884,6 @@ int main(int argc, char **argv)
 	auto gov_fresh = [&] {
 		if (gov.smooth_off || gov.scale_cut || gov_aa_cut) fprintf(stderr, "governor: a setting changed: its cuts lifted\n");
 		gov.smooth_off = false;
-		gov.kept = false;
 		gov.missed_cuts = 0;
 		gov.scale_cut = 0;
 		scale = chosen_scale();   // (not cfg.scale: 0 on a first start, and the picture's size loop never ended)
@@ -1896,6 +1968,10 @@ int main(int argc, char **argv)
 			"Smooth softens the stage backgrounds so they don't look blocky when enlarged. Off keeps their original pixels. The scores and text stay sharp either way.",
 			[&] { return std::string(cfg.smooth_bg ? "Smooth" : "Off"); },
 			[&](int) { cfg.smooth_bg = !cfg.smooth_bg; cfg_dirty = true; SDL_SetTextureScaleMode(tex_below, cfg.smooth_bg ? SDL_SCALEMODE_LINEAR : SDL_SCALEMODE_NEAREST); } });
+		p.items.push_back({ "Distant textures",
+			"Sharp picks the textures' detail for the picture's size, so things in the distance stay as crisp as the render scale allows. Arcade picks it as the arcade did for its own screen: softer in the distance at higher render scales. The same at 1x.",
+			[&] { return std::string(cfg.sharp_textures ? "Sharp" : "Arcade"); },
+			[&](int) { cfg.sharp_textures = !cfg.sharp_textures; video::Raster::arcade_lod = !cfg.sharp_textures; cfg_dirty = true; } });
 		p.items.push_back({ "Smooth motion",
 			"On: a picture for each refresh of your screen (up to 120 a second), placed between the arcade's 57.5 frames a second, a frame behind them. Off: only the arcade's own frames, as on the cabinet (uneven on most screens).",
 			[&] { return on_off(cfg.smooth) + (cfg.smooth && gov.smooth_off ? " (60 a second for now: the computer is busy)" : ""); },
@@ -1904,6 +1980,10 @@ int main(int argc, char **argv)
 			"Scanlines adds the dark lines between the arcade monitor's rows. CRT adds those, the monitor's red, green and blue stripes, and slightly darker corners. The lines need a large window or fullscreen to show.",
 			[&] { return std::string(FILTER_NAMES[cfg.filter]); },
 			[&](int d) { cfg.filter = wrap(cfg.filter + d, 3); cfg_dirty = true; } });
+		p.items.push_back({ "CRT colours",
+			"The colours as an arcade monitor showed them, as Supermodel's CRT colours. Sega arcade is a Japanese cabinet's: bluer whites and richer colours. The others are a Sony studio monitor and the TV standards of Japan, the US and Europe. Off: the game's colours as they are.",
+			[&] { return std::string(CRT_COLOURS[cfg.crt_colours].name) + (cfg.crt_colours && crt_failed ? " (not with this renderer)" : ""); },
+			[&](int d) { cfg.crt_colours = wrap(cfg.crt_colours + d, N_CRT_COLOURS); cfg_dirty = true; } });
 		p.items.push_back({ "Show FPS", "Shows the frame rate in the top right corner.",
 			[&] { return on_off(cfg.show_fps); },
 			[&](int) { cfg.show_fps = !cfg.show_fps; cfg_dirty = true; if (!cfg.show_fps) menu.set_fps(""); } });
@@ -2556,7 +2636,10 @@ int main(int argc, char **argv)
 			new_frame = false;
 			// the governor
 			const uint64_t now = SDL_GetTicksNS();
-			static const bool governs = (quit_after < 0 && rec.dir.empty()) || getenv("VF3_GOVERN");   // (test runs: as set, unless VF3_GOVERN)
+			// (off for players, as VF1's and VF2's since its v0.1.10: the scale, the antialiasing and smooth motion
+			// always the player's; its cuts held a fast Mac at 60 through the character select's loads. VF3_GOVERN:
+			// on, for tests)
+			static const bool governs = getenv("VF3_GOVERN") != nullptr;
 			if (governs && now > gov.grace_until && !stopped && !ff && !unseen) {
 				gov.fixed_ms = gov.pictures ? gov.fixed_ms + (std::min(picture_fixed_ms, ms) - gov.fixed_ms) * 0.05 : std::min(picture_fixed_ms, ms);
 				gov.avg_ms = gov.pictures++ ? gov.avg_ms + (ms - gov.avg_ms) * 0.05 : ms;
@@ -2570,8 +2653,8 @@ int main(int argc, char **argv)
 				const double budget = smooth ? 1000.0 / hz - emu * std::min(1.0, FRAME_HZ / hz) : frame_ms - emu;
 				if (gov.pictures > 30) {
 					if (gov.avg_ms > 0.9 * budget || gov.missing) {
-						if (gov.missing && ++gov.missed_cuts >= 3) gov.kept = true;
-						if (gov.missing) fprintf(stderr, "governor: %d of %d refreshes missed (the GPU or the present, not the pictures' %.1f ms)\n", gov.win_missed, gov.win_passes, gov.avg_ms);
+						if (gov.missing) gov.missed_cuts++;
+						if (gov.missing) fprintf(stderr, "governor: %d of %d refreshes missed (the GPU or the present, not the pictures' %.1f ms)\n", gov.was_missed, gov.was_passes, gov.avg_ms);
 						if (smooth && !gov.smooth_off && hz > 65) {
 							gov.smooth_off = true;
 							fprintf(stderr, "governor: pictures take %.1f ms, over %.0f a second's time: smooth motion held to 60 pictures a second for now\n", gov.avg_ms, hz);
@@ -2593,8 +2676,8 @@ int main(int argc, char **argv)
 						}
 						gov_grace(2);
 						gov.calm_since = 0;
-					} else if (!gov.kept && (gov.smooth_off || gov.scale_cut || gov_aa_cut)) {
-						// calm: the cut lifted after 10 s well within the time the pictures would take then (the scale's
+					} else if (gov.smooth_off || gov.scale_cut || gov_aa_cut) {
+						// calm: the cut lifted after 10 s (longer for cuts again for refreshes missed: missed_cuts) well within the time the pictures would take then (the scale's
 						// first, then the antialiasing's, then smooth motion)
 						const int k = aa_now();
 						const double want = gov.scale_cut ? gov.avg_ms * double((scale + 1) * (scale + 1)) / (scale * scale)
@@ -2602,7 +2685,7 @@ int main(int argc, char **argv)
 						const double want_budget = gov.scale_cut || gov_aa_cut ? budget : 1000.0 / std::min(screen_hz, 120.0) - emu * std::min(1.0, FRAME_HZ / std::min(screen_hz, 120.0));
 						if (want < 0.6 * want_budget) {
 							if (!gov.calm_since) gov.calm_since = now;
-							else if (now - gov.calm_since > 10000000000ull) {
+							else if (now - gov.calm_since > (gov.missed_cuts > 3 ? 60 : 10ull << std::max(0, gov.missed_cuts - 1)) * 1000000000ull) {
 								if (gov.scale_cut) { scale++; gov.scale_cut--; fprintf(stderr, "governor: calm again: the render scale back up to %dx\n", scale); }
 								else if (gov_aa_cut) { gov_aa_cut--; fprintf(stderr, "governor: calm again: antialiasing back up to %dx\n", aa_now()); }
 								else if (cfg.smooth) { gov.smooth_off = false; fprintf(stderr, "governor: calm again: smooth motion back to 120 pictures a second\n"); }
@@ -2657,13 +2740,19 @@ int main(int argc, char **argv)
 		{   // the governor's count of refreshes missed (above)
 			static uint64_t last_present = 0;
 			const uint64_t now_p = SDL_GetTicksNS();
-			if (last_present && quit_after < 0 && rec.dir.empty() && every_refresh && draw && smooth && !stopped && !unseen && now_p > gov.grace_until) {
+			// (only passes whose own work fit in a refresh: one that ran long on the CPU before its present, the game's
+			// frame loading a stage or a fighter (the character select, the intros: 11 ms before the present), is no
+			// sign of the GPU or the present falling behind, and fewer pictures wouldn't help it. Counted, those
+			// loads alone held smooth motion at 60 on an M4 Max at 4x.)
+			if (last_present && quit_after < 0 && rec.dir.empty() && every_refresh && draw && smooth && !stopped && !unseen && now_p > gov.grace_until &&
+				double(pass_work_ns) < 1e9 / screen_hz) {
 				gov.win_passes++;
 				if (double(now_p - last_present) > 1.5e9 / screen_hz) gov.win_missed++;
 			}
 			last_present = now_p;
 			if (now_p - gov.win_t0 > 3000000000ull) {
 				gov.missing = gov.win_passes > 100 && gov.win_missed * 10 > gov.win_passes;
+				gov.was_passes = gov.win_passes; gov.was_missed = gov.win_missed;
 				gov.win_t0 = now_p;
 				gov.win_passes = gov.win_missed = 0;
 			}
@@ -2748,6 +2837,9 @@ int main(int argc, char **argv)
 	gpu3d.shutdown();
 	SDL_DestroyTexture(tex3d);
 	if (glass) SDL_DestroyTexture(glass);
+	if (crt_tex) SDL_DestroyTexture(crt_tex);
+	if (crt_state) SDL_DestroyGPURenderState(crt_state);
+	if (crt_shader) SDL_ReleaseGPUShader(SDL_GetGPURendererDevice(ren), crt_shader);
 	SDL_DestroyTexture(tex_below);
 	SDL_DestroyTexture(tex_above);
 	SDL_DestroyRenderer(ren);

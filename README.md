@@ -53,8 +53,8 @@ the hardware; none of its code is in this one.
 | --- | --- |
 | The PowerPC program, recompiled to native code | Working: identical to the interpreter on every frame checked |
 | Board, tile generator, Real3D (CPU renderer) | Working: the pictures match the reference's, but for the differences below |
-| The 3D on the GPU (Display > 3D renderer: Auto, GPU or CPU) | Working on Metal (Apple M4 Max: 120 pictures a second at 4x and 6x) and Vulkan (checked against the CPU's picture as the game starts); Direct3D 12 not yet tried on real hardware. Direct3D 12 that draws nothing falls back to Vulkan, and any difference or error to the CPU |
-| Sound board (68000, two SCSPs) | Working: against the reference's on the same inputs, the same loudness (0.1 dB apart on average) and balance across the bands, a little brighter above 8 kHz (MAME's SCSP, where the reference has its own) |
+| The 3D on the GPU (Display > 3D renderer: Auto, GPU or CPU) | Working on Metal (Apple M4 Max: 120 pictures a second at 4x and 6x) and Vulkan (checked against the CPU's picture as the game starts); Direct3D 12 (an RTX 3070 Laptop, #4; a Radeon starts on Vulkan, where its Direct3D 12 was slow). Direct3D 12 that draws nothing falls back to Vulkan, and any difference or error to the CPU |
+| Sound board (68000, two SCSPs) | Working: against the reference's on the same inputs, every song of the sound test within 0.2 dB of it in each band over the song (MAME's SCSP, with the reference's VF3 tunings: its timers, FM depth and pitch LFO depth), the voices bit-identical |
 | Render scale up to 6x, antialiasing, widescreen and ultrawide, smooth motion | Working. Widescreen: the fights see more to the sides, and the stages' backgrounds carry on from the game's own panoramas |
 | Menu, keyboard and gamepads, two players, the arcade's settings, screen filters | Working |
 | Portable mode, your own ROM folder | Working |
@@ -65,7 +65,7 @@ the hardware; none of its code is in this one.
 [Issues](https://github.com/mr-finster/vf3-recomp/issues), with the `log.txt` from the game's data folder.
 
 Known issues: Shun's stage water is the game's own low-resolution
-2D art up close, and Direct3D 12 is untested. Virtua Fighter 3 Team Battle (`vf3tb`) isn't supported yet.
+2D art up close. Virtua Fighter 3 Team Battle (`vf3tb`) isn't supported yet.
 
 Known differences from the reference's pictures: textures far away are softer (the Real3D's own mipmap level choice,
 as Supermodel's New3D documents it, where the reference build used OpenGL's).
@@ -151,15 +151,15 @@ scale; View + RB: picture shape. For Arcade play on a pad, set a Coin button in 
 
 - **Resume** and **Quit**.
 - **Display:** render scale (up to 6x), antialiasing (2x, 3x), the 3D renderer, picture shape (fit the window, 4:3,
-  16:10, 16:9, 21:9), background filter, smooth motion, screen filter (scanlines, CRT), Show FPS, fullscreen.
+  16:10, 16:9, 21:9), background filter, distant textures (sharp, or as the arcade's), smooth motion, screen filter (scanlines, CRT), CRT colours (an arcade monitor's, as Supermodel's presets), Show FPS, fullscreen.
 - **Sound:** volume, and the music's and the effects' own volumes.
 - **Game:** play style (PC: no boot screen, always free play; Arcade: the boot, coins and credits, its coin settings kept for it), reset.
 - **Arcade settings:** difficulty, rounds to win, energy, demo sound, country, and the arcade's own service menu (its
   other settings, sound test, bookkeeping). A change restarts the game.
 - **Controls:** each player's pad, keys and buttons.
 
-If the computer can't keep up, the game first shows only the arcade's own 57.5 pictures a second, then lowers the
-antialiasing and the render scale, and lifts them again once it can.
+The settings stay as you set them, as in Virtua Fighter 1 and 2 Recomp: if the computer can't keep up at a render
+scale, choose a lower one (F5).
 
 ## How it works
 
@@ -232,13 +232,20 @@ the reference's.
 
 The whole story, with how the AI-assisted work was organised and checked: [docs/HOW-IT-WAS-MADE.md](docs/HOW-IT-WAS-MADE.md).
 
+## Other games on this port
+
+Fighting Vipers 2 (Model 3 Step 2.0, 1998) runs on a fork of this port, with Virtua Fighter 3 kept identical:
+[penpenlovesrei-dotcom/vf3-recomp](https://github.com/penpenlovesrei-dotcom/vf3-recomp/tree/fv2) (its
+`docs/step2-fvipers2.md` has what Step 2.x needed; #4).
+
 ## Credits
 
 Built on MAME's work: the 68000 core (Olivier Galibert), the SCSP and its DSP (ElSemi, R. Belmont) and the Model 3
 sound board's design (R. Belmont, Ville Linde), as Virtua Fighter 2 Recomp has them (`third_party/mame/README.md`
 lists the files), all BSD-3-Clause. Supermodel (Bart Trzynadlowski, Ian Curtis, Nik Henson and others) was read as
 documentation of the Model 3 and its Real3D, and was the reference everything was checked against; none of its code
-is in this one. Also SLJIT (Zoltan Herczeg, BSD-2-Clause), RmlUi (MIT), SDL 3 (zlib), FreeType (FreeType License),
+is in this one, but its settings for Virtua Fighter 3's sound (the SCSP's timers counted at the samples, its FM and
+pitch LFO depths) and its CRT colours (Dan Mons' colour_matrix_adaptations) are followed. Also SLJIT (Zoltan Herczeg, BSD-2-Clause), RmlUi (MIT), SDL 3 (zlib), FreeType (FreeType License),
 zlib, and the Barlow Condensed font (SIL Open Font License).
 
 Virtua Fighter 3 is SEGA's. This project is not affiliated with or endorsed by SEGA.

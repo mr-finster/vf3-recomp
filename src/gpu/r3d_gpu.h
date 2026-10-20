@@ -12,6 +12,11 @@
 
 #include "../machine/model3.h"
 
+// The CRT colours' fragment shader (r3d.hlsl's FS_COLOUR) on a device, for the host renderer's SDL_GPURenderState:
+// its picture the texture drawn, sampler 0; uniforms 0: three float4, the matrix's rows, the first's w the gamma.
+// Null if it can't be made here (SDL_GetError()).
+SDL_GPUShader *colour_shader(SDL_GPUDevice *dev);
+
 class R3dGpu
 {
 public:

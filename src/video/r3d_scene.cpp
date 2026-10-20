@@ -839,12 +839,17 @@ struct Plan {
 	uint64_t a = 0, b = 0;
 	bool ok = false;
 	InterpStats st;
+	std::vector<int> av;                     // a's viewport each of b's is paired with (-1: none)
 	std::vector<std::vector<int>> from;
 	std::vector<std::vector<int>> verts;     // a's model each of b's vertices are blended from, + 1 (0: not blended)
 	std::vector<std::vector<int>> paired;    // every one of b's models' pair in a (blended or not)
 	std::vector<std::vector<Flip>> flips;    // per b's model
+	std::vector<std::vector<char>> swarm;    // b's models shown as a swarm's grains (snap 4)
 };
 Plan plan;
+// the addresses a swarm's grains were seen at, and the frames they stay a swarm's (interpolate)
+std::unordered_map<uint32_t, int> swarms;
+constexpr int SWARM_FRAMES = 115;
 
 // the flipbooks' steps faded in (after the rest of the blend): their shapes and the two pictures, by where between its
 // frames the picture is
@@ -881,19 +886,103 @@ void apply_flips(const Scene &b, float t, Scene &out)
 		}
 }
 
+// A swarm's grain (the beach's spray, Wolf's desert sand: 1 to 6 polygons): under 40 vertices
+bool grain(const Model &m)
+{
+	size_t n = 0;
+	if (m.meshes)
+		for (auto &mesh : *m.meshes) n += mesh.verts.size();
+	return n < 40;
+}
+
+// How far the scene moved between a and b: the median move, over its distance, of the models alone at their address
+// in both (not a swarm's grains) in the viewports paired (av: a's for each of b's); -1 if under 8 of them
+float scene_move(const Scene &a, const Scene &b, const std::vector<int> &av)
+{
+	std::vector<float> moved;
+	for (size_t v = 0; v < av.size(); v++) {
+		if (av[v] < 0) continue;
+		const std::vector<Model> &was = a.viewports[size_t(av[v])].models, &now = b.viewports[v].models;
+		std::unordered_map<uint32_t, int> n_was, n_now;
+		std::unordered_map<uint32_t, const Model *> at;
+		for (auto &m : was) { n_was[m.addr]++; at[m.addr] = &m; }
+		for (auto &m : now) n_now[m.addr]++;
+		for (auto &m : now)
+			if (n_now[m.addr] == 1 && n_was[m.addr] == 1 && !grain(m))
+				moved.push_back(std::sqrt(moved2(*at[m.addr], m) / std::max(dist2(m), 1.0f)));
+	}
+	if (moved.size() < 8) return -1;
+	std::nth_element(moved.begin(), moved.begin() + moved.size() / 2, moved.end());
+	return moved[moved.size() / 2];
+}
+
+// A model's size: the square of its farthest vertex from its origin, in the view's units
+float radius2(const Model &m)
+{
+	float r = 0;
+	if (m.meshes)
+		for (auto &mesh : *m.meshes)
+			for (auto &v : mesh.verts) r = std::max(r, v.pos[0] * v.pos[0] + v.pos[1] * v.pos[1] + v.pos[2] * v.pos[2]);
+	const float *c = m.matrix.m;
+	return r * (c[0] * c[0] + c[1] * c[1] + c[2] * c[2]);
+}
+
+// Which of a's viewports each of b's is (-1: none); false for a cut. The same number: the same, in order. Otherwise
+// by the models they have in common (their addresses), the most alike first, each once, at least half of the larger's
+// in common: the game puts viewports in the list and takes them out (6 small ones in a throw at the beach, the ones
+// after them moved along), and the whole scene was shown unblended for a frame, a stop then a jump in the fighters'
+// motion. It does at cuts too (the stage's models the same, from elsewhere): a cut unless the scene moved under 10%
+// (scene_move: a throw's 2% at most; a cut's 15-40%).
+bool pair_viewports(const Scene &a, const Scene &b, std::vector<int> &av)
+{
+	av.assign(b.viewports.size(), -1);
+	if (a.viewports.size() == b.viewports.size()) {
+		for (size_t v = 0; v < av.size(); v++) av[v] = int(v);
+		return true;
+	}
+	std::vector<std::tuple<float, int, int>> all;
+	for (size_t u = 0; u < a.viewports.size(); u++) {
+		std::unordered_map<uint32_t, int> n_was;
+		for (auto &m : a.viewports[u].models) n_was[m.addr]++;
+		for (size_t v = 0; v < b.viewports.size(); v++) {
+			std::unordered_map<uint32_t, int> left = n_was;
+			size_t common = 0;
+			for (auto &m : b.viewports[v].models)
+				if (auto it = left.find(m.addr); it != left.end() && it->second > 0) { it->second--; common++; }
+			const size_t most = std::max(a.viewports[u].models.size(), b.viewports[v].models.size());
+			if (common * 2 >= most && common) all.push_back({ -float(common) / float(most), int(u), int(v) });
+		}
+	}
+	std::sort(all.begin(), all.end());
+	std::vector<char> taken(a.viewports.size(), 0);
+	for (auto &[score, u, v] : all)
+		if (!taken[size_t(u)] && av[size_t(v)] < 0) { av[size_t(v)] = u; taken[size_t(u)] = 1; }
+	const float moved = scene_move(a, b, av);
+	return moved >= 0 && moved < 0.1f;
+}
+
 } // namespace
+
+const std::vector<std::vector<int>> *interp_paired(const Scene &a, const Scene &b, std::vector<int> *viewports)
+{
+	if (!(a.id && plan.a == a.id && plan.b == b.id && plan.paired.size() == b.viewports.size())) return nullptr;
+	if (viewports) *viewports = plan.av;
+	return &plan.paired;
+}
 
 bool interpolate(const Scene &a, const Scene &b, float t, Scene &out, InterpStats *st)
 {
 	out = b;
-	if (a.viewports.size() != b.viewports.size() || a.blank || b.blank)
+	std::vector<int> av;
+	if (a.blank || b.blank || !pair_viewports(a, b, av))
 		return false;
 	static const bool no_plan = getenv("VF3_NO_INTERP_PLAN") != nullptr;   // (tests: every picture paired afresh)
 	if (!no_plan && a.id && b.id && plan.a == a.id && plan.b == b.id && plan.from.size() == out.viewports.size()) {
 		if (st) *st = plan.st;
 		if (!plan.ok) { out = b; return false; }
 		for (size_t v = 0; v < out.viewports.size(); v++) {
-			const std::vector<Model> &was = a.viewports[v].models;
+			if (plan.av[v] < 0) continue;
+			const std::vector<Model> &was = a.viewports[size_t(plan.av[v])].models;
 			std::vector<Model> &now = out.viewports[v].models;
 			for (size_t j = 0; j < now.size() && j < plan.from[v].size(); j++) {
 				const int i = plan.from[v][j];
@@ -914,12 +1003,23 @@ bool interpolate(const Scene &a, const Scene &b, float t, Scene &out, InterpStat
 	InterpStats local;
 	if (!st) st = &local;
 	*st = InterpStats();
-	size_t total = 0, matched = 0;
+	size_t total = 0, matched = 0, voters = 0, voted = 0, strays = 0;
+	for (auto it = swarms.begin(); it != swarms.end();) it = --it->second <= 0 ? swarms.erase(it) : std::next(it);
+	np.av = std::move(av);
 	for (size_t v = 0; v < out.viewports.size(); v++) {
 		np.from.emplace_back(out.viewports[v].models.size(), -1);
 		np.verts.emplace_back(out.viewports[v].models.size(), 0);
 		np.paired.emplace_back(out.viewports[v].models.size(), -1);
-		const std::vector<Model> &was = a.viewports[v].models;
+		const int u = np.av[v];
+		if (u < 0) {   // (a viewport new this frame: its models shown as they are)
+			np.swarm.emplace_back(out.viewports[v].models.size(), 0);
+			for (auto &m : out.viewports[v].models) voters += !grain(m);
+			total += out.viewports[v].models.size();
+			st->no_key += out.viewports[v].models.size();
+			continue;
+		}
+		const Viewport &va = a.viewports[size_t(u)];
+		const std::vector<Model> &was = va.models;
 		std::vector<Model> &now = out.viewports[v].models;
 		std::vector<char> taken(was.size(), 0);
 		std::vector<int> pair(now.size(), -1);
@@ -927,7 +1027,7 @@ bool interpolate(const Scene &a, const Scene &b, float t, Scene &out, InterpStat
 		for (auto &m : was) n_was[m.addr]++;
 		for (auto &m : now) n_now[m.addr]++;
 		Mat4 camera;
-		const bool have_camera = camera_move(a.viewports[v], b.viewports[v], camera);
+		const bool have_camera = camera_move(va, b.viewports[v], camera);
 		// how far a's model is from b's: from where the camera's move puts it, if known
 		auto apart2 = [&](const Model &p, const Model &m) { return have_camera ? predicted2(camera, p, m) : moved2(p, m); };
 		// The nearest of a's models with the same key not yet paired (several share a model's address: a stage's
@@ -1064,8 +1164,9 @@ bool interpolate(const Scene &a, const Scene &b, float t, Scene &out, InterpStat
 				fprintf(stderr, "near vp %zu was %zu %08x at %.0f,%.0f taken %d\n", v, i, was[i].addr, sx, sy, int(taken[i]));
 			}
 		}
-		// too far in a frame: shown where it is now (0 blended, 1 turned, 2 moved, 3 another of several)
+		// too far in a frame: shown where it is now (0 blended, 1 turned, 2 moved, 3 another of several, 4 a swarm's grain)
 		std::vector<uint8_t> snap(now.size(), 0);
+		std::vector<char> loose(now.size(), 0), far(now.size(), 0);
 		for (size_t j = 0; j < now.size(); j++) {
 			if (pair[j] < 0) continue;
 			const Model &m = now[j], &p = was[size_t(pair[j])];
@@ -1079,11 +1180,40 @@ bool interpolate(const Scene &a, const Scene &b, float t, Scene &out, InterpStat
 			// between the two, a flag in the sky for a picture)
 			const bool wrong = (n_was[p.addr] > 1 || n_now[m.addr] > 1 || crowded[j]) && apart2(p, m) > 0.0225f * dist + 1.0f;
 			static const bool no_crowded = getenv("VF3_NO_CROWDED") != nullptr;   // (tests: crowded pairs not blended)
+			// (a swarm's grain not alone at its address in both frames, far from where the camera's move puts its
+			// partner: below)
+			loose[j] = grain(m) && !(p.addr == m.addr && n_was[p.addr] == 1 && n_now[m.addr] == 1);
+			far[j] = loose[j] && apart2(p, m) > std::max(4 * radius2(m), 0.0004f * dist);
 			snap[j] = rot > 0.75f ? 1 : move > 0.25f * dist + 1.0f ? 2 : wrong || (no_crowded && crowded[j]) ? 3 : 0;
+		}
+		// A swarm's grains (Wolf's desert sand, the beach's spray: kicked up and put somewhere new each frame, dozens to an
+		// address): blended, each was drawn along a line between it and another grain, the sand around a fighter's feet
+		// swirling and flickering at 120 a second. Shown where they are, as the arcade's frames have them. An address is
+		// a swarm's when most of its grains not alone at it are further from where the camera's move puts their partners
+		// than twice their size and 2% of their distance, and stays one for 2 seconds after, as does a grain whose partner
+		// was one: by the grain, a swarm's near its partner by chance glided one frame and jumped the next. (A grain alone
+		// at its address, a spark, glides; so do a stage's small models that share one, flags, birds, a fighter's hair,
+		// which stay near where the camera's move puts them.)
+		{
+			std::unordered_map<uint32_t, std::pair<int, int>> group;   // (grains not alone at the address, and of them far)
+			for (size_t j = 0; j < now.size(); j++)
+				if (loose[j]) { auto &g = group[now[j].addr]; g.first++; g.second += far[j]; }
+			for (auto &[addr, g] : group)
+				if (g.first >= 2 && g.second * 2 > g.first) swarms[addr] = SWARM_FRAMES;
+			// (or its partner was one the frame before: a grain's next step of its animation is at another address)
+			const bool chain = plan.b == a.id && a.id && size_t(u) < plan.swarm.size();
+			np.swarm.emplace_back(now.size(), 0);
+			for (size_t j = 0; j < now.size(); j++) {
+				const bool was_one = chain && pair[j] >= 0 && size_t(pair[j]) < plan.swarm[size_t(u)].size() && plan.swarm[size_t(u)][size_t(pair[j])];
+				if (loose[j] && (snap[j] == 0 || snap[j] == 3) && (far[j] || was_one || swarms.count(now[j].addr))) snap[j] = 4;
+				np.swarm[v][j] = snap[j] == 4;
+			}
 		}
 		for (size_t j = 0; j < now.size(); j++) {
 			Model &m = now[j];
 			total++;
+			strays += snap[j] == 4;
+			voters += !grain(m);
 			np.paired[v][j] = pair[j];
 			if (pair[j] < 0) { if (st) st->no_key++; continue; }
 			const Model &p = was[size_t(pair[j])];
@@ -1092,6 +1222,7 @@ bool interpolate(const Scene &a, const Scene &b, float t, Scene &out, InterpStat
 				continue;
 			}
 			matched++;
+			voted += !grain(m);
 			np.from[v][j] = pair[j];
 			int matrix_from = pair[j];   // (the partner its vertices are blended from, when another: its matrix too)
 			// A model the game builds each frame (the fighters' joints, between their limbs): its vertices blended
@@ -1206,21 +1337,35 @@ bool interpolate(const Scene &a, const Scene &b, float t, Scene &out, InterpStat
 	st->total = total;
 	st->matched = matched;
 	np.st = *st;
-	np.ok = !(total && matched * 2 < total);
+	// Most models too far in a frame (or new): a cut, the whole scene shown as it is in b. But not when the rest, a
+	// swarm's grains left out, are 32 or more and 70% of them blended: the game puts hundreds of grains somewhere new
+	// each frame (Wolf's desert sand, the beach's spray around a fighter's feet: 400-900 of a scene's 900-1400 models,
+	// or all put in at once), and they outvoted the rest, the whole scene unblended for frames on end as the fighters
+	// moved, a stop then a jump each frame. (A real cut, and a thrown fighter's spin whose pieces turned too far, left
+	// 58-63% of the rest blended: those stay cuts, the thrown fighter's pieces not drawn apart for a frame.)
+	// And the scene moved over 25% of its distance in a frame (scene_move): a cut, whatever the models' vote (VF1's:
+	// always a cut). The stage's models moved less than a quarter of their distance each, or are many of an address,
+	// and most were blended across the attract's cuts to a fighter's introduction, his pieces flying across the screen.
+	// (The grains shown where they are on purpose, 4, don't vote either way.)
+	const size_t vote = total - strays;
+	const bool cut = (vote && matched * 2 < vote && !(voters >= 32 && voted * 10 >= voters * 7)) || scene_move(a, b, np.av) > 0.25f;
+	np.ok = !cut;
 	// the flipbooks: a step from a to b remembered, or the one remembered for a's model carried on (when a's frame
 	// was the last plan's b: one frame on)
 	{
 		const bool chain = plan.b == a.id && a.id && plan.flips.size() == a.viewports.size();
+		const std::vector<int> &av = np.av;
 		np.flips.resize(np.paired.size());
 		for (size_t v = 0; v < np.paired.size(); v++) {
 			np.flips[v].resize(np.paired[v].size());
 			for (size_t j = 0; j < np.paired[v].size(); j++) {
 				const int i = np.paired[v][j];
 				if (i < 0) continue;
-				const Flip *pr = chain && size_t(i) < plan.flips[v].size() && plan.flips[v][size_t(i)].age >= 0 ? &plan.flips[v][size_t(i)] : nullptr;
+				const size_t u = size_t(av[v]);   // (paired: in a viewport of a's)
+				const Flip *pr = chain && size_t(i) < plan.flips[u].size() && plan.flips[u][size_t(i)].age >= 0 ? &plan.flips[u][size_t(i)] : nullptr;
 				Flip &f = np.flips[v][j];
-				if (flip_step(a.viewports[v].models[size_t(i)], b.viewports[v].models[j])) {
-					f.from = a.viewports[v].models[size_t(i)].meshes;
+				if (flip_step(a.viewports[u].models[size_t(i)], b.viewports[v].models[j])) {
+					f.from = a.viewports[u].models[size_t(i)].meshes;
 					f.age = 0;
 					f.period = pr && pr->age + 1 >= 2 && pr->age + 1 <= 8 ? pr->age + 1 : 0;
 				} else if (pr && pr->age + 1 <= 8) {
@@ -1231,7 +1376,7 @@ bool interpolate(const Scene &a, const Scene &b, float t, Scene &out, InterpStat
 		}
 	}
 	if (a.id && b.id) plan = std::move(np);
-	if (total && matched * 2 < total) {
+	if (cut) {
 		out = b;
 		return false;
 	}

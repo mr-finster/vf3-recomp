@@ -1,4 +1,6 @@
 #include <algorithm>
+#include <array>
+#include <cmath>
 // vf3run: the headless runner. Runs the game on the interpreter for a number of frames (or until a script
 // quits), playing an input script, and writes the CPU state and a RAM hash after every frame in the reference
 // build's format, for tools/statecmp.py.
@@ -190,6 +192,253 @@ int main(int argc, char **argv)
 					for (uint32_t i = 0; i < 0x200; i++) { uint16_t v = sound.reg_word(n, i); fwrite(&v, 2, 1, df); }
 				fclose(df);
 			}
+		}
+		// VF3_HITCH=file: smooth motion's hitch finder's samples (tools/hitch/hitch.py reads them). Each frame, the
+		// pictures between it and the frame before at t = 0.25, 0.5, 0.75 and 1 (as smooth motion would show them, 4 a
+		// frame at even moments), and where the 3D is on average in each: the mean of the models' blended places in the
+		// view, as its move since the sample before. A line a sample: "s <frame> <k> <blended> <dx> <dy> <dz> <models>
+		// <depth>"; a line a frame: "p <frame> <total> <no_key> <turned> <moved> <matched>" (interpolate's stats) and
+		// "c <frame> <share> <move> <n> <turn>" (a real cut's signs, from the two frames alone: the share of the models
+		// found in the frame before, by address, and of the n alone at their address the median move over its depth and
+		// the median turn, the most a matrix element changed).
+		// VF3_HITCH_STRIP=dir,from-to,... (frames): those frames' samples drawn in a strip (dir/strip_<from>.png: a row a
+		// frame, its 4 samples across, at half size (VF3_HITCH_STRIP_FULL: full), a red bar over those shown unblended),
+		// the pictures to look at before believing a flag. VF3_HITCH_DEBUG=f,...: those frames' viewports' model counts.
+		if (static const char *hitch_path = getenv("VF3_HITCH"); hitch_path) {
+			static FILE *hl = fopen(hitch_path, "w");
+			static video::Scene hs[2], hm;
+			static int hc = 0;
+			static bool have = false;
+			hc ^= 1;
+			scene_builder.build(board, hs[hc]);
+			struct Strip { long from, to; std::vector<uint32_t> px; };
+			static std::vector<Strip> strips;
+			static std::string strip_dir;
+			if (static bool parsed = false; !parsed) {
+				parsed = true;
+				if (const char *sp = getenv("VF3_HITCH_STRIP")) {
+					std::string s = sp;
+					size_t c = s.find(',');
+					strip_dir = s.substr(0, c);
+					while (c != std::string::npos) {
+						long a = 0, b = 0;
+						if (sscanf(s.c_str() + c + 1, "%ld-%ld", &a, &b) == 2) strips.push_back({ a, b, {} });
+						c = s.find(',', c + 1);
+					}
+				}
+			}
+			// The models measured: all the viewports', but for a swarm's grains (under 40 vertices: the beach's spray
+			// and Wolf's desert sand, hundreds of 4-6 polygon models put somewhere new each frame, a viewport of their
+			// own at the beach: their mean was the swarm's)
+			auto counted = [](const video::Model &m) {
+				size_t nv = 0;
+				if (m.meshes) for (auto &me : *m.meshes) nv += me.verts.size();
+				return nv >= 40;
+			};
+			if (have) {
+				const video::Scene &A = hs[hc ^ 1], &B = hs[hc];
+				video::InterpStats st;
+				std::vector<std::vector<std::array<float, 3>>> last;   // (the models' places in the sample before)
+				std::vector<std::vector<char>> shown_as_b;             // (paired, but shown where they are in b: left out)
+				for (int k = 0; k < 4; k++) {
+					const float t = float(k + 1) / 4;
+					const bool blended = video::interpolate(A, B, t, hm, k == 0 ? &st : nullptr);
+					const video::Scene &S = blended ? hm : B;
+					// The mean of the models' moves since the sample before (a's partner's place before the first): the move
+					// of the mean place over the models b has a partner for, the same set in each of the 4 (one appearing or
+					// gone moved the mean of all, a lurch each frame that isn't one). A model paired but not blended (one too
+					// far in a frame) is left out, or its jump was a lurch each frame; when none is blended (a cut), all are.
+					std::vector<int> av;
+					const std::vector<std::vector<int>> *paired = video::interp_paired(A, B, &av);
+					double move[3] = { 0, 0, 0 }, depth = 0;
+					size_t n = 0;
+					if (k == 0) { last.assign(S.viewports.size(), {}); shown_as_b.assign(S.viewports.size(), {}); }
+					for (size_t v = 0; paired && v < S.viewports.size(); v++) {
+						if (av[v] < 0) continue;
+						const std::vector<video::Model> &now = S.viewports[v].models, &was = A.viewports[size_t(av[v])].models, &bm = B.viewports[v].models;
+						const std::vector<int> &pr = (*paired)[v];
+						if (k == 0) {
+							last[v].assign(now.size(), {});
+							shown_as_b[v].assign(now.size(), 0);
+							for (size_t j = 0; j < now.size() && j < pr.size(); j++) {
+								if (pr[j] < 0) continue;
+								const video::Model &p = was[size_t(pr[j])], &m = bm[j];
+								for (int r = 0; r < 3; r++) last[v][j][size_t(r)] = p.matrix.m[12 + r];
+								shown_as_b[v][j] = blended && memcmp(now[j].matrix.m, m.matrix.m, sizeof m.matrix.m) == 0 &&
+								                   memcmp(p.matrix.m, m.matrix.m, sizeof m.matrix.m) != 0;
+							}
+						}
+						for (size_t j = 0; j < now.size() && j < pr.size(); j++) {
+							if (pr[j] < 0 || shown_as_b[v][j] || !counted(bm[j])) continue;
+							for (int r = 0; r < 3; r++) {
+								move[r] += now[j].matrix.m[12 + r] - last[v][j][size_t(r)];
+								last[v][j][size_t(r)] = now[j].matrix.m[12 + r];
+							}
+							depth += std::fabs(now[j].matrix.m[14]);
+							n++;
+						}
+					}
+					if (n) {
+						for (double &x : move) x /= double(n);
+						depth /= double(n);
+					}
+					fprintf(hl, "s %llu %d %d %.4f %.4f %.4f %zu %.2f\n", (unsigned long long)f, k, blended ? 1 : 0, move[0], move[1], move[2], n, depth);
+					for (Strip &sp : strips) {
+						if (long(f) < sp.from || long(f) > sp.to) continue;
+						static const int z = getenv("VF3_HITCH_STRIP_FULL") ? 1 : 2;   // (full size: a swarm's grains seen)
+						const int w = video::W / z, h = video::H / z, row = int(long(f) - sp.from);
+						sp.px.resize(size_t(w) * 4 * h * size_t(sp.to - sp.from + 1), 0xFF000000u);
+						raster.render(S, board.tex_ram.data());
+						std::vector<uint32_t> o(size_t(video::W) * video::H, 0xFF000000u);
+						raster.compose(o.data(), o.data());
+						for (int y = 0; y < h; y++)
+							for (int x = 0; x < w; x++) {
+								// (z by z averaged, and a sample shown unblended marked by a red bar along its top)
+								uint32_t c = 0;
+								for (int sh = 0; sh < 24; sh += 8) {
+									int s = 0;
+									for (int dy = 0; dy < z; dy++) for (int dx = 0; dx < z; dx++) s += (o[size_t(z * y + dy) * video::W + z * x + dx] >> sh) & 255;
+									c |= uint32_t(s / (z * z)) << sh;
+								}
+								if (!blended && y < 4) c = 0xFF0000FFu;
+								sp.px[(size_t(row) * h + y) * w * 4 + size_t(k) * w + x] = c | 0xFF000000u;
+							}
+						if (long(f) == sp.to && k == 3)
+							write_png((strip_dir + "/strip_" + std::to_string(sp.from) + ".png").c_str(), sp.px.data(), w * 4, h * int(sp.to - sp.from + 1));
+					}
+				}
+				if (static const char *dbg = getenv("VF3_HITCH_DEBUG"); dbg && strstr((std::string(",") + dbg + ",").c_str(), ("," + std::to_string(f) + ",").c_str())) {
+					fprintf(stderr, "hitch %llu: viewports' models", (unsigned long long)f);
+					for (auto &vp : A.viewports) fprintf(stderr, " %zu", vp.models.size());
+					fprintf(stderr, " ->");
+					for (auto &vp : B.viewports) fprintf(stderr, " %zu", vp.models.size());
+					fprintf(stderr, "\n");
+					size_t same = 0, n = 0;
+					for (size_t v = 0; v < B.viewports.size() && v < A.viewports.size(); v++)
+						for (size_t j = 0; j < B.viewports[v].models.size() && j < A.viewports[v].models.size(); j++) {
+							n++;
+							same += memcmp(B.viewports[v].models[j].matrix.m, A.viewports[v].models[j].matrix.m, sizeof(float) * 16) == 0;
+						}
+					fprintf(stderr, "  %zu of %zu models' matrices the same, in order\n", same, n);
+				}
+				{
+					// The flicker detector: each of b's models with a partner in a, by kind, as the in-betweens show it:
+					// blended, or as it is in b while the rest are blended (as-is), and its move over the frame. Flagged:
+					//   toggle: blended in one frame and as-is in the next, or the other way (the partner's status the frame
+					//           before), the model alternating between gliding and jumping (both frames blended: a cut
+					//           is the hitch finder's)
+					//   jitter: blended both frames, its move unlike its move the frame before (they differ by over half the
+					//           larger and 3% of its distance): a zigzag in the in-betweens
+					//   stray:  blended across more than 4 times its own size and 2% of its distance in a frame: drawn
+					//           along a line between two unrelated models (a swarm's grain paired with another)
+					// A line a frame and kind: "f <frame> <kind> <models> <blended> <as-is> <toggle> <jitter> <stray>".
+					// Kinds: 0 grain (under 40 vertices), 1 joint (built in polygon RAM), 2 flipbook (its texture moved),
+					// 3 translucent (shadows, effects), 4 cut-out (alpha-textured: grass, leaves, flags), 5 small (under 300
+					// vertices), 6 the rest (the fighters' limbs, the stage).
+					struct Rec { char status = 0; float vel[3] = {}; };   // (status 0: no partner, 1 blended, 2 as-is)
+					static std::vector<std::vector<Rec>> prev_rec;
+					static bool prev_blended = false;
+					std::vector<std::vector<Rec>> rec(B.viewports.size());
+					std::vector<int> av;
+					const std::vector<std::vector<int>> *paired = video::interp_paired(A, B, &av);
+					video::Scene half;
+					const bool blended = video::interpolate(A, B, 0.5f, half);
+					long cnt[7][6] = {};
+					for (size_t v = 0; v < B.viewports.size(); v++) {
+						const std::vector<video::Model> &bm = B.viewports[v].models;
+						rec[v].resize(bm.size());
+						if (!paired || av[v] < 0) continue;
+						const std::vector<video::Model> &am = A.viewports[size_t(av[v])].models;
+						const std::vector<int> &pr = (*paired)[v];
+						for (size_t j = 0; j < bm.size() && j < pr.size(); j++) {
+							if (pr[j] < 0) continue;
+							const video::Model &m = bm[j], &p = am[size_t(pr[j])], &h = half.viewports[v].models[j];
+							size_t nv = 0;
+							bool trans = m.alpha < 1, cutout = false, flip = false;
+							float size = 0;
+							if (m.meshes)
+								for (size_t k = 0; k < m.meshes->size(); k++) {
+									const video::Mesh &me = (*m.meshes)[k];
+									nv += me.verts.size();
+									trans |= me.poly_alpha;
+									cutout |= me.texture_alpha;
+									flip |= me.flip > 0 || (h.meshes && k < h.meshes->size() && (*h.meshes)[k].flip > 0);
+									if (p.meshes && p.meshes->size() == m.meshes->size() && ((*p.meshes)[k].x != me.x || (*p.meshes)[k].y != me.y)) flip = true;
+									for (auto &vx : me.verts) size = std::max(size, vx.pos[0] * vx.pos[0] + vx.pos[1] * vx.pos[1] + vx.pos[2] * vx.pos[2]);
+								}
+							const float scale = std::sqrt(m.matrix.m[0] * m.matrix.m[0] + m.matrix.m[1] * m.matrix.m[1] + m.matrix.m[2] * m.matrix.m[2]);
+							size = std::sqrt(size) * scale;
+							const int kind = nv < 40 ? 0 : m.addr < 0x100000 ? 1 : flip ? 2 : trans ? 3 : cutout ? 4 : nv < 300 ? 5 : 6;
+							Rec &r = rec[v][j];
+							const bool same = memcmp(h.matrix.m, m.matrix.m, sizeof m.matrix.m) == 0;
+							const bool moves = memcmp(p.matrix.m, m.matrix.m, sizeof m.matrix.m) != 0;
+							if (!moves) { r.status = 0; continue; }   // (standing still: nothing to see)
+							r.status = blended && !same ? 1 : 2;
+							float d = 0, z = 0;
+							for (int c = 0; c < 3; c++) { r.vel[c] = m.matrix.m[12 + c] - p.matrix.m[12 + c]; d += r.vel[c] * r.vel[c]; z += m.matrix.m[12 + c] * m.matrix.m[12 + c]; }
+							d = std::sqrt(d);
+							z = std::sqrt(z);
+							long *c = cnt[kind];
+							c[0]++;
+							c[r.status]++;
+							const Rec *q = size_t(av[v]) < prev_rec.size() && size_t(pr[j]) < prev_rec[size_t(av[v])].size() ? &prev_rec[size_t(av[v])][size_t(pr[j])] : nullptr;
+							if (q && q->status && q->status != r.status && blended && prev_blended) c[3]++;
+							if (q && q->status == 1 && r.status == 1) {
+								float e = 0, dq = 0;
+								for (int k = 0; k < 3; k++) { e += (r.vel[k] - q->vel[k]) * (r.vel[k] - q->vel[k]); dq += q->vel[k] * q->vel[k]; }
+								e = std::sqrt(e);
+								if (e > 0.5f * std::max(d, std::sqrt(dq)) && e > 0.03f * z) c[4]++;
+							}
+							if (r.status == 1 && d > 4 * size && d > 0.02f * z) c[5]++;
+						}
+					}
+					prev_rec = std::move(rec);
+					prev_blended = blended;
+					for (int k = 0; k < 7; k++)
+						if (cnt[k][0]) fprintf(hl, "f %llu %d %ld %ld %ld %ld %ld %ld\n", (unsigned long long)f, k, cnt[k][0], cnt[k][1], cnt[k][2], cnt[k][3], cnt[k][4], cnt[k][5]);
+				}
+				fprintf(hl, "p %llu %zu %zu %zu %zu %zu\n", (unsigned long long)f, st.total, st.no_key, st.turned, st.moved, st.matched);
+				{
+					// A real cut's signs, from the two frames alone (each of b's viewports with a's with most addresses in
+					// common): the share of b's models found in a, and the median move over depth of those alone at their
+					// address in both
+					size_t all = 0, found = 0;
+					std::vector<float> rel, turn;
+					for (auto &vb : B.viewports) {
+						size_t best = 0, bu = 0;
+						for (size_t u = 0; u < A.viewports.size(); u++) {
+							std::map<uint32_t, int> left;
+							for (auto &m : A.viewports[u].models) if (counted(m)) left[m.addr]++;
+							size_t common = 0;
+							for (auto &m : vb.models) if (counted(m)) if (auto it = left.find(m.addr); it != left.end() && it->second > 0) { it->second--; common++; }
+							if (common > best) { best = common; bu = u; }
+						}
+						for (auto &m : vb.models) all += counted(m);
+						found += best;
+						if (!best) continue;
+						std::map<uint32_t, int> na, nb;
+						std::map<uint32_t, const video::Model *> at;
+						for (auto &m : A.viewports[bu].models) if (counted(m)) { na[m.addr]++; at[m.addr] = &m; }
+						for (auto &m : vb.models) if (counted(m)) nb[m.addr]++;
+						for (auto &m : vb.models) {
+							if (!counted(m) || nb[m.addr] != 1 || na[m.addr] != 1) continue;
+							const video::Model &p = *at[m.addr];
+							float d = 0, z = 0;
+							for (int r = 0; r < 3; r++) { const float e = m.matrix.m[12 + r] - p.matrix.m[12 + r]; d += e * e; z += m.matrix.m[12 + r] * m.matrix.m[12 + r]; }
+							rel.push_back(std::sqrt(d / std::max(z, 1.0f)));
+							float most = 0;
+							for (int c = 0; c < 3; c++) for (int r = 0; r < 3; r++) most = std::max(most, std::fabs(m.matrix.m[c * 4 + r] - p.matrix.m[c * 4 + r]));
+							turn.push_back(most);
+						}
+					}
+					float med = 1;
+					if (!rel.empty()) { std::nth_element(rel.begin(), rel.begin() + rel.size() / 2, rel.end()); med = rel[rel.size() / 2]; }
+					float med_turn = 0;
+					if (!turn.empty()) { std::nth_element(turn.begin(), turn.begin() + turn.size() / 2, turn.end()); med_turn = turn[turn.size() / 2]; }
+					fprintf(hl, "c %llu %.3f %.4f %zu %.3f\n", (unsigned long long)f, all ? double(found) / double(all) : 1.0, med, rel.size(), med_turn);
+				}
+			}
+			have = true;
 		}
 		static const long flicker_from = getenv("VF3_FLICKER_FROM") ? atol(getenv("VF3_FLICKER_FROM")) : 0;   // (tests: checked from this frame)
 		if (flicker_dir && long(f) >= flicker_from) {   // VF3_FLICKER: the in-between pictures (t = 0.5) against the frames either side

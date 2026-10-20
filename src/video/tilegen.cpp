@@ -1198,7 +1198,9 @@ void TileGen::line(const m3::Model3 &board, unsigned y)
 			// doesn't agree with what's remembered (a row made wrongly: the sky streamed in pieces, the sun's tile
 			// repeated), what's remembered mirrored on out.
 			static const bool no_mem = getenv("VF3_NO_SEEN") != nullptr;   // (tests: the sides without the memory)
-			if (!no_mem && !from_map && !(prim + k == 3 && (backdrop.ok || backdrop.known))) {   // (not for a stage's backdrop: as the screen has it, a cleared map's rows blank)
+			// (nothing remembered yet, as for the stage's backdrop until the game's map is lost: a cut, the test menu
+			// left, find_backdrop above clearing backdrop.ok and .known mid-line after the memory was passed over)
+			if (!no_mem && !from_map && !(prim + k == 3 && (backdrop.ok || backdrop.known)) && !mem.at_x.empty()) {   // (not for a stage's backdrop: as the screen has it, a cleared map's rows blank)
 				const int32_t ax0 = mem.x + ((((l.sx & 511) - mem.last_sx + 256) & 511) - 256), ay = mem.y + int(y);
 				const size_t line_i = size_t(ay & 511) * R;
 				auto x_of = [&](int o) { return side ? W + o : -1 - o; };   // (o pixels out from the edge)

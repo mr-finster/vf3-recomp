@@ -9,6 +9,8 @@
 //   VS_QUAD   a rectangle in clip space (the uniforms')
 //   FS_FOG    the fog layers: a colour, with the spotlight on fog's ellipse
 //   FS_OUT    the three layers put together into one premultiplied picture
+//   FS_COLOUR the whole picture through an arcade monitor's colours (the host's CRT colours, SDL's renderer's
+//             own vertex shader in front: its colour and texture coordinate in)
 
 #ifdef __spirv__
 #define BIND(n, s) [[vk::binding(n, s)]]
@@ -369,5 +371,32 @@ float4 main(float4 pos : SV_Position) : SV_Target0
 	for (int j = 0; j < k; j++)
 		for (int i = 0; i < k; i++) sum += one(at + int2(i, j));
 	return sum / float(k * k);
+}
+#endif
+
+#ifdef FS_COLOUR
+// A CRT's colours on today's screen (as Supermodel's CRT colours, from Dan Mons' colour_matrix_adaptations): the
+// picture back to linear light by the monitor's gamma (or sRGB's curve), through the matrix from its phosphors and
+// white to sRGB's, and out by sRGB's curve.
+COMBINED BIND(0, 2) Texture2D<float4> pic : register(t0, space2);
+COMBINED BIND(0, 2) SamplerState pic_s : register(s0, space2);
+BIND(0, 3) cbuffer Colour : register(b0, space3)
+{
+	float4 m0, m1, m2;   // the matrix's rows (xyz); m0.w the monitor's gamma, 0 for sRGB's curve
+};
+struct ColourIn
+{
+	float4 colour : COLOR0;
+	float2 uv : TEXCOORD0;
+};
+float3 from_srgb(float3 c) { return select(c <= 0.04045, c / 12.92, pow((c + 0.055) / 1.055, 2.4)); }
+float3 to_srgb(float3 c) { return select(c <= 0.0031308, c * 12.92, 1.055 * pow(c, 1.0 / 2.4) - 0.055); }
+float4 main(ColourIn i) : SV_Target
+{
+	float4 p = pic.Sample(pic_s, i.uv);
+	float3 c = saturate(p.rgb);
+	c = m0.w > 0 ? pow(c, m0.w) : from_srgb(c);
+	c = saturate(float3(dot(m0.xyz, c), dot(m1.xyz, c), dot(m2.xyz, c)));
+	return float4(to_srgb(c), p.a) * i.colour;
 }
 #endif
