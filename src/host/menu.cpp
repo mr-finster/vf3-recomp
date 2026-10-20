@@ -40,8 +40,9 @@ struct menu_listener : Rml::EventListener
 		menu->select(i);
 		if (ev.GetId() == Rml::EventId::Click) {
 			const menu_item &it = menu->m_stack.back().items[i];
+			const Rml::Element *t = ev.GetTargetElement();
 			if (it.activate) menu->activate();
-			else if (it.change) menu->change(+1);
+			else if (it.change) menu->click_change(t && t->IsClassSet("back") ? -1 : +1);   // (the "<": down)
 		}
 	}
 };
@@ -170,7 +171,7 @@ void game_menu::build()
 			   "\" id=\"r" + std::to_string(i) + "\"><span class=\"label\">" + escape(it.label) + "</span>";
 		if (it.value) {
 			rml += "<span class=\"value\">";
-			if (it.change) rml += "<span class=\"arrow\">&lt;&nbsp;&nbsp;</span>";
+			if (it.change) rml += "<span class=\"arrow back\">&lt;&nbsp;&nbsp;</span>";
 			rml += escape(it.value());
 			if (it.change) rml += "<span class=\"arrow\">&nbsp;&nbsp;&gt;</span>";
 			rml += "</span>";
@@ -241,6 +242,22 @@ void game_menu::change(int d)
 	if (!f) return;
 	f(d);
 	refresh();
+}
+
+// A click: a step (the "<" down, anywhere else up), and from either end round to the other. Some choices stop at
+// their ends (the render scale at 6x, the difficulty at Hardest, the rounds), and with a click always up, a mouse
+// couldn't come back down from them: the option looked stuck (#3).
+void game_menu::click_change(int d)
+{
+	auto value = [&] { const menu_item &it = m_stack.back().items[m_sel]; return it.value ? it.value() : std::string(); };
+	const std::string was = value();
+	change(d);
+	if (value() != was) return;
+	for (int n = 0; n < 64; n++) {   // (at an end: to the other one)
+		const std::string at = value();
+		change(-d);
+		if (value() == at) break;
+	}
 }
 
 // A binding back to none: Delete on a keyboard, Y on a pad, with its row selected (not Esc or
