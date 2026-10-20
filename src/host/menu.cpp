@@ -271,6 +271,7 @@ void game_menu::click_change(int d)
 // Backspace, which go back a page, nor B)
 void game_menu::clear()
 {
+	if (m_stack.empty() || size_t(m_sel) >= m_stack.back().items.size()) return;
 	auto f = m_stack.back().items[m_sel].clear;
 	if (!f) return;
 	f();
