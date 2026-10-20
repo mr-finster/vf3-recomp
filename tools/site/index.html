@@ -376,8 +376,11 @@ dialog .x:hover{background:rgba(255,255,255,.2)}
       <div class="pop" role="dialog" aria-label="Changelog">
         <p><b>%VERSION%</b> &middot; %DATE%</p>
         <ul>
-          <li>Windows: the GPU renderer starts on Vulkan for every graphics card (it was AMD only), where Direct3D 12 could be far slower on NVIDIA cards. Direct3D 12 is still used by itself if Vulkan fails, and Display &gt; Graphics driver chooses it.</li>
+          <li>No more stutter every few seconds on a hard disk: the game's saves are written in the background, and its bookkeeping once a minute instead of every 3 seconds.</li>
         </ul>
+        <details><summary>v0.1.5-alpha</summary><ul>
+          <li>Windows: the GPU renderer starts on Vulkan for every graphics card (it was AMD only), where Direct3D 12 could be far slower on NVIDIA cards. Direct3D 12 is still used by itself if Vulkan fails, and Display &gt; Graphics driver chooses it.</li>
+        </ul></details>
         <details><summary>v0.1.4-alpha</summary><ul>
           <li>No more crash when clicking an option that restarts the game (Play style) with the mouse.</li>
         </ul></details>

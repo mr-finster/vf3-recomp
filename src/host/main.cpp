@@ -397,6 +397,54 @@ bool save_blob(const std::string &path, const void *src, size_t n)
 	return replace_file(path, tmp);
 }
 
+// Saves written off the game's thread (as VF1's and VF2's): each flushed to the disk took tens of milliseconds on a
+// hard disk, a hitch every few seconds while the arcade's bookkeeping kept changing the backup RAM in play. put copies
+// the bytes and returns; the writer thread writes the newest copy of each file; finish writes what's left and stops
+// (a put after it is dropped: the caller writes the final copies itself).
+struct bg_saver
+{
+	std::mutex m;
+	std::condition_variable cv;
+	std::map<std::string, std::vector<uint8_t>> pending;
+	bool stop = false;
+	std::thread writer{ [this] { run(); } };   // (last: started once the rest is made)
+
+	void put(const std::string &path, const void *src, size_t n)
+	{
+		std::vector<uint8_t> bytes(static_cast<const uint8_t *>(src), static_cast<const uint8_t *>(src) + n);
+		{
+			std::lock_guard<std::mutex> lk(m);
+			if (stop) return;
+			pending[path] = std::move(bytes);
+		}
+		cv.notify_one();
+	}
+	void run()
+	{
+		for (;;) {
+			std::map<std::string, std::vector<uint8_t>> now;
+			{
+				std::unique_lock<std::mutex> lk(m);
+				cv.wait(lk, [&] { return stop || !pending.empty(); });
+				if (pending.empty() && stop) return;
+				now.swap(pending);
+			}
+			for (auto &[path, bytes] : now)
+				if (!save_blob(path, bytes.data(), bytes.size())) fprintf(stderr, "couldn't save %s\n", path.c_str());
+		}
+	}
+	void finish()
+	{
+		{
+			std::lock_guard<std::mutex> lk(m);
+			stop = true;
+		}
+		cv.notify_one();
+		if (writer.joinable()) writer.join();
+	}
+	~bg_saver() { finish(); }
+};
+
 uint64_t fnv(const void *p, size_t n, uint64_t h = 1469598103934665603ull)
 {
 	for (size_t i = 0; i < n; i++) h = (h ^ static_cast<const uint8_t *>(p)[i]) * 1099511628211ull;
@@ -1030,14 +1078,20 @@ int main(int argc, char **argv)
 	load_blob(eeprom_path, board.eeprom.regs, sizeof(board.eeprom.regs));
 	auto nvram_hash = [&] { return fnv(board.eeprom.regs, sizeof(board.eeprom.regs), fnv(board.backup.data(), board.backup.size())); };
 	uint64_t saved_hash = nvram_hash();
-	auto save_nvram = [&] {
+	bg_saver saver;
+	// (in play: copied for the writer thread, bg_saver; at the quit: written here, the writer finished first)
+	auto save_nvram = [&](bool now = false) {
 		if (game.emu_thread.joinable()) game.job_wait();   // (not while a frame runs alongside)
 		if (quit_after >= 0) return;   // test runs leave the saves alone
 		const uint64_t h = nvram_hash();
 		if (h == saved_hash) return;
 		std::filesystem::create_directories(data, ec);
-		if (save_blob(backup_path, board.backup.data(), board.backup.size()) &&
-			save_blob(eeprom_path, board.eeprom.regs, sizeof(board.eeprom.regs)))
+		if (!now) {
+			saver.put(backup_path, board.backup.data(), board.backup.size());
+			saver.put(eeprom_path, board.eeprom.regs, sizeof(board.eeprom.regs));
+			saved_hash = h;
+		} else if (save_blob(backup_path, board.backup.data(), board.backup.size()) &&
+				   save_blob(eeprom_path, board.eeprom.regs, sizeof(board.eeprom.regs)))
 			saved_hash = h;
 		else fprintf(stderr, "couldn't save the NVRAM in %s\n", data.c_str());
 	};
@@ -2344,7 +2398,7 @@ int main(int argc, char **argv)
 	std::string title_now;
 	struct { uint64_t t0 = 0; int frames = 0, pictures = 0; double emu_ms = 0, draw_ms = 0; } t9;
 	t9.t0 = SDL_GetTicksNS();
-	uint64_t save_t = SDL_GetTicksNS();   // the settings and the NVRAM saved every 3 s when changed
+	uint64_t save_t = SDL_GetTicksNS();   // the settings saved every 3 s when changed (the NVRAM once a minute: nvram_t)
 	while (running) {
 		pass++;
 		const uint64_t pass_t0 = SDL_GetTicksNS();
@@ -2827,18 +2881,25 @@ int main(int argc, char **argv)
 			pace.t0 = SDL_GetTicksNS();
 			between_n = cut_n = 0;
 		}
-		// the NVRAM (the game writes its rankings and settings as it goes) and the settings (a hotkey's change: Steam
-		// can end the game without a quit) saved every 3 s when changed, as VF1's and VF2's
+		// the settings (a hotkey's change: Steam can end the game without a quit) saved every 3 s when changed, and the
+		// NVRAM (the game writes its rankings and settings as it goes: the arcade's bookkeeping changes it all through
+		// play) once a minute, as VF1's and VF2's; at the quit, whatever's changed
+		static uint64_t nvram_t = SDL_GetTicksNS();
+		if (SDL_GetTicksNS() - nvram_t > 60000000000ull) {
+			nvram_t = SDL_GetTicksNS();
+			save_nvram();
+		}
 		if (SDL_GetTicksNS() - save_t > 3000000000ull) {
 			save_t = SDL_GetTicksNS();
-			save_nvram();
 			if (cfg_dirty && !menu.is_open() && quit_after < 0 && cfg.save(settings_path)) cfg_dirty = false;
 		}
 		// (a refresh and a half of this screen's: at 60 Hz every pass waiting on vsync was over the 120 Hz one's)
 		if (!stopped && double(SDL_GetTicksNS() - pass_t0) > 1.5e9 / std::max(60.0, screen_hz)) { pace.slow[pass_kind]++; pace.slow_work_ms += double(pass_work_ns) / 1e6; }
 		(void)shown;
 	}
-	save_nvram();
+	saver.finish();
+	saved_hash = ~nvram_hash();   // (the last copies written here whatever the writer did)
+	save_nvram(true);
 	rec_stop();
 	if (cfg_dirty && quit_after < 0) cfg.save(settings_path);
 	if (audio) SDL_DestroyAudioStream(audio);
