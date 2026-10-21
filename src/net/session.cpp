@@ -394,7 +394,7 @@ void Session::check_hashes()
 bool Session::step(uint16_t input)
 {
 	if (st != State::running) return false;
-	if (local.size() == size_t(cur) + size_t(cfg.delay)) local.push_back(input);
+	while (local.size() <= size_t(cur) + size_t(cfg.delay)) local.push_back(input);   // (once a frame; more if the delay grew)
 	send_inputs();
 
 	// the other side's inputs that came since: back to the first wrong guess, and every frame since again

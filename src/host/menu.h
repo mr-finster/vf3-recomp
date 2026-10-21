@@ -17,6 +17,10 @@ struct menu_item
 	std::function<void()> activate;       // Enter / A / a click (buttons)
 	bool info = false;                    // a line of text: not selectable
 	std::function<void()> clear;          // Delete / Y: back to none (a key or button binding)
+	bool heading = false;                 // a section's title (with info: not selectable)
+	bool sub = false;                     // a row belonging to the one above it (indented)
+	std::function<std::string()> below;   // a line under the row when not empty (a mistake to put right, a status)
+	bool good = false;                    // (below: shown as good news, not a mistake)
 };
 
 struct menu_page
@@ -38,14 +42,18 @@ public:
 	void set_fps(const std::string &text);      // the small FPS at the top right; empty hides it   // the small line at the bottom right (version and date)
 
 	bool is_open() const { return m_open; }
+	bool capturing() const { return bool(m_capture); }   // (a key or a name being typed: every key its)
 	void open(menu_page root);            // opens at this page
 	void close();
 	void push(menu_page p);               // a sub-page
 	void pop();                           // back a page; closes at the top
+	void replace(menu_page p, int sel);   // the page on top made again (rows come and go), this row selected
+	size_t depth() const { return m_stack.size(); }
+	int selected() const { return m_sel; }
 	void refresh();                       // redraw the values (changed from outside)
 	// Waits for a key or pad button: on_event sees each input event until it returns true. Esc
 	// cancels. The prompt shows under the items meanwhile.
-	void capture(std::string prompt, std::function<bool(const SDL_Event &)> on_event);
+	void capture(std::string prompt, std::function<bool(const SDL_Event &)> on_event, std::function<void()> on_cancel = {});
 
 	// Takes the event if the menu is open; true when it was used.
 	bool handle_event(const SDL_Event &e);
@@ -65,6 +73,7 @@ private:
 	int m_stick_x = 0, m_stick_y = 0;    // the left stick's last direction, for edges
 	std::function<bool(const SDL_Event &)> m_capture;
 	std::string m_capture_prompt;
+	std::function<void()> m_capture_cancel;   // (Esc while capturing)
 
 	void build();                         // the current page into the document
 	void show_help();                     // the selected item's help under the items
