@@ -77,6 +77,25 @@ struct State
 	uint64_t total_cycles;
 	int icount, cur_cycles;
 	bool fatal;                 // stopped on something it can't run; the message says what
+
+	// Save states (src/machine/state_io.h): each field on its own, so the struct's padding isn't in the state
+	template <class IO> void state(IO &io)
+	{
+		io.pod(r);
+		for (Fpr &x : f) io.pod(x.i);
+		io.pod(cr);
+		io.pod(xer); io.pod(lr); io.pod(ctr); io.pod(msr); io.pod(fpscr);
+		io.pod(pc); io.pod(npc);
+		io.pod(srr0); io.pod(srr1); io.pod(sprg);
+		io.pod(pvr); io.pod(hid0); io.pod(hid1); io.pod(hid2); io.pod(sdr1); io.pod(dsisr); io.pod(dar); io.pod(ear); io.pod(iabr);
+		io.pod(dmiss); io.pod(dcmp); io.pod(hash1); io.pod(hash2); io.pod(imiss); io.pod(icmp); io.pod(rpa);
+		io.pod(ibat); io.pod(dbat); io.pod(sr);
+		io.pod(reserved); io.pod(reserved_address); io.pod(interrupt_pending);
+		io.pod(tb); io.pod(dec); io.pod(timer_ratio); io.pod(timer_frac);
+		io.pod(tb_base_icount); io.pod(dec_base_icount); io.pod(dec_trigger_cycle);
+		io.pod(total_cycles); io.pod(icount); io.pod(cur_cycles);
+		io.pod(fatal);
+	}
 };
 
 class Cpu

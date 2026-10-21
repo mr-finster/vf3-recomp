@@ -11,7 +11,7 @@ OBJ ?= build/obj
 BIN ?= build/bin
 objs = $(patsubst %.cpp,$(OBJ)/%.o,$(1))
 
-all: $(BIN)/vf3run $(BIN)/vf3lock $(BIN)/vf3
+all: $(BIN)/vf3run $(BIN)/vf3lock $(BIN)/vf3soak $(BIN)/vf3
 
 SDL_CFLAGS ?= $(shell pkg-config --cflags sdl3 2>/dev/null || echo -I/opt/homebrew/include)
 SDL_LIBS ?= $(shell pkg-config --libs sdl3 2>/dev/null || echo -L/opt/homebrew/lib -lSDL3)
@@ -62,6 +62,10 @@ $(BIN)/vf3run: $(call objs,$(CORE) tools/vf3run.cpp) $(SLJIT_OBJ)
 	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDLIBS)
 
 $(BIN)/vf3lock: $(call objs,$(CORE) tools/vf3lock.cpp) $(SLJIT_OBJ)
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDLIBS)
+
+$(BIN)/vf3soak: $(call objs,$(CORE) tools/vf3soak.cpp) $(SLJIT_OBJ)
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDLIBS)
 
