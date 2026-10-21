@@ -31,8 +31,8 @@ SDL_VIDEO_DRIVER=offscreen build/bin/menutest /tmp/shots       # the Online page
 
 To play: both start the game; one opens Online > Host a match (the page shows the address to give), the other
 Online > Join a match, types it, Connect. On one network that's all; over the internet the host forwards UDP port
-7700 to their computer until the lobby server does it for them. A match starts at the character select, both on
-free play; the menu doesn't pause it; Leave the match (or the other side going) goes back to playing alone, with
+7700 to their computer until the lobby server does it for them. A match starts at the title screen, both on free
+play (both press Start); the menu doesn't pause it; Leave the match (or the other side going) goes back to playing alone, with
 the player's own NVRAM given back (a match plays on the host's).
 
 ## What's enough: the bar to clear
@@ -123,7 +123,7 @@ decline". It's declined by itself after 15 s.
 
 **Starting a match**: one screen with each step, ticked off as it's done: connecting (and "directly" or "through the
 relay, +18 ms"), checking both have the same version and ROM, sending the starting state, both ready. Then both
-boards start from it, on free play with both players' credits in, at the character select. Each player plays with
+boards start from it, on free play, at the title screen (both press Start). Each player plays with
 their own Player 1 controls, whichever side they're on, so nobody has to rebind anything.
 
 **In a match**: the game never pauses. Start or Esc opens a smaller menu over the game while it goes on: the
