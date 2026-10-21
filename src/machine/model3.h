@@ -8,6 +8,7 @@
 // rather than known hardware behaviour.
 #pragma once
 #include "../ppc/ppc.h"
+#include "state_io.h"
 #include <cstdint>
 #include <deque>
 #include <functional>
@@ -33,6 +34,7 @@ public:
 	void assert_(unsigned bits);
 	void deassert(unsigned bits);
 	void reset() { enable = 0; state = 0; }
+	template <class IO> void save_state(IO &io) { io.pod(enable); io.pod(state); }
 };
 
 // The 93C46 serial EEPROM (64 words) behind input register 0
@@ -44,6 +46,11 @@ public:
 	void write(unsigned cs, unsigned clk, unsigned di);
 	unsigned read();
 	void reset();
+	template <class IO> void save_state(IO &io)
+	{
+		io.pod(regs); io.pod(CS); io.pod(CLK); io.pod(DI); io.pod(DO); io.pod(out); io.pod(in);
+		io.pod(bits_out); io.pod(receiving); io.pod(addr); io.pod(busy); io.pod(locked);
+	}
 private:
 	unsigned CS = 0, CLK = 0, DI = 0, DO = 0;
 	uint32_t out = 0, in = 0;
@@ -62,6 +69,13 @@ public:
 	bool read() const { return tdo; }
 	void reset();
 	uint32_t modeword[5] = {};  // per ASIC kind, for the renderer
+	template <class IO> void save_state(IO &io)
+	{
+		for (Device &d : dev) {
+			io.pod(d.asic); io.pod(d.kind); io.pod(d.id); io.pod(d.shift); io.pod(d.size); io.pod(d.ir); io.pod(d.mode);
+		}
+		io.pod(state); io.pod(last_tck); io.pod(tdo); io.pod(modeword);
+	}
 private:
 	struct Device
 	{
@@ -97,6 +111,11 @@ public:
 	bool halt = false;
 	uint8_t base = 0;
 	void reset();
+	template <class IO> void save_state(IO &io)
+	{
+		io.pod(regs); io.pod(temp); io.pod(dsp); io.pod(dsps); io.pod(dbc);
+		io.pod(dcmd); io.pod(dcntl); io.pod(dmode); io.pod(dstat); io.pod(dien); io.pod(istat); io.pod(halt); io.pod(base);
+	}
 	uint8_t read(unsigned reg);
 	void write(unsigned reg, uint8_t data);
 private:
@@ -201,6 +220,18 @@ public:
 	void write32(uint32_t addr, uint32_t data) override;
 	void write64(uint32_t addr, uint64_t data) override;
 
+	// Save states (state_io.h): everything the game's run depends on, the PowerPC's state, the board's registers and
+	// all its memories but the ROMs (about 27 MB; the sound board is apart: it only hears the MIDI bytes, and nothing
+	// it does reaches this board). save_state reuses the buffer's memory; sections, if given, are filled with where
+	// each part starts. load_state restores one this build saved, and false (the board then half restored: reset
+	// it) if it isn't one. The renderers are told every texture changed, and the recompiled code rechecks RAM.
+	void save_state(std::vector<uint8_t> &out, std::vector<StateSection> *sections = nullptr);
+	bool load_state(const uint8_t *p, size_t n);
+	static constexpr uint32_t STATE_MAGIC = 0x53334656, STATE_VERSION = 1;   // "VF3S"
+	// The real-time clock: the host's local time, or (rtc_time >= 0: netplay, tests) this time, seconds since 1970,
+	// as UTC, the same on every machine
+	int64_t rtc_time = -1;
+
 	uint64_t ram_hash() const;
 	// RAM or CROM as the CPU reads it, without its side effects (0 elsewhere)
 	uint16_t peek16(uint32_t addr) const;
@@ -230,6 +261,8 @@ private:
 	uint8_t read_rtc(unsigned reg);
 	uint32_t read_security(unsigned reg);
 	bool scsi_mapped(uint32_t addr) const;
+
+	template <class IO> void state(IO &io);
 
 	uint32_t r3d_register(unsigned reg) const;
 	void r3d_flush();
