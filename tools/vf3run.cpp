@@ -17,6 +17,7 @@
 #include "../src/video/tilegen.h"
 #include "../src/video/sky_lead.h"
 #include "../src/video/r3d_raster.h"
+#include "../src/video/hud_names.h"
 #include "../src/sound/soundboard.h"
 #include <chrono>
 #include <cstdio>
@@ -775,6 +776,12 @@ int main(int argc, char **argv)
 				raster.render(scene, board.tex_ram.data());
 				static std::vector<uint32_t> below, above;
 				tiles.aligned(below, above);
+				if (const char *hn = getenv("VF3_HUD_NAMES")) {   // (tests: "P1NAME,P2NAME" under the energy bars, as netplay shows them)
+					const std::string v = hn;
+					const size_t comma = v.find(',');
+					const std::string names[2] = { v.substr(0, comma), comma == std::string::npos ? std::string() : v.substr(comma + 1) };
+					video::hud_names(board, above, names);
+				}
 				if (getenv("VF3_VP")) {
 					for (int x : { 0, video::W - 3 }) {
 						int a = 0, b = 0;

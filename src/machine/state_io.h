@@ -23,7 +23,8 @@ struct StateSection { const char *name; size_t offset; };
 class StateWriter
 {
 public:
-	explicit StateWriter(std::vector<uint8_t> &out, std::vector<StateSection> *sections = nullptr) : out(out), sections(sections) { out.clear(); }
+	// (append: after what the buffer holds already)
+	explicit StateWriter(std::vector<uint8_t> &out, std::vector<StateSection> *sections = nullptr, bool append = false) : out(out), sections(sections) { if (!append) out.clear(); }
 	static constexpr bool loading = false;
 	void section(const char *name) { if (sections) sections->push_back({ name, out.size() }); }
 	void bytes(const void *p, size_t n)

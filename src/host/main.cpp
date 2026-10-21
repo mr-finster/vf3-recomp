@@ -85,6 +85,7 @@
 //                        start's grace (the governor's tests)
 #include "version.h"      // VF3_VERSION, VF3_DATE (made by the Makefile from git)
 #include "online.h"
+#include "../video/hud_names.h"
 #include "../machine/model3.h"
 #include "../machine/romset.h"
 #include "../rec/ppc_rec.h"
@@ -830,6 +831,7 @@ struct Game
 		frame = 0;
 	}
 	std::function<void(std::vector<uint8_t> &)> take_midi;   // (a netplay match's: the adapter's)
+	std::string hud_names[2];   // (a netplay match's: the players' names under the energy bars)
 	// One frame: the board, the sound board, the frame's scene and 2D layers. In two halves for smooth motion
 	// (start_frame, finish_frame): the first half run a picture before the frame is due, so no picture's time holds
 	// a whole frame (at 120 a second a picture has 8.3 ms, a frame took 7-10 on an M4 Max: every other picture missed
@@ -865,6 +867,7 @@ struct Game
 		builder.build(board, scene[newest]);
 		have_prev = frame > 1;
 		tiles.aligned(below, above);
+		if (!hud_names[0].empty() || !hud_names[1].empty()) video::hud_names(board, above, hud_names);   // (a netplay match's)
 		tiles.aligned_wide(below_wide);
 		bg_moved = video::TileGen::scrolled(prev_scroll, tiles.scroll, prev_below, below, bg_dx, bg_dy) && have_prev;
 		prev_scroll = tiles.scroll;
@@ -2480,6 +2483,8 @@ int main(int argc, char **argv)
 	auto end_match = [&] {   // back to playing on its own, from the boot, with this player's NVRAM
 		match_on = false;
 		game.take_midi = nullptr;
+		game.hud_names[0].clear();
+		game.hud_names[1].clear();
 		game.tiles_on = true;
 		menu.set_notice("");
 		menu.set_net("", 0);
@@ -2507,6 +2512,8 @@ int main(int argc, char **argv)
 				};
 				game.tiles_on = true;
 				game_frame = vf3net::BOOT_FRAMES;
+				game.hud_names[online.local_player()] = cfg.online.name;
+				game.hud_names[online.local_player() ^ 1] = online.opponent();
 				menu.close();
 				clock_reset = true;
 				sync_menu_sound();

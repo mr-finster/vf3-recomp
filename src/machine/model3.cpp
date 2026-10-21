@@ -3,6 +3,7 @@
 #include "romset.h"
 #include <cstring>
 #include <ctime>
+#include <random>
 
 namespace m3 {
 
@@ -380,6 +381,7 @@ bool Model3::load(const std::string &zip, std::string &error)
 	poly_ram.assign(0x400000 / 4, 0);
 	tex_fifo.reserve(0x100000 / 4);
 	tex_ram.assign(2048 * 2048, 0);
+	setup_pages();
 	cpu.attach(this, ram.data(), crom.data());
 	// Step 1.0: a 66 MHz 603e on a 66 MHz bus (multiplier 1.0); the reference's PVR and HID1 for it
 	cpu.configure(0x00071202, 2, 66000000, 0xF0000000);
@@ -409,6 +411,7 @@ void Model3::reset()
 	std::fill(poly_ram.begin(), poly_ram.end(), 0);
 	tex_fifo.clear();
 	std::fill(tex_ram.begin(), tex_ram.end(), 0);
+	snap_epoch++;   // (the memories filled: states saved before copy whole)
 	tex_serial++;
 	tex_uploads.clear();
 	tex_uploads.push_back({ 0, 0, 2048, 2048 });
@@ -423,6 +426,34 @@ void Model3::reset()
 	jtag.reset();
 	gpus_ready = false;
 	frame = 0;
+}
+
+void Model3::power_on()
+{
+	// the PowerPC's registers (a reset leaves them: a board that had run kept its own), but what configure set
+	const uint32_t pvr = cpu.s.pvr, hid1 = cpu.s.hid1;
+	const int timer_ratio = cpu.s.timer_ratio;
+	cpu.s = ppc::State{};
+	cpu.s.pvr = pvr;
+	cpu.s.hid1 = hid1;
+	cpu.s.timer_ratio = timer_ratio;
+	// the devices as made (the EEPROM keeping what it holds; the 53C810 its board)
+	uint16_t words[64];
+	memcpy(words, eeprom.regs, sizeof words);
+	eeprom = Eeprom();
+	memcpy(eeprom.regs, words, sizeof words);
+	jtag = Jtag();
+	scsi = Scsi{};
+	scsi.board = this;
+	std::fill(security.begin(), security.end(), 0);
+	flushes = 0;
+	vrom_fifo[0] = vrom_fifo[1] = 0;
+	gun_reg = 0;
+	outputs[0] = outputs[1] = 0;
+	flip_line_ = 0;
+	midi.clear();
+	controls = Controls{};
+	reset();
 }
 
 void Model3::set_crom_bank(uint8_t v)
@@ -472,8 +503,8 @@ void Model3::run_frame_start()
 
 	if (gpus_ready) {
 		ping_pong_copy = ping_pong;
-		for (auto &w : pending_hi) cull_hi[w.first] = w.second;
-		for (auto &w : pending_poly) poly_ram[w.first] = w.second;
+		for (auto &w : pending_hi) { cull_hi[w.first] = w.second; touch(2, size_t(w.first) * 4); }
+		for (auto &w : pending_poly) { poly_ram[w.first] = w.second; touch(3, size_t(w.first) * 4); }
 		pending_hi.clear();
 		pending_poly.clear();
 		if (command_written)
@@ -523,6 +554,8 @@ template <class IO> void pairs(IO &io, std::vector<std::pair<uint32_t, uint32_t>
 
 } // namespace
 
+// The state's small parts, after the memories: the CPU, the board's registers, the Real3D's and the tile
+// generator's, the writes and bytes waiting
 template <class IO> void Model3::state(IO &io)
 {
 	io.section("cpu");
@@ -544,13 +577,7 @@ template <class IO> void Model3::state(IO &io)
 	io.pod(frame); io.pod(flip_line_);
 	io.deq(midi);
 	io.pod(midi_ctrl);
-	io.section("ram");
-	io.vec(ram);
-	io.section("backup");
-	io.vec(backup);
-	io.vec(security);
 	io.section("tile generator");
-	io.vec(tile_ram);
 	io.pod(tile_regs);
 	io.pod(tilegen_draw);
 	io.section("real3d");
@@ -560,66 +587,119 @@ template <class IO> void Model3::state(IO &io)
 	pairs(io, pending_hi);
 	pairs(io, pending_poly);
 	io.vec(tex_fifo);
-	io.section("culling ram");
-	io.vec(cull_lo);
-	io.vec(cull_hi);
-	io.section("polygon ram");
-	io.vec(poly_ram);
-	io.section("texture ram");
-	if constexpr (IO::loading) load_textures(io);
-	else io.vec(tex_ram);
 	io.section("end");
 }
 
-// The texture RAM from a state: only the bands of rows that differ copied, and only those given to the renderers
-// as changed (the GPU's copy is uploaded again from them: all 8 MB at every rollback was far too slow, and a
-// fight's textures seldom change)
-void Model3::load_textures(StateReader &io)
+namespace {
+
+struct StateHeader { uint32_t magic, version, id, epoch, gen, zero; };
+static_assert(sizeof(StateHeader) == Model3::STATE_HEADER);
+
+const char *const PAGED_NAMES[] = { "tile ram", "culling ram", "culling ram (high)", "polygon ram", "texture ram" };
+
+} // namespace
+
+void Model3::setup_pages()
 {
-	uint64_t n = 0;
-	io.pod(n);
-	if (!io.ok || n != tex_ram.size()) { io.ok = false; return; }
-	const uint8_t *src = io.take(size_t(n) * 2);
-	if (!src) return;
-	constexpr unsigned BAND = 16;   // rows of 2048 texels
-	for (unsigned y = 0; y < 2048; y += BAND) {
-		uint16_t *dst = &tex_ram[size_t(y) * 2048];
-		const uint8_t *from = src + size_t(y) * 2048 * 2;
-		if (!memcmp(dst, from, BAND * 2048 * 2)) continue;
-		memcpy(dst, from, BAND * 2048 * 2);
-		if (!tex_uploads.empty() && tex_uploads.back().x == 0 && tex_uploads.back().w == 2048 && tex_uploads.back().y + tex_uploads.back().h == y)
-			tex_uploads.back().h += BAND;   // (joined to the band above)
-		else tex_uploads.push_back({ 0, y, 2048, BAND });
-		textures_loaded = true;
+	uint8_t *base[PAGED] = { tile_ram.data(), reinterpret_cast<uint8_t *>(cull_lo.data()), reinterpret_cast<uint8_t *>(cull_hi.data()),
+		reinterpret_cast<uint8_t *>(poly_ram.data()), reinterpret_cast<uint8_t *>(tex_ram.data()) };
+	const size_t bytes[PAGED] = { tile_ram.size(), cull_lo.size() * 4, cull_hi.size() * 4, poly_ram.size() * 4, tex_ram.size() * 2 };
+	for (int r = 0; r < PAGED; r++) {
+		paged[r].base = base[r];
+		paged[r].bytes = bytes[r];
+		paged[r].gen.assign((bytes[r] + PAGE - 1) / PAGE, 0);
 	}
+	std::random_device rd;
+	snap_id = rd() ^ uint32_t(uintptr_t(this));
+	snap_epoch++;
 }
 
+size_t Model3::fixed_state_size() const
+{
+	size_t n = STATE_HEADER + ram.size() + backup.size() + security.size();
+	for (const Paged &r : paged) n += r.bytes;
+	return n;
+}
+
+// The state: the header (for this board's saves only: which board, since which reset, which save), the memories at
+// fixed places, then the rest. A save into a buffer this board saved before, since its last reset, copies only the
+// device memories' pages written since (the RAM, which the recompiled code writes directly, always whole).
 void Model3::save_state(std::vector<uint8_t> &out, std::vector<StateSection> *sections)
 {
 	if (sections) sections->clear();
-	StateWriter w(out, sections);
-	uint32_t magic = STATE_MAGIC, version = STATE_VERSION;
-	w.pod(magic);
-	w.pod(version);
+	const size_t fixed = fixed_state_size();
+	StateHeader h{};
+	if (out.size() >= fixed) memcpy(&h, out.data(), sizeof h);
+	const bool since = out.size() >= fixed && h.magic == STATE_MAGIC && h.version == STATE_VERSION && h.id == snap_id && h.epoch == snap_epoch;
+	const uint32_t prev = since ? h.gen : 0;
+	out.resize(fixed);   // (no allocation once the buffer has had a state)
+	h = { STATE_MAGIC, STATE_VERSION, snap_id, snap_epoch, snap_gen, 0 };
+	memcpy(out.data(), &h, sizeof h);
+	size_t at = STATE_HEADER;
+	auto whole = [&](const char *name, const void *src, size_t n) {
+		if (sections) sections->push_back({ name, at });
+		memcpy(out.data() + at, src, n);
+		at += n;
+	};
+	whole("ram", ram.data(), ram.size());
+	whole("backup", backup.data(), backup.size());
+	whole("security", security.data(), security.size());
+	for (int r = 0; r < PAGED; r++) {
+		const Paged &g = paged[r];
+		if (sections) sections->push_back({ PAGED_NAMES[r], at });
+		if (!since) memcpy(out.data() + at, g.base, g.bytes);
+		else
+			for (size_t q = 0; q < g.gen.size(); q++)
+				if (g.gen[q] > prev) memcpy(out.data() + at + q * PAGE, g.base + q * PAGE, std::min(PAGE, g.bytes - q * PAGE));
+		at += g.bytes;
+	}
+	StateWriter w(out, sections, true);
 	state(w);
+	snap_gen++;   // (writes from now on are after this save)
 }
 
 bool Model3::load_state(const uint8_t *p, size_t n)
 {
-	StateReader r(p, n);
-	uint32_t magic = 0, version = 0;
-	r.pod(magic);
-	r.pod(version);
-	if (!r.ok || magic != STATE_MAGIC || version != STATE_VERSION)
-		return false;
+	const size_t fixed = fixed_state_size();
+	StateHeader h{};
+	if (n < fixed) return false;
+	memcpy(&h, p, sizeof h);
+	if (h.magic != STATE_MAGIC || h.version != STATE_VERSION) return false;
+	// a state this board saved since its last reset: only the pages written since it was saved differ
+	const bool since = h.id == snap_id && h.epoch == snap_epoch;
+	size_t at = STATE_HEADER;
+	auto whole = [&](void *dst, size_t m) { memcpy(dst, p + at, m); at += m; };
+	whole(ram.data(), ram.size());
+	whole(backup.data(), backup.size());
+	whole(security.data(), security.size());
 	textures_loaded = false;
-	state(r);
+	for (int r = 0; r < PAGED; r++) {
+		Paged &g = paged[r];
+		for (size_t q = 0; q < g.gen.size(); q++) {
+			const size_t len = std::min(PAGE, g.bytes - q * PAGE);
+			uint8_t *dst = g.base + q * PAGE;
+			const uint8_t *src = p + at + q * PAGE;
+			if (since ? g.gen[q] <= h.gen : !memcmp(dst, src, len)) continue;
+			memcpy(dst, src, len);
+			g.gen[q] = snap_gen;   // (changed now: the next save into any buffer copies it)
+			if (r == PAGED - 1) {   // the texture RAM: a page a row, given to the renderers as changed
+				const unsigned y = unsigned(q);
+				if (!tex_uploads.empty() && tex_uploads.back().x == 0 && tex_uploads.back().w == 2048 && tex_uploads.back().y + tex_uploads.back().h == y)
+					tex_uploads.back().h++;   // (joined to the row above)
+				else tex_uploads.push_back({ 0, y, 2048, 1 });
+				textures_loaded = true;
+			}
+		}
+		at += g.bytes;
+	}
+	StateReader rd(p + fixed, n - fixed);
+	state(rd);
 	// what isn't kept but follows from what is
 	set_crom_bank(crom_bank_reg);
 	if (cpu.rec)
 		cpu.rec->recount();
 	if (textures_loaded) tex_serial++;   // (the renderers: what changed is in tex_uploads)
-	return r.done();
+	return rd.done();
 }
 
 std::vector<uint32_t> Model3::program_image() const
@@ -916,6 +996,7 @@ void Model3::r3d_store(unsigned x0, unsigned y0, unsigned w, unsigned h, const u
 				data += step;
 			}
 	}
+	for (unsigned y = y0; y < y0 + h + ty; y++) touch(4, size_t(y & 2047) * 4096);   // (its rows, a page each)
 	tex_uploads.push_back({ x0, y0, w, h });
 	tex_serial++;
 }
@@ -1001,6 +1082,7 @@ uint32_t Model3::peek32(uint32_t a) const
 void Model3::tile_ram_write32(unsigned addr, uint32_t data)
 {
 	word(tile_ram, addr) = data;   // the palette (addresses from 0x100000) is decoded by the renderer
+	touch(0, addr);
 }
 
 void Model3::tile_reg_write(unsigned reg, uint32_t data)
@@ -1197,6 +1279,7 @@ void Model3::write16(uint32_t a, uint16_t d)
 			uint32_t at = a & 0x1FFFFF;
 			tile_ram[at] = uint8_t(d >> 8);
 			tile_ram[at + 1] = uint8_t(d);
+			touch(0, at);
 		}
 		break;
 	case 0xF8:
@@ -1221,16 +1304,16 @@ void Model3::write32(uint32_t a, uint32_t d)
 	}
 	switch (a >> 24) {
 	case 0x88: r3d_flush(); break;
-	case 0x8C: cull_lo[(a & 0x3FFFFF) / 4] = bswap32(d); break;
+	case 0x8C: cull_lo[(a & 0x3FFFFF) / 4] = bswap32(d); touch(1, a & 0x3FFFFC); break;
 	case 0x8E:
 		if (ping_pong != ping_pong_copy) pending_hi.push_back({ (a & 0xFFFFF) / 4, bswap32(d) });
-		else cull_hi[(a & 0xFFFFF) / 4] = bswap32(d);
+		else { cull_hi[(a & 0xFFFFF) / 4] = bswap32(d); touch(2, a & 0xFFFFC); }
 		break;
 	case 0x90: r3d_texture_port(a & 0xFF, bswap32(d)); break;
 	case 0x94: if (tex_fifo.size() < 0x100000 / 4) tex_fifo.push_back(bswap32(d)); break;
 	case 0x98:
 		if (ping_pong != ping_pong_copy) pending_poly.push_back({ (a & 0x3FFFFF) / 4, bswap32(d) });
-		else poly_ram[(a & 0x3FFFFF) / 4] = bswap32(d);
+		else { poly_ram[(a & 0x3FFFFF) / 4] = bswap32(d); touch(3, a & 0x3FFFFC); }
 		break;
 	case 0x9C: r3d_config[(a & 0xF) / 4] = bswap32(d); break;
 	case 0xC2: r3d_dma_write32(a & 0xFF, bswap32(d)); break;

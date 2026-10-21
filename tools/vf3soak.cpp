@@ -159,8 +159,9 @@ int main(int argc, char **argv)
 			const uint64_t k = f - uint64_t(delay);
 			std::vector<uint8_t> &mine = ring[k % ring_n];
 			A.save_state(straight, &sections);
-			if (hashes) fprintf(hashes, "%llu %016llx\n", (unsigned long long)k, (unsigned long long)m3::state_hash(straight.data(), straight.size()));
-			if (mine != straight) {
+			const size_t H = m3::Model3::STATE_HEADER;   // (each board's own bookkeeping: not compared)
+			if (hashes) fprintf(hashes, "%llu %016llx\n", (unsigned long long)k, (unsigned long long)m3::state_hash(straight.data() + H, straight.size() - H));
+			if (mine.size() != straight.size() || memcmp(mine.data() + H, straight.data() + H, mine.size() - H) != 0) {
 				printf("frame %llu: the rolled-back board's state differs from the straight one's (before the frame)\n", (unsigned long long)k);
 				report(straight, mine, sections);
 				if (write_file("soak_straight.bin", straight) && write_file("soak_rolled.bin", mine))
