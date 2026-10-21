@@ -506,6 +506,99 @@ void Model3::run_frame_end()
 	frame++;
 }
 
+// ---- save states ----
+
+namespace {
+
+template <class IO> void pairs(IO &io, std::vector<std::pair<uint32_t, uint32_t>> &v)
+{
+	uint64_t n = v.size();
+	io.pod(n);
+	if constexpr (IO::loading) {
+		if (!io.ok || n > 0x1000000) { io.ok = false; return; }
+		v.resize(size_t(n));
+	}
+	for (auto &w : v) { io.pod(w.first); io.pod(w.second); }
+}
+
+} // namespace
+
+template <class IO> void Model3::state(IO &io)
+{
+	io.section("cpu");
+	cpu.s.state(io);
+	io.section("board");
+	irq.save_state(io);
+	eeprom.save_state(io);
+	jtag.save_state(io);
+	scsi.save_state(io);
+	for (int p = 0; p < 2; p++) {
+		Controls &c = controls;
+		io.pod(c.coin[p]); io.pod(c.start[p]); io.pod(c.test[p]); io.pod(c.service[p]);
+		io.pod(c.up[p]); io.pod(c.down[p]); io.pod(c.left[p]); io.pod(c.right[p]);
+		io.pod(c.punch[p]); io.pod(c.kick[p]); io.pod(c.guard[p]); io.pod(c.escape[p]);
+	}
+	io.pod(crom_bank_reg); io.pod(input_bank); io.pod(serial1); io.pod(serial2); io.pod(adc_channel); io.pod(gun_reg);
+	io.pod(outputs); io.pod(gpus_ready);
+	io.pod(pci_regs); io.pod(pci_bus); io.pod(pci_device); io.pod(pci_function); io.pod(pci_reg);
+	io.pod(frame); io.pod(flip_line_);
+	io.deq(midi);
+	io.pod(midi_ctrl);
+	io.section("ram");
+	io.vec(ram);
+	io.section("backup");
+	io.vec(backup);
+	io.vec(security);
+	io.section("tile generator");
+	io.vec(tile_ram);
+	io.pod(tile_regs);
+	io.pod(tilegen_draw);
+	io.section("real3d");
+	io.pod(r3d_config); io.pod(vrom_fifo); io.pod(vrom_fifo_n);
+	io.pod(ping_pong); io.pod(ping_pong_copy); io.pod(flushes); io.pod(command_written);
+	io.pod(dma_src); io.pod(dma_dst); io.pod(dma_len); io.pod(dma_data); io.pod(dma_status); io.pod(dma_config);
+	pairs(io, pending_hi);
+	pairs(io, pending_poly);
+	io.vec(tex_fifo);
+	io.section("culling ram");
+	io.vec(cull_lo);
+	io.vec(cull_hi);
+	io.section("polygon ram");
+	io.vec(poly_ram);
+	io.section("texture ram");
+	io.vec(tex_ram);
+	io.section("end");
+}
+
+void Model3::save_state(std::vector<uint8_t> &out, std::vector<StateSection> *sections)
+{
+	if (sections) sections->clear();
+	StateWriter w(out, sections);
+	uint32_t magic = STATE_MAGIC, version = STATE_VERSION;
+	w.pod(magic);
+	w.pod(version);
+	state(w);
+}
+
+bool Model3::load_state(const uint8_t *p, size_t n)
+{
+	StateReader r(p, n);
+	uint32_t magic = 0, version = 0;
+	r.pod(magic);
+	r.pod(version);
+	if (!r.ok || magic != STATE_MAGIC || version != STATE_VERSION)
+		return false;
+	state(r);
+	// what isn't kept but follows from what is
+	set_crom_bank(crom_bank_reg);
+	if (cpu.rec)
+		cpu.rec->recount();
+	tex_serial++;
+	tex_uploads.clear();
+	tex_uploads.push_back({ 0, 0, 2048, 2048 });
+	return r.done();
+}
+
 std::vector<uint32_t> Model3::program_image() const
 {
 	// The boot copies 0xA0000 bytes from the fixed CROM's offset 0x710000 to RAM 0 (docs/step1-measure.md)
@@ -677,12 +770,14 @@ void Model3::write_sysreg(unsigned reg, uint8_t data)
 uint8_t Model3::read_rtc(unsigned reg)
 {
 	// The host's local time, as the reference gives it (VF3 reads only registers 13 and 15, which read 0)
-	time_t now = time(nullptr);
+	time_t now = rtc_time >= 0 ? time_t(rtc_time) : time(nullptr);
 	struct tm t;
 #ifdef _WIN32
-	localtime_s(&t, &now);
+	if (rtc_time >= 0) gmtime_s(&t, &now);
+	else localtime_s(&t, &now);
 #else
-	localtime_r(&now, &t);
+	if (rtc_time >= 0) gmtime_r(&now, &t);
+	else localtime_r(&now, &t);
 #endif
 	switch (reg & 0xF) {
 	case 0: return (t.tm_sec % 10) & 0xF;
