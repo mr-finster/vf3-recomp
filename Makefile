@@ -11,7 +11,7 @@ OBJ ?= build/obj
 BIN ?= build/bin
 objs = $(patsubst %.cpp,$(OBJ)/%.o,$(1))
 
-all: $(BIN)/vf3run $(BIN)/vf3lock $(BIN)/vf3soak $(BIN)/vf3
+all: $(BIN)/vf3run $(BIN)/vf3lock $(BIN)/vf3soak $(BIN)/nettest $(BIN)/vf3
 
 SDL_CFLAGS ?= $(shell pkg-config --cflags sdl3 2>/dev/null || echo -I/opt/homebrew/include)
 SDL_LIBS ?= $(shell pkg-config --libs sdl3 2>/dev/null || echo -L/opt/homebrew/lib -lSDL3)
@@ -44,6 +44,9 @@ CORE = src/ppc/ppc.cpp src/machine/model3.cpp src/machine/romset.cpp src/host/in
 	third_party/mame/m68000/m68000.cpp third_party/mame/m68000/m68000-decode.cpp \
 	third_party/mame/m68000/m68000-sdf.cpp third_party/mame/m68000/m68000-sdp.cpp
 
+# Netplay (src/net): rollback sessions and their links, nothing of the game's (shared with VF1 and VF2 Recomp)
+NET = src/net/session.cpp src/net/link.cpp
+
 # SLJIT (BSD-2): the native code made at start-up. C, built by the C++ compiler's driver (-x c)
 SLJIT_OBJ = $(OBJ)/third_party/sljit/sljitLir.o
 $(SLJIT_OBJ): third_party/sljit/sljitLir.c
@@ -68,6 +71,10 @@ $(BIN)/vf3lock: $(call objs,$(CORE) tools/vf3lock.cpp) $(SLJIT_OBJ)
 $(BIN)/vf3soak: $(call objs,$(CORE) tools/vf3soak.cpp) $(SLJIT_OBJ)
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDLIBS)
+
+$(BIN)/nettest: $(call objs,$(NET) tools/nettest.cpp)
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) $^ -o $@
 
 $(BIN)/vf3: $(call objs,$(CORE) $(HOST) $(RML_SRC)) $(SLJIT_OBJ)
 	@mkdir -p $(dir $@)
