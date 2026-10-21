@@ -93,6 +93,7 @@ public:
 	int delay() const { return cfg.delay; }
 
 	State state() const { return st; }
+	bool game_started() const { return began; }   // (in the handshake: the game's start is running or done)
 	End end_reason() const { return why; }
 	bool interrupted() const { return quiet; }
 	bool next_event(Event &e);

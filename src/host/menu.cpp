@@ -71,6 +71,7 @@ game_menu::~game_menu()
 }
 
 bool game_menu::ready() const { return m->doc != nullptr; }
+SDL_Window *game_menu::window() const { return m->win; }
 
 void game_menu::textures_lost() { if (ready()) Rml::ReleaseTextures(); }
 
@@ -79,7 +80,41 @@ void game_menu::set_fps(const std::string &text)
 	if (!m->overlay || text == m_fps) return;
 	m_fps = text;
 	if (Rml::Element *e = m->overlay->GetElementById("fps")) e->SetInnerRML(escape(text));
-	if (text.empty() || m_open) m->overlay->Hide(); else m->overlay->Show();   // (not over the menu)
+}
+
+void game_menu::set_net(const std::string &text, int level)
+{
+	if (!m->overlay || (text == m_net && level == m_net_level)) return;
+	m_net = text;
+	m_net_level = level;
+	if (Rml::Element *e = m->overlay->GetElementById("net")) {
+		e->SetInnerRML(text.empty() ? "" : "<span class=\"dot\"></span>" + escape(text));
+		e->SetClassNames(level <= 0 ? "good" : level == 1 ? "fair" : "poor");
+	}
+}
+
+void game_menu::toast(const std::string &text, double seconds)
+{
+	if (!m->overlay) return;
+	if (Rml::Element *e = m->overlay->GetElementById("toast")) e->SetInnerRML(text.empty() ? "" : "<span>" + escape(text) + "</span>");
+	m_toast_until = text.empty() ? 0 : SDL_GetTicks() + uint64_t(seconds * 1000);
+}
+
+void game_menu::set_notice(const std::string &title, const std::string &sub)
+{
+	const std::string key = title + "\n" + sub;
+	if (!m->overlay || key == m_notice) return;
+	m_notice = title.empty() ? "" : key;
+	if (Rml::Element *e = m->overlay->GetElementById("notice")) {
+		e->SetInnerRML(title.empty() ? "" : "<div class=\"title\">" + escape(title) + "</div>" + (sub.empty() ? "" : "<div class=\"sub\">" + escape(sub) + "</div>"));
+		e->SetProperty("visibility", title.empty() ? "hidden" : "visible");
+	}
+}
+
+void game_menu::set_title(const std::string &text)
+{
+	if (m->doc)
+		if (Rml::Element *e = m->doc->GetElementById("title")) e->SetInnerRML(escape(text));
 }
 
 void game_menu::set_footer(const std::string &text)
@@ -106,6 +141,10 @@ bool game_menu::init(SDL_Window *win, SDL_Renderer *ren, const std::string &asse
 	m->doc = m->ctx->LoadDocument(assets + "/ui/menu.rml");
 	if (!m->doc) return false;
 	m->overlay = m->ctx->LoadDocument(assets + "/ui/overlay.rml");   // optional
+	if (m->overlay) {
+		m->overlay->Show();
+		if (Rml::Element *e = m->overlay->GetElementById("notice")) e->SetProperty("visibility", "hidden");
+	}
 	m->listener.menu = this;
 	m->doc->AddEventListener(Rml::EventId::Mouseover, &m->listener);
 	m->doc->AddEventListener(Rml::EventId::Click, &m->listener);
@@ -120,7 +159,7 @@ void game_menu::open(menu_page root)
 	m_sel = first_selectable(m_stack.back());
 	build();
 	m->doc->Show();
-	if (m->overlay) m->overlay->Hide();   // the FPS: not over the menu
+	if (m->overlay) m->overlay->PullToFront();   // (its notices over the menu; the FPS hidden while it's open)
 	m_open = true;
 	SDL_ShowCursor();
 }
@@ -132,7 +171,6 @@ void game_menu::close()
 	if (auto c = std::exchange(m_capture_cancel, nullptr)) c();
 	m->doc->Hide();
 	m_open = false;
-	if (m->overlay && !m_fps.empty()) m->overlay->Show();
 	m_stack.clear();
 	SDL_HideCursor();
 }
@@ -179,7 +217,7 @@ void game_menu::build()
 	std::string rml;
 	for (size_t i = 0; i < p.items.size(); i++) {
 		const menu_item &it = p.items[i];
-		rml += "<div class=\"row" + std::string(it.info ? " info" : "") + (it.heading ? " heading" : "") + (it.sub ? " sub" : "") + (int(i) == m_sel ? " selected" : "") +
+		rml += "<div class=\"row" + std::string(it.info ? " info" : "") + (it.heading ? " heading" : "") + (it.sub ? " sub" : "") + (it.big ? " big" : "") + (int(i) == m_sel ? " selected" : "") +
 			   "\" id=\"r" + std::to_string(i) + "\"><span class=\"label\">" + escape(it.label) + "</span>";
 		if (it.value) {
 			rml += "<span class=\"value\">";
@@ -192,7 +230,7 @@ void game_menu::build()
 		rml += "</div>";
 		if (it.below)
 			if (const std::string b = it.below(); !b.empty())
-				rml += "<div class=\"row info " + std::string(it.good ? "good" : "error") + "\"><span class=\"label\">" + escape(b) + "</span></div>";
+				rml += "<div class=\"row info " + std::string(it.good && it.good() ? "good" : "error") + "\"><span class=\"label\">" + escape(b) + "</span></div>";
 	}
 	m->doc->GetElementById("rows")->SetInnerRML(rml);
 	scroll_to_selected();
@@ -397,9 +435,10 @@ bool game_menu::handle_event(const SDL_Event &e)
 
 void game_menu::render(bool fps)
 {
-	if (!m_open && (m_fps.empty() || !fps)) return;
+	if (m_toast_until && SDL_GetTicks() >= m_toast_until) toast("");
+	if (!m_open && (m_fps.empty() || !fps) && m_net.empty() && !m_toast_until && m_notice.empty()) return;
 	if (Rml::Element *e = m->overlay ? m->overlay->GetElementById("fps") : nullptr)
-		e->SetProperty("visibility", fps && !m_open ? "visible" : "hidden");
+		e->SetProperty("visibility", fps && !m_open && !m_fps.empty() ? "visible" : "hidden");
 	// the menu is laid out in window pixels, not the game's letterboxed picture
 	int lw = 0, lh = 0;
 	SDL_RendererLogicalPresentation mode = SDL_LOGICAL_PRESENTATION_DISABLED;

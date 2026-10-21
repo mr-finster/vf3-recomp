@@ -2,8 +2,11 @@
 <head>
 	<title>Overlay</title>
 	<style>
-		/* drawn over the game: the frames per second, small, at the top right (Display > Show FPS) */
+		/* drawn over the game, the menu open or not: the frames per second (Display > Show FPS), online play's
+		   connection, a notice that comes and goes (someone joined), and one that stays while it's true (the
+		   connection interrupted) */
 		body { width: 100%; height: 100%; font-family: "Barlow Condensed"; pointer-events: none; }
+		div { display: block; }
 		#fps {
 			position: absolute;
 			right: 18dp;
@@ -13,7 +16,63 @@
 			color: #ffd23f;
 			font-effect: outline(2dp #0b1430);
 		}
+		/* online play's connection: small, at the top in the middle, between the energy bars' names and the time */
+		#net {
+			position: absolute;
+			left: 0; right: 0;
+			top: 6dp;
+			text-align: center;
+			font-size: 17dp;
+			font-weight: 600;
+			color: #dfe7fb;
+			font-effect: outline(2dp #0b1430);
+		}
+		#net .dot {
+			display: inline-block;
+			width: 9dp; height: 9dp;
+			margin-right: 7dp;
+			border-radius: 5dp;
+			background-color: #7ee08a;
+		}
+		#net.fair .dot { background-color: #ffd23f; }
+		#net.poor .dot { background-color: #ff6b5a; }
+		/* a notice that comes and goes, near the bottom */
+		#toast {
+			position: absolute;
+			left: 0; right: 0;
+			bottom: 64dp;
+			text-align: center;
+		}
+		#toast span {
+			padding: 8dp 26dp;
+			font-size: 28dp;
+			font-weight: 700;
+			font-style: italic;
+			color: #0b1430;
+			decorator: horizontal-gradient(#ffd23f #ff8f1f);
+		}
+		/* a notice that stays, in the middle (the game waits under it) */
+		#notice {
+			position: absolute;
+			left: 0; right: 0;
+			top: 270dp;
+			padding: 22dp 0;
+			text-align: center;
+			decorator: horizontal-gradient(#040818e0 #040818e0);
+		}
+		#notice .title {
+			font-size: 46dp;
+			font-weight: 700;
+			font-style: italic;
+			color: #ffd23f;
+		}
+		#notice .sub {
+			margin-top: 6dp;
+			font-size: 22dp;
+			font-weight: 500;
+			color: #dfe7fb;
+		}
 	</style>
 </head>
-<body><div id="fps"></div></body>
+<body><div id="fps"></div><div id="net"></div><div id="toast"></div><div id="notice"></div></body>
 </rml>
