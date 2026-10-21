@@ -10,6 +10,22 @@ The plan: GGPO-style rollback netcode, as a library shared by VF1, VF2 and VF3 R
 3. The lobby server, then spectators.
 4. VF2, then VF1 (whose recompiled code runs on its own stack: that has to change first).
 
+## Player names on the energy bars
+
+In a netplay match each player's name (up to 10 letters, typed in the menu, sent when the session starts) takes the
+fighter's name's place under their energy bar, as VF1 Recomp spells its random fighters' names there.
+
+- Drawn by the host only, as the tile generator's picture is made (a cell's entry swapped as it's read), never
+  written to the board's tile RAM: the board's state stays the same whatever the names are, so they can't cause a
+  desync, and a rollback can't leave a name half drawn. (VF1 writes its names into the guest's tile map, which is
+  in the state there: fine with one machine, a hazard with two.)
+- Only on the fight's HUD, recognised by its own tiles (as VF1 checks for its WIN markers), never on another screen.
+- The letters the HUD's font has (A-Z, 0-9 and a few signs, upper case); anything else is dropped as it's typed. If
+  the HUD has pictures of the names and no font, the host draws the letters itself in a matching style.
+- Still to find, with the ROM: where the name boxes are in the HUD's map and how its letters are made. A fight's
+  tiles: `vf3run vf3.zip --script versus.txt --rec --frames 2511 --ram-at 2510 --shots shots` writes
+  `tiles_2510.bin` (the tile RAM, then the 64 registers) and the frame's picture.
+
 ## Save states
 
 `Model3::save_state` and `load_state` (src/machine/model3.cpp, src/machine/state_io.h). One function,
