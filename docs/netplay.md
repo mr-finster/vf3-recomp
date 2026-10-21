@@ -10,6 +10,38 @@ The plan: GGPO-style rollback netcode, as a library shared by VF1, VF2 and VF3 R
 3. The lobby server, then spectators.
 4. VF2, then VF1 (whose recompiled code runs on its own stack: that has to change first).
 
+## What's enough: the bar to clear
+
+From a survey of other projects' online play (Oct 2026; many sources secondhand, marked so in the notes).
+
+- **The closest thing there is**: Supermodel Dojo plays VF3 online, delay-based only, by IP and port, and desyncs
+  unless both sides match the PowerPC's clock, refresh rate and delay. Fightcade (FBNeo, GGPO rollback, lobbies
+  with ping, challenges, spectators, replays) is what players will compare us with. VF5 Final Showdown's
+  delay-based online was disliked; VF5 R.E.V.O.'s rollback (2025) was well received, but forcing both players to
+  the lower of their two delays was not.
+- **Input delay**: 2 frames by default, 0 to 6 by choice, and an Auto from the ping (ceil(RTT / 2 / 17.4 ms),
+  Supermodel Dojo's rule), at most 4. Each side keeps its own; never forced down to the other's.
+- **Rollback**: up to 7 frames; beyond that the game waits rather than guessing further. Rollback runs only when
+  a guess was wrong (the soak test's every-frame mode is the stress case).
+- **The cost**: up to 8 frames run in one frame's 17.4 ms, with the picture, on a Steam Deck. So a frame's run
+  with no picture about 1.5 ms at most, and a save well under 1 ms. A full 27 MB copy (about 4 ms) is too slow:
+  saves must copy only what changed.
+- **Ping**: under 60 ms good, 60-120 playable, 120-150 shown as poor, over 150 or jittery (wifi) warned about before
+  the match. The connection indicator shows real numbers (ping, rollback frames), not bars.
+- **The game's rate is fixed**: 57.524 Hz on both sides whatever the screen, smooth motion or frame limit;
+  fast-forward and pause are off, and the menu never stops the game.
+- **The handshake** compares the build, a hash of the ROM's contents (not its file name) and the settings that
+  change the game (the host's EEPROM and backup RAM go in the starting state), and says plainly what doesn't match.
+- **Desyncs**: a state hash every 30 frames; on a difference the match ends with "desync", the states are saved
+  for a report, and a rematch is offered. Never a hang or a crash.
+- **Disconnects**: "connection interrupted" after 1 s, the match given up after about 8 s.
+- **Joining**: room codes, and a lobby with a ping column and challenge / accept; UDP hole punching first, the
+  relay when that fails (shown as relayed, with what it adds). Rematch and back to the lobby after a match.
+- **Sound**: VF3's sound board is apart from the game's state, so it can't be rolled back. Waiting for certain
+  frames would make every sound up to 7 frames late, so the MIDI bytes of guessed frames go to it at once, and after
+  a rollback only bytes that weren't sent already: a wrong guess can leave a stray sound, never a late one.
+- **Later**: spectators, shared replays, ranked play, a region filter, a lag simulator for practice, a wifi badge.
+
 ## Player names on the energy bars
 
 In a netplay match each player's name (up to 10 letters, typed in the menu, sent when the session starts) takes the
