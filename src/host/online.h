@@ -50,6 +50,7 @@ public:
 	// The connection display: "MRFINSTER  42 ms  rollback 2", and how good (0 good, 1 fair, 2 poor)
 	std::string connection(int &level) const;
 	std::string opponent() const { return session ? session->opponent_name() : ""; }
+	int local_player() const { return is_host ? 0 : 1; }   // (the host is player 1)
 	int delay_now() const { return session ? session->delay() : 0; }
 	void set_delay(int setting);  // the menu's, in a match (Auto: from the ping)
 	int ping() const { return session ? int(session->stats().rtt_ms + 0.5) : 0; }

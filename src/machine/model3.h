@@ -202,6 +202,10 @@ public:
 
 	bool load(const std::string &zip, std::string &error);
 	void reset();
+	// A reset as from cold, as the board is just loaded: also what reset() leaves as it was (the security RAM, the
+	// Real3D's flush count and VROM FIFO, the outputs, the MIDI bytes not taken). Netplay's start, so both sides
+	// begin alike whatever each ran before.
+	void power_on();
 	void run_frame();
 	// a frame in two halves (the host's smooth motion: each half in its own picture's time): the vertical blank and
 	// lines 0-191, then lines 192-383
@@ -227,7 +231,10 @@ public:
 	// it) if it isn't one. The renderers are told which textures changed, and the recompiled code rechecks RAM.
 	void save_state(std::vector<uint8_t> &out, std::vector<StateSection> *sections = nullptr);
 	bool load_state(const uint8_t *p, size_t n);
-	static constexpr uint32_t STATE_MAGIC = 0x53334656, STATE_VERSION = 1;   // "VF3S"
+	static constexpr uint32_t STATE_MAGIC = 0x53334656, STATE_VERSION = 2;   // "VF3S"
+	// The state's first bytes are for this board's saves alone (which board, since which reset, which save): two
+	// boards in the same state have the same bytes after them, and only those are compared or hashed
+	static constexpr size_t STATE_HEADER = 24;
 	// The real-time clock: the host's local time, or (rtc_time >= 0: netplay, tests) this time, seconds since 1970,
 	// as UTC, the same on every machine
 	int64_t rtc_time = -1;
@@ -263,8 +270,17 @@ private:
 	bool scsi_mapped(uint32_t addr) const;
 
 	template <class IO> void state(IO &io);
-	void load_textures(StateReader &io);
 	bool textures_loaded = false;
+	// Save states copy the device memories by the 4 KB pages written since (save_state): each page's save number
+	// when last written. The RAM is copied whole (the recompiled code writes it directly).
+	static constexpr int PAGED = 5;   // the tile RAM, the culling RAMs, the polygon RAM, the texture RAM
+	static constexpr size_t PAGE = 4096;
+	struct Paged { uint8_t *base = nullptr; size_t bytes = 0; std::vector<uint32_t> gen; };
+	Paged paged[PAGED];
+	uint32_t snap_id = 0, snap_epoch = 0, snap_gen = 1;
+	void touch(int r, size_t byte) { paged[r].gen[byte / PAGE] = snap_gen; }
+	void setup_pages();
+	size_t fixed_state_size() const;
 
 	uint32_t r3d_register(unsigned reg) const;
 	void r3d_flush();

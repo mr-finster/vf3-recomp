@@ -17,10 +17,11 @@ The plan: GGPO-style rollback netcode, as a library shared by VF1, VF2 and VF3 R
 | Part | State |
 | --- | --- |
 | `src/net`: rollback, handshake, input redundancy, time sync, desync checks, disconnects | `nettest`: 17 network cases and UDP on localhost, all pass (no ROM needed) |
-| Save states | round trip exact (no ROM); `vf3soak` to run with the ROM |
-| VF3 adapter (start, inputs, MIDI under rollback) | `vf3net` to run with the ROM: two boards over a simulated network against a straight run |
+| Save states | `vf3soak`, versus script, 7-frame rollback every frame: 4,303 frames identical. Save 1.3 ms, restore 1.5 ms (device memories copied by the 4 KB pages written since; was 6.9 and 4.7) |
+| VF3 adapter (start, inputs, MIDI under rollback) | `vf3net`, 40 ms each way: 4,000 frames in step, every checkpoint the straight run's; 1.0-1.3 frame rollbacks, a step 4.7 ms on average (a slow cloud machine) |
+| Names under the energy bars | drawn in the HUD's style (`VF3_HUD_NAMES=P1,P2` for vf3run's shots) |
 | Online menu, notices, connection display | built into the game; drawn without the ROM by `menutest` (pictures below); not yet played |
-| Lobby server, room codes, quick match, watching, rematch, names on the bars, replays | not yet |
+| Lobby server, room codes, quick match, watching, rematch, replays | not yet |
 
 ```sh
 build/bin/nettest                                              # the session, no ROM
@@ -158,9 +159,14 @@ fighter's name's place under their energy bar, as VF1 Recomp spells its random f
 - Only on the fight's HUD, recognised by its own tiles (as VF1 checks for its WIN markers), never on another screen.
 - The letters the HUD's font has (A-Z, 0-9 and a few signs, upper case); anything else is dropped as it's typed. If
   the HUD has pictures of the names and no font, the host draws the letters itself in a matching style.
-- Still to find, with the ROM: where the name boxes are in the HUD's map and how its letters are made. A fight's
-  tiles: `vf3run vf3.zip --script versus.txt --rec --frames 2511 --ram-at 2510 --shots shots` writes
-  `tiles_2510.bin` (the tile RAM, then the 64 registers) and the frame's picture.
+- Found: the HUD (tile layer A, rows 6-7) has each fighter's name as a picture of 6 x 2 tiles, player 1's from
+  column 2, player 2's to column 59, and no font. So the names are drawn in a font of this project's own
+  (src/video/hud_names.cpp: 7 x 10, strokes of 3 with a black outline, white to lavender, each stroke's right-hand
+  pixel darker blue, as the HUD's letters are), player 1's from the left, player 2's to the right; ten letters
+  stay short of the round markers.
+- A match's start is a cold one on both sides (`Model3::power_on`: the PowerPC's registers, the EEPROM's shifter,
+  the JTAG chain, the 53C810, the Real3D's flush count and more, which a reset leaves): before it, a host that had
+  played offline started its match out of step.
 
 ## Save states
 
