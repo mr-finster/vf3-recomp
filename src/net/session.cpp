@@ -188,7 +188,7 @@ void Session::poll(double t)
 				if (chunk_count == 0 && their_name.empty()) send_hello();
 				else if (began) { send_packet(Out(READY).b); last_hello = now; }
 				else { Out a(BLOB_ACK); a.u32(chunks_acked); send_packet(a.b); last_hello = now; }
-			} else if (!their_name.empty() && !began)
+			} else if (!their_name.empty() && chunks_acked < chunk_count)
 				send_blob();
 		}
 		return;
@@ -237,6 +237,11 @@ void Session::receive(const std::vector<uint8_t> &p)
 		if (their_name.empty()) started = now;   // (the handshake's time from the first hello)
 		their_name = name.empty() ? "PLAYER 2" : name;
 		send_blob();
+		// the host's game starts now, alongside the guest's (a game's start can take seconds: VF3 runs its boot)
+		if (!began) {
+			began = true;
+			if (!game.begin(start_blob)) { finish(End::rejected, "The game couldn't start."); return; }
+		}
 		return;
 	}
 	case WELCOME: {
@@ -289,12 +294,8 @@ void Session::receive(const std::vector<uint8_t> &p)
 		return;
 	}
 	case READY: {
-		if (!host || their_name.empty()) return;
-		if (!began) {
-			if (!game.begin(start_blob)) { finish(End::rejected, "The game couldn't start."); return; }
-			began = true;
-			start_running();
-		}
+		if (!host || !began) return;
+		start_running();
 		send_packet(Out(GO).b);   // (again for each READY: a lost GO costs a resend)
 		return;
 	}

@@ -11,7 +11,7 @@ OBJ ?= build/obj
 BIN ?= build/bin
 objs = $(patsubst %.cpp,$(OBJ)/%.o,$(1))
 
-all: $(BIN)/vf3run $(BIN)/vf3lock $(BIN)/vf3soak $(BIN)/nettest $(BIN)/vf3
+all: $(BIN)/vf3run $(BIN)/vf3lock $(BIN)/vf3soak $(BIN)/nettest $(BIN)/vf3net $(BIN)/vf3
 
 SDL_CFLAGS ?= $(shell pkg-config --cflags sdl3 2>/dev/null || echo -I/opt/homebrew/include)
 SDL_LIBS ?= $(shell pkg-config --libs sdl3 2>/dev/null || echo -L/opt/homebrew/lib -lSDL3)
@@ -75,6 +75,10 @@ $(BIN)/vf3soak: $(call objs,$(CORE) tools/vf3soak.cpp) $(SLJIT_OBJ)
 $(BIN)/nettest: $(call objs,$(NET) tools/nettest.cpp)
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) $^ -o $@
+
+$(BIN)/vf3net: $(call objs,$(CORE) $(NET) src/host/vf3_netplay.cpp tools/vf3net.cpp) $(SLJIT_OBJ)
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDLIBS)
 
 $(BIN)/vf3: $(call objs,$(CORE) $(HOST) $(RML_SRC)) $(SLJIT_OBJ)
 	@mkdir -p $(dir $@)
