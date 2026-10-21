@@ -5,7 +5,7 @@
 // quits), playing an input script, and writes the CPU state and a RAM hash after every frame in the reference
 // build's format, for tools/statecmp.py.
 //   vf3run <vf3.zip> [--frames N] [--script FILE] [--state FILE] [--ram-at FRAME] [--watch ADDR] [--rec] [--quiet]
-// --wav FILE runs the sound board and writes what it plays. --shots DIR writes the script's screenshots there as PNG. --rec runs the recompiled code (src/rec) with the interpreter for the rest. --ram-at writes RAM after that frame to ram_<frame>.bin in the current folder; --watch ADDR (hex) reports
+// --wav FILE runs the sound board and writes what it plays. --shots DIR writes the script's screenshots there as PNG. --rec runs the recompiled code (src/rec) with the interpreter for the rest. --ram-at writes RAM after that frame to ram_<frame>.bin in the current folder (the tile generator's RAM and registers to tiles_<frame>.bin); --watch ADDR (hex) reports
 // the CPU's stores to that word (--trace-pc ADDR: r3-r8 and LR each time that instruction runs; both on the interpreter). VF3_VOLUMES=music,effects (percent) sets the sound board's two volumes for --wav. VF3_POKE=addr=value
 // (hex address into --ram-at's dump, a byte; "b" first: the backup RAM's) writes RAM before every frame
 // (VF3_POKE_FRAMES=from-to: only those). VF3_FREE_PLAY=1: the coin setting FREE PLAY before the boot, as the PC way.
@@ -864,6 +864,13 @@ int main(int argc, char **argv)
 		if (long(board.frame) == ram_at) {
 			std::string p = "ram_" + std::to_string(board.frame) + ".bin";
 			if (FILE *rf = fopen(p.c_str(), "wb")) { fwrite(board.ram.data(), 1, board.ram.size(), rf); fclose(rf); }
+			// (and the tile generator's RAM, then its 64 registers: the HUD's maps and patterns)
+			p = "tiles_" + std::to_string(board.frame) + ".bin";
+			if (FILE *tf = fopen(p.c_str(), "wb")) {
+				fwrite(board.tile_ram.data(), 1, board.tile_ram.size(), tf);
+				fwrite(board.tile_regs, 4, 64, tf);
+				fclose(tf);
+			}
 		}
 		if (board.cpu.s.fatal) {
 			fprintf(stderr, "vf3run: frame %llu: CPU stopped: %s\n", (unsigned long long)board.frame, board.cpu.fatal_message);
