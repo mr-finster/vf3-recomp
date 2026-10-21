@@ -1,4 +1,5 @@
 #include "vf3_netplay.h"
+#include <algorithm>
 #include <cstring>
 
 namespace vf3net {
@@ -81,17 +82,22 @@ bool Adapter::begin(const std::vector<uint8_t> &blob)
 	if (board.hide_free_play_text() != 2) return false;
 	if (program_changed) program_changed();
 	board.rtc_time = 0;
-	board.controls = m3::Controls{};
-	board.reset();
+	board.power_on();
 	for (int i = 0; i < 300 && board.coin_setting() < 0; i++) board.run_frame();
 	if (board.coin_setting() < 0 || (!board.set_coin_setting(m3::Model3::COIN_FREE_PLAY) && !board.free_play())) return false;
-	board.reset();
+	board.power_on();
 	for (int i = 0; i < BOOT_FRAMES; i++) board.run_frame();
 	board.midi.clear();
 	frame = 0;
 	midi_sent.clear();
 	checkpoints.clear();
 	return true;
+}
+
+uint64_t Adapter::hash(const std::vector<uint8_t> &state)
+{
+	const size_t skip = std::min(state.size(), m3::Model3::STATE_HEADER);
+	return vfnet::hash64(state.data() + skip, state.size() - skip);
 }
 
 void Adapter::save(std::vector<uint8_t> &state)
@@ -127,7 +133,7 @@ void Adapter::advance(const uint16_t input[2], bool resim)
 	frame++;
 	if (checkpoint_every && frame % checkpoint_every == 0) {
 		board.save_state(scratch);
-		checkpoints[frame] = vfnet::hash64(scratch.data(), scratch.size());
+		checkpoints[frame] = hash(scratch);
 	}
 }
 
