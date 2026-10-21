@@ -42,6 +42,59 @@ From a survey of other projects' online play (Oct 2026; many sources secondhand,
   a rollback only bytes that weren't sent already: a wrong guess can leave a stray sound, never a late one.
 - **Later**: spectators, shared replays, ranked play, a region filter, a lag simulator for practice, a wifi badge.
 
+## The menu: Online
+
+In the menu the game already has (src/host/menu.cpp, RmlUi), so it looks and works like every other page: the
+D-pad or stick to choose, Left / Right to change, A to select, B back, Y to clear; the keyboard and mouse the same.
+Nothing is reached only by mouse or only by keyboard.
+
+**Typing** (a name, a room code), as VF1's seed entry: on a keyboard, type; on a pad, Up / Down change the letter,
+Right adds one, Left takes one off, A done, B as it was. Room codes are 6 letters from an alphabet with no
+look-alikes (no O/0, I/1), so they can be read out over voice chat and entered quickly on a pad.
+
+**Online** (a new row in the root menu, between Game and Controls):
+
+| Row | What it does |
+| --- | --- |
+| Your name | Up to 10 letters, shown under your energy bar in a match. Asked for the first time Online is opened. |
+| Quick match | Finds an opponent with a good ping. You go back to the game (attract mode, or a fight with the CPU) while it looks; a notice over the game says when someone's found. |
+| Host a room | Shows the room's code, big, with Copy (to the clipboard) and how many are waiting. Back to the game while you wait. |
+| Join a room | Type the code, A to join. |
+| Lobby | The players online: name, ping (colour-coded, a wifi mark), playing or free. A on a name challenges; your own row says if you're free to be challenged. |
+| Watch | Matches being played now; A to watch one. |
+| Input delay | Auto (shows what it picked) or 0 to 6 frames. Says what it means: "fewer frames: more rollback". |
+| Connection display | On / Off: the ping and rollback in a match. |
+| Server | Advanced: the lobby server's address. |
+
+**Being challenged**: a notice over the game, menu open or not: "MRFINSTER (42 ms) challenges you: A accept, B
+decline". It's declined by itself after 15 s.
+
+**Starting a match**: one screen with each step, ticked off as it's done: connecting (and "directly" or "through the
+relay, +18 ms"), checking both have the same version and ROM, sending the starting state, both ready. Then both
+boards start from it, on free play with both players' credits in, at the character select. Each player plays with
+their own Player 1 controls, whichever side they're on, so nobody has to rebind anything.
+
+**In a match**: the game never pauses. Start or Esc opens a smaller menu over the game while it goes on: the
+connection's details, Input delay (from the next match), Leave the match (asks first). The opponent sees "in the
+menu" by your name. The connection display is small and out of the way at the top of the screen: ping, the
+rollback frames, green / yellow / red.
+
+**When something goes wrong**, it says what happened and what to do, in words, never a code:
+- "Connection interrupted" with a count down over the game, which waits; then "Your opponent left" and back to the
+  lobby.
+- "The match went out of step (a desync). A report was saved to send us." and Rematch / Lobby.
+- "Your opponent has v0.1.4, you have v0.1.3: you both need the same version." "Your ROM isn't the same as your
+  opponent's." "Couldn't reach the server: check the internet connection."
+
+**After a match**: Rematch / Lobby, with what the other player picked ("waiting for MRFINSTER"), instead of the
+game's continue countdown.
+
+What the menu needs for this, beyond what it has: VF1's additions (typing, a line under a row for status or an
+error, a page replaced in place), notices drawn over the game when the menu is closed (overlay.rml, which now draws
+only the FPS), a menu that doesn't pause the game in a match, and rows whose values change on their own (the
+lobby's pings, a search's status). The pages are built against the netplay library's session interface (step 2),
+so they can be tried on one machine with two copies of the game before the server exists.
+
 ## Player names on the energy bars
 
 In a netplay match each player's name (up to 10 letters, typed in the menu, sent when the session starts) takes the
