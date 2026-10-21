@@ -132,8 +132,8 @@ void Adapter::advance(const uint16_t input[2], bool resim)
 	}
 	frame++;
 	if (checkpoint_every && frame % checkpoint_every == 0) {
-		board.save_state(scratch);
-		checkpoints[frame] = hash(scratch);
+		board.save_state(check_buf);
+		checkpoints[frame] = hash(check_buf);
 	}
 }
 

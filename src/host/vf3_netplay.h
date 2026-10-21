@@ -59,7 +59,7 @@ private:
 	uint32_t frame = 0;   // the session's frame the board is at
 	// per frame: the MIDI bytes the sound board was sent for it (a frame run again sends only what wasn't)
 	std::map<uint32_t, std::vector<uint8_t>> midi_sent;
-	std::vector<uint8_t> scratch;
+	std::vector<uint8_t> scratch, check_buf;
 	bool midi_taken = false;
 };
 

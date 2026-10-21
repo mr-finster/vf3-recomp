@@ -2481,6 +2481,7 @@ int main(int argc, char **argv)
 	Online::Phase online_was = Online::Phase::off;
 	uint64_t online_refresh_t = 0;
 	auto end_match = [&] {   // back to playing on its own, from the boot, with this player's NVRAM
+		if (match_on) fprintf(stderr, "online: the match ended at frame %llu; back to playing alone\n", (unsigned long long)game_frame);
 		match_on = false;
 		game.take_midi = nullptr;
 		game.hud_names[0].clear();
@@ -2519,6 +2520,7 @@ int main(int argc, char **argv)
 				sync_menu_sound();
 			}
 			menu.toast(n.text, n.kind == Online::Notice::joined ? 4 : 7);
+			fprintf(stderr, "online: %s\n", n.text.c_str());
 		}
 		if ((match_on && !online.playing()) || (nvram_away && online.phase() == Online::Phase::off)) end_match();   // (ended, left, or never got going)
 		if (online.playing() && online.interrupted()) menu.set_notice("Connection interrupted", "Waiting for " + online.opponent() + "...");
@@ -2754,6 +2756,7 @@ int main(int argc, char **argv)
 					SDL_PutAudioStreamData(audio, game.audio.data(), int(game.audio.size() * sizeof(int16_t)));
 				game.audio.clear();
 				if (hk == hotkey::menu) open_menu();
+				if (quit_after >= 0 && int64_t(game_frame) >= quit_after) running = false;   // (tests)
 			}
 			due = 0;
 		}
