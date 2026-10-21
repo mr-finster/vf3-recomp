@@ -352,8 +352,8 @@ menu_page page(Online &o, OnlineSettings &s, game_menu &menu, std::function<void
 		w.good = [] { return true; };
 		p.items.push_back(w);
 	} else {
-		menu_item h{ "Host a match", "Waits for a player to join you. Close the menu and play on your own meanwhile: the match starts "
-			"at the character select when they join.", {}, {},
+		menu_item h{ "Host a match", "Waits for a player to join you (play on your own meanwhile). Matches always play the PC way, "
+			"free play, with your arcade settings (difficulty, rounds, time). You're player 1, with your own controls.", {}, {},
 			[&o, &s, &menu, problem, changed, type_name] {
 				auto go = [&o, &s, &menu, problem, changed] {
 					std::string err;
@@ -365,7 +365,8 @@ menu_page page(Online &o, OnlineSettings &s, game_menu &menu, std::function<void
 			} };
 		h.below = [problem] { return *problem; };
 		p.items.push_back(h);
-		p.items.push_back({ "Join a match", "Joins a player who's hosting, by their address.", {}, {},
+		p.items.push_back({ "Join a match", "Joins a player who's hosting, by their address. Matches always play the PC way, free play, "
+			"with the host's arcade settings. You're player 2, with your own controls: Player 1's keys or pad work.", {}, {},
 			[&o, &s, &menu, problem, changed, type_name] {
 				auto go = [&o, &s, &menu, changed] { menu.push(join_page(o, s, menu, changed)); };
 				if (s.name.empty()) { *problem = "Your name first: type it above."; type_name(go); return; }

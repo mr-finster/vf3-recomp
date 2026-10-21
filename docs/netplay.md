@@ -66,6 +66,33 @@ From a survey of other projects' online play (Oct 2026; many sources secondhand,
   a rollback only bytes that weren't sent already: a wrong guess can leave a stray sound, never a late one.
 - **Later**: spectators, shared replays, ranked play, a region filter, a lag simulator for practice, a wifi badge.
 
+## Safety: a stranger on the other end
+
+The code is open, so anyone can read exactly what the game accepts from the network; it has to be safe because
+of what it does, not because nobody looks. What another player can reach, and what stops them:
+
+- **Packets** are small and fixed in form (src/net/session.cpp): every field read with its length checked, strings
+  at most 255 bytes, a packet's inputs at most 255, inputs for frames too far ahead dropped (a bad peer can't make
+  a side hold more and more), the starting blob at most 4 MB. `netfuzz` plays sessions while a man in the middle
+  spoils packets every way it can (bits, lengths, extreme values, splices, replays, made-up packets), built with
+  AddressSanitizer and UBSan: 48,000 sessions and about 14 million spoilt packets, nothing out of bounds.
+- **A session's token**: the guest picks 64 random bits; every packet carries them and any other is dropped, and a
+  host only answers a sender whose packet is a session's. Someone who can't see the packets can't put one in.
+- **The game itself** only ever gets the other player's buttons, an input word a frame, and (from a host) the
+  arcade's backup RAM and EEPROM to start from. The game runs in the emulated board: the PowerPC's RAM accesses are
+  checked against its 8 MB (the interpreter's and the recompiled code's), and the board's devices mask every
+  address into their own memories, so nothing the game is made to do reaches outside them. (Still to do: the scene
+  builder reads geometry wherever the game points, checking only where it starts, with padding after; a start
+  blob made to trip that could crash the game, not run code. To be bounded.)
+- **Nothing is ever run or loaded** from the other side: no files, no code, no settings beyond those two memories,
+  which go back to the player's own after the match (and aren't saved meanwhile).
+- **Cheating**: each side runs the whole game itself and only inputs cross, so a modified game can't change the
+  other player's game; anything but the real inputs ends the match as a desync. What it can't stop is what no
+  input-only netcode can: a bot or a macro playing for someone.
+- **Your address**: playing directly, the other player sees your IP address, as in any peer-to-peer game. The lobby
+  server's relay (step 3) will hide it, for those who'd rather; play only people you choose meanwhile.
+- **Not in yet**: a SECURITY.md saying where to report a hole privately.
+
 ## The menu: Online
 
 In the menu the game already has (src/host/menu.cpp, RmlUi), so it looks and works like every other page: the

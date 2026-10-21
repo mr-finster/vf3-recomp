@@ -2,6 +2,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <chrono>
+#include <random>
 
 namespace vfnet {
 
@@ -37,7 +39,7 @@ enum : uint8_t { HELLO = 1, WELCOME, REJECT, BLOB, BLOB_ACK, READY, GO, INPUT, Q
 struct Out
 {
 	std::vector<uint8_t> b;
-	explicit Out(uint8_t type) { u32(MAGIC); u8(type); }
+	Out(uint8_t type, uint64_t token) { u32(MAGIC); u8(type); u64(token); }
 	void u8(uint8_t v) { b.push_back(v); }
 	void u16(uint16_t v) { u8(uint8_t(v)); u8(uint8_t(v >> 8)); }
 	void u32(uint32_t v) { u16(uint16_t(v)); u16(uint16_t(v >> 16)); }
@@ -74,6 +76,11 @@ Session::Session(Link &link, Game &game, const Identity &me_, const Config &cfg_
 	cfg.max_rollback = std::clamp(cfg.max_rollback, 1, 30);
 	cfg.checksum_every = std::max(cfg.checksum_every, 1);
 	ring.resize(size_t(cfg.max_rollback) + 2);
+	if (!host) {   // (the guest's token, at random: the host takes it from the hello)
+		std::random_device rd;
+		token = (uint64_t(rd()) << 32 ^ rd()) ^ uint64_t(std::chrono::steady_clock::now().time_since_epoch().count()) * 0x9E3779B97F4A7C15ull;
+		have_token = true;
+	}
 	if (host) {
 		start_blob = std::move(blob);
 		blob_size = uint32_t(start_blob.size());
@@ -107,7 +114,7 @@ void Session::send_packet(const std::vector<uint8_t> &p)
 
 void Session::send_hello()
 {
-	Out o(HELLO);
+	Out o(HELLO, token);
 	o.u16(PROTOCOL);
 	o.str(me.game);
 	o.str(me.build);
@@ -120,13 +127,13 @@ void Session::send_hello()
 
 void Session::send_blob()
 {
-	Out w(WELCOME);
+	Out w(WELCOME, token);
 	w.str(me.name);
 	w.u32(blob_size);
 	w.u32(chunk_count);
 	send_packet(w.b);
 	for (uint32_t i = chunks_acked; i < std::min(chunk_count, chunks_acked + CHUNK_WINDOW); i++) {
-		Out o(BLOB);
+		Out o(BLOB, token);
 		o.u32(i);
 		const size_t from = size_t(i) * CHUNK, n = std::min(CHUNK, start_blob.size() - from);
 		o.u16(uint16_t(n));
@@ -138,7 +145,7 @@ void Session::send_blob()
 
 void Session::send_inputs()
 {
-	Out o(INPUT);
+	Out o(INPUT, token);
 	o.u32(uint32_t(remote.size()));   // (their inputs this side has)
 	o.u32(cur);
 	o.u8(uint8_t(int8_t(std::clamp(adv_mine.empty() ? 0 : adv_mine.back(), -100, 100))));
@@ -186,8 +193,8 @@ void Session::poll(double t)
 		if (now - last_hello >= 100) {
 			if (!host) {
 				if (chunk_count == 0 && their_name.empty()) send_hello();
-				else if (began) { send_packet(Out(READY).b); last_hello = now; }
-				else { Out a(BLOB_ACK); a.u32(chunks_acked); send_packet(a.b); last_hello = now; }
+				else if (began) { send_packet(Out(READY, token).b); last_hello = now; }
+				else { Out a(BLOB_ACK, token); a.u32(chunks_acked); send_packet(a.b); last_hello = now; }
 			} else if (!their_name.empty() && chunks_acked < chunk_count)
 				send_blob();
 		}
@@ -210,6 +217,9 @@ void Session::receive(const std::vector<uint8_t> &p)
 	In in(p);
 	in.u32();
 	const uint8_t type = in.u8();
+	const uint64_t t_ = in.u64();
+	if (!in.ok) return;
+	if (have_token ? t_ != token : type != HELLO) return;   // (not this session's)
 	switch (type) {
 	case HELLO: {
 		if (!host || st != State::handshake) return;
@@ -228,12 +238,14 @@ void Session::receive(const std::vector<uint8_t> &p)
 		else if (content != me.content)
 			mine = theirs = "Your game files (the ROM) aren't the same as your opponent's.";
 		if (!mine.empty()) {
-			Out r(REJECT);
+			Out r(REJECT, t_);
 			r.str(theirs);
 			for (int i = 0; i < 3; i++) send_packet(r.b);
 			finish(End::rejected, mine);
 			return;
 		}
+		token = t_;   // (from now on only this guest's packets)
+		have_token = true;
 		if (their_name.empty()) started = now;   // (the handshake's time from the first hello)
 		their_name = name.empty() ? "PLAYER 2" : name;
 		send_blob();
@@ -248,7 +260,7 @@ void Session::receive(const std::vector<uint8_t> &p)
 		if (host || st != State::handshake || chunk_count) return;
 		const std::string name = clean_name(in.str());
 		const uint32_t size = in.u32(), count = in.u32();
-		if (!in.ok || count != (size + CHUNK - 1) / CHUNK || size > 64u << 20) return;
+		if (!in.ok || count != (size + CHUNK - 1) / CHUNK || size > cfg.max_blob) return;
 		their_name = name.empty() ? "PLAYER 1" : name;
 		blob_size = size;
 		chunk_count = count;
@@ -257,7 +269,7 @@ void Session::receive(const std::vector<uint8_t> &p)
 		if (count == 0) {
 			began = true;
 			if (!game.begin(start_blob)) { finish(End::rejected, "The game couldn't start from the host's settings."); return; }
-			send_packet(Out(READY).b);
+			send_packet(Out(READY, token).b);
 		}
 		return;
 	}
@@ -274,13 +286,13 @@ void Session::receive(const std::vector<uint8_t> &p)
 		memcpy(&start_blob[size_t(i) * CHUNK], in.p, n);
 		chunk_have[i] = true;
 		while (chunks_acked < chunk_count && chunk_have[chunks_acked]) chunks_acked++;
-		Out a(BLOB_ACK);
+		Out a(BLOB_ACK, token);
 		a.u32(chunks_acked);
 		send_packet(a.b);
 		if (chunks_acked == chunk_count) {
 			began = true;
 			if (!game.begin(start_blob)) { finish(End::rejected, "The game couldn't start from the host's settings."); return; }
-			send_packet(Out(READY).b);
+			send_packet(Out(READY, token).b);
 		}
 		return;
 	}
@@ -296,7 +308,7 @@ void Session::receive(const std::vector<uint8_t> &p)
 	case READY: {
 		if (!host || !began) return;
 		start_running();
-		send_packet(Out(GO).b);   // (again for each READY: a lost GO costs a resend)
+		send_packet(Out(GO, token).b);   // (again for each READY: a lost GO costs a resend)
 		return;
 	}
 	case GO:
@@ -345,8 +357,12 @@ void Session::receive(const std::vector<uint8_t> &p)
 
 void Session::got_inputs(uint32_t first, const uint16_t *in, uint32_t n)
 {
+	// (an honest peer is never further ahead than its rollback and its delay allow: it waits; inputs past that are
+	// dropped, so a bad one can't make this side hold more and more. An honest one sends them again later.)
+	const uint64_t limit = uint64_t(cur) + uint64_t(cfg.max_rollback) + 10 + 16;
 	for (uint32_t i = 0; i < n; i++) {
 		const uint32_t f = first + i;
+		if (f >= limit) break;
 		if (f < remote.size()) continue;
 		if (f > remote.size()) break;   // (a gap: later packets fill it)
 		remote.push_back(in[i]);
@@ -431,7 +447,7 @@ bool Session::step(uint16_t input)
 	// time sync: how far ahead of the other side this one is (its frame now, from what it last said and the time
 	// since, and half the round trip), against how far ahead it says it is; the one ahead waits a frame
 	const double theirs_now = double(their_frame) + (now - their_frame_at + stats_.rtt_ms / 2) / cfg.frame_ms;
-	const int ahead = int(std::lround(double(cur) - theirs_now));
+	const int ahead = int(std::lround(std::clamp(double(cur) - theirs_now, -120.0, 120.0)));   // (whatever the other side says)
 	adv_mine.push_back(ahead);
 	adv_theirs.push_back(their_adv);
 	while (adv_mine.size() > 60) adv_mine.pop_front();
@@ -459,7 +475,7 @@ bool Session::step(uint16_t input)
 void Session::quit()
 {
 	if (st == State::ended) return;
-	for (int i = 0; i < 3; i++) send_packet(Out(QUIT).b);
+	for (int i = 0; i < 3; i++) send_packet(Out(QUIT, token).b);
 	finish(End::quit, "You left the match.");
 }
 
