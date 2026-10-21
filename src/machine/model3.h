@@ -224,7 +224,7 @@ public:
 	// all its memories but the ROMs (about 27 MB; the sound board is apart: it only hears the MIDI bytes, and nothing
 	// it does reaches this board). save_state reuses the buffer's memory; sections, if given, are filled with where
 	// each part starts. load_state restores one this build saved, and false (the board then half restored: reset
-	// it) if it isn't one. The renderers are told every texture changed, and the recompiled code rechecks RAM.
+	// it) if it isn't one. The renderers are told which textures changed, and the recompiled code rechecks RAM.
 	void save_state(std::vector<uint8_t> &out, std::vector<StateSection> *sections = nullptr);
 	bool load_state(const uint8_t *p, size_t n);
 	static constexpr uint32_t STATE_MAGIC = 0x53334656, STATE_VERSION = 1;   // "VF3S"
@@ -263,6 +263,8 @@ private:
 	bool scsi_mapped(uint32_t addr) const;
 
 	template <class IO> void state(IO &io);
+	void load_textures(StateReader &io);
+	bool textures_loaded = false;
 
 	uint32_t r3d_register(unsigned reg) const;
 	void r3d_flush();

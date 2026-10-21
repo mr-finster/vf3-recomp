@@ -3,6 +3,7 @@
 #include "RmlUi_Platform_SDL.h"
 #include "RmlUi_Renderer_SDL.h"
 #include <cstdlib>
+#include <utility>
 
 namespace {
 
@@ -35,7 +36,7 @@ struct menu_listener : Rml::EventListener
 	{
 		Rml::Element *e = ev.GetTargetElement();
 		while (e && !e->IsClassSet("row")) e = e->GetParentNode();
-		if (!e || e->IsClassSet("info")) return;
+		if (!e || e->IsClassSet("info") || menu->capturing()) return;   // (typing into a row: the pointer doesn't move off it)
 		const int i = atoi(e->GetId().c_str() + 1);
 		menu->select(i);
 		if (ev.GetId() == Rml::EventId::Click) {
@@ -128,6 +129,7 @@ void game_menu::close()
 {
 	if (!ready()) return;
 	m_capture = nullptr;
+	if (auto c = std::exchange(m_capture_cancel, nullptr)) c();
 	m->doc->Hide();
 	m_open = false;
 	if (m->overlay && !m_fps.empty()) m->overlay->Show();
@@ -146,11 +148,21 @@ void game_menu::push(menu_page p)
 void game_menu::pop()
 {
 	m_capture = nullptr;
+	if (auto c = std::exchange(m_capture_cancel, nullptr)) c();
 	if (m_stack.size() <= 1) { close(); return; }
 	m_stack.pop_back();
 	m_sel = m_sel_stack.back();
 	m_sel_stack.pop_back();
 	build();
+}
+
+void game_menu::replace(menu_page p, int sel)
+{
+	if (m_stack.empty()) return;
+	m_stack.back() = std::move(p);
+	const menu_page &q = m_stack.back();
+	m_sel = sel >= 0 && sel < int(q.items.size()) && !q.items[sel].info ? sel : first_selectable(q);
+	if (m_open) build();
 }
 
 void game_menu::refresh()
@@ -167,16 +179,20 @@ void game_menu::build()
 	std::string rml;
 	for (size_t i = 0; i < p.items.size(); i++) {
 		const menu_item &it = p.items[i];
-		rml += "<div class=\"row" + std::string(it.info ? " info" : "") + (int(i) == m_sel ? " selected" : "") +
+		rml += "<div class=\"row" + std::string(it.info ? " info" : "") + (it.heading ? " heading" : "") + (it.sub ? " sub" : "") + (int(i) == m_sel ? " selected" : "") +
 			   "\" id=\"r" + std::to_string(i) + "\"><span class=\"label\">" + escape(it.label) + "</span>";
 		if (it.value) {
 			rml += "<span class=\"value\">";
-			if (it.change) rml += "<span class=\"arrow back\">&lt;&nbsp;&nbsp;</span>";
+			const bool arrows = it.change && !(m_capture && int(i) == m_sel);   // (not while it's being typed into)
+			if (arrows) rml += "<span class=\"arrow back\">&lt;&nbsp;&nbsp;</span>";
 			rml += escape(it.value());
-			if (it.change) rml += "<span class=\"arrow\">&nbsp;&nbsp;&gt;</span>";
+			if (arrows) rml += "<span class=\"arrow\">&nbsp;&nbsp;&gt;</span>";
 			rml += "</span>";
 		}
 		rml += "</div>";
+		if (it.below)
+			if (const std::string b = it.below(); !b.empty())
+				rml += "<div class=\"row info " + std::string(it.good ? "good" : "error") + "\"><span class=\"label\">" + escape(b) + "</span></div>";
 	}
 	m->doc->GetElementById("rows")->SetInnerRML(rml);
 	scroll_to_selected();
@@ -196,10 +212,11 @@ void game_menu::scroll_to_selected()
 	rows->SetScrollTop(st);
 }
 
-void game_menu::capture(std::string prompt, std::function<bool(const SDL_Event &)> on_event)
+void game_menu::capture(std::string prompt, std::function<bool(const SDL_Event &)> on_event, std::function<void()> on_cancel)
 {
 	m_capture_prompt = std::move(prompt);
 	m_capture = std::move(on_event);
+	m_capture_cancel = std::move(on_cancel);
 	show_help();
 }
 
@@ -296,11 +313,11 @@ bool game_menu::handle_event(const SDL_Event &e)
 		switch (e.type) {
 		case SDL_EVENT_KEY_DOWN:
 			if (e.key.repeat) return true;
-			if (e.key.scancode == SDL_SCANCODE_ESCAPE) { m_capture = nullptr; build(); return true; }
+			if (e.key.scancode == SDL_SCANCODE_ESCAPE) { m_capture = nullptr; if (auto c = std::exchange(m_capture_cancel, nullptr)) c(); build(); return true; }
 			[[fallthrough]];
-		case SDL_EVENT_GAMEPAD_BUTTON_DOWN: case SDL_EVENT_GAMEPAD_AXIS_MOTION: {
+		case SDL_EVENT_GAMEPAD_BUTTON_DOWN: case SDL_EVENT_GAMEPAD_AXIS_MOTION: case SDL_EVENT_TEXT_INPUT: {
 			auto f = m_capture;
-			if (f(e)) { m_capture = nullptr; build(); }
+			if (f(e)) { m_capture = nullptr; m_capture_cancel = nullptr; build(); }
 			return true;
 		}
 		case SDL_EVENT_KEY_UP: case SDL_EVENT_GAMEPAD_BUTTON_UP:

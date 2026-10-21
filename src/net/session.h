@@ -14,6 +14,7 @@
 // compare a hash of their state every checksum_every frames, and say when the other's gone quiet or gone.
 #pragma once
 #include "link.h"
+#include <algorithm>
 #include <cstdint>
 #include <deque>
 #include <map>
@@ -86,6 +87,10 @@ public:
 	// time. Call it again next frame with the input as it is then.
 	bool step(uint16_t input);
 	void quit();               // leave: the other side is told
+	// The input delay from now on (Auto's, once the ping is known): longer repeats the input for the frames between,
+	// shorter keeps the inputs already sent and takes new ones once the frames reach them
+	void set_delay(int frames) { cfg.delay = std::clamp(frames, 0, 10); }
+	int delay() const { return cfg.delay; }
 
 	State state() const { return st; }
 	End end_reason() const { return why; }

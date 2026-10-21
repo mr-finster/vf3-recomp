@@ -93,6 +93,14 @@ public:
 		d.assign(p, p + n);
 		p += n;
 	}
+	// The next n bytes where they are, or null (a part the caller copies in its own way)
+	const uint8_t *take(size_t n)
+	{
+		if (!ok || size_t(end - p) < n) { ok = false; return nullptr; }
+		const uint8_t *q = p;
+		p += n;
+		return q;
+	}
 	bool done() const { return ok && p == end; }
 
 private:

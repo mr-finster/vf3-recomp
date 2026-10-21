@@ -566,8 +566,32 @@ template <class IO> void Model3::state(IO &io)
 	io.section("polygon ram");
 	io.vec(poly_ram);
 	io.section("texture ram");
-	io.vec(tex_ram);
+	if constexpr (IO::loading) load_textures(io);
+	else io.vec(tex_ram);
 	io.section("end");
+}
+
+// The texture RAM from a state: only the bands of rows that differ copied, and only those given to the renderers
+// as changed (the GPU's copy is uploaded again from them: all 8 MB at every rollback was far too slow, and a
+// fight's textures seldom change)
+void Model3::load_textures(StateReader &io)
+{
+	uint64_t n = 0;
+	io.pod(n);
+	if (!io.ok || n != tex_ram.size()) { io.ok = false; return; }
+	const uint8_t *src = io.take(size_t(n) * 2);
+	if (!src) return;
+	constexpr unsigned BAND = 16;   // rows of 2048 texels
+	for (unsigned y = 0; y < 2048; y += BAND) {
+		uint16_t *dst = &tex_ram[size_t(y) * 2048];
+		const uint8_t *from = src + size_t(y) * 2048 * 2;
+		if (!memcmp(dst, from, BAND * 2048 * 2)) continue;
+		memcpy(dst, from, BAND * 2048 * 2);
+		if (!tex_uploads.empty() && tex_uploads.back().x == 0 && tex_uploads.back().w == 2048 && tex_uploads.back().y + tex_uploads.back().h == y)
+			tex_uploads.back().h += BAND;   // (joined to the band above)
+		else tex_uploads.push_back({ 0, y, 2048, BAND });
+		textures_loaded = true;
+	}
 }
 
 void Model3::save_state(std::vector<uint8_t> &out, std::vector<StateSection> *sections)
@@ -588,14 +612,13 @@ bool Model3::load_state(const uint8_t *p, size_t n)
 	r.pod(version);
 	if (!r.ok || magic != STATE_MAGIC || version != STATE_VERSION)
 		return false;
+	textures_loaded = false;
 	state(r);
 	// what isn't kept but follows from what is
 	set_crom_bank(crom_bank_reg);
 	if (cpu.rec)
 		cpu.rec->recount();
-	tex_serial++;
-	tex_uploads.clear();
-	tex_uploads.push_back({ 0, 0, 2048, 2048 });
+	if (textures_loaded) tex_serial++;   // (the renderers: what changed is in tex_uploads)
 	return r.done();
 }
 

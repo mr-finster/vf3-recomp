@@ -30,8 +30,9 @@ public:
 	explicit Adapter(m3::Model3 &board) : board(board) {}
 
 	// Set by the host program:
-	// one frame (the controls are set): resim, a frame run again (no picture, no sound needed). Leaves board.midi
-	// for the adapter. Default: board.run_frame().
+	// one frame (the controls are set): resim, a frame run again (no picture, no sound needed). Default:
+	// board.run_frame(). Whatever takes the frame's MIDI bytes for the sound board calls take_midi (else the
+	// adapter does after the frame, and gives them to midi_out).
 	std::function<void(bool resim)> run;
 	std::function<void()> program_changed;     // the CROM changed (the recompiled code must be made again)
 	std::function<void()> settle;              // before a save or load: anything running alongside the board waits
@@ -41,6 +42,10 @@ public:
 	void save(std::vector<uint8_t> &state) override;
 	bool load(const std::vector<uint8_t> &state) override;
 	void advance(const uint16_t input[2], bool resim) override;
+	// The frame's MIDI bytes to send now (board.midi emptied): all of them the first time a frame runs; run again
+	// after a rollback, none if its bytes went already (the sound board can't take back what it played: a wrong
+	// guess's sound stays), and if it sent none and has some now, those (late)
+	void take_midi(std::vector<uint8_t> &out);
 
 	// tests: the state's hash after each frame a multiple of this, the last time it ran (0: none kept)
 	uint32_t checkpoint_every = 0;
@@ -52,6 +57,7 @@ private:
 	// per frame: the MIDI bytes the sound board was sent for it (a frame run again sends only what wasn't)
 	std::map<uint32_t, std::vector<uint8_t>> midi_sent;
 	std::vector<uint8_t> scratch;
+	bool midi_taken = false;
 };
 
 } // namespace vf3net

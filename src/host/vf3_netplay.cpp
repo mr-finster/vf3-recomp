@@ -48,6 +48,24 @@ std::vector<uint8_t> start_blob(const m3::Model3 &b)
 	return out;
 }
 
+// (a frame's MIDI bytes go at once, a guessed frame's as much as a certain one's, so no sound waits for the other
+// side's input)
+void Adapter::take_midi(std::vector<uint8_t> &out)
+{
+	midi_taken = true;
+	scratch.assign(board.midi.begin(), board.midi.end());
+	board.midi.clear();
+	out.clear();
+	auto it = midi_sent.find(frame);
+	const bool sent = it != midi_sent.end() && !it->second.empty();
+	if (!scratch.empty() && !sent) {
+		out = scratch;
+		midi_sent[frame] = scratch;
+	} else if (it == midi_sent.end())
+		midi_sent[frame] = {};
+	while (!midi_sent.empty() && midi_sent.begin()->first + 64 < frame) midi_sent.erase(midi_sent.begin());
+}
+
 bool Adapter::begin(const std::vector<uint8_t> &blob)
 {
 	uint32_t magic = 0;
@@ -97,21 +115,14 @@ void Adapter::advance(const uint16_t input[2], bool resim)
 {
 	unpack(input[0], 0, board.controls);
 	unpack(input[1], 1, board.controls);
+	midi_taken = false;
 	if (run) run(resim);
 	else board.run_frame();
-	// The frame's MIDI bytes: sent at once (a frame run with a guess as much as a certain one, so no sound waits for
-	// the other side's input). Run again, a frame whose bytes went already sends nothing more (the sound board can't
-	// take back what it played: a wrong guess's sound stays); one that sent none, now some, sends them (late).
-	scratch.assign(board.midi.begin(), board.midi.end());
-	board.midi.clear();
-	auto it = midi_sent.find(frame);
-	const bool sent = it != midi_sent.end() && !it->second.empty();
-	if (!scratch.empty() && !sent) {
-		if (midi_out) midi_out(scratch);
-		midi_sent[frame] = scratch;
-	} else if (it == midi_sent.end())
-		midi_sent[frame] = {};
-	while (!midi_sent.empty() && midi_sent.begin()->first + 64 < frame) midi_sent.erase(midi_sent.begin());
+	if (!midi_taken) {
+		std::vector<uint8_t> out;
+		take_midi(out);
+		if (!out.empty() && midi_out) midi_out(out);
+	}
 	frame++;
 	if (checkpoint_every && frame % checkpoint_every == 0) {
 		board.save_state(scratch);
