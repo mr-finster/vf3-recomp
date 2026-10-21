@@ -62,6 +62,7 @@ int main(int argc, char **argv)
 	vfnet::SimWire::Params p{ 40, 8, 0 };
 	int delay = 2;
 	bool use_rec = true;
+	const bool slow = getenv("VF3NET_SLOW") != nullptr;   // (each step over 40 ms, the host's)
 	const char *usage = "usage: vf3net <vf3.zip> --script FILE [--frames N] [--latency MS] [--jitter MS] [--loss PERCENT] [--delay D] [--interp]\n";
 	for (int i = 1; i < argc; i++) {
 		std::string a = argv[i];
@@ -126,8 +127,11 @@ int main(int argc, char **argv)
 		}
 		if (t >= next_a) {
 			const auto s0 = Clock::now();
+			const uint64_t rb0 = sa.stats().resim_frames;
 			if (sa.step(vf3net::pack(real[std::min(na, real.size() - 1)], 0))) na++;
-			if (connected) ta.add(std::chrono::duration<double, std::milli>(Clock::now() - s0).count());
+			const double ms = std::chrono::duration<double, std::milli>(Clock::now() - s0).count();
+			if (connected) ta.add(ms);
+			if (slow && ms > 40) printf("  slow step: host frame %u, %.1f ms, %llu frames run again\n", sa.frame(), ms, (unsigned long long)(sa.stats().resim_frames - rb0));
 			next_a += fa;
 		}
 		if (t >= next_b) {

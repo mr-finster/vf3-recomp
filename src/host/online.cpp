@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdio>
 
 // ---- the match ----
 
@@ -33,7 +34,9 @@ bool Online::host(const OnlineSettings &s, std::string &error)
 	auto_done = false;
 	port = std::clamp(s.port, 1024, 65535);
 	lan = vfnet::lan_address();
-	return open_host(error);
+	if (!open_host(error)) return false;
+	fprintf(stderr, "online: hosting on UDP port %d (%s)\n", port, lan.empty() ? "no network address" : lan.c_str());
+	return true;
 }
 
 bool Online::join(const OnlineSettings &s, std::string &error)
@@ -64,6 +67,7 @@ bool Online::join(const OnlineSettings &s, std::string &error)
 	session = std::make_unique<vfnet::Session>(*link, adapter, identity, config(s), false);
 	joining_to = host + (p != 7700 ? ":" + std::to_string(p) : "");
 	ph = Phase::joining;
+	fprintf(stderr, "online: joining %s, port %d\n", host.c_str(), p);
 	return true;
 }
 
@@ -85,7 +89,7 @@ void Online::poll(double t)
 		switch (e.kind) {
 		case vfnet::Session::Event::connected:
 			ph = Phase::playing;
-			notices.push_back({ Notice::joined, "Playing " + e.text });
+			notices.push_back({ Notice::joined, "Playing " + e.text + ": press Start" });
 			break;
 		case vfnet::Session::Event::ended: {
 			const auto why = session->end_reason();
@@ -285,7 +289,7 @@ menu_page join_page(Online &o, OnlineSettings &s, game_menu &menu, std::function
 		} };
 	a.below = [addr] { return addr->error; };
 	p.items.push_back(a);
-	menu_item c{ "Connect", "Joins the host's match. The game starts at the character select once you're both in.", {}, {},
+	menu_item c{ "Connect", "Joins the host's match. Once you're both in, the game starts at its title screen: both press Start.", {}, {},
 		[&o, &s, problem] {
 			problem->clear();
 			if (s.address.empty()) { *problem = "Type the host's address first."; return; }

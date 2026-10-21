@@ -168,6 +168,9 @@ void Session::start_running()
 	if (st != State::handshake) return;
 	st = State::running;
 	local.assign(size_t(cfg.delay), 0);   // (the first delay frames: nothing pressed)
+	// the rollback's buffers made now, not in the match's first frames (a state is tens of MB: making them as the
+	// frames first ran held the first frames up, 0.2 s)
+	for (auto &r : ring) game.save(r);
 	events.push_back({ Event::connected, their_name });
 }
 
