@@ -56,6 +56,7 @@ struct Config
 	int checksum_every = 30;
 	double frame_ms = 1000.0 / 57.524160;
 	double interrupt_ms = 1000, disconnect_ms = 8000, handshake_ms = 15000;
+	size_t max_blob = 4u << 20;   // the largest starting blob a guest takes (VF3's: 128 KB)
 };
 
 class Session
@@ -154,6 +155,12 @@ private:
 	bool have_their_t = false;
 
 	uint8_t my_flags = 0, their_flags = 0;
+
+	// The session's token: the guest's, chosen at random and sent in its hello; every packet after carries it and
+	// one without it is dropped (a third party who can't see the packets can't put one in)
+	uint64_t token = 0;
+	bool have_token = false;
+	std::vector<uint8_t> out(uint8_t type) const;
 
 	void finish(End e, const std::string &text);
 	void send_packet(const std::vector<uint8_t> &p);

@@ -80,6 +80,11 @@ $(BIN)/vf3net: $(call objs,$(CORE) $(NET) src/host/vf3_netplay.cpp tools/vf3net.
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDLIBS)
 
+# netfuzz: the session against a peer who sends anything, with AddressSanitizer and UBSan (its own objects)
+$(BIN)/netfuzz: $(NET) tools/netfuzz.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) -std=c++20 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer $^ -o $@
+
 # menutest: the Online pages drawn offscreen to pictures (SDL_VIDEO_DRIVER=offscreen)
 $(BIN)/menutest: $(call objs,src/host/menu.cpp src/host/online.cpp src/host/vf3_netplay.cpp src/machine/model3.cpp src/machine/romset.cpp src/ppc/ppc.cpp $(NET) tools/menutest.cpp $(RML_SRC))
 	@mkdir -p $(dir $@)
