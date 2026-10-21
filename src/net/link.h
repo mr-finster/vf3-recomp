@@ -20,8 +20,9 @@ struct Link
 	virtual ~Link() = default;
 };
 
-// A UDP socket. A host binds a port and takes as its peer the first address a datagram comes from (the session
-// checks it's a game's); a guest is given the host's address. Non-blocking.
+// A UDP socket. A host binds a port and takes as its peer the first address a session's datagram comes from; a
+// guest is given the host's address. Non-blocking.
+std::string lan_address();   // this machine's address on its network, as others there would reach it ("" if none)
 class UdpLink : public Link
 {
 public:
@@ -30,6 +31,7 @@ public:
 	bool bind(uint16_t port, std::string &error);                         // a host's: 0 for any free port
 	bool connect(const std::string &host, uint16_t port, std::string &error);   // a guest's (binds any free port)
 	uint16_t local_port() const;
+	std::string peer_address() const;   // the peer's, as text
 	bool has_peer() const { return peer_set; }
 	void send(const uint8_t *p, size_t n) override;
 	bool recv(std::vector<uint8_t> &out) override;

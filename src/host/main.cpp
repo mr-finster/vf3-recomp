@@ -84,6 +84,7 @@
 //   VF3_TEST_LOAD=ms:s   each picture ms longer (by the scale's square, from 1x) for the first s seconds after the
 //                        start's grace (the governor's tests)
 #include "version.h"      // VF3_VERSION, VF3_DATE (made by the Makefile from git)
+#include "online.h"
 #include "../machine/model3.h"
 #include "../machine/romset.h"
 #include "../rec/ppc_rec.h"
@@ -468,6 +469,7 @@ struct settings
 	bool smooth_bg = true;   // the 2D backgrounds (the layers below the 3D) scaled smoothly, not as blocks
 	bool sharp_textures = true;   // the 3D's textures' mipmap levels for the picture's size (false: the arcade's, video::Raster::arcade_lod)
 	int filter = 0;          // the screen filter: 0 off, 1 scanlines, 2 CRT
+	OnlineSettings online;   // the Online page's
 	int crt_colours = 0;     // an arcade monitor's colours: 0 off, 1-5 as Supermodel's (CRT_COLOURS)
 	int graphics = 0;        // Windows: the GPU renderer's driver, 0 Auto (Vulkan first, Direct3D 12 if it fails), 1 Direct3D 12 first
 	int aa = 1;              // antialiasing: the 3D drawn aa times larger each way and averaged (1 off)
@@ -495,6 +497,11 @@ struct settings
 		num("arcade_coins", arcade_coin, -2, m3::Model3::COIN_FREE_PLAY - 1);
 		num("renderer_3d", renderer3d, 0, 2);
 		if (auto it = kv.find("roms_folder"); it != kv.end()) roms_folder = it->second;
+		if (auto it = kv.find("online_name"); it != kv.end()) online.name = online_menu::clean_name(it->second);
+		if (auto it = kv.find("online_address"); it != kv.end()) online.address = it->second;
+		num("online_delay", online.delay, -1, 6);
+		num("online_port", online.port, 1024, 65535);
+		flag("online_connection", online.show_connection);
 		if (auto it = kv.find("gpu_3d_failed"); it != kv.end()) gpu3d_failed = it->second;
 		flag("fullscreen", fullscreen);
 		flag("arcade_mode", arcade);
@@ -557,6 +564,9 @@ struct settings
 		fprintf(f, "crt_colours = %d\nsharp_textures = %d\n", crt_colours, int(sharp_textures));
 		if (graphics) fprintf(f, "graphics = %d\n", graphics);
 		fprintf(f, "screen_filter = %d\nantialiasing = %d\nmusic_volume = %d\neffects_volume = %d\narcade_coins = %d\nframe_timings = %d\n", filter, aa, music, effects, arcade_coin, int(timings));
+		fprintf(f, "online_name = %s\nonline_delay = %d\nonline_connection = %d\nonline_port = %d\n", online.name.c_str(), online.delay,
+				int(online.show_connection), online.port);
+		if (!online.address.empty()) fprintf(f, "online_address = %s\n", online.address.c_str());
 		for (int p = 0; p < 2; p++) ctl[p].save(f, p);
 		const bool flushed = flush_to_disk(f);
 		if (fclose(f) == 0 && flushed && replace_file(path, tmp)) return true;
@@ -804,16 +814,22 @@ struct Game
 	}
 	void reset()
 	{
+		reset_host();
+		board.reset();
+	}
+	// all but the board: the sound board, the pictures (a netplay match starts its board itself)
+	void reset_host()
+	{
 		if (emu_thread.joinable()) job_wait();
 		sound_wait();
 		sound_out.clear();
-		board.reset();
 		sound.reset();
 		builder.clear_cache();
 		have_prev = false;
 		scene[0] = scene[1] = video::Scene();
 		frame = 0;
 	}
+	std::function<void(std::vector<uint8_t> &)> take_midi;   // (a netplay match's: the adapter's)
 	// One frame: the board, the sound board, the frame's scene and 2D layers. In two halves for smooth motion
 	// (start_frame, finish_frame): the first half run a picture before the frame is due, so no picture's time holds
 	// a whole frame (at 120 a second a picture has 8.3 ms, a frame took 7-10 on an M4 Max: every other picture missed
@@ -834,8 +850,11 @@ struct Game
 		sound_out.clear();
 		{
 			std::lock_guard<std::mutex> lk(sound_m);
-			sound_midi.assign(board.midi.begin(), board.midi.end());
-			board.midi.clear();
+			if (take_midi) take_midi(sound_midi);   // (a match: a frame run again sends only what it hadn't)
+			else {
+				sound_midi.assign(board.midi.begin(), board.midi.end());
+				board.midi.clear();
+			}
 			sound_job_on = sound_on;
 			sound_busy = true;
 		}
@@ -1073,6 +1092,11 @@ int main(int argc, char **argv)
 		if (!game.load(zip, err, arg_interp)) return fail(err);
 	}
 	m3::Model3 &board = game.board;
+	// Online play (online.h): in a match the board holds the host's NVRAM, and this player's own is kept here
+	static Online online(board);
+	std::vector<uint8_t> own_backup;
+	uint16_t own_eeprom[64] = {};
+	bool nvram_away = false;
 	const std::string backup_path = data + "/backup", eeprom_path = data + "/eeprom";
 	load_blob(backup_path, board.backup.data(), board.backup.size());
 	load_blob(eeprom_path, board.eeprom.regs, sizeof(board.eeprom.regs));
@@ -1083,6 +1107,7 @@ int main(int argc, char **argv)
 	auto save_nvram = [&](bool now = false) {
 		if (game.emu_thread.joinable()) game.job_wait();   // (not while a frame runs alongside)
 		if (quit_after >= 0) return;   // test runs leave the saves alone
+		if (nvram_away) return;        // (a netplay match: the host's NVRAM, not this player's)
 		const uint64_t h = nvram_hash();
 		if (h == saved_hash) return;
 		std::filesystem::create_directories(data, ec);
@@ -2267,25 +2292,49 @@ int main(int argc, char **argv)
 		pg.items.push_back(back_item());
 		return pg;
 	};
+	bool online_ready = false;
+	auto online_page = [&] {
+		if (!online_ready) {   // (the ROM's hash for the handshake, once)
+			if (game.emu_thread.joinable()) game.job_wait();
+			online.identity = { "vf3", VF3_VERSION, vf3net::content_hash(board), "" };
+			online_ready = true;
+		}
+		return online_menu::page(online, cfg.online, menu, [&] { cfg_dirty = true; });
+	};
 	auto main_page = [&] {
 		menu_page p{ "", "", {} };
+		if (online.playing()) {   // (the match goes on under the menu)
+			p.items.push_back({ "Resume", "Back to the match (it goes on while the menu's open).", {}, {}, [&] { menu.close(); } });
+			online_menu::match_rows(online, cfg.online, menu, [&] { cfg_dirty = true; }, p.items);
+			p.items.push_back({ "Display", "Sharpness, antialiasing, screen shape, the 3D renderer, smooth motion, background and screen filters, frame rate and fullscreen.", {}, {}, [&] { menu.push(display_page()); } });
+			p.items.push_back({ "Sound", "The overall, music and effects volumes.", {}, {}, [&] { menu.push(sound_page()); } });
+			p.items.push_back({ "Controls", "Each player's controller, keys and buttons. Online, you play with Player 1's.", {}, {}, [&] { menu.push(controls_page()); } });
+			return p;
+		}
 		p.items.push_back({ "Resume", "Back to the game.", {}, {}, [&] { menu.close(); } });
 		p.items.push_back({ "Display", "Sharpness, antialiasing, screen shape, the 3D renderer, smooth motion, background and screen filters, frame rate and fullscreen.", {}, {}, [&] { menu.push(display_page()); } });
 		p.items.push_back({ "Sound", "The overall, music and effects volumes.", {}, {}, [&] { menu.push(sound_page()); } });
 		p.items.push_back({ "Game", "Play style and reset.", {}, {}, [&] { menu.push(game_page()); } });
 		p.items.push_back({ "Arcade settings", "Difficulty, rounds, energy, demo sound, country and the service menu. Changing them restarts the game.", {}, {},
 							[&] { if (arcade_before.empty()) arcade_before = arcade_bytes(); menu.push(arcade_page()); } });
+		p.items.push_back({ "Online", "Play someone over the network: host a match, or join one.", {}, {}, [&] { menu.push(online_page()); } });
 		p.items.push_back({ "Controls", "Each player's controller, keys and buttons.", {}, {}, [&] { menu.push(controls_page()); } });
 		p.items.push_back({ "Quit", "Saves and closes the game.", {}, {}, [&] { running = false; } });
 		return p;
 	};
 	bool sound_paused = false;
 	auto sync_menu_sound = [&] {
-		if (!audio || menu.is_open() == sound_paused) return;
-		sound_paused = menu.is_open();
+		const bool pause = menu.is_open() && !online.playing();   // (a match goes on, its sound too)
+		if (!audio || pause == sound_paused) return;
+		sound_paused = pause;
 		if (sound_paused) SDL_PauseAudioStreamDevice(audio); else SDL_ResumeAudioStreamDevice(audio);
 	};
-	auto open_menu = [&] { if (game.emu_thread.joinable()) game.job_wait(); if (menu.ready() && !menu.is_open()) menu.open(main_page()); sync_menu_sound(); };
+	auto open_menu = [&] {
+		if (game.emu_thread.joinable()) game.job_wait();
+		menu.set_title(online.playing() ? "ONLINE MATCH" : "PAUSED");
+		if (menu.ready() && !menu.is_open()) menu.open(main_page());
+		sync_menu_sound();
+	};
 
 	// ---- test hooks ----
 	std::vector<std::pair<SDL_Scancode, uint64_t>> test_keys;   // VF3_KEYS
@@ -2399,6 +2448,84 @@ int main(int argc, char **argv)
 	struct { uint64_t t0 = 0; int frames = 0, pictures = 0; double emu_ms = 0, draw_ms = 0; } t9;
 	t9.t0 = SDL_GetTicksNS();
 	uint64_t save_t = SDL_GetTicksNS();   // the settings saved every 3 s when changed (the NVRAM once a minute: nvram_t)
+
+	// ---- online play (online.h): the match's frames through the session, its notices over the game ----
+	online.adapter.settle = [&] { if (game.emu_thread.joinable()) game.job_wait(); };
+	online.adapter.program_changed = [&] { game.program_changed(); };
+	online.adapter.run = [&](bool resim) {
+		if (!resim) { game.run_frame(true, true); return; }
+		const bool tiles = game.tiles_on;   // (a frame run again after a rollback: the board alone, no picture or sound)
+		game.tiles_on = false;
+		board.run_frame();
+		game.tiles_on = tiles;
+	};
+	online.adapter.on_begin = [&] {
+		if (!nvram_away) {   // (this player's own, given back after the match)
+			own_backup = board.backup;
+			memcpy(own_eeprom, board.eeprom.regs, sizeof own_eeprom);
+			nvram_away = true;
+		}
+		half = false;
+		paused = false;
+		game.reset_host();
+		game.tiles_on = false;   // (the match's boot runs unseen)
+		test_frames = service_frames = test_mode_frames = 0;
+		test_pending = in_test = false;
+	};
+	std::vector<uint8_t> late_midi;   // (a frame run again that has sounds its first run hadn't: they go with the next frame's)
+	online.adapter.midi_out = [&](const std::vector<uint8_t> &b) { late_midi.insert(late_midi.end(), b.begin(), b.end()); };
+	bool match_on = false;
+	Online::Phase online_was = Online::Phase::off;
+	uint64_t online_refresh_t = 0;
+	auto end_match = [&] {   // back to playing on its own, from the boot, with this player's NVRAM
+		match_on = false;
+		game.take_midi = nullptr;
+		game.tiles_on = true;
+		menu.set_notice("");
+		menu.set_net("", 0);
+		board.rtc_time = -1;
+		if (nvram_away) {
+			board.backup = own_backup;
+			memcpy(board.eeprom.regs, own_eeprom, sizeof own_eeprom);
+			nvram_away = false;
+		}
+		menu.set_title("PAUSED");
+		reset_game();
+		sync_menu_sound();
+	};
+	auto online_pass = [&] {
+		online.poll(double(SDL_GetTicksNS()) / 1e6);
+		Online::Notice n;
+		while (online.next_notice(n)) {
+			if (n.kind == Online::Notice::joined) {
+				match_on = true;
+				late_midi.clear();
+				game.take_midi = [&](std::vector<uint8_t> &out) {
+					online.adapter.take_midi(out);
+					out.insert(out.begin(), late_midi.begin(), late_midi.end());
+					late_midi.clear();
+				};
+				game.tiles_on = true;
+				game_frame = vf3net::BOOT_FRAMES;
+				menu.close();
+				clock_reset = true;
+				sync_menu_sound();
+			}
+			menu.toast(n.text, n.kind == Online::Notice::joined ? 4 : 7);
+		}
+		if ((match_on && !online.playing()) || (nvram_away && online.phase() == Online::Phase::off)) end_match();   // (ended, left, or never got going)
+		if (online.playing() && online.interrupted()) menu.set_notice("Connection interrupted", "Waiting for " + online.opponent() + "...");
+		else if (online.starting()) menu.set_notice("Starting the match", online.status());
+		else menu.set_notice("");
+		int level = 0;
+		const std::string line = online.playing() && cfg.online.show_connection ? online.connection(level) : std::string();
+		menu.set_net(line, level);
+		// the Online page as things change: its rows made again with the phase, its status lines a few times a second
+		if (menu.is_open() && online.phase() != online_was && menu.top_name() == "Online") menu.replace(online_page(), menu.selected());
+		else if (menu.is_open() && online.waiting() && SDL_GetTicks() - online_refresh_t > 250) { online_refresh_t = SDL_GetTicks(); menu.refresh(); }
+		online_was = online.phase();
+	};
+
 	while (running) {
 		pass++;
 		const uint64_t pass_t0 = SDL_GetTicksNS();
@@ -2438,8 +2565,8 @@ int main(int argc, char **argv)
 			if (e.type == SDL_EVENT_KEY_DOWN && !e.key.repeat) {
 				switch (e.key.scancode) {
 				case SDL_SCANCODE_ESCAPE: open_menu(); break;
-				case SDL_SCANCODE_P: paused = !paused; break;
-				case SDL_SCANCODE_F3: reset_game(); break;
+				case SDL_SCANCODE_P: if (!online.playing()) paused = !paused; break;   // (a match can't pause)
+				case SDL_SCANCODE_F3: if (!online.playing()) reset_game(); break;
 				case SDL_SCANCODE_F9:   // the timings in the title (and the log) every 2 s
 					cfg.timings = !cfg.timings; cfg_dirty = true; title_now.clear();
 					t9 = {}; t9.t0 = SDL_GetTicksNS();
@@ -2484,8 +2611,9 @@ int main(int argc, char **argv)
 			gov_grace(2);
 		}
 		if (clock_reset) { clock_reset = false; frames_run = 0; restart_clock_real(); new_frame = true; }
-		const bool stopped = paused || menu.is_open();
-		const bool ff = !stopped && SDL_GetKeyboardState(nullptr)[SDL_SCANCODE_TAB];
+		online_pass();
+		const bool stopped = !online.playing() && (paused || menu.is_open() || online.starting());
+		const bool ff = !stopped && !online.playing() && SDL_GetKeyboardState(nullptr)[SDL_SCANCODE_TAB];
 		int due = 0;
 		if (stopped) {
 			pace.stopped_s += double(SDL_GetTicksNS() - clock_t) / 1e9;   // (the menu's time isn't the game's)
@@ -2593,6 +2721,35 @@ int main(int argc, char **argv)
 				if (test_frames > 0) { c.test[0] = true; test_frames--; }
 				game.builder.widen = std::max(1.0f, float(picture_aspect()) * 0.75f) * 1.05f;   // (a little more: smooth motion)
 		};
+		if (online.playing()) {
+			// A match: each frame through the session, with this player's input (whichever player's controls they
+			// use; nothing while the menu's open); a frame that can't run yet (the other side behind, or keeping in
+			// time) stays due, and the picture stays
+			for (int i = 0; i < due && running && online.playing(); i++) {
+				m3::Controls live;
+				const hotkey hk = read_inputs(live, pads, pstate, cfg.ctl);
+				const uint16_t bits = menu.is_open() ? 0 : uint16_t(vf3net::pack(live, 0) | vf3net::pack(live, 1));
+				game.builder.widen = std::max(1.0f, float(picture_aspect()) * 0.75f) * 1.05f;
+				const uint64_t te = SDL_GetTicksNS();
+				online.poll(double(te) / 1e6);
+				if (!online.step(bits)) {
+					frames_run -= uint64_t(due - i);
+					frame_clock = std::min(frame_clock, double(frames_run) + 1.0);
+					break;
+				}
+				game.publish();
+				game_frame++;
+				pace.frames++;
+				pace.emu_ms += double(SDL_GetTicksNS() - te) / 1e6;
+				pass_kind = 3;
+				new_frame = true;
+				if (audio && !game.audio.empty())
+					SDL_PutAudioStreamData(audio, game.audio.data(), int(game.audio.size() * sizeof(int16_t)));
+				game.audio.clear();
+				if (hk == hotkey::menu) open_menu();
+			}
+			due = 0;
+		}
 		for (int i = 0; i < due && running; i++) {
 			// A frame more than this pass's first (a slow pass let two fall due): started on the game's own thread, not
 			// run here, and taken next pass (run here it made this pass slow too, and the next, one after another)
@@ -2651,6 +2808,7 @@ int main(int argc, char **argv)
 		// a frame's work at most (the pictures go between the last two frames finished: this one isn't yet)
 		static const bool no_halves = getenv("VF3_NO_HALVES") != nullptr;   // (tests: whole frames, as before)
 		if (!half && !no_halves && rec.dir.empty() && running && !stopped && !ff && cfg.smooth && (due == 0 || emu_threaded) && !menu.is_open() && first_shown &&
+			online.phase() == Online::Phase::off &&   // (online: whole frames, each through the session)
 			frame_clock - double(frames_run) >= 0.5) {
 			const uint64_t th = SDL_GetTicksNS();
 			frame_inputs(half_hk, half_act, half_left);

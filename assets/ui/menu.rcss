@@ -102,6 +102,45 @@ div { display: block; }
 
 .row.info .value { color: #dfe7fb; }
 
+/* a row belonging to the one above it */
+.row.sub { padding-left: 40dp; font-size: 21dp; }
+.row.sub .label { color: #9fb0dc; }
+.row.sub.selected { padding-left: 52dp; }
+.row.sub.selected .label { color: #0b1430; }
+
+/* a line under its row: a mistake to put right (red), or how it's going (green) */
+.row.error, .row.good {
+	height: 24dp;
+	line-height: 24dp;
+	padding-left: 52dp;
+	font-size: 18dp;
+	color: #ff6b5a;
+}
+.row.good { color: #7ee08a; }
+
+/* a section's title */
+.row.heading {
+	height: 24dp;
+	line-height: 24dp;
+	margin-top: 10dp;
+	margin-bottom: 4dp;
+	font-size: 16dp;
+	font-weight: 700;
+	color: #8fa3d6;
+	letter-spacing: 1dp;
+}
+.row.heading:first-child { margin-top: 0; }
+
+/* a big value to read out (a host's address) */
+.row.big {
+	height: 44dp;
+	line-height: 44dp;
+	font-size: 34dp;
+	font-style: italic;
+	font-weight: 700;
+	color: #ffd23f;
+}
+
 #note {
 	margin-top: 8dp;
 	height: 80dp;           /* four lines; the help texts are written to fit */
