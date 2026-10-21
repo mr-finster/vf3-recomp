@@ -3,12 +3,36 @@
 The plan: GGPO-style rollback netcode, as a library shared by VF1, VF2 and VF3 Recomp, with a small lobby server
 (rooms, NAT traversal, a relay, spectators). VF3 first: its board's state is the easiest to save.
 
-1. **Save states and the soak test** (this step, no network): the board's whole state saved and restored, and
-   checked the way rollback uses it.
-2. The shared library (rollback, the UDP link, replays, desync checks), two copies of the game on one machine
-   with latency and packet loss simulated.
-3. The lobby server, then spectators.
+1. **Save states and the soak test** (done; to run with the ROM): the board's whole state saved and restored,
+   and checked the way rollback uses it.
+2. **The shared library, the VF3 adapter and the Online menu** (done, but for the ROM's runs): `src/net` (rollback
+   sessions, UDP, a simulated network), `src/host/vf3_netplay` (the board as a session's game), `src/host/online`
+   (the Online pages, hosting and joining by address), wired into `main.cpp`.
+3. The lobby server (room codes, quick match, NAT traversal and a relay, watching), then the rest of the menu's
+   plan below: the lobby's rows, rematch after a match, the names on the energy bars, replays.
 4. VF2, then VF1 (whose recompiled code runs on its own stack: that has to change first).
+
+## Where it stands, and how to try it
+
+| Part | State |
+| --- | --- |
+| `src/net`: rollback, handshake, input redundancy, time sync, desync checks, disconnects | `nettest`: 17 network cases and UDP on localhost, all pass (no ROM needed) |
+| Save states | round trip exact (no ROM); `vf3soak` to run with the ROM |
+| VF3 adapter (start, inputs, MIDI under rollback) | `vf3net` to run with the ROM: two boards over a simulated network against a straight run |
+| Online menu, notices, connection display | built into the game; drawn without the ROM by `menutest` (pictures below); not yet played |
+| Lobby server, room codes, quick match, watching, rematch, names on the bars, replays | not yet |
+
+```sh
+build/bin/nettest                                              # the session, no ROM
+build/bin/vf3net vf3.zip --script /tmp/scripts/versus.txt      # two boards, 40 ms each way (--latency, --jitter, --loss, --delay)
+SDL_VIDEO_DRIVER=offscreen build/bin/menutest /tmp/shots       # the Online pages as pictures
+```
+
+To play: both start the game; one opens Online > Host a match (the page shows the address to give), the other
+Online > Join a match, types it, Connect. On one network that's all; over the internet the host forwards UDP port
+7700 to their computer until the lobby server does it for them. A match starts at the character select, both on
+free play; the menu doesn't pause it; Leave the match (or the other side going) goes back to playing alone, with
+the player's own NVRAM given back (a match plays on the host's).
 
 ## What's enough: the bar to clear
 

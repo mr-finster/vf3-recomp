@@ -37,6 +37,7 @@ public:
 	std::function<void()> program_changed;     // the CROM changed (the recompiled code must be made again)
 	std::function<void()> settle;              // before a save or load: anything running alongside the board waits
 	std::function<void(const std::vector<uint8_t> &)> midi_out;   // bytes for the sound board
+	std::function<void()> on_begin;            // a match's start, before the board is set up for it (keep the player's NVRAM)
 
 	bool begin(const std::vector<uint8_t> &blob) override;
 	void save(std::vector<uint8_t> &state) override;

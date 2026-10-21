@@ -3,6 +3,9 @@
 #include <cstring>
 
 #ifdef _WIN32
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0601   // (Windows 7 on: inet_ntop, inet_pton)
+#endif
 #include <winsock2.h>
 #include <ws2tcpip.h>
 typedef SOCKET sock_t;
@@ -149,7 +152,8 @@ bool UdpLink::recv(std::vector<uint8_t> &out)
 		socklen_t from_len = sizeof from;
 		const auto n = recvfrom(m->s, reinterpret_cast<char *>(buf), sizeof buf, 0, reinterpret_cast<sockaddr *>(&from), &from_len);
 		if (n < 0) return false;
-		if (!peer_set) {   // a host's first datagram: its sender is the peer from now on
+		if (!peer_set) {   // a host's first game datagram ("VFNP" first): its sender is the peer from now on
+			if (n < 4 || memcmp(buf, "VFNP", 4) != 0) continue;
 			m->peer = from;
 			m->peer_len = from_len;
 			peer_set = true;
@@ -158,6 +162,49 @@ bool UdpLink::recv(std::vector<uint8_t> &out)
 		out.assign(buf, buf + n);
 		return true;
 	}
+}
+
+std::string UdpLink::peer_address() const
+{
+	if (!peer_set) return "";
+	char host[INET6_ADDRSTRLEN] = {};
+	const sockaddr *a = reinterpret_cast<const sockaddr *>(&m->peer);
+	if (a->sa_family == AF_INET6) {
+		const sockaddr_in6 *v6 = reinterpret_cast<const sockaddr_in6 *>(a);
+		const uint8_t *b = reinterpret_cast<const uint8_t *>(&v6->sin6_addr);
+		static const uint8_t mapped[12] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xFF, 0xFF };
+		if (!memcmp(b, mapped, 12)) inet_ntop(AF_INET, b + 12, host, sizeof host);   // (an IPv4 address, mapped)
+		else inet_ntop(AF_INET6, &v6->sin6_addr, host, sizeof host);
+	} else inet_ntop(AF_INET, &reinterpret_cast<const sockaddr_in *>(a)->sin_addr, host, sizeof host);
+	return host;
+}
+
+// (a UDP socket "connected" to an address outside, nothing sent: the address the system would send from)
+std::string lan_address()
+{
+#ifdef _WIN32
+	WSADATA d;
+	if (WSAStartup(MAKEWORD(2, 2), &d) != 0) return "";
+#endif
+	std::string out;
+	sock_t s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+	if (s != NO_SOCKET) {
+		sockaddr_in to{};
+		to.sin_family = AF_INET;
+		to.sin_port = htons(53);
+		inet_pton(AF_INET, "8.8.8.8", &to.sin_addr);
+		sockaddr_in me{};
+		socklen_t n = sizeof me;
+		char host[INET_ADDRSTRLEN] = {};
+		if (::connect(s, reinterpret_cast<sockaddr *>(&to), sizeof to) == 0 && getsockname(s, reinterpret_cast<sockaddr *>(&me), &n) == 0 &&
+			inet_ntop(AF_INET, &me.sin_addr, host, sizeof host) && strcmp(host, "0.0.0.0") != 0)
+			out = host;
+		close_socket(s);
+	}
+#ifdef _WIN32
+	WSACleanup();
+#endif
+	return out;
 }
 
 // ---- the simulated wire ----

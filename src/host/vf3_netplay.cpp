@@ -73,6 +73,7 @@ bool Adapter::begin(const std::vector<uint8_t> &blob)
 	memcpy(&magic, blob.data(), 4);
 	if (magic != BLOB_MAGIC) return false;
 	if (settle) settle();
+	if (on_begin) on_begin();
 	memcpy(board.backup.data(), blob.data() + 4, board.backup.size());
 	memcpy(board.eeprom.regs, blob.data() + 4 + board.backup.size(), sizeof board.eeprom.regs);
 	// the PC way on both sides, whatever each plays offline: the FREE PLAY notices hidden in the CROM the boot

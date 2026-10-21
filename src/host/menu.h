@@ -20,7 +20,8 @@ struct menu_item
 	bool heading = false;                 // a section's title (with info: not selectable)
 	bool sub = false;                     // a row belonging to the one above it (indented)
 	std::function<std::string()> below;   // a line under the row when not empty (a mistake to put right, a status)
-	bool good = false;                    // (below: shown as good news, not a mistake)
+	std::function<bool()> good;           // (below: true, shown as good news or how it's going, not a mistake)
+	bool big = false;                     // (info: big, to be read out: a host's address)
 };
 
 struct menu_page
@@ -39,7 +40,15 @@ public:
 	bool init(SDL_Window *win, SDL_Renderer *ren, const std::string &assets_dir);
 	bool ready() const;
 	void set_footer(const std::string &text);
-	void set_fps(const std::string &text);      // the small FPS at the top right; empty hides it   // the small line at the bottom right (version and date)
+	void set_title(const std::string &text);    // (PAUSED; a match goes on under the menu: ONLINE MATCH)
+	void select_row(int i) { select(i); }
+	void set_fps(const std::string &text);      // the small FPS at the top right; empty hides it
+	// Over the game, the menu open or not: online play's connection at the top (empty hides it; level 0 good,
+	// 1 fair, 2 poor), a notice for a few seconds near the bottom, and one that stays in the middle while it's
+	// true (empty title: gone)
+	void set_net(const std::string &text, int level);
+	void toast(const std::string &text, double seconds = 4);
+	void set_notice(const std::string &title, const std::string &sub = "");
 
 	bool is_open() const { return m_open; }
 	bool capturing() const { return bool(m_capture); }   // (a key or a name being typed: every key its)
@@ -49,6 +58,8 @@ public:
 	void pop();                           // back a page; closes at the top
 	void replace(menu_page p, int sel);   // the page on top made again (rows come and go), this row selected
 	size_t depth() const { return m_stack.size(); }
+	const std::string &top_name() const { static const std::string none; return m_stack.empty() ? none : m_stack.back().name; }
+	SDL_Window *window() const;
 	int selected() const { return m_sel; }
 	void refresh();                       // redraw the values (changed from outside)
 	// Waits for a key or pad button: on_event sees each input event until it returns true. Esc
@@ -66,7 +77,9 @@ public:
 private:
 	std::unique_ptr<impl> m;
 	bool m_open = false;
-	std::string m_fps;
+	std::string m_fps, m_net, m_notice;
+	int m_net_level = -1;
+	uint64_t m_toast_until = 0;   // (SDL_GetTicks)
 	std::vector<menu_page> m_stack;
 	std::vector<int> m_sel_stack;
 	int m_sel = 0;
