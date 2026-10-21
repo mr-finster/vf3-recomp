@@ -83,6 +83,8 @@ struct Case
 	std::function<void(vfnet::SimWire &, double t, uint32_t fa, uint32_t fb)> during;   // (cuts)
 	vfnet::Identity id_b{ "toy", "v1", 42, "GUEST" };
 	uint32_t corrupt_b = UINT32_MAX;
+	uint32_t redelay_at = UINT32_MAX;   // (at this frame the host's delay becomes redelay_a, the guest's redelay_b)
+	int redelay_a = 0, redelay_b = 0;
 	size_t blob = 1000;
 	// what should happen
 	vfnet::Session::End expect_a = vfnet::Session::End::none, expect_b = vfnet::Session::End::none;
@@ -113,6 +115,8 @@ bool run(const Case &c)
 		// (the network polled every millisecond, as the game does while it waits for the next frame's time)
 		a.poll(t);
 		b.poll(t);
+		if (a.frame() == c.redelay_at && a.delay() != c.redelay_a) a.set_delay(c.redelay_a);
+		if (b.frame() == c.redelay_at && b.delay() != c.redelay_b) b.set_delay(c.redelay_b);
 		if (t >= next_a) { a.step(pa.next()); next_a += fa_ms; }
 		if (t >= next_b) { b.step(pb.next()); next_b += fb_ms; }
 		vfnet::Session::Event e;
@@ -179,6 +183,12 @@ int main(int argc, char **argv)
 	{
 		Case c{ "delay 0 / 4 (30 ms)", P{ 30, 4, 0 }, P{ 30, 4, 0 } };
 		c.delay_a = 0; c.delay_b = 4;
+		cases.push_back(c);
+	}
+	{
+		Case c{ "delays changed mid-match (2 to 5, 3 to 0)", P{ 30, 4, 0.01 }, P{ 30, 4, 0.01 } };
+		c.delay_b = 3;
+		c.redelay_at = 1200; c.redelay_a = 5; c.redelay_b = 0;
 		cases.push_back(c);
 	}
 	{
