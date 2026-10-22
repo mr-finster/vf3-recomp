@@ -2250,6 +2250,9 @@ int main(int argc, char **argv)
 		choice("Rounds to win (vs player)", "Rounds needed to win a match between two players.", 3, 2, 5, [](int v) { return std::to_string(v); });
 		energy("Energy (vs CPU)", "Each fighter's energy in a match against the computer (the arcade's ENERGY MAX).", 8, 160, 360);
 		energy("Energy (vs player)", "Each fighter's energy in a match between two players.", 12, 180, 400);
+		choice("Stage select (vs player)", "A match between two players: the challenger picks the stage (the arcade's own screen, 8 seconds; "
+		       "hold Start on one for its Dural version). Off, every such match is on the same stage. Online matches always have it on.",
+		       0x17, 0, 1, [&](int v) { return on_off(v == 0); });
 		choice("Demo sound", "Sound during the demo that plays between games.", 7, 0, 1, [&](int v) { return on_off(v == 0); });
 		choice("Country", "The arcade's region: Japan, USA, Export or Asia. It changes the game's text and what it shows.", 0x1E, 0, 3,
 			[](int v) { return std::string(COUNTRY[v]); });
@@ -2670,7 +2673,7 @@ int main(int argc, char **argv)
 				                   online.is_hosting() ? online.my_country() : online.peer_country(), online.is_hosting() ? online.peer_country() : online.my_country() });
 			}
 			// (nothing else said over the game: the Online screen says what came of it, when it's next opened)
-			fprintf(stderr, "online: %s\n", n.text.c_str());
+			fprintf(stderr, "online: %s\n", Online::log_masked(n.text).c_str());
 		}
 		if ((match_on && !online.playing()) || (nvram_away && !online.playing() && !online.starting())) end_match();   // (ended, left, or never got going)
 		// (quiet a second is often only both games restarting their boards at the match's start: said after two, and
@@ -2708,7 +2711,12 @@ int main(int argc, char **argv)
 				? "Hosting   " + (online.local_address().empty() ? std::string("no network") : online.local_address()) + "   " + online.status()
 				: online.status();
 		if (menu.versus_showing()) line.clear();   // (the versus screen says who and how; and the start's quiet isn't news)
-		menu.set_net(line, level, online.playing() && cfg.online.show_connection == 2 && !line.empty() ? online.connection_detail() : std::string());
+		// (the details' figures change every frame: said 4 times a second, not laid out again each frame)
+		static std::string detail;
+		static uint64_t detail_at = 0;
+		if (!(online.playing() && cfg.online.show_connection == 2 && !line.empty())) detail.clear();
+		else if (detail.empty() || SDL_GetTicks() - detail_at >= 250) { detail = online.connection_detail(); detail_at = SDL_GetTicks(); }
+		menu.set_net(line, level, detail);
 		// the Online page as things change: its rows made again with the phase, its status lines a few times a second
 		if (menu.is_open() && (online.phase() != online_was || online.room_code() != online_code_was) && menu.top_name() == "Online" && !menu.capturing())
 			menu.replace(online_page(), -1);

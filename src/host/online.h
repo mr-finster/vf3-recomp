@@ -132,6 +132,7 @@ public:
 	int players_online(const OnlineSettings &s);
 	// At a quit: a moment (at most ms) for the goodbyes to the lobby still on their way (a room closed, a search left)
 	static void flush(int ms);
+	static std::string log_masked(const std::string &t);   // (a line for the log, its addresses' ends hidden)
 	bool slow_local() const { return local_slow; }   // (this match through the relay only for a Mac's Local Network permission)
 	void set_last_match(const LastMatch &m) { last = m; }   // ({}: forgotten, the menu closed after it; tests: one made up)
 	void forget_failure() { failure.clear(); }              // (the menu closed after it)

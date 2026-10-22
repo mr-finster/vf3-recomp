@@ -14,7 +14,16 @@ uint64_t hash64(const uint8_t *p, size_t n)
 	// four lanes a word in four, so the multiplies don't wait on each other; little-endian words on every platform
 	constexpr uint64_t K = 0xFF51AFD7ED558CCDull;
 	uint64_t h[4] = { 0x9E3779B97F4A7C15ull ^ n, 0xC2B2AE3D27D4EB4Full, 0x165667B19E3779F9ull, 0x27D4EB2F165667C5ull };
-	auto le64 = [](const uint8_t *q) { uint64_t w = 0; for (int i = 7; i >= 0; i--) w = w << 8 | q[i]; return w; };
+	// (a word loaded as it is, little-endian made so on a big-endian machine: the byte-at-a-time loop this was made
+	// the 27 MB state's hash ~30 ms, a hitch every checkpoint on a Steam Deck; the same value, ~4x faster)
+	auto le64 = [](const uint8_t *q) {
+		uint64_t w;
+		memcpy(&w, q, 8);
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+		w = __builtin_bswap64(w);
+#endif
+		return w;
+	};
 	size_t i = 0;
 	for (; i + 32 <= n; i += 32)
 		for (int l = 0; l < 4; l++) {
@@ -103,6 +112,7 @@ Session::Session(Link &link, Game &game, const Identity &me_, const Config &cfg_
 	cfg.max_rollback = std::clamp(cfg.max_rollback, 1, 30);
 	cfg.checksum_every = std::max(cfg.checksum_every, 1);
 	ring.resize(size_t(cfg.max_rollback) + 2);
+	ring_frame.assign(ring.size(), UINT32_MAX);
 	if (!host) {   // (the guest's token, at random: the host takes it from the hello)
 		token = cfg.token ? cfg.token : random64();
 		have_token = true;
@@ -532,6 +542,7 @@ void Session::check_hashes(bool work)
 	}
 	while (work && hashing.on && budget-- > 0) {
 		const auto t0 = Clock::now();
+		if (ring_frame[hashing.frame % R] != hashing.frame) { hashing.on = false; break; }   // (not its state there: not checked)
 		const std::vector<uint8_t> &st = ring[hashing.frame % R];
 		const size_t skip = std::min(st.size(), game.hash_skip()), n = st.size() - skip;
 		const size_t a = skip + n * size_t(hashing.part) / HASH_PARTS, b = skip + n * size_t(hashing.part + 1) / HASH_PARTS;
@@ -566,13 +577,17 @@ bool Session::step(uint16_t input)
 	if (rollback_from < cur) {
 		const uint32_t from = rollback_from;
 		rollback_from = UINT32_MAX;
-		if (cur - from >= R || !game.load(ring[from % R])) {
+		if (cur - from >= R || ring_frame[from % R] != from || !game.load(ring[from % R])) {
 			finish(End::desync, "The game couldn't go back to a frame (rollback).");
 			return false;
 		}
 		const auto t0 = Clock::now();
 		for (uint32_t g = from; g < cur; g++) {
-			if (g != from) game.save(ring[g % R]);
+			// (a frame whose inputs are all here now is never gone back to again, a rollback starting at the first
+			// not yet here: its state's kept only if the desync check wants it; a save each is a ms or two on a Deck)
+			const bool wanted = g >= remote.size() || g == next_check || (hashing.on && g == hashing.frame);
+			if (g != from && wanted) { game.save(ring[g % R]); ring_frame[g % R] = g; }
+			else if (g != from) ring_frame[g % R] = UINT32_MAX;   // (what's there is another frame's now)
 			run_frame(g, true);
 		}
 		stats_.resim_ms += ms_since(t0);
@@ -623,6 +638,7 @@ bool Session::step(uint16_t input)
 
 	const auto t0 = Clock::now();
 	game.save(ring[cur % R]);
+	ring_frame[cur % R] = cur;
 	stats_.save_ms += ms_since(t0);
 	const auto t1 = Clock::now();
 	run_frame(cur, false);
