@@ -63,6 +63,7 @@ public:
 	std::string connection_detail() const;
 	// the other player's name, as the HUD can show it (only its letters: whatever else the other side sent, dropped)
 	std::string opponent() const;
+	static bool local_address(const std::string &address);   // (a private network's: 192.168.x.x and the like)
 	int local_player() const { return is_host ? 0 : 1; }   // (the host is player 1)
 	int delay_now() const { return session ? session->delay() : 0; }
 	void set_delay(int setting);  // the menu's, in a match (Auto: from the ping)
@@ -71,6 +72,8 @@ public:
 	// (gently: much more and the sound's queue ran dry, and its catching up ran frames in a burst)
 	double slow_down() const { return playing() && session ? std::clamp(session->stats().lead * 0.01, 0.0, 0.02) : 0.0; }
 	const LastMatch &last_match() const { return last; }
+	// Why the last join didn't get going ("" if it did, or none yet): shown under Connect
+	const std::string &join_failure() const { return failure; }
 	void set_last_match(const LastMatch &m) { last = m; }   // ({}: forgotten, the menu closed after it; tests: one made up)
 	const std::string &local_address() const { return lan; }
 	int local_port() const { return port; }
@@ -85,6 +88,7 @@ private:
 	std::string lan, joining_to;
 	double now = 0, logged_at = 0, began_at = 0;
 	LastMatch last;
+	std::string failure;
 	void ended(const std::string &why);   // (the match over: kept as the last match)
 	uint64_t logged_rb = 0, logged_resim = 0, logged_stalls = 0, logged_waits = 0, logged_steps = 0;
 	double logged_save = 0, logged_run = 0, logged_resim_ms = 0, logged_hash = 0;

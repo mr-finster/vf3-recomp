@@ -39,6 +39,16 @@ void Online::ended(const std::string &why)
 	fprintf(stderr, "online: the match with %s ended after %d s: %s\n", last.opponent.c_str(), last.seconds, why.c_str());
 }
 
+// A private network's address (192.168.x.x, 10.x.x.x, 172.16-31.x.x: an iPhone's hotspot is 172.20.10.x; 169.254.x.x):
+// reachable only from the same network. (Not 100.64-127.x.x: Tailscale's, which reach across the internet.)
+bool Online::local_address(const std::string &a)
+{
+	unsigned b[4];
+	char tail = 0;
+	if (sscanf(a.c_str(), "%u.%u.%u.%u%c", &b[0], &b[1], &b[2], &b[3], &tail) < 4) return false;
+	return b[0] == 10 || (b[0] == 192 && b[1] == 168) || (b[0] == 172 && b[1] >= 16 && b[1] <= 31) || (b[0] == 169 && b[1] == 254);
+}
+
 std::string Online::opponent() const
 {
 	if (!session) return "";
@@ -50,6 +60,7 @@ bool Online::host(const OnlineSettings &s, std::string &error)
 {
 	stop();
 	last = {};
+	failure.clear();
 	started_with = s;
 	is_host = true;
 	auto_delay = s.delay < 0;
@@ -65,6 +76,7 @@ bool Online::join(const OnlineSettings &s, std::string &error)
 {
 	stop();
 	last = {};
+	failure.clear();
 	started_with = s;
 	is_host = false;
 	auto_delay = s.delay < 0;
@@ -133,6 +145,13 @@ void Online::poll(double t)
 				ended(why == vfnet::Session::End::opponent_quit ? who + " left the match."
 				      : why == vfnet::Session::End::disconnected ? "Lost the connection to " + who + "."
 				      : why == vfnet::Session::End::desync ? "The match went out of step." : e.text);
+			}
+			if (!was_playing && !is_host && why != vfnet::Session::End::quit) {
+				failure = e.text;
+				// (a local address over the internet: the commonest mistake, worth saying what to do)
+				if (why == vfnet::Session::End::timeout && local_address(joining_to))
+					failure += " " + joining_to + " is a local address: it works only on the same network (Wi-Fi, a hotspot). Over the "
+					           "internet, use the host's public address or a VPN like Tailscale.";
 			}
 			if (why != vfnet::Session::End::quit)
 				notices.push_back({ was_playing ? Notice::ended : Notice::refused, was_playing ? last.why : e.text });
@@ -374,8 +393,12 @@ menu_page join_page(Online &o, OnlineSettings &s, game_menu &menu, std::function
 			std::string err;
 			if (!o.join(s, err)) *problem = err;
 		} };
-	c.below = [&o, problem] { return !problem->empty() ? *problem : o.phase() == Online::Phase::joining ? o.status() : std::string(); };
-	c.good = [problem] { return problem->empty(); };
+	c.below = [&o, problem] {
+		if (!problem->empty()) return *problem;
+		if (o.phase() == Online::Phase::joining) return o.status();
+		return o.join_failure();   // (why it didn't, once it's stopped trying)
+	};
+	c.good = [&o, problem] { return problem->empty() && (o.phase() == Online::Phase::joining || o.join_failure().empty()); };
 	p.items.push_back(c);
 	p.items.push_back({ "Stop", "Stops trying to join.", {}, {}, [&o, problem] { o.stop(); problem->clear(); } });
 	// (the Online page under it made again: it was made before Connect, and shows joining now, or what came of it)
