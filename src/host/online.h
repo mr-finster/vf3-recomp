@@ -124,7 +124,8 @@ public:
 	// What the host's screen says besides how it's going: a player who couldn't join and why, the lobby hard to
 	// reach ("" none)
 	const std::string &host_note() const { return note; }
-	// The match on its title screen: 1 this player hasn't pressed Start yet, 2 the other hasn't, 0 both have (or no match)
+	// Who's to press Start: on the match's title screen 1 this player hasn't yet, 2 the other hasn't; after a match
+	// (the loser out of the game, as its RAM has it) 3 this player's out (Start for a rematch), 4 the other is; 0 none
 	int start_wait() const;
 	bool slow_local() const { return local_slow; }   // (this match through the relay only for a Mac's Local Network permission)
 	void set_last_match(const LastMatch &m) { last = m; }   // ({}: forgotten, the menu closed after it; tests: one made up)
@@ -153,6 +154,7 @@ private:
 	vf3net::Score score;
 	mutable size_t start_scan[2] = {};   // (start_wait: how far each player's inputs have been looked through)
 	mutable bool start_seen[2] = {};
+	bool both_in = false;   // (both have been in the game at once, as its RAM has it: start_wait's rematches)
 	Try tried = Try::none;
 	std::string want_code;           // (host_room's want)
 	double patient_until = 0;
