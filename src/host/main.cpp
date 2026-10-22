@@ -2089,6 +2089,9 @@ int main(int argc, char **argv)
 	bool half_left = false;
 	uint64_t half_ns = 0;   // (its first half's time, counted with the frame's)
 	auto reset_game = [&] {
+		// (never on a match's board, from its start: the host's settings booted, the same on both sides; a reset
+		// there, or a setting changed, and the match goes out of step. end_match gives this player's back first.)
+		if (nvram_away) { fprintf(stderr, "(no restart: an online match's board)\n"); return; }
 		half = false;
 		menu.close();   // (back to the game, as VF1's and VF2's)
 		paused = false;
@@ -2205,7 +2208,7 @@ int main(int argc, char **argv)
 		p.items.push_back({ "Play style",
 			"PC skips the boot screen and is always free play. Arcade has the boot screen, coins and credits, like the real cabinet: Start needs a credit, and Coin adds one (5 and 6, or set it in Controls: a key, or a pad button such as View); its coin settings are kept for it. Changing it restarts the game.",
 			[&] { return std::string(cfg.arcade ? "Arcade" : "PC"); },
-			[&](int) { cfg.arcade = !cfg.arcade; g_pc_mode = !cfg.arcade; cfg_dirty = true; reset_game(); } });
+			[&](int) { if (nvram_away) return; cfg.arcade = !cfg.arcade; g_pc_mode = !cfg.arcade; cfg_dirty = true; reset_game(); } });
 		p.items.push_back({ "Reset game", "Restarts the game, like switching the arcade off and on. Rankings and settings are kept. (F3)",
 			{}, {}, [&] { reset_game(); } });
 		p.items.push_back(back_item());
@@ -2225,7 +2228,7 @@ int main(int argc, char **argv)
 				[at, o, lo, hi, name] { const int v = at(o); return v < lo || v > hi ? std::string("-") : name(v); },
 				[&, at, o, lo, hi](int d) {
 					const int v = at(o);
-					if (v < lo || v > hi) return;
+					if (v < lo || v > hi || nvram_away) return;   // (not the host's settings, a match's)
 					at(o) = uint8_t(std::clamp(v + d, lo, hi));
 				} });
 		};
@@ -2235,7 +2238,7 @@ int main(int argc, char **argv)
 				[get, lo, hi] { const int v = get(); return v < lo || v > hi ? std::string("-") : std::to_string(v); },
 				[&, at, get, o, lo, hi](int d) {
 					const int v = get();
-					if (v < lo || v > hi) return;
+					if (v < lo || v > hi || nvram_away) return;
 					const int n = std::clamp(v + 10 * d, lo, hi);
 					for (int i = 0; i < 4; i++) at(o + i) = uint8_t(n >> (24 - 8 * i));
 				} });
@@ -2394,12 +2397,12 @@ int main(int argc, char **argv)
 	};
 	auto main_page = [&] {
 		menu_page p{ "", "", {} };
-		if (online.playing()) {   // (the match goes on under the menu)
+		if (online.playing() || nvram_away) {   // (the match goes on under the menu; or it's starting, on its board)
 			p.items.push_back({ "Resume", "Back to the match (it goes on while the menu's open).", {}, {}, [&] { menu.close(); } });
 			online_menu::match_rows(online, cfg.online, menu, [&] { cfg_dirty = true; }, p.items);
 			p.items.push_back({ "Display", "Sharpness, antialiasing, screen shape, the 3D renderer, smooth motion, background and screen filters, frame rate and fullscreen.", {}, {}, [&] { menu.push(display_page()); } });
 			p.items.push_back({ "Sound", "The overall, music and effects volumes.", {}, {}, [&] { menu.push(sound_page()); } });
-			p.items.push_back({ "Controls", "Each player's controller, keys and buttons. Online, you play with Player 1's.", {}, {}, [&] { menu.push(controls_page()); } });
+			p.items.push_back({ "Controls", "Each player's controller, keys and buttons. Online, either player's controls play your fighter.", {}, {}, [&] { menu.push(controls_page()); } });
 			return p;
 		}
 		p.items.push_back({ "Resume", "Back to the game.", {}, {}, [&] { menu.close(); } });
@@ -2584,6 +2587,7 @@ int main(int argc, char **argv)
 		game.tiles_on = true;
 		menu.set_notice("");
 		menu.set_banner("");
+		menu.hide_versus();
 		menu.set_net("", 0);
 		board.rtc_time = -1;
 		if (nvram_away) {
@@ -2727,10 +2731,16 @@ int main(int argc, char **argv)
 	// passes went past their refresh)
 	struct { bool on = false, ok = false; double ms = 0; } match_job;
 	bool match_job_taken = false;
+	// A step that couldn't run (the other side behind, or keeping in time) takes no input: what was pressed for it
+	// goes with the next one tried, so a tap of Start or Coin then (read_inputs plays them out over a few frames,
+	// each read once) isn't lost
+	uint16_t step_carry = 0, match_job_bits = 0;
+	constexpr uint16_t ONE_SHOT = vf3net::START_BUTTON | 512;   // (Start and Coin: the input word's, vf3net::pack)
 	auto take_match_job = [&] {
 		if (!match_job.on) return;
 		game.job_wait();
 		match_job.on = false;
+		step_carry = match_job.ok ? 0 : uint16_t(match_job_bits & ONE_SHOT);
 		if (!match_job.ok) {   // (it couldn't run: still due)
 			frames_run -= 1;
 			frame_clock = std::min(frame_clock, double(frames_run) + 1.0);
@@ -2797,8 +2807,8 @@ int main(int argc, char **argv)
 			if (e.type == SDL_EVENT_KEY_DOWN && !e.key.repeat) {
 				switch (e.key.scancode) {
 				case SDL_SCANCODE_ESCAPE: open_menu(); break;
-				case SDL_SCANCODE_P: if (!online.playing()) paused = !paused; break;   // (a match can't pause)
-				case SDL_SCANCODE_F3: if (!online.playing()) reset_game(); break;
+				case SDL_SCANCODE_P: if (!online.playing() && !nvram_away) paused = !paused; break;   // (a match can't pause)
+				case SDL_SCANCODE_F3: if (!online.playing() && !nvram_away) reset_game(); break;
 				case SDL_SCANCODE_F9:   // the timings in the title (and the log) every 2 s
 					cfg.timings = !cfg.timings; cfg_dirty = true; title_now.clear();
 					t9 = {}; t9.t0 = SDL_GetTicksNS();
@@ -2979,13 +2989,14 @@ int main(int argc, char **argv)
 					const uint16_t sb = vf3net::pack(script_ctl, 0);
 					vf3net::unpack(uint16_t(vf3net::pack(live, 0) | sb), 0, live);
 				}
-				const uint16_t bits = menu.is_open() ? 0 : uint16_t(vf3net::pack(live, 0) | vf3net::pack(live, 1));
+				const uint16_t bits = menu.is_open() ? 0 : uint16_t(vf3net::pack(live, 0) | vf3net::pack(live, 1) | step_carry);
 				game.builder.widen = std::max(1.0f, float(picture_aspect()) * 0.75f) * 1.05f;
 				const uint64_t te = SDL_GetTicksNS();
 				online.poll(double(te) / 1e6);
 				if (hk == hotkey::menu) open_menu();
 				if (emu_threaded && i + 1 == due) {   // (the pass's last: on the game's thread, taken next pass)
 					match_job = { true, false, 0 };
+					match_job_bits = bits;
 					game.job_run([&, bits] {
 						const uint64_t t0 = SDL_GetTicksNS();
 						match_job.ok = online.step(bits);
@@ -2994,10 +3005,12 @@ int main(int argc, char **argv)
 					break;
 				}
 				if (!online.step(bits)) {
+					step_carry = uint16_t(bits & ONE_SHOT);
 					frames_run -= uint64_t(due - i);
 					frame_clock = std::min(frame_clock, double(frames_run) + 1.0);
 					break;
 				}
+				step_carry = 0;
 				game.publish();
 				game_frame++;
 				pace.frames++;
@@ -3327,7 +3340,9 @@ int main(int argc, char **argv)
 		(void)shown;
 	}
 	if (game.emu_thread.joinable()) game.job_wait();   // (a match's step still running)
+	if (flag_atlas) SDL_DestroySurface(flag_atlas);
 	online.stop();   // (closed in a match: the other side is told at once, not after a silence)
+	Online::flush(1500);   // (and the lobby told: a room closed, a search left)
 	if (nvram_away) {   // (closed in a match: this player's own NVRAM back, to be saved, not the host's)
 		if (game.emu_thread.joinable()) game.job_wait();
 		board.backup = own_backup;

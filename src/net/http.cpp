@@ -64,6 +64,8 @@ Reply request(const std::string &method, const std::string &url, const std::stri
 	Handle req(WinHttpOpenRequest(conn.h, wide(method).c_str(), target.c_str(), nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES,
 	                              secure ? WINHTTP_FLAG_SECURE : 0));
 	if (!req.h) { r.error = "couldn't reach the online service"; return r; }
+	DWORD never = WINHTTP_OPTION_REDIRECT_POLICY_NEVER;   // (as curl: a redirect isn't followed, nor the request sent elsewhere)
+	WinHttpSetOption(req.h, WINHTTP_OPTION_REDIRECT_POLICY, &never, sizeof never);
 	const wchar_t *headers = L"Content-Type: application/json\r\n";
 	if (!WinHttpSendRequest(req.h, headers, DWORD(-1), body.empty() ? WINHTTP_NO_REQUEST_DATA : const_cast<char *>(body.data()), DWORD(body.size()),
 	                        DWORD(body.size()), 0) ||

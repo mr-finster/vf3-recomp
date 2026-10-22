@@ -44,3 +44,8 @@ simple = { limit = 20, period = 60 }
 name = "TURN_LIMIT"
 namespace_id = "1004"
 simple = { limit = 30, period = 60 }
+
+[[ratelimits]]
+name = "WAIT_LIMIT"
+namespace_id = "1005"
+simple = { limit = 180, period = 60 }   # (the hosts' and searchers' waits: one each 20 s, many players behind one address)

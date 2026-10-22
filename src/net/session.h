@@ -193,6 +193,8 @@ private:
 	void send_packet(const std::vector<uint8_t> &p);
 	void send_hello();
 	void send_blob();
+	void send_chunks(uint32_t from_chunk, uint32_t to_chunk);
+	double blob_moved = 0;   // (when the settings' window last moved on, or went again)
 	void send_inputs();
 	bool receive(const std::vector<uint8_t> &p);   // false: not this session's
 	void handle(const std::vector<uint8_t> &p);    // (this session's: its token checked)

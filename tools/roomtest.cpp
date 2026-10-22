@@ -63,7 +63,7 @@ bool run(const char *what, const std::string &server, const std::string &user, c
 	printf("  %s: host %s(public %s, relay %s); guest %s(public %s, relay %s)\n", what, join(a.link.candidates()).c_str(), a.link.public_address().c_str(),
 	       a.link.relay_address().c_str(), join(b.link.candidates()).c_str(), b.link.public_address().c_str(), b.link.relay_address().c_str());
 	if ((a_turn && a.link.relay_address().empty()) || (b_turn && b.link.relay_address().empty()) || a.link.public_address().empty()) {
-		printf("  FAIL %s: no relay or public address\n", what);
+		printf("  FAIL %s: no relay or public address (host: %s; guest: %s)\n", what, a.link.report(0).c_str(), b.link.report(0).c_str());
 		return false;
 	}
 	const std::vector<std::string> nowhere = { "10.255.255.1:9" };   // (a private network's: nothing there, and never through a relay)

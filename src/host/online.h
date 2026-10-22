@@ -130,6 +130,8 @@ public:
 	// How many play at random now (searching, or in a random match lately), as the lobby last said; -1 not known.
 	// Asked again every 30 s while it's called (the Online screen open), never while a match is on or being made
 	int players_online(const OnlineSettings &s);
+	// At a quit: a moment (at most ms) for the goodbyes to the lobby still on their way (a room closed, a search left)
+	static void flush(int ms);
 	bool slow_local() const { return local_slow; }   // (this match through the relay only for a Mac's Local Network permission)
 	void set_last_match(const LastMatch &m) { last = m; }   // ({}: forgotten, the menu closed after it; tests: one made up)
 	void forget_failure() { failure.clear(); }              // (the menu closed after it)
@@ -160,12 +162,14 @@ private:
 	std::shared_ptr<std::atomic<int>> online_count = std::make_shared<std::atomic<int>>(-1);
 	std::shared_ptr<std::atomic<bool>> online_asking = std::make_shared<std::atomic<bool>>(false);
 	double online_asked = -1e18;   // (when, in ms)
+	bool reopening = false;  // (opening: the same room again, after a player who couldn't join)
 	int random_misses = 0;   // (random opponents in a row not reached)
 	bool both_in = false;   // (both have been in the game at once, as its RAM has it: start_wait's rematches)
 	mutable size_t out_scan[2] = { SIZE_MAX, SIZE_MAX };   // (a player out of the game: their inputs looked through from then)
 	mutable bool out_pressed[2] = {};                     // (and they've pressed Start since: on their way back in)
 	Try tried = Try::none;
 	std::string want_code;           // (host_room's want)
+	std::string kept_code, kept_key;  // (the last room this side hosted: its code and key, for a Play again's)
 	double patient_until = 0;
 	std::string patient_for;         // (whose room's waited for)
 	bool random = false;
@@ -191,6 +195,7 @@ private:
 	std::string me_json(const std::string &extra) const;   // this side, as the lobby takes it
 	void start_job(std::function<void(Job &)> work);
 	void room_poll();
+	void host_again(const std::string &why);
 	void room_session(bool host);       // the session, with the lobby's token, on the room's link
 	void room_failed(const std::string &why);
 	void joined(const vfnet::json::Value &v);   // (the room found: connecting to its host)

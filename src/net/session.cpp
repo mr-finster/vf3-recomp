@@ -166,7 +166,12 @@ void Session::send_welcome()
 void Session::send_blob()
 {
 	if (!proven) return;
-	for (uint32_t i = chunks_acked; i < std::min(chunk_count, chunks_acked + CHUNK_WINDOW); i++) {
+	send_chunks(chunks_acked, chunks_acked + CHUNK_WINDOW);
+}
+
+void Session::send_chunks(uint32_t from_chunk, uint32_t to_chunk)
+{
+	for (uint32_t i = from_chunk; i < std::min(chunk_count, to_chunk); i++) {
 		Out o(BLOB, token);
 		o.u32(i);
 		const size_t from = size_t(i) * CHUNK, n = std::min(CHUNK, start_blob.size() - from);
@@ -247,7 +252,7 @@ void Session::poll(double t)
 				else if (began) { Out r(READY, token); r.u64(nonce); send_packet(r.b); last_hello = now; }
 				else { Out a(BLOB_ACK, token); a.u32(chunks_acked); a.u64(nonce); send_packet(a.b); last_hello = now; }
 			} else if (!their_name.empty() && !began) {
-				if (proven) send_blob();
+				if (proven) { if (now - blob_moved >= 300) { send_blob(); blob_moved = now; } }   // (the window again only once acks stop: not every 100 ms)
 				else if (welcomes < MAX_WELCOMES && now - last_hello >= 200) send_welcome();   // (unanswered: soon given up)
 			}
 		}
@@ -329,6 +334,7 @@ void Session::handle(const std::vector<uint8_t> &p)
 		const uint64_t n_ = in.u64();
 		if (!in.ok || size > cfg.max_blob || count != (size_t(size) + CHUNK - 1) / CHUNK) return;
 		nonce = n_;
+		link.lock();   // (the way the host's welcome came by, with this side's token: only that one from now)
 		their_name = name.empty() ? "PLAYER 1" : name;
 		if (trace) trace("the host answered (" + their_name + "): its settings, " + std::to_string(size) + " bytes");
 		blob_size = size;
@@ -391,9 +397,14 @@ void Session::handle(const std::vector<uint8_t> &p)
 		if (!in.ok || in.u64() != nonce || !in.ok) return;   // (not from where the welcome went)
 		const bool first = !proven;
 		proven = true;
-		if (n > chunks_acked && n <= chunk_count) chunks_acked = n;
-		else if (!first) return;
-		send_blob();   // (the first window, or the window moved on)
+		if (first) { if (n <= chunk_count) chunks_acked = std::max(chunks_acked, n); send_blob(); blob_moved = now; return; }   // (the first window)
+		if (n <= chunks_acked || n > chunk_count) return;
+		// the window moved on: only what's come into it (what's lost in it is sent again by poll's timer, not
+		// on every ack: the whole window again each ack was the settings sent ~30 times over)
+		const uint32_t was = chunks_acked;
+		chunks_acked = n;
+		blob_moved = now;
+		send_chunks(std::max(was + CHUNK_WINDOW, n), n + CHUNK_WINDOW);
 		return;
 	}
 	case READY: {
@@ -496,8 +507,12 @@ void Session::check_hashes(bool work)
 	const uint32_t R = uint32_t(ring.size());
 	// (a confirmed frame's state, hashed a part each step: it stays in the ring R frames, and a rollback never saves
 	// it again, a confirmed frame being before any wrong guess)
+	// (the ring's slot for frame f is saved over by frame f + R: at this check, before this step's save, f's is there
+	// while cur - f <= R; a resim before it saves only frames after f and before cur. A frame confirmed only when
+	// it's nearly gone from the ring, as at a high ping or a small input delay, is hashed whole at once: hashing it a
+	// part a step there, every checkpoint ran out of the ring unchecked and a desync went on unseen.)
 	if (work && !hashing.on) {
-		while (next_check <= remote.size() && next_check < cur && rollback_from >= next_check && cur - next_check >= R)
+		while (next_check <= remote.size() && next_check < cur && rollback_from >= next_check && cur - next_check > R)
 			next_check += uint32_t(cfg.checksum_every);   // (gone from the ring meanwhile: that one's not checked)
 		if (next_check <= remote.size() && next_check < cur && rollback_from >= next_check) {
 			hashing.on = true;
@@ -506,9 +521,9 @@ void Session::check_hashes(bool work)
 			hashing.h = 0x9E3779B97F4A7C15ull;
 			next_check += uint32_t(cfg.checksum_every);
 		}
-	} else if (work && hashing.on && cur - hashing.frame >= R)
+	} else if (work && hashing.on && cur - hashing.frame > R)
 		hashing.on = false;   // (it stalled out of the ring: not checked)
-	if (work && hashing.on) {
+	while (work && hashing.on) {
 		const auto t0 = Clock::now();
 		const std::vector<uint8_t> &st = ring[hashing.frame % R];
 		const size_t skip = std::min(st.size(), game.hash_skip()), n = st.size() - skip;
@@ -520,6 +535,7 @@ void Session::check_hashes(bool work)
 			my_hash[hashing.frame] = hashing.h;
 			while (my_hash.size() > 64) my_hash.erase(my_hash.begin());
 		}
+		if (cur - hashing.frame < R - 1) break;   // (the rest next steps: its slot's kept a step more at least)
 	}
 	for (auto it = their_hash.begin(); it != their_hash.end();) {
 		auto m = my_hash.find(it->first);

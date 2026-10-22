@@ -61,7 +61,8 @@ and the games started with `VF_LOBBY=http://127.0.0.1:8787`.
 ## What stops abuse
 
 - **Rate limits** per address (an IPv6 one by its /64), in `wrangler.toml`: 600 requests a minute in all, 60 rooms
-  opened or random searches, 20 joins, 30 relay logins; and 6 random searches at once. High enough for a phone
+  opened or random searches, 20 joins, 30 relay logins, 180 waits; 6 random searches at once and 30 random
+  matches in 10 minutes; and 500 relay logins a day (an IPv4 address, or an IPv6 /48). High enough for a phone
   network's or a school's shared address (many players behind one); a flood, or a room code guessed at (31^6,
   about 900 million codes), is stopped.
 - **The random queue**: one Durable Object a game version, in memory (a restart or a deploy drops those searching:
@@ -70,6 +71,10 @@ and the games started with `VF_LOBBY=http://127.0.0.1:8787`.
   plus two a random match made in the last 10 minutes, kept 30 s at Cloudflare's edge (everyone on the Online
   screen asks: the queue answers once a place). It's fine into the thousands searching at once; well past that,
   the queue's pairing (each against all) would want splitting by region.
+- **A room's code after it's closed** is kept for 2 hours for its host alone (by the room's key): a Play again opens
+  the same code, and no one else can take it while the other player waits on it.
+- **Addresses a game gives** are read whole (any way an IPv6 is written) and dropped if they'd point the other
+  game at nowhere, everyone (multicast, broadcast) or itself (loopback).
 - **The relay's logins are capped**: `TURN_PER_DAY` in `src/index.js` (10,000 a day, about 5,000 matches). Past it
   no more are given out that day: matches still connect directly, only the relay's matches wait for tomorrow. The
   relay is the one thing that costs by use, so this is what bounds the bill; raise it as players come.

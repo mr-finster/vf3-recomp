@@ -65,6 +65,7 @@ public:
 	struct versus { std::string left_label, left, right_label, right, line, sub; bool relay = false; std::string left_country, right_country; };
 	void show_versus(const versus &v, double seconds = 3.5);
 	bool versus_showing() const { return m_vs_until > SDL_GetTicks(); }
+	void hide_versus() { if (m_vs_until) m_vs_until = SDL_GetTicks(); }   // (gone at the next draw: a match over before its time)
 	// At the bottom in the middle over the game, while it's set: what the players are waited for (Press Start)
 	void set_banner(const std::string &title, const std::string &sub = "", const std::string &key = "");   // (key: a button, shown as one after the title)
 
