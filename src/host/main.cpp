@@ -2533,6 +2533,7 @@ int main(int argc, char **argv)
 	online.adapter.midi_out = [&](const std::vector<uint8_t> &b) { late_midi.insert(late_midi.end(), b.begin(), b.end()); };
 	bool match_on = false;
 	Online::Phase online_was = Online::Phase::off;
+	std::string online_code_was;   // (the room code: its page made again when the lobby gives it)
 	uint64_t online_refresh_t = 0;
 	bool menu_closed_elsewhere = false;   // (the menu closed by a match starting: its closing's bookkeeping still owed)
 	auto end_match = [&] {   // back to playing on its own, from the boot, with this player's NVRAM
@@ -2598,12 +2599,14 @@ int main(int argc, char **argv)
 		int level = 0;
 		std::string line = online.playing() && cfg.online.show_connection ? online.connection(level) : std::string();
 		if (cfg.online.show_connection && online.waiting() && !online.starting())   // (playing alone meanwhile: still waiting, and where)
-			line = online.phase() == Online::Phase::hosting
+			line = online.phase() == Online::Phase::hosting && online.by_code()
+				? "Hosting   " + (online.room_code().empty() ? std::string("a room") : "room " + online.room_code()) + "   " + online.status()
+				: online.phase() == Online::Phase::hosting
 				? "Hosting   " + (online.local_address().empty() ? std::string("no network") : online.local_address()) + "   " + online.status()
 				: online.status();
 		menu.set_net(line, level, online.playing() && cfg.online.show_connection == 2 ? online.connection_detail() : std::string());
 		// the Online page as things change: its rows made again with the phase, its status lines a few times a second
-		if (menu.is_open() && online.phase() != online_was && menu.top_name() == "Online" && !menu.capturing())
+		if (menu.is_open() && (online.phase() != online_was || online.room_code() != online_code_was) && menu.top_name() == "Online" && !menu.capturing())
 			menu.replace(online_page(), -1);
 		else if (menu.is_open() && online.phase() != online_was && !menu.capturing())
 			menu.refresh();   // (the Join page: its line under Connect, joining no longer, and why)
@@ -2617,6 +2620,7 @@ int main(int argc, char **argv)
 			if (const std::string now = online.status(); now != said) { said = now; menu.refresh(); }
 		}
 		online_was = online.phase();
+		if (!menu.capturing()) online_code_was = online.room_code();
 	};
 
 	// A match's step on the game's thread: started after the pass's inputs, run while the picture's drawn and the
