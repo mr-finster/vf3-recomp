@@ -165,6 +165,9 @@ int main(int argc, char **argv)
 	o.poll(1000);
 	gm.refresh();
 	shot("join_typed.png", w, h);
+	for (double t = 1000; t < 20000 && o.phase() == Online::Phase::joining; t += 100) o.poll(t);   // (no host: it gives up)
+	gm.refresh();
+	shot("join_failed.png", w, h);
 	o.stop();
 
 	o.set_last_match({ true, true, "RENODECK left the match.", "RENODECK", 194, 19 });
