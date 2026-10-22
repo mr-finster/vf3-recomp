@@ -1,6 +1,7 @@
 <rml>
 <head>
 	<title>Overlay</title>
+	<link type="text/rcss" href="flags.rcss"/>
 	<style>
 		/* drawn over the game, the menu open or not: the frames per second (Display > Show FPS), online play's
 		   connection, a notice that comes and goes (someone joined), and one that stays while it's true (the
@@ -109,10 +110,24 @@
 		}
 		#banner .title { font-size: 34dp; font-weight: 700; font-style: italic; color: #0b1026; }
 		#banner .sub { font-size: 20dp; font-weight: 600; color: #0b1026; }
+		#banner .button {
+			display: inline-block;
+			margin-left: 14dp;
+			padding: 0 14dp;
+			border-radius: 9dp;
+			background-color: #0b1026;
+			color: #f2d14b;
+			font-style: normal;
+			font-weight: 600;
+			font-size: 30dp;
+		}
 		/* a match found: the two players, VS between (the two sides drawn under this by the menu: game_menu::draw_versus) */
 		#vs { position: absolute; left: 0; right: 0; top: 0; bottom: 0; }
 		#vs .pl { position: absolute; top: 210dp; font-size: 24dp; font-weight: 600; letter-spacing: 4dp; line-height: 24dp; }
 		#vs .nm { position: absolute; top: 230dp; font-size: 92dp; font-weight: 700; font-style: italic; line-height: 92dp; white-space: nowrap; }
+		#vs .vflag { width: 64dp; height: 48dp; margin: 0 18dp; border: 2dp #ffffff; vertical-align: middle; }
+		#vs .nm.left .vflag { margin-left: 0; }
+		#vs .nm.right .vflag { margin-right: 0; }
 		#vs .left { left: 72dp; color: #0b1026; }
 		#vs .right { right: 72dp; text-align: right; }
 		#vs .pl.right { color: #c3cbf0; }

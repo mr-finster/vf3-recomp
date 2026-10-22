@@ -105,11 +105,16 @@ of what it does, not because nobody looks. What another player can reach, and wh
   other player's game; anything but the real inputs ends the match as a desync. What it can't stop is what no
   input-only netcode can: a bot or a macro playing for someone.
 - **Your address**: playing directly, the other player sees your IP address, as in any peer-to-peer game. Hide my IP
-  address (Online > Settings) makes room-code matches go only through this side's relay: its own addresses are
+  address (Online > Settings) makes matches go only through this side's relay: its own addresses are
   never given to the lobby nor sent from.
 - **The lobby**: rooms are random 6-letter codes (31^6, about 900 million) with a per-IP limit on joins, so guessing
   one is impractical; a guest gets in only with the room's token, which the session checks in its hello. TURN logins
   come from the Worker for a day; the TURN key stays in the Worker's secrets.
+- **Random matches**: one Queue (a Durable Object) holds who's looking, with roughly where Cloudflare places them
+  (its `cf` latitude and longitude, never sent on): each is paired with the nearest within a reach that widens with
+  the wait (1500 km, then 4000, 9000, then anyone). The one who waited longer hosts: the Queue opens a room for them
+  and joins the other into it, so a random match is an ordinary room match from there. The flags are Cloudflare's
+  country for each side's request, never what a game says of itself.
 - **Not in yet**: a SECURITY.md saying where to report a hole privately.
 
 ## The menu: Online

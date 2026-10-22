@@ -67,6 +67,7 @@
 //                        goes to build/host_window_F.png
 //   VF3_HOST_ROOM=1      hosts a room code's match at pass 60 (the code in log.txt), as Online > Host a match
 //   VF3_JOIN_CODE=XXXXXX joins that room at pass 60, as Online > Join with a code (VF_LOBBY: another lobby)
+//   VF3_RANDOM=1         looks for a random opponent at pass 60, as Online > Random
 //   VF3_MENU_KEYS=k,...  presses these keys (esc, up, down, left, right, enter, or SDL key names) 6 passes of the
 //                        loop apart from pass 30
 //   VF3_SHOT_AT=n,...    the window as drawn at these passes of the loop, to build/host_window_at_N.png
@@ -88,6 +89,7 @@
 #include "version.h"      // VF3_VERSION, VF3_DATE (made by the Makefile from git)
 #include "online.h"
 #include "../video/hud_names.h"
+#include "flags.h"
 #include "../machine/model3.h"
 #include "../machine/romset.h"
 #include "../rec/ppc_rec.h"
@@ -840,6 +842,7 @@ struct Game
 	}
 	std::function<void(std::vector<uint8_t> &)> take_midi;   // (a netplay match's: the adapter's)
 	std::string hud_names[2];   // (a netplay match's: the players' names under the energy bars)
+	video::HudFlag hud_flags[2];   // (and their countries' flags, beside them: none if not known)
 	// One frame: the board, the sound board, the frame's scene and 2D layers. In two halves for smooth motion
 	// (start_frame, finish_frame): the first half run a picture before the frame is due, so no picture's time holds
 	// a whole frame (at 120 a second a picture has 8.3 ms, a frame took 7-10 on an M4 Max: every other picture missed
@@ -892,7 +895,10 @@ struct Game
 		have_prev = frame > 1;
 		t = SDL_GetTicksNS();
 		tiles.aligned(below, above);
-		if (!hud_names[0].empty() || !hud_names[1].empty()) video::hud_names(board, above, hud_names);   // (a netplay match's)
+		if (!hud_names[0].empty() || !hud_names[1].empty()) {   // (a netplay match's)
+			const video::HudFlag *fl[2] = { &hud_flags[0], &hud_flags[1] };
+			video::hud_names(board, above, hud_names, fl);
+		}
 		tiles.aligned_wide(below_wide);
 		part_ms[3] += ms_since(t);
 		t = SDL_GetTicksNS();
@@ -1979,6 +1985,33 @@ int main(int argc, char **argv)
 	// ---- the menu ----
 	auto menu_owner = std::make_unique<game_menu>();   // (let go before the renderer it draws with)
 	game_menu &menu = *menu_owner;
+	// the countries' flags (assets/ui/flags.png), for the HUD's: each a 12 x 9 of its 48 x 36, a box of 4 x 4 for a pixel
+	SDL_Surface *flag_atlas = nullptr;
+	if (SDL_Surface *f = SDL_LoadSurface((find_assets() + "/ui/flags.png").c_str())) {
+		flag_atlas = SDL_ConvertSurface(f, SDL_PIXELFORMAT_ABGR8888);
+		SDL_DestroySurface(f);
+	}
+	auto hud_flag = [&](const std::string &country) {
+		video::HudFlag fl;
+		const int i = flags::index_of(country);
+		if (!flag_atlas || i < 0) return fl;
+		const int x0 = i % flags::COLS * flags::CELL_W + 1, y0 = i / flags::COLS * flags::CELL_H + 1;
+		if (x0 + flags::W > flag_atlas->w || y0 + flags::H > flag_atlas->h) return fl;
+		fl.w = flags::W / 4;
+		fl.h = flags::H / 4;
+		fl.px.resize(size_t(fl.w) * size_t(fl.h));
+		for (int y = 0; y < fl.h; y++)
+			for (int x = 0; x < fl.w; x++) {
+				unsigned sum[4] = {};
+				for (int dy = 0; dy < 4; dy++)
+					for (int dx = 0; dx < 4; dx++) {
+						const uint8_t *q = static_cast<const uint8_t *>(flag_atlas->pixels) + size_t(y0 + y * 4 + dy) * size_t(flag_atlas->pitch) + size_t(x0 + x * 4 + dx) * 4;
+						for (int c = 0; c < 4; c++) sum[c] += q[c];
+					}
+				fl.px[size_t(y) * size_t(fl.w) + size_t(x)] = 0xFF000000u | (sum[2] / 16) << 16 | (sum[1] / 16) << 8 | (sum[0] / 16);
+			}
+		return fl;
+	};
 	if (!menu.init(win, ren, find_assets()))
 		fprintf(stderr, "no menu: its files (assets/ui) weren't found\n");
 	menu.set_footer(std::string("Virtua Fighter 3 Recomp ") + VF3_VERSION + (*VF3_DATE ? std::string(" \u00b7 ") + VF3_DATE : std::string()));
@@ -2544,6 +2577,7 @@ int main(int argc, char **argv)
 		match_on = false;
 		game.take_midi = nullptr;
 		game.hud_names[0].clear();
+		game.hud_flags[0] = game.hud_flags[1] = {};
 		game.hud_names[1].clear();
 		game.tiles_on = true;
 		menu.set_notice("");
@@ -2566,6 +2600,32 @@ int main(int argc, char **argv)
 		}
 		sync_menu_sound();
 	};
+	// The button this player presses for Start, as their pad or keyboard has it (online, Player 1's controls): a pad's
+	// Start under its own name (OPTIONS on a PlayStation's, + on a Switch's, MENU on an Xbox One's and a Steam Deck),
+	// a button it's set to otherwise, else the key
+	auto start_button = [&]() -> std::string {
+		const int b = cfg.ctl[0].pad[C_START];
+		if (pads[0] && b != PAD_NONE) {
+			if (b != SDL_GAMEPAD_BUTTON_START) {
+				const char *bn = b == PAD_LT ? "LT" : b == PAD_RT ? "RT" : SDL_GetGamepadStringForButton(SDL_GamepadButton(b));
+				std::string n = bn ? bn : "START";
+				for (char &ch : n) ch = char(toupper(uint8_t(ch)));
+				return n;
+			}
+			const char *nm = SDL_GetGamepadName(pads[0]);
+			if (nm && strstr(nm, "Steam Deck")) return "MENU";
+			switch (SDL_GetGamepadType(pads[0])) {
+			case SDL_GAMEPAD_TYPE_PS3: case SDL_GAMEPAD_TYPE_PS4: case SDL_GAMEPAD_TYPE_PS5: return "OPTIONS";
+			case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO: case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_LEFT:
+			case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_RIGHT: case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_PAIR: return "+";
+			case SDL_GAMEPAD_TYPE_XBOXONE: return "MENU";
+			default: return "START";
+			}
+		}
+		std::string k = key_name(cfg.ctl[0].key[C_START]);
+		for (char &ch : k) ch = char(toupper(uint8_t(ch)));
+		return k;
+	};
 	auto online_pass = [&] {
 		online.poll(double(SDL_GetTicksNS()) / 1e6);
 		Online::Notice n;
@@ -2582,6 +2642,8 @@ int main(int argc, char **argv)
 				game_frame = vf3net::BOOT_FRAMES;
 				game.hud_names[online.local_player()] = online.identity.name;   // (the name the other side was sent)
 				game.hud_names[online.local_player() ^ 1] = online.opponent();
+				game.hud_flags[online.local_player()] = hud_flag(online.my_country());
+				game.hud_flags[online.local_player() ^ 1] = hud_flag(online.peer_country());
 				arcade_before.clear();   // (the board's arcade settings are the host's now: no restart for them)
 				if (menu.is_open()) { menu.close(); menu_closed_elsewhere = true; }
 				clock_reset = true;
@@ -2592,7 +2654,8 @@ int main(int argc, char **argv)
 				menu.show_versus({ "PLAYER 1 \xC2\xB7 HOST", host, "PLAYER 2", guest,
 				                   std::string(online.via_relay() ? "Connected through the relay" : "Connected directly") + (ms > 0 ? " \xC2\xB7 " + std::to_string(ms) + " ms" : ""),
 				                   online.slow_local() ? "Through the relay: this Mac blocks your network. Turn on Local Network (System Settings) for a faster match"
-				                                       : "Both press Start", online.via_relay() });
+				                                       : "Both press Start", online.via_relay(),
+				                   online.is_hosting() ? online.my_country() : online.peer_country(), online.is_hosting() ? online.peer_country() : online.my_country() });
 			}
 			// (nothing else said over the game: the Online screen says what came of it, when it's next opened)
 			fprintf(stderr, "online: %s\n", n.text.c_str());
@@ -2605,7 +2668,7 @@ int main(int argc, char **argv)
 		said_interrupted = interrupted;
 		// the match's start: who's still to press Start, until both have (not over the versus screen, which says it)
 		const int wait = online.playing() && !menu.is_open() && !menu.versus_showing() && !interrupted ? online.start_wait() : 0;
-		menu.set_banner(wait == 1 ? "PRESS START" : wait == 2 ? "WAITING FOR " + online.opponent() : "", wait == 2 ? "to press Start" : "");
+		menu.set_banner(wait == 1 ? "PRESS" : wait == 2 ? "WAITING FOR " + online.opponent() : "", wait == 2 ? "to press Start" : "", wait == 1 ? start_button() : "");
 		if (interrupted)
 			menu.set_notice("WAITING FOR " + online.opponent(), "The connection dropped. Holding the match for " + std::to_string(online.hold_left()) + " s...",
 			                "It carries on from right here if it comes back");
@@ -2674,11 +2737,12 @@ int main(int argc, char **argv)
 		uint64_t pass_work_ns = 0;
 		const bool menu_was_open = menu.is_open();
 		// (tests: a room hosted, or joined with its code, as the menu would, once the game's past its start)
-		static const char *test_host_room = getenv("VF3_HOST_ROOM"), *test_join_code = getenv("VF3_JOIN_CODE");
-		if ((test_host_room || test_join_code) && pass == 60) {
+		static const char *test_host_room = getenv("VF3_HOST_ROOM"), *test_join_code = getenv("VF3_JOIN_CODE"), *test_random = getenv("VF3_RANDOM");
+		if ((test_host_room || test_join_code || test_random) && pass == 60) {
 			online_page();   // (the identity, as opening the Online page sets it)
 			std::string err;
-			if (!(test_join_code ? online.join_room(cfg.online, test_join_code, err) : online.host_room(cfg.online, err)))
+			if (!(test_random ? online.find_random(cfg.online, err)
+			      : test_join_code ? online.join_room(cfg.online, test_join_code, err) : online.host_room(cfg.online, err)))
 				fprintf(stderr, "online: (test) %s\n", err.c_str());
 		}
 		if (!menu_keys.empty() && pass >= 30 && (pass - 30) % 6 == 0 && (pass - 30) / 6 < menu_keys.size()) {

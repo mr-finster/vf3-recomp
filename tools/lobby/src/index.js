@@ -9,7 +9,12 @@
 //   POST /v1/wait   {code, key}   (the host's: waits up to 20 s for a player) -> {guest: null | {name, cands, relay}}
 //   POST /v1/reopen {code, key}   (the host's, after a player who didn't get going: the same code, open again)
 //   POST /v1/close  {code, key}
-//   POST /v1/turn   {game}  -> {servers: [{host, port, username, credential}], ttl}   (TURN_PER_DAY a day, all told)
+//   POST /v1/turn   {game}  -> {servers: [{host, port, username, credential}], ttl, country}   (TURN_PER_DAY a day, all told)
+//   POST /v1/random {game, version, content, name, cands, relay} -> {ticket, waiting, players} or a match
+//   POST /v1/random/wait  {ticket}  (waits up to 20 s) -> the same
+//   POST /v1/random/leave {ticket}
+//   A match: {role: "host", code, key, token, name, country} (the room's, opened as theirs, the other already in it)
+//   or {role: "guest", code, name, cands, relay, token, country} (as /v1/join's). Players meet the nearest first.
 //   GET  /v1/ping   -> {ok, protocol}
 //
 // Errors are {error: "<what>"} with a status: no_room 404, full 409, game / version / rom 412 (with the host's
@@ -50,8 +55,18 @@ function addr_ok(a) {
 	const v6 = m[2].toLowerCase();
 	return v6 !== '::' && v6 !== '::1' && !v6.startsWith('ff') && !v6.startsWith('::ffff:127.') && !v6.startsWith('::ffff:0.');
 }
-function who(b) {
+// Where a request comes from, as Cloudflare has it: the country (two letters) and roughly where
+function country_of(req) {
+	const c = req.cf && typeof req.cf.country === 'string' ? req.cf.country.toUpperCase() : '';
+	return /^[A-Z]{2}$/.test(c) && c !== 'XX' && c !== 'T1' ? c : '';
+}
+function geo_of(req) {
+	const lat = req.cf ? parseFloat(req.cf.latitude) : NaN, lon = req.cf ? parseFloat(req.cf.longitude) : NaN;
+	return Number.isFinite(lat) && Number.isFinite(lon) ? { lat, lon } : null;
+}
+function who(b, req) {
 	return {
+		country: country_of(req),   // (the lobby's own: never what a game says of itself)
 		game: clean(b.game, 16),
 		version: clean(b.version, 64),
 		content: clean(b.content, 32),
@@ -114,7 +129,7 @@ export default {
 				if (await limited(env, req, 'HOST_LIMIT')) return json({ error: 'busy' }, 429);
 				const b = await body_of(req);
 				if (!b) return json({ error: 'bad' }, 400);
-				const me = who(b);
+				const me = who(b, req);
 				if (!me.game || !me.version) return json({ error: 'bad' }, 400);
 				// (the host's code from before, a match's Play again: kept if no one's taken it meanwhile)
 				const want = normal_code(b.want);
@@ -132,7 +147,7 @@ export default {
 				if (!b) return json({ error: 'bad' }, 400);
 				const code = normal_code(b.code);
 				if (!code_ok(code)) return json({ error: 'no_room' }, 404);
-				return room(env, code).fetch('https://room/join', { method: 'POST', body: JSON.stringify({ guest: who(b) }) });
+				return room(env, code).fetch('https://room/join', { method: 'POST', body: JSON.stringify({ guest: who(b, req) }) });
 			}
 
 			if (path === '/v1/wait' || path === '/v1/reopen' || path === '/v1/close') {
@@ -147,7 +162,21 @@ export default {
 				if (await limited(env, req, 'TURN_LIMIT')) return json({ error: 'busy' }, 429);
 				const day = await env.LIMITS.get(env.LIMITS.idFromName('turn')).fetch('https://limits/', { method: 'POST', body: JSON.stringify({ per_day: TURN_PER_DAY }) });
 				if (day.status === 429) return json({ error: 'no_turn' }, 503);
-				return turn(env);
+				return turn(env, country_of(req));
+			}
+
+			// a random opponent: the nearest of those searching, the same game, version and ROM
+			if (path === '/v1/random' || path === '/v1/random/wait' || path === '/v1/random/leave') {
+				if (path === '/v1/random' && (await limited(env, req, 'HOST_LIMIT'))) return json({ error: 'busy' }, 429);
+				const b = await body_of(req);
+				if (!b) return json({ error: 'bad' }, 400);
+				const me = who(b, req);
+				if (!me.game || !me.version) return json({ error: 'bad' }, 400);
+				const q = env.QUEUES.get(env.QUEUES.idFromName('q|' + me.game + '|' + me.version + '|' + me.content));
+				return q.fetch('https://queue' + (path === '/v1/random' ? '/enter' : path.slice(10)), {
+					method: 'POST',
+					body: JSON.stringify({ me, geo: geo_of(req), ticket: clean(b.ticket, 32) }),
+				});
 			}
 
 			return json({ error: 'bad' }, 404);
@@ -162,9 +191,9 @@ function room(env, code) {
 }
 
 // Cloudflare's TURN: a login for a day, from the TURN key (kept as this Worker's secrets)
-async function turn(env) {
+async function turn(env, country) {
 	// (testing on one's own computer: a TURN server of one's own, as a .dev.vars line TURN_STATIC='[{"host":...}]')
-	if (env.TURN_STATIC) return json({ servers: JSON.parse(env.TURN_STATIC), ttl: 86400 });   // (never set on the real one)
+	if (env.TURN_STATIC) return json({ servers: JSON.parse(env.TURN_STATIC), ttl: 86400, country: env.DEV_COUNTRY || country });   // (never set on the real one)
 	if (!env.TURN_KEY_ID || !env.TURN_KEY_API_TOKEN) return json({ error: 'no_turn' }, 503);
 	const r = await fetch(`https://rtc.live.cloudflare.com/v1/turn/keys/${env.TURN_KEY_ID}/credentials/generate-ice-servers`, {
 		method: 'POST',
@@ -185,7 +214,7 @@ async function turn(env) {
 		}
 	}
 	if (!servers.length) return json({ error: 'no_turn' }, 503);
-	return json({ servers, ttl: 86400 });
+	return json({ servers, ttl: 86400, country });
 }
 
 // One room: the host's details and key, the player who joined, and the host's waits
@@ -233,7 +262,7 @@ export class Room {
 			r.guest = g;
 			await this.save();
 			for (const w of this.waiters.splice(0)) w(g);
-			return json({ name: h.name, cands: h.cands, relay: h.relay, token: r.token });
+			return json({ name: h.name, cands: h.cands, relay: h.relay, token: r.token, country: h.country });
 		}
 		// the host's own: its key
 		if (b.key !== r.key) return json({ error: 'no_room' }, 404);
@@ -282,5 +311,122 @@ export class Limits {
 		c.n++;
 		await this.ctx.storage.put('c', c);
 		return new Response(null, { status: 204 });
+	}
+}
+
+// Those searching for a random opponent (one queue per game, version and ROM: only those who can play each other
+// meet). Each is matched with the nearest other, by where Cloudflare has them: close at first, further the longer
+// either has waited, anyone after 40 s. The one who waited longer hosts: a room's opened as theirs, the other
+// joined into it, and from there it's a room's match like any other (its code kept for Play again). Kept in memory
+// only: those searching ask every 20 s, and one gone quiet 25 s is dropped.
+const RANDOM_WAIT_MS = 20000, RANDOM_GONE_MS = 25000, RANDOM_KEPT_MS = 60000;
+function reach_km(seconds) {
+	return seconds < 8 ? 1500 : seconds < 20 ? 4000 : seconds < 40 ? 9000 : Infinity;
+}
+function km(a, b) {
+	if (!a || !b) return 0;   // (not known: as near as can be)
+	const r = Math.PI / 180, dlat = (b.lat - a.lat) * r, dlon = (b.lon - a.lon) * r;
+	const h = Math.sin(dlat / 2) ** 2 + Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin(dlon / 2) ** 2;
+	return 12742 * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+export class Queue {
+	constructor(ctx, env) {
+		this.ctx = ctx;
+		this.env = env;
+		this.waiting = new Map();   // ticket -> { me, geo, since, seen, result, waiters }
+	}
+	prune() {
+		const now = Date.now();
+		for (const [t, w] of this.waiting)
+			if (now - w.seen > (w.result ? RANDOM_KEPT_MS : RANDOM_GONE_MS)) this.waiting.delete(t);
+	}
+	searching() {
+		let n = 0;
+		for (const w of this.waiting.values()) if (!w.result) n++;
+		return n;
+	}
+	// The nearest other one searching that this one may be matched with now
+	nearest(ticket, w) {
+		const now = Date.now();
+		let pick = null, best = Infinity;
+		for (const [t, o] of this.waiting) {
+			if (t === ticket || o.result) continue;
+			const d = km(w.geo, o.geo), waited = Math.max(now - w.since, now - o.since) / 1000;
+			if (d <= reach_km(waited) && d < best) { pick = o; best = d; }
+		}
+		return pick;
+	}
+	async try_match(ticket, w) {
+		const o = this.nearest(ticket, w);
+		if (!o) return;
+		const host = o.since <= w.since ? o : w, guest = host === o ? w : o;
+		w.result = o.result = 'pairing';   // (both taken before anything's awaited: no one else picks them meanwhile)
+		const m = await this.open(host, guest);
+		if (!m) { w.result = o.result = null; return; }
+		this.settle(host, m.host);
+		this.settle(guest, m.guest);
+	}
+	async open(host, guest) {
+		for (let tries = 0; tries < 8; tries++) {
+			const code = random_code();
+			const r = await room(this.env, code).fetch('https://room/open', { method: 'POST', body: JSON.stringify({ code, host: host.me }) });
+			if (r.status !== 200) continue;
+			const h = await r.json();
+			const j = await room(this.env, code).fetch('https://room/join', { method: 'POST', body: JSON.stringify({ guest: guest.me }) });
+			if (j.status !== 200) return null;
+			const g = await j.json();
+			return {
+				host: { role: 'host', code, key: h.key, token: h.token, name: guest.me.name, country: guest.me.country },
+				guest: { role: 'guest', code, name: g.name, cands: g.cands, relay: g.relay, token: g.token, country: g.country },
+			};
+		}
+		return null;
+	}
+	settle(w, result) {
+		w.result = result;
+		w.seen = Date.now();
+		for (const done of w.waiters.splice(0)) done();
+	}
+	answer(ticket, w) {
+		if (w.result && w.result !== 'pairing') {
+			this.waiting.delete(ticket);
+			return json(w.result);
+		}
+		return json({ ticket, waiting: true, players: this.searching() });
+	}
+	async fetch(req) {
+		const op = new URL(req.url).pathname;
+		const b = await req.json();
+		this.prune();
+		const now = Date.now();
+		if (op === '/enter') {
+			const ticket = random_hex(12);
+			const w = { me: b.me, geo: b.geo, since: now, seen: now, result: null, waiters: [] };
+			this.waiting.set(ticket, w);
+			await this.try_match(ticket, w);
+			return this.answer(ticket, w);
+		}
+		const w = this.waiting.get(b.ticket);
+		if (!w) return json({ error: 'gone' }, 404);
+		w.seen = now;
+		if (op === '/leave') {
+			this.waiting.delete(b.ticket);
+			return json({ ok: true });
+		}
+		if (op === '/wait') {
+			if (!w.result) await this.try_match(b.ticket, w);
+			if (!w.result || w.result === 'pairing')
+				await new Promise((done) => {
+					w.waiters.push(done);
+					setTimeout(() => {
+						w.waiters = w.waiters.filter((x) => x !== done);
+						done();
+					}, RANDOM_WAIT_MS);
+				});
+			w.seen = Date.now();
+			return this.answer(b.ticket, w);
+		}
+		return json({ error: 'bad' }, 400);
 	}
 }

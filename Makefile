@@ -82,6 +82,10 @@ $(BIN)/vf3soak: $(call objs,$(CORE) tools/vf3soak.cpp) $(SLJIT_OBJ)
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDLIBS)
 
+$(BIN)/vf3detect: $(call objs,$(CORE) $(NET) src/host/vf3_netplay.cpp tools/vf3detect.cpp) $(SLJIT_OBJ)
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDLIBS)
+
 $(BIN)/roomtest: $(call objs,$(NET) tools/roomtest.cpp)
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDLIBS)
