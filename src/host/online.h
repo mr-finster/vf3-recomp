@@ -27,6 +27,14 @@ class Online
 public:
 	enum class Phase { off, hosting, joining, playing };
 	struct Notice { enum Kind { joined, ended, refused } kind; std::string text; };
+	// The match that ended last: what ended it, who and how long, for the Online page to show after it (and offer
+	// the same again)
+	struct LastMatch
+	{
+		bool any = false, was_host = false;
+		std::string why, opponent;
+		int seconds = 0, ping = 0;
+	};
 
 	explicit Online(m3::Model3 &board) : adapter(board), board(board) {}
 	vf3net::Adapter adapter;      // (its run, settle and program_changed set by main)
@@ -54,6 +62,8 @@ public:
 	int delay_now() const { return session ? session->delay() : 0; }
 	void set_delay(int setting);  // the menu's, in a match (Auto: from the ping)
 	int ping() const { return session ? int(session->stats().rtt_ms + 0.5) : 0; }
+	const LastMatch &last_match() const { return last; }
+	void set_last_match(const LastMatch &m) { last = m; }   // (tests)
 	const std::string &local_address() const { return lan; }
 	int local_port() const { return port; }
 
@@ -65,7 +75,10 @@ private:
 	bool is_host = false, auto_delay = true, auto_done = false;
 	int port = 0;
 	std::string lan, joining_to;
-	double now = 0;
+	double now = 0, logged_at = 0, began_at = 0;
+	LastMatch last;
+	void ended(const std::string &why);   // (the match over: kept as the last match)
+	uint64_t logged_rb = 0, logged_resim = 0, logged_stalls = 0, logged_waits = 0;
 	std::deque<Notice> notices;
 	vfnet::Config config(const OnlineSettings &s) const;
 	bool open_host(std::string &error);
@@ -78,6 +91,8 @@ namespace online_menu {
 menu_page page(Online &o, OnlineSettings &s, game_menu &menu, std::function<void()> changed);
 // The menu's rows in a match (the game goes on under it): who and how the connection is, input delay, the
 // connection display, leaving the match
+// The row the Online page starts on: after a match, the one that plays again
+int first_row(const Online &o);
 void match_rows(Online &o, OnlineSettings &s, game_menu &menu, std::function<void()> changed, std::vector<menu_item> &rows);
 // The name as typed: upper case, the letters the game's HUD can show, at most vfnet::MAX_NAME
 std::string clean_name(const std::string &s);

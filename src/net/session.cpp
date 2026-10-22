@@ -91,6 +91,7 @@ Session::Session(Link &link, Game &game, const Identity &me_, const Config &cfg_
 void Session::finish(End e, const std::string &text)
 {
 	if (st == State::ended) return;
+	if (trace) trace("ended: " + text);
 	st = State::ended;
 	why = e;
 	events.push_back({ Event::ended, text });
@@ -166,6 +167,7 @@ void Session::send_inputs()
 void Session::start_running()
 {
 	if (st != State::handshake) return;
+	if (trace) trace("the match begins (input delay " + std::to_string(cfg.delay) + ")");
 	st = State::running;
 	local.assign(size_t(cfg.delay), 0);   // (the first delay frames: nothing pressed)
 	// the rollback's buffers made now, not in the match's first frames (a state is tens of MB: making them as the
@@ -198,7 +200,7 @@ void Session::poll(double t)
 				if (chunk_count == 0 && their_name.empty()) send_hello();
 				else if (began) { send_packet(Out(READY, token).b); last_hello = now; }
 				else { Out a(BLOB_ACK, token); a.u32(chunks_acked); send_packet(a.b); last_hello = now; }
-			} else if (!their_name.empty() && chunks_acked < chunk_count)
+			} else if (!their_name.empty() && !began)
 				send_blob();
 		}
 		return;
@@ -250,13 +252,9 @@ void Session::receive(const std::vector<uint8_t> &p)
 		token = t_;   // (from now on only this guest's packets)
 		have_token = true;
 		if (their_name.empty()) started = now;   // (the handshake's time from the first hello)
+		if (their_name.empty() && trace) trace("a player's hello: " + (name.empty() ? std::string("PLAYER 2") : name) + "; sending the settings");
 		their_name = name.empty() ? "PLAYER 2" : name;
 		send_blob();
-		// the host's game starts now, alongside the guest's (a game's start can take seconds: VF3 runs its boot)
-		if (!began) {
-			began = true;
-			if (!game.begin(start_blob)) { finish(End::rejected, "The game couldn't start."); return; }
-		}
 		return;
 	}
 	case WELCOME: {
@@ -265,6 +263,7 @@ void Session::receive(const std::vector<uint8_t> &p)
 		const uint32_t size = in.u32(), count = in.u32();
 		if (!in.ok || count != (size + CHUNK - 1) / CHUNK || size > cfg.max_blob) return;
 		their_name = name.empty() ? "PLAYER 1" : name;
+		if (trace) trace("the host answered (" + their_name + "): its settings, " + std::to_string(size) + " bytes");
 		blob_size = size;
 		chunk_count = count;
 		start_blob.assign(size, 0);
@@ -293,6 +292,7 @@ void Session::receive(const std::vector<uint8_t> &p)
 		a.u32(chunks_acked);
 		send_packet(a.b);
 		if (chunks_acked == chunk_count) {
+			if (trace) trace("the host's settings all here: starting the game");
 			began = true;
 			if (!game.begin(start_blob)) { finish(End::rejected, "The game couldn't start from the host's settings."); return; }
 			send_packet(Out(READY, token).b);
@@ -309,7 +309,14 @@ void Session::receive(const std::vector<uint8_t> &p)
 		return;
 	}
 	case READY: {
-		if (!host || !began) return;
+		if (!host || their_name.empty()) return;
+		// the host's game starts once the guest's has (not at the hello: a guest that never got this far left the
+		// host's game set up for a match it had never had, and playing on it alone after)
+		if (!began) {
+			if (trace) trace("the player's game is ready: starting this one");
+			began = true;
+			if (!game.begin(start_blob)) { finish(End::rejected, "The game couldn't start."); return; }
+		}
 		start_running();
 		send_packet(Out(GO, token).b);   // (again for each READY: a lost GO costs a resend)
 		return;

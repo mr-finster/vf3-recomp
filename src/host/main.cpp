@@ -2320,7 +2320,7 @@ int main(int argc, char **argv)
 		p.items.push_back({ "Game", "Play style and reset.", {}, {}, [&] { menu.push(game_page()); } });
 		p.items.push_back({ "Arcade settings", "Difficulty, rounds, energy, demo sound, country and the service menu. Changing them restarts the game.", {}, {},
 							[&] { if (arcade_before.empty()) arcade_before = arcade_bytes(); menu.push(arcade_page()); } });
-		p.items.push_back({ "Online", "Play someone over the network: host a match, or join one.", {}, {}, [&] { menu.push(online_page()); } });
+		p.items.push_back({ "Online", "Play someone over the network: host a match, or join one.", {}, {}, [&] { menu.push(online_page()); menu.select_row(online_menu::first_row(online)); } });
 		p.items.push_back({ "Controls", "Each player's controller, keys and buttons.", {}, {}, [&] { menu.push(controls_page()); } });
 		p.items.push_back({ "Quit", "Saves and closes the game.", {}, {}, [&] { running = false; } });
 		return p;
@@ -2481,6 +2481,7 @@ int main(int argc, char **argv)
 	Online::Phase online_was = Online::Phase::off;
 	uint64_t online_refresh_t = 0;
 	auto end_match = [&] {   // back to playing on its own, from the boot, with this player's NVRAM
+		const bool was_on = match_on;
 		if (match_on) fprintf(stderr, "online: the match ended at frame %llu; back to playing alone\n", (unsigned long long)game_frame);
 		match_on = false;
 		game.take_midi = nullptr;
@@ -2497,6 +2498,14 @@ int main(int argc, char **argv)
 		}
 		menu.set_title("PAUSED");
 		reset_game();
+		// back on the Online page: what ended the match, and the same again a press away
+		if (was_on && menu.ready()) {
+			if (menu.is_open()) menu.close();
+			menu.open(main_page());
+			menu.select_row(5);   // (Online)
+			menu.push(online_page());
+			menu.select_row(online_menu::first_row(online));
+		}
 		sync_menu_sound();
 	};
 	auto online_pass = [&] {
@@ -2523,15 +2532,26 @@ int main(int argc, char **argv)
 			fprintf(stderr, "online: %s\n", n.text.c_str());
 		}
 		if ((match_on && !online.playing()) || (nvram_away && online.phase() == Online::Phase::off)) end_match();   // (ended, left, or never got going)
+		static bool was_interrupted = false;   // (the connection back after an interruption: said)
+		if (online.playing() && was_interrupted && !online.interrupted()) menu.toast("Connection back", 3);
+		was_interrupted = online.playing() && online.interrupted();
 		if (online.playing() && online.interrupted()) menu.set_notice("Connection interrupted", "Waiting for " + online.opponent() + "...");
 		else if (online.starting()) menu.set_notice("Starting the match", online.status());
 		else menu.set_notice("");
 		int level = 0;
-		const std::string line = online.playing() && cfg.online.show_connection ? online.connection(level) : std::string();
+		std::string line = online.playing() && cfg.online.show_connection ? online.connection(level) : std::string();
+		if (cfg.online.show_connection && online.waiting() && !online.starting())   // (playing alone meanwhile: still waiting, and where)
+			line = online.phase() == Online::Phase::hosting
+				? "Hosting   " + (online.local_address().empty() ? std::string("no network") : online.local_address()) + "   " + online.status()
+				: online.status();
 		menu.set_net(line, level);
 		// the Online page as things change: its rows made again with the phase, its status lines a few times a second
 		if (menu.is_open() && online.phase() != online_was && menu.top_name() == "Online") menu.replace(online_page(), menu.selected());
-		else if (menu.is_open() && online.waiting() && SDL_GetTicks() - online_refresh_t > 250) { online_refresh_t = SDL_GetTicks(); menu.refresh(); }
+		else if (menu.is_open() && online.waiting() && SDL_GetTicks() - online_refresh_t > 250) {
+			online_refresh_t = SDL_GetTicks();
+			static std::string said;
+			if (const std::string now = online.status(); now != said) { said = now; menu.refresh(); }
+		}
 		online_was = online.phase();
 	};
 
@@ -3065,6 +3085,7 @@ int main(int argc, char **argv)
 		if (!stopped && double(SDL_GetTicksNS() - pass_t0) > 1.5e9 / std::max(60.0, screen_hz)) { pace.slow[pass_kind]++; pace.slow_work_ms += double(pass_work_ns) / 1e6; }
 		(void)shown;
 	}
+	online.stop();   // (closed in a match: the other side is told at once, not after a silence)
 	saver.finish();
 	saved_hash = ~nvram_hash();   // (the last copies written here whatever the writer did)
 	save_nvram(true);
