@@ -40,9 +40,8 @@ Everything runs on the Mac, from this folder.
    The first says `{"ok":true,...}`, the second lists `servers` with a username and credential. `no_turn`
    means step 2 or 3 went wrong: put the secrets again.
 
-5. Build the games with the address: `export VF_LOBBY_URL=https://vf-lobby.yourname.workers.dev` before
-   the build commands (or set it as the default in the Makefile). A build without it shows only the
-   by-address matches.
+5. The games are built with the address: the Makefile's `VF_LOBBY_URL` (the one in use now), or
+   `export VF_LOBBY_URL=...` before the build commands for another. Empty: only the by-address matches.
 
 ## Changing it later
 
