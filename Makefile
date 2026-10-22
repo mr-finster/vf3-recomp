@@ -24,7 +24,7 @@ VF3_VERSION ?= $(shell git describe --tags --always 2>/dev/null || echo dev)
 VF3_DATE ?= $(shell git log -1 --format=%cd --date=format:'%b %-d %Y' 2>/dev/null)
 # and the lobby the room codes use (tools/lobby/README.md): its https address, "" for none (Online then offers only
 # the by-address matches)
-VF_LOBBY_URL ?=
+VF_LOBBY_URL ?= https://vf-lobby.throbbing-lab-db6e.workers.dev
 $(OBJ)/version.h: FORCE
 	@mkdir -p $(OBJ)
 	@printf '#define VF3_VERSION "%s"\n#define VF3_DATE "%s"\n#define VF_LOBBY_URL "%s"\n' "$(VF3_VERSION)" "$(VF3_DATE)" "$(VF_LOBBY_URL)" > $@.tmp
