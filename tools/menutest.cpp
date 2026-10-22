@@ -196,7 +196,7 @@ int main(int argc, char **argv)
 	gm.set_title("PAUSED");
 
 	gm.toast("Playing MRFINSTER");
-	gm.set_net("MRFINSTER   42 ms   rollback 1", 0);
+	gm.set_net("MRFINSTER   42 ms   rollback 1", 0, "delay 1   jitter 4 ms   rollback 1.3 avg, 2 peak   ahead -0.4   step 4.2 ms (save 0.8)");
 	shot("overlay.png", w, h);
 	gm.toast("A player couldn't join: Your opponent has v0.1.6-alpha-13-gf9440e8, you have v0.1.7-netplay-test3: you both need the same version.");
 	shot("toast_long.png", w, h);

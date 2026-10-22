@@ -37,7 +37,9 @@ struct Game
 	virtual bool load(const std::vector<uint8_t> &state) = 0;
 	// One frame, with both players' inputs; resim: a frame run again after a rollback (no picture or sound needed)
 	virtual void advance(const uint16_t input[2], bool resim) = 0;
-	virtual uint64_t hash(const std::vector<uint8_t> &state) { return hash64(state.data(), state.size()); }
+	// The bytes at a state's start the desync check leaves out (the game's own bookkeeping, not the same on both
+	// sides); the rest is hashed in a few parts, one a frame (a whole state at once was a frame's worst cost)
+	virtual size_t hash_skip() const { return 0; }
 	virtual ~Game() = default;
 };
 
@@ -77,10 +79,14 @@ public:
 	struct Stats
 	{
 		double rtt_ms = 0;
+		double jitter_ms = 0;  // how much the round trip varies (its average difference from the average)
 		int rollback = 0;      // the last rollback's frames
 		int rollback_max = 0;  // the most in the last second
 		int ahead = 0;         // frames this side is ahead of the other (time sync)
 		double lead = 0;       // the same, not rounded: what soft_sync slows for
+		// what this side's steps cost, ms in all (for a log: where a slow machine's time goes)
+		double save_ms = 0, run_ms = 0, resim_ms = 0, hash_ms = 0, step_max_ms = 0;
+		uint64_t steps = 0;
 		uint64_t rollbacks = 0, resim_frames = 0, stalls = 0, waits = 0;
 	};
 
@@ -109,6 +115,7 @@ public:
 	uint32_t frame() const { return cur; }           // the next frame to run
 	uint32_t confirmed() const;                      // frames run with both inputs real
 	const Stats &stats() const { return stats_; }
+	void clear_step_max() { stats_.step_max_ms = 0; }   // (a log's: the worst step since it last said)
 	// Every frame's inputs so far, both players' (a replay: the blob and these)
 	const std::vector<uint16_t> &inputs(int player) const { return player == local_player() ? local : remote; }
 	const std::vector<uint8_t> &blob() const { return start_blob; }
@@ -161,6 +168,8 @@ private:
 
 	// checksums: this side's and the other's, by frame
 	uint32_t next_check = 0;
+	struct { bool on = false; uint32_t frame = 0; int part = 0; uint64_t h = 0; } hashing;   // (one in parts)
+	static constexpr int HASH_PARTS = 4;
 	std::map<uint32_t, uint64_t> my_hash, their_hash;
 
 	// round trips: the other's last clock, when it came
@@ -187,7 +196,7 @@ private:
 	void got_inputs(uint32_t first, const uint16_t *in, uint32_t n);
 	void start_running();
 	void run_frame(uint32_t f, bool resim);
-	void check_hashes();
+	void check_hashes(bool work);   // work: a part of a hash done now (a step's; a packet's only compares)
 	uint16_t remote_input(uint32_t f) const;
 };
 

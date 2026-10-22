@@ -36,6 +36,7 @@
 			background-color: #7ee08a;
 		}
 		#net.fair .dot { background-color: #ffd23f; }
+		#net .detail { font-size: 13dp; font-weight: 500; color: #b8c4e6; }
 		#net.poor .dot { background-color: #ff6b5a; }
 		/* a notice that comes and goes, at the bottom right (out of the menu's way and the HUD's) */
 		#toast {

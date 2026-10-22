@@ -30,6 +30,9 @@ uint64_t hash64(const uint8_t *p, size_t n)
 
 namespace {
 
+using Clock = std::chrono::steady_clock;
+double ms_since(Clock::time_point t) { return std::chrono::duration<double, std::milli>(Clock::now() - t).count(); }
+
 constexpr uint32_t MAGIC = 0x504E4656;   // "VFNP"
 constexpr size_t CHUNK = 1024;            // the starting blob's pieces
 constexpr uint32_t CHUNK_WINDOW = 32;     // sent ahead of the last acknowledged
@@ -429,14 +432,17 @@ void Session::handle(const std::vector<uint8_t> &p)
 		have_their_t = true;
 		if (echo) {
 			const double rtt = double(uint32_t(int64_t(now)) - echo) - echo_age;
-			if (rtt >= 0 && rtt < 5000) stats_.rtt_ms = stats_.rtt_ms ? stats_.rtt_ms * 0.9 + rtt * 0.1 : rtt;
+			if (rtt >= 0 && rtt < 5000) {
+				if (stats_.rtt_ms) stats_.jitter_ms = stats_.jitter_ms * 0.9 + std::fabs(rtt - stats_.rtt_ms) * 0.1;
+				stats_.rtt_ms = stats_.rtt_ms ? stats_.rtt_ms * 0.9 + rtt * 0.1 : rtt;
+			}
 		}
 		if (hash_frame != UINT32_MAX) {
 			their_hash[hash_frame] = hash;
 			while (their_hash.size() > 64) their_hash.erase(their_hash.begin());
 		}
 		got_inputs(first, v.data(), n);
-		check_hashes();
+		check_hashes(false);
 		return;
 	}
 	case QUIT:
@@ -478,15 +484,35 @@ void Session::run_frame(uint32_t f, bool resim)
 	game.advance(in, resim);
 }
 
-void Session::check_hashes()
+void Session::check_hashes(bool work)
 {
 	const uint32_t R = uint32_t(ring.size());
-	while (next_check <= remote.size() && next_check < cur && rollback_from >= next_check) {
-		if (cur - next_check < R) {
-			my_hash[next_check] = game.hash(ring[next_check % R]);
+	// (a confirmed frame's state, hashed a part each step: it stays in the ring R frames, and a rollback never saves
+	// it again, a confirmed frame being before any wrong guess)
+	if (work && !hashing.on) {
+		while (next_check <= remote.size() && next_check < cur && rollback_from >= next_check && cur - next_check >= R)
+			next_check += uint32_t(cfg.checksum_every);   // (gone from the ring meanwhile: that one's not checked)
+		if (next_check <= remote.size() && next_check < cur && rollback_from >= next_check) {
+			hashing.on = true;
+			hashing.frame = next_check;
+			hashing.part = 0;
+			hashing.h = 0x9E3779B97F4A7C15ull;
+			next_check += uint32_t(cfg.checksum_every);
+		}
+	} else if (work && hashing.on && cur - hashing.frame >= R)
+		hashing.on = false;   // (it stalled out of the ring: not checked)
+	if (work && hashing.on) {
+		const auto t0 = Clock::now();
+		const std::vector<uint8_t> &st = ring[hashing.frame % R];
+		const size_t skip = std::min(st.size(), game.hash_skip()), n = st.size() - skip;
+		const size_t a = skip + n * size_t(hashing.part) / HASH_PARTS, b = skip + n * size_t(hashing.part + 1) / HASH_PARTS;
+		hashing.h = (hashing.h ^ hash64(st.data() + a, b - a)) * 0x100000001B3ull;
+		stats_.hash_ms += ms_since(t0);
+		if (++hashing.part == HASH_PARTS) {
+			hashing.on = false;
+			my_hash[hashing.frame] = hashing.h;
 			while (my_hash.size() > 64) my_hash.erase(my_hash.begin());
 		}
-		next_check += uint32_t(cfg.checksum_every);
 	}
 	for (auto it = their_hash.begin(); it != their_hash.end();) {
 		auto m = my_hash.find(it->first);
@@ -502,6 +528,7 @@ void Session::check_hashes()
 bool Session::step(uint16_t input)
 {
 	if (st != State::running) return false;
+	const auto t_step = Clock::now();
 	while (local.size() <= size_t(cur) + size_t(cfg.delay)) local.push_back(input);   // (once a frame; more if the delay grew)
 	send_inputs();
 
@@ -514,10 +541,12 @@ bool Session::step(uint16_t input)
 			finish(End::desync, "The game couldn't go back to a frame (rollback).");
 			return false;
 		}
+		const auto t0 = Clock::now();
 		for (uint32_t g = from; g < cur; g++) {
 			if (g != from) game.save(ring[g % R]);
 			run_frame(g, true);
 		}
+		stats_.resim_ms += ms_since(t0);
 		const int n = int(cur - from);
 		stats_.rollback = n;
 		stats_.rollbacks++;
@@ -527,7 +556,7 @@ bool Session::step(uint16_t input)
 	while (!recent_rollbacks.empty() && now - recent_rollbacks.front().first > 1000) recent_rollbacks.pop_front();
 	stats_.rollback_max = 0;
 	for (auto &r : recent_rollbacks) stats_.rollback_max = std::max(stats_.rollback_max, r.second);
-	check_hashes();
+	check_hashes(true);
 	if (st != State::running) return false;
 
 	// too far ahead of what's come: wait
@@ -563,8 +592,14 @@ bool Session::step(uint16_t input)
 		}
 	}
 
+	const auto t0 = Clock::now();
 	game.save(ring[cur % R]);
+	stats_.save_ms += ms_since(t0);
+	const auto t1 = Clock::now();
 	run_frame(cur, false);
+	stats_.run_ms += ms_since(t1);
+	stats_.steps++;
+	stats_.step_max_ms = std::max(stats_.step_max_ms, ms_since(t_step));
 	cur++;
 	return true;
 }
