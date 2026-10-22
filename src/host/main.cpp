@@ -2666,9 +2666,22 @@ int main(int argc, char **argv)
 		static bool said_interrupted = false;
 		const bool interrupted = online.playing() && online.interrupted() && (said_interrupted || (online.hold_left() <= 6 && !menu.versus_showing()));
 		said_interrupted = interrupted;
-		// the match's start: who's still to press Start, until both have (not over the versus screen, which says it)
-		const int wait = online.playing() && !menu.is_open() && !menu.versus_showing() && !interrupted ? online.start_wait() : 0;
-		menu.set_banner(wait == 1 ? "PRESS" : wait == 2 ? "WAITING FOR " + online.opponent() : "", wait == 2 ? "to press Start" : "", wait == 1 ? start_button() : "");
+		// who's to press Start: at the match's start until both have (not over the versus screen, which says it), and
+		// after a match the loser, for a rematch (the winner told for 8 s: they're playing on, against the computer)
+		int wait = online.playing() && !menu.is_open() && !menu.versus_showing() && !interrupted ? online.start_wait() : 0;
+		static uint64_t other_out_since = 0;
+		if (wait != 4) other_out_since = 0;
+		else if (!other_out_since) other_out_since = SDL_GetTicks();
+		else if (SDL_GetTicks() - other_out_since > 8000) wait = 0;
+		static int said_wait = 0;
+		if (wait != said_wait && online.playing()) {   // (in the log: who's to press Start, and why)
+			static const char *what[5] = { "no one", "this player (the match's start)", "the other (the match's start)", "this player (a rematch)", "the other (a rematch)" };
+			fprintf(stderr, "online: to press Start: %s\n", what[wait]);
+		}
+		said_wait = wait;
+		const bool press = wait == 1 || wait == 3;
+		menu.set_banner(press ? "PRESS" : wait ? "WAITING FOR " + online.opponent() : "",
+		                wait == 2 ? "to press Start" : wait == 3 ? "for a rematch" : wait == 4 ? "to press Start for a rematch" : "", press ? start_button() : "");
 		if (interrupted)
 			menu.set_notice("WAITING FOR " + online.opponent(), "The connection dropped. Holding the match for " + std::to_string(online.hold_left()) + " s...",
 			                "It carries on from right here if it comes back");

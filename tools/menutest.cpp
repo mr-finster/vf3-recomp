@@ -388,6 +388,8 @@ int main(int argc, char **argv)
 	shot("press_start.png", w, h);
 	gm.set_banner("WAITING FOR G", "to press Start");
 	shot("waiting_start.png", w, h);
+	gm.set_banner("PRESS", "for a rematch", "OPTIONS");
+	shot("rematch.png", w, h);
 	gm.set_banner("");
 	if (fails) { fprintf(stderr, "menutest: %d failed\n", fails); return 1; }
 	printf("all passed\n");

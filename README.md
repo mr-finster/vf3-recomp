@@ -183,7 +183,8 @@ takes over once it's found. After the match, **New opponent** looks again.
    show how far it's got. Once you're both in, the game starts at its title screen: both press Start.
 
 On a controller the code and name screens show letters to pick with A (X deletes, Y pastes); on a keyboard just type.
-After a match, **Play again** keeps the same code: the host opens it again and the other player joins it by itself.
+In a match, whoever loses is told to press Start for a rematch (as in the arcade, the winner plays on against the
+computer until they do). After leaving a match, **Play again** keeps the same code: the host opens it again and the other player joins it by itself.
 
 The games connect to each other directly whenever they can; when a network won't let them (phones' 5G, some
 office, school and hotel networks), the match goes through a relay (Cloudflare's) instead, automatically. The
