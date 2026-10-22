@@ -75,7 +75,7 @@ and the games started with `VF_LOBBY=http://127.0.0.1:8787`.
   the same code, and no one else can take it while the other player waits on it.
 - **Addresses a game gives** are read whole (any way an IPv6 is written) and dropped if they'd point the other
   game at nowhere, everyone (multicast, broadcast) or itself (loopback).
-- **The relay's logins are capped**: `TURN_PER_DAY` in `src/index.js` (10,000 a day, about 5,000 matches). Past it
+- **The relay's logins are capped**: `TURN_PER_DAY` in `src/index.js` (100,000 a day, about 50,000 match tries). Past it
   no more are given out that day: matches still connect directly, only the relay's matches wait for tomorrow. The
   relay is the one thing that costs by use, so this is what bounds the bill; raise it as players come.
 - **A billing alert** (do this once): Cloudflare dashboard > **Notifications** > **Add**, pick the usage-based
