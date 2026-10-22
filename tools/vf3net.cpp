@@ -61,9 +61,9 @@ int main(int argc, char **argv)
 	long frames = 3000;
 	vfnet::SimWire::Params p{ 40, 8, 0 };
 	int delay = 2;
-	bool use_rec = true;
+	bool use_rec = true, soft = false;   // soft: each side's clock a little slower while ahead, as the game's
 	const bool slow = getenv("VF3NET_SLOW") != nullptr;   // (each step over 40 ms, the host's)
-	const char *usage = "usage: vf3net <vf3.zip> --script FILE [--frames N] [--latency MS] [--jitter MS] [--loss PERCENT] [--delay D] [--interp]\n";
+	const char *usage = "usage: vf3net <vf3.zip> --script FILE [--frames N] [--latency MS] [--jitter MS] [--loss PERCENT] [--delay D] [--interp] [--soft]\n";
 	for (int i = 1; i < argc; i++) {
 		std::string a = argv[i];
 		if (a == "--frames" && i + 1 < argc) frames = strtol(argv[++i], nullptr, 10);
@@ -73,6 +73,7 @@ int main(int argc, char **argv)
 		else if (a == "--loss" && i + 1 < argc) p.loss = atof(argv[++i]) / 100;
 		else if (a == "--delay" && i + 1 < argc) delay = atoi(argv[++i]);
 		else if (a == "--interp") use_rec = false;
+		else if (a == "--soft") soft = true;
 		else if (a[0] != '-' && rom.empty()) rom = a;
 		else { fprintf(stderr, "vf3net: unknown argument %s\n%s", a.c_str(), usage); return 2; }
 	}
@@ -104,6 +105,7 @@ int main(int argc, char **argv)
 	vfnet::SimWire wire(p, p, 7);
 	vfnet::Config cfg;
 	cfg.delay = delay;
+	cfg.soft_sync = soft;
 	cfg.handshake_ms = 120000;   // (both boots run here one after the other, on the one clock)
 	const vfnet::Identity ia{ "vf3", "test", content, "HOST" }, ib{ "vf3", "test", content, "GUEST" };
 	A.adapter.checkpoint_every = B.adapter.checkpoint_every = 300;
@@ -132,13 +134,13 @@ int main(int argc, char **argv)
 			const double ms = std::chrono::duration<double, std::milli>(Clock::now() - s0).count();
 			if (connected) ta.add(ms);
 			if (slow && ms > 40) printf("  slow step: host frame %u, %.1f ms, %llu frames run again\n", sa.frame(), ms, (unsigned long long)(sa.stats().resim_frames - rb0));
-			next_a += fa;
+			next_a += fa / (1 - (soft ? std::clamp(sa.stats().lead * 0.02, 0.0, 0.04) : 0.0));
 		}
 		if (t >= next_b) {
 			const auto s0 = Clock::now();
 			if (sb.step(vf3net::pack(real[std::min(nb, real.size() - 1)], 1))) nb++;
 			if (connected) tb.add(std::chrono::duration<double, std::milli>(Clock::now() - s0).count());
-			next_b += fb;
+			next_b += fb / (1 - (soft ? std::clamp(sb.stats().lead * 0.02, 0.0, 0.04) : 0.0));
 		}
 		t += 1;
 	}
