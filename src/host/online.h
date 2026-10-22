@@ -188,7 +188,8 @@ private:
 
 	// ---- a room code's match ----
 	struct Job;                         // a request to the lobby, on a thread of its own
-	static std::function<void(Job &)> gather(const std::string &base);
+	static std::function<void(Job &)> gather(const std::string &base, const std::string &body);
+	std::string turn_json() const;
 	std::shared_ptr<Job> job;
 	std::string lobby, code, key, peer_name;
 	uint64_t room_token = 0;

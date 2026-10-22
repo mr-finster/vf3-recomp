@@ -9,7 +9,7 @@
 //   POST /v1/wait   {code, key}   (the host's: waits up to 20 s for a player) -> {guest: null | {name, cands, relay}}
 //   POST /v1/reopen {code, key}   (the host's, after a player who didn't get going: the same code, open again)
 //   POST /v1/close  {code, key}
-//   POST /v1/turn   {game}  -> {servers: [{host, port, username, credential}], ttl, country}   (TURN_PER_DAY a day, all told)
+//   POST /v1/turn   {game, version, content} -> {servers: [{host, port, username, credential}], ttl, country}   (TURN_PER_DAY a day, all told)
 //   POST /v1/random {game, version, content, name, cands, relay} -> {ticket, waiting, players} or a match
 //   POST /v1/random/wait  {ticket}  (waits up to 20 s) -> the same
 //   POST /v1/random/leave {ticket}
@@ -34,7 +34,10 @@ const WAIT_MS = 20000;
 const TURN_PER_DAY = 100000;
 // And from one address a day (an IPv4 one, or an IPv6 /48): room for a school's or a phone network's shared
 // address, but one address alone can't take the day's
-const TURN_PER_ADDRESS_DAY = 500;
+const TURN_PER_ADDRESS_DAY = 200;
+// How long a relay login works: longer than a long night's session (a login ending may end a match through the relay
+// with it), short enough that one taken for something else is soon worthless
+const TURN_TTL = 6 * 3600;
 const GAMES = /^vf[123]$/;   // (the games there are: no queue or count made for anything else)
 
 const json = (body, status = 200) =>
@@ -227,6 +230,9 @@ export default {
 
 			if (path === '/v1/turn') {
 				if (await limited(env, req, 'TURN_LIMIT')) return json({ error: 'busy' }, 429);
+				// (only for one of the games, as it asks: which game, its version, its ROM's hash; not an empty ask)
+				const b = await body_of(req), me = b ? who(b, req) : null;
+				if (!me || !GAMES.test(me.game) || !me.version || !/^[0-9a-f]{16}$/.test(me.content)) return json({ error: 'bad' }, 400);
 				const limits = env.LIMITS.get(env.LIMITS.idFromName('turn')), from = sender(req, 3);
 				const day = await limits.fetch('https://limits/', { method: 'POST', body: JSON.stringify({ per_day: TURN_PER_DAY, who: from, per_who: TURN_PER_ADDRESS_DAY }) });
 				if (day.status === 429) return json({ error: 'no_turn' }, 503);
@@ -276,15 +282,15 @@ function room(env, code) {
 	return env.ROOMS.get(env.ROOMS.idFromName(code));
 }
 
-// Cloudflare's TURN: a login for a day, from the TURN key (kept as this Worker's secrets)
+// Cloudflare's TURN: a login for TURN_TTL, from the TURN key (kept as this Worker's secrets)
 async function turn(env, country) {
 	// (testing on one's own computer: a TURN server of one's own, as a .dev.vars line TURN_STATIC='[{"host":...}]')
-	if (env.TURN_STATIC) return json({ servers: JSON.parse(env.TURN_STATIC), ttl: 86400, country: env.DEV_COUNTRY || country });   // (never set on the real one)
+	if (env.TURN_STATIC) return json({ servers: JSON.parse(env.TURN_STATIC), ttl: TURN_TTL, country: env.DEV_COUNTRY || country });   // (never set on the real one)
 	if (!env.TURN_KEY_ID || !env.TURN_KEY_API_TOKEN) return json({ error: 'no_turn' }, 503);
 	const r = await fetch(`https://rtc.live.cloudflare.com/v1/turn/keys/${env.TURN_KEY_ID}/credentials/generate-ice-servers`, {
 		method: 'POST',
 		headers: { authorization: `Bearer ${env.TURN_KEY_API_TOKEN}`, 'content-type': 'application/json' },
-		body: JSON.stringify({ ttl: 86400 }),
+		body: JSON.stringify({ ttl: TURN_TTL }),
 	});
 	if (!r.ok) return json({ error: 'no_turn' }, 503);
 	const d = await r.json();
@@ -300,7 +306,7 @@ async function turn(env, country) {
 		}
 	}
 	if (!servers.length) return json({ error: 'no_turn' }, 503);
-	return json({ servers, ttl: 86400, country });
+	return json({ servers, ttl: TURN_TTL, country });
 }
 
 // One room: the host's details and key, the player who joined, and the host's waits
