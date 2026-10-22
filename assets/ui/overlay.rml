@@ -73,7 +73,7 @@
 		#toast {
 			position: absolute;
 			right: 24dp;
-			bottom: 44dp;   /* (over the connection display) */
+			bottom: 60dp;   /* (over the connection display, Detailed's row too) */
 			max-width: 560dp;
 		}
 		#toast span {
