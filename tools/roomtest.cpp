@@ -1,6 +1,7 @@
 // roomtest: two sessions over RoomLinks (src/net/room_link.h) on this machine, through a real STUN / TURN server
 // (coturn: turnserver -n --listening-ip=127.0.0.1 --lt-cred-mech --user=test:secret --realm=vf --allow-loopback-peers
-// --relay-ip=127.0.0.1 --no-tls --no-dtls --no-cli), as a room code's match makes them: each side finds its
+// --relay-ip=127.0.0.1 --no-tls --no-dtls --no-cli --denied-peer-ip=192.0.2.0-192.0.2.255: the made-up "on its network"
+// addresses refused, as Cloudflare's relay refuses a private network's), as a room code's match makes them: each side finds its
 // addresses (STUN) and a relay (TURN), is given the other's, and the first way that answers is the match's.
 //   roomtest [--server 127.0.0.1:3478] [--user test --pass secret]
 // The ways tried: direct (both sides' real addresses); both relays (the real addresses unreachable: only the relays
