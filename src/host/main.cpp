@@ -2574,6 +2574,11 @@ int main(int argc, char **argv)
 	std::string online_code_was;   // (the room code: its page made again when the lobby gives it)
 	uint64_t online_refresh_t = 0;
 	bool menu_closed_elsewhere = false;   // (the menu closed by a match starting: its closing's bookkeeping still owed)
+	// A step that couldn't run (the other side behind, or keeping in time) takes no input: what was pressed for it
+	// goes with the next one tried, so a tap of Start or Coin then (read_inputs plays them out over a few frames,
+	// each read once) isn't lost
+	uint16_t step_carry = 0, match_job_bits = 0;
+	constexpr uint16_t ONE_SHOT = vf3net::START_BUTTON | 512;   // (Start and Coin: the input word's, vf3net::pack)
 	auto end_match = [&] {   // back to playing on its own, from the boot, with this player's NVRAM
 		if (game.emu_thread.joinable()) game.job_wait();   // (nothing of a frame still running while it's all put back)
 		half = false;
@@ -2588,6 +2593,7 @@ int main(int argc, char **argv)
 		menu.set_notice("");
 		menu.set_banner("");
 		menu.hide_versus();
+		step_carry = 0;   // (a press held over from this match's last step: not the next one's)
 		menu.set_net("", 0);
 		board.rtc_time = -1;
 		if (nvram_away) {
@@ -2731,11 +2737,6 @@ int main(int argc, char **argv)
 	// passes went past their refresh)
 	struct { bool on = false, ok = false; double ms = 0; } match_job;
 	bool match_job_taken = false;
-	// A step that couldn't run (the other side behind, or keeping in time) takes no input: what was pressed for it
-	// goes with the next one tried, so a tap of Start or Coin then (read_inputs plays them out over a few frames,
-	// each read once) isn't lost
-	uint16_t step_carry = 0, match_job_bits = 0;
-	constexpr uint16_t ONE_SHOT = vf3net::START_BUTTON | 512;   // (Start and Coin: the input word's, vf3net::pack)
 	auto take_match_job = [&] {
 		if (!match_job.on) return;
 		game.job_wait();
@@ -3341,6 +3342,7 @@ int main(int argc, char **argv)
 	}
 	if (game.emu_thread.joinable()) game.job_wait();   // (a match's step still running)
 	if (flag_atlas) SDL_DestroySurface(flag_atlas);
+	flag_atlas = nullptr;
 	online.stop();   // (closed in a match: the other side is told at once, not after a silence)
 	Online::flush(1500);   // (and the lobby told: a room closed, a search left)
 	if (nvram_away) {   // (closed in a match: this player's own NVRAM back, to be saved, not the host's)
