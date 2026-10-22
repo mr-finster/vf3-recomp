@@ -63,7 +63,7 @@ and the games started with `VF_LOBBY=http://127.0.0.1:8787`.
 - **Rate limits** per address (an IPv6 one by its /64), in `wrangler.toml`: 120 requests a minute in all, 20 rooms
   opened, 20 joins, 10 relay logins. Enough for a LAN party or a phone network's shared address; a flood, or a
   room code guessed at (31^6, about 900 million codes), is stopped.
-- **The relay's logins are capped**: `TURN_PER_DAY` in `src/index.js` (4,000 a day, about 2,000 matches). Past it
+- **The relay's logins are capped**: `TURN_PER_DAY` in `src/index.js` (10,000 a day, about 5,000 matches). Past it
   no more are given out that day: matches still connect directly, only the relay's matches wait for tomorrow. The
   relay is the one thing that costs by use, so this is what bounds the bill; raise it as players come.
 - **A billing alert** (do this once): Cloudflare dashboard > **Notifications** > **Add**, pick the usage-based
@@ -81,5 +81,5 @@ After changing anything here, `npx wrangler deploy` again.
 ## What it keeps
 
 A room: the host's name, game, version and addresses, for as long as the host's game keeps asking (it's gone 30
-seconds after the host stops, two hours at most). Requests are limited per IP address (kept in memory only). No
-logs are written by the Worker.
+seconds after the host stops, two hours at most). Requests are limited per IP address (Cloudflare's rate limiting, kept
+for a minute), and the relay's logins counted for the day. No logs are written by the Worker.
