@@ -23,6 +23,7 @@ void unpack(uint16_t bits, int player, m3::Controls &c);
 uint64_t content_hash(m3::Model3 &board);
 // The host's starting blob: its backup RAM and EEPROM
 std::vector<uint8_t> start_blob(const m3::Model3 &board);
+constexpr uint16_t START_BUTTON = 256;   // (the input word's Start: pack's)
 
 class Adapter : public vfnet::Game
 {

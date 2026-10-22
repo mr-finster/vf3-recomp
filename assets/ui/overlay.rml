@@ -98,6 +98,17 @@
 			font-weight: 500;
 			color: #5d6799;
 		}
+		/* what the players are waited for (Press Start), at the bottom in the middle */
+		#banner { position: absolute; left: 0; right: 0; bottom: 200dp; text-align: center; }   /* (above the title screen's own Press Start Button) */
+		#banner .in {
+			display: inline-block;
+			padding: 12dp 36dp 14dp 36dp;
+			border-radius: 14dp;
+			border: 2dp #ffffff;
+			decorator: horizontal-gradient(#f2d14b #f0922e);
+		}
+		#banner .title { font-size: 34dp; font-weight: 700; font-style: italic; color: #0b1026; }
+		#banner .sub { font-size: 20dp; font-weight: 600; color: #0b1026; }
 		/* a match found: the two players, VS between (the two sides drawn under this by the menu: game_menu::draw_versus) */
 		#vs { position: absolute; left: 0; right: 0; top: 0; bottom: 0; }
 		#vs .pl { position: absolute; top: 210dp; font-size: 24dp; font-weight: 600; letter-spacing: 4dp; line-height: 24dp; }
@@ -129,5 +140,5 @@
 		#vs .sub { margin-top: 10dp; font-size: 26dp; font-weight: 500; color: #d8ddf5; }
 	</style>
 </head>
-<body><div id="vs"></div><div id="notice"></div><div id="fps"></div><div id="net"></div><div id="toast"></div></body>
+<body><div id="vs"></div><div id="banner"></div><div id="notice"></div><div id="fps"></div><div id="net"></div><div id="toast"></div></body>
 </rml>

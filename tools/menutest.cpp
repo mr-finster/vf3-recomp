@@ -346,6 +346,12 @@ int main(int argc, char **argv)
 	gm.show_versus({ "PLAYER 1 \xC2\xB7 HOST", "MRFINSTER", "PLAYER 2", "G", "Connected directly \xC2\xB7 19 ms", "Both press Start", false });
 	for (int i = 0; i < 20; i++) { shot("", w, h); SDL_Delay(20); }   // (its fade in)
 	shot("versus.png", w, h);
+	for (int i = 0; i < 20; i++) { shot("", w, h); SDL_Delay(200); }   // (gone after its 3.5 s)
+	gm.set_banner("PRESS START");
+	shot("press_start.png", w, h);
+	gm.set_banner("WAITING FOR G", "to press Start");
+	shot("waiting_start.png", w, h);
+	gm.set_banner("");
 	if (fails) { fprintf(stderr, "menutest: %d failed\n", fails); return 1; }
 	printf("all passed\n");
 	return 0;

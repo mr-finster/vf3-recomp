@@ -129,6 +129,21 @@ void game_menu::set_notice(const std::string &title, const std::string &sub, con
 	}
 }
 
+void game_menu::set_banner(const std::string &title, const std::string &sub)
+{
+	const std::string key = title + "\n" + sub;
+	if (!m->overlay || key == m_banner) return;
+	m_banner = key;
+	if (Rml::Element *e = m->overlay->GetElementById("banner")) {
+		e->SetInnerRML(title.empty() ? "" : "<div class=\"in\"><div class=\"title\">" + escape(title) + "</div>" + (sub.empty() ? "" : "<div class=\"sub\">" + escape(sub) + "</div>") + "</div>");
+		e->SetProperty("visibility", title.empty() ? "hidden" : "visible");
+	}
+}
+
+// The size of everything: 1dp a 720th of the window's height, or a 1280th of its width if that's less (a window
+// narrower than 16:9, a Steam Deck's 16:10, 4:3: the screens laid out for 1280 x 720 fit across it whole)
+static float dp_of(int w, int h) { return std::min(float(h) / 720.0f, float(w) / 1280.0f); }
+
 void game_menu::show_versus(const versus &v, double seconds)
 {
 	if (!m->overlay) return;
@@ -149,7 +164,7 @@ void game_menu::show_versus(const versus &v, double seconds)
 void game_menu::draw_versus(int w, int h)
 {
 	const uint64_t now = SDL_GetTicks();
-	const float dp = float(h) / 720.0f, mid = float(w) / 2, top_h = 560 * dp, lean = 60 * dp;
+	const float dp = dp_of(w, h), mid = float(w) / 2, top_h = 560 * dp, lean = 60 * dp;
 	// (in, then out: a quarter of a second each)
 	const float a = std::clamp(std::min(float(now - m_vs_from), float(m_vs_until - now)) / 250.0f, 0.0f, 1.0f);
 	auto col = [a](uint32_t rgb) { return SDL_FColor{ float(rgb >> 16 & 255) / 255, float(rgb >> 8 & 255) / 255, float(rgb & 255) / 255, a }; };
@@ -202,6 +217,7 @@ bool game_menu::init(SDL_Window *win, SDL_Renderer *ren, const std::string &asse
 		m->overlay->Show();
 		if (Rml::Element *e = m->overlay->GetElementById("notice")) e->SetProperty("visibility", "hidden");
 		if (Rml::Element *e = m->overlay->GetElementById("vs")) e->SetProperty("visibility", "hidden");
+		if (Rml::Element *e = m->overlay->GetElementById("banner")) e->SetProperty("visibility", "hidden");
 	}
 	m->screen = m->ctx->LoadDocument(assets + "/ui/screen.rml");   // (without it a screen page shows as rows)
 	m->listener.menu = this;
@@ -594,7 +610,7 @@ void game_menu::render(bool fps)
 		m_vs_until = 0;
 		if (Rml::Element *e = m->overlay ? m->overlay->GetElementById("vs") : nullptr) e->SetProperty("visibility", "hidden");
 	}
-	if (!m_open && (m_fps.empty() || !fps) && m_net.empty() && !m_toast_until && m_notice == "\n\n" && !m_vs_until) return;   // (nothing over the game)
+	if (!m_open && (m_fps.empty() || !fps) && m_net.empty() && !m_toast_until && m_notice == "\n\n" && !m_vs_until && m_banner == "\n") return;   // (nothing over the game)
 	if (Rml::Element *e = m->overlay ? m->overlay->GetElementById("fps") : nullptr)
 		e->SetProperty("visibility", fps && !m_open && !m_fps.empty() ? "visible" : "hidden");
 	// the menu is laid out in window pixels, not the game's letterboxed picture
@@ -605,7 +621,7 @@ void game_menu::render(bool fps)
 	int w = 0, h = 0;
 	SDL_GetCurrentRenderOutputSize(m->ren, &w, &h);
 	m->ctx->SetDimensions(Rml::Vector2i(w, h));
-	m->ctx->SetDensityIndependentPixelRatio(float(h) / 720.0f);
+	m->ctx->SetDensityIndependentPixelRatio(dp_of(w, h));
 	m->ctx->Update();
 	if (m_vs_until) draw_versus(w, h);
 	m->gfx->BeginOverlay();
