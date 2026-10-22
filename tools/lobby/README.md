@@ -34,7 +34,7 @@ Everything runs on the Mac, from this folder.
 
    ```
    curl https://vf-lobby.yourname.workers.dev/v1/ping
-   curl -X POST https://vf-lobby.yourname.workers.dev/v1/turn -d '{}'
+   curl -X POST https://vf-lobby.yourname.workers.dev/v1/turn -d '{"game":"vf3","version":"test","content":"0123456789abcdef"}'
    ```
 
    The first says `{"ok":true,...}`, the second lists `servers` with a username and credential. `no_turn`
@@ -62,7 +62,7 @@ and the games started with `VF_LOBBY=http://127.0.0.1:8787`.
 
 - **Rate limits** per address (an IPv6 one by its /64), in `wrangler.toml`: 600 requests a minute in all, 60 rooms
   opened or random searches, 20 joins, 30 relay logins, 180 waits; 6 random searches at once and 120 random
-  matches in 10 minutes; and 500 relay logins a day (an IPv4 address, or an IPv6 /48). High enough for a phone
+  matches in 10 minutes; and 200 relay logins a day (an IPv4 address, or an IPv6 /48). High enough for a phone
   network's or a school's shared address (many players behind one); a flood, or a room code guessed at (31^6,
   about 900 million codes), is stopped.
 - **The random queue**: one Durable Object a game version, in memory (a restart or a deploy drops those searching:
@@ -76,14 +76,16 @@ and the games started with `VF_LOBBY=http://127.0.0.1:8787`.
 - **Addresses a game gives** are read whole (any way an IPv6 is written) and dropped if they'd point the other
   game at nowhere, everyone (multicast, broadcast) or itself (loopback).
 - **The relay's logins are capped**: `TURN_PER_DAY` in `src/index.js` (100,000 a day, about 50,000 match tries), and
-  500 a day from one address. Past it no more are given out that day: matches still connect directly, only the
-  relay's matches wait for tomorrow. The relay is the one thing that costs by use, and it's billed by its traffic
-  (the first 1000 GB a month free), not by its logins: a login works a day for any traffic, so the caps slow a
-  runaway, they don't bound the bill. The billing alert below is what does.
+  200 a day from one address; past it no more are given out that day (matches still connect directly, only the
+  relay's wait for tomorrow). A login is given only to an ask that names one of the games, its version and its ROM's
+  hash, and works for 6 hours (`TURN_TTL`), not a day. The relay is the one thing that costs by use, billed by its
+  traffic (the first 1000 GB a month free), not its logins. **It can't be locked to the games alone:** they're open
+  source, so whatever a game asks, a script could ask too; the caps and the short logins limit what one address can
+  take, and the billing alert below is what bounds the bill.
 - **A billing alert** (do this once): Cloudflare dashboard > **Notifications** > **Add**, pick the usage-based
   billing alert, and set an amount you'd want to hear about (say $5). Cloudflare has no hard spending cap for the
   relay; the cap above and this alert are what there is.
-- **The secrets** (`TURN_KEY_ID`, `TURN_KEY_API_TOKEN`) never leave the Worker: players get only day-long relay
+- **The secrets** (`TURN_KEY_ID`, `TURN_KEY_API_TOKEN`) never leave the Worker: players get only 6-hour relay
   logins. If the token ever leaks, regenerate it in the dashboard (Realtime > TURN Server) and put it again.
 - **What the games are told**: only another player's addresses (checked: nothing that points a game at its own
   machine, broadcast or multicast), name and version, and only to someone with the room's code. The room's host
