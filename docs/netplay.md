@@ -33,8 +33,8 @@ build/bin/roomtest                                             # room links agai
 
 To play: both start the game; one opens Online > HOST (a room code), the other Online > JOIN and types it (joined at
 the 6th letter). The lobby only hands each side the other's addresses (on their network, public as STUN saw
-it, their relay) and a token; the games try every way at once and keep the first that answers. By address (Host by
-address, under Play by address) is still there for one network or a VPN. A match starts at the title screen, both on free
+it, their relay) and a token; the games try every way at once and keep the first that answers. By address (Online::host
+/ join, a UdpLink) is still in the code for tests, not in the menu: codes only. A match starts at the title screen, both on free
 play (both press Start); the menu doesn't pause it; Leave the match (or the other side going) goes back to playing alone, with
 the player's own NVRAM given back (a match plays on the host's).
 

@@ -109,6 +109,12 @@ public:
 	std::string peer() const;     // the other player's name, as the lobby or the session has it ("" not yet)
 	// In a match whose connection's gone quiet: the seconds left before it's given up
 	int hold_left() const { return session ? session->quiet_left_s() : 0; }
+	// What the host's screen says besides how it's going: a player who couldn't join and why, the lobby hard to
+	// reach ("" none)
+	const std::string &host_note() const { return note; }
+	// The match on its title screen: 1 this player hasn't pressed Start yet, 2 the other hasn't, 0 both have (or no match)
+	int start_wait() const;
+	bool slow_local() const { return local_slow; }   // (this match through the relay only for a Mac's Local Network permission)
 	void set_last_match(const LastMatch &m) { last = m; }   // ({}: forgotten, the menu closed after it; tests: one made up)
 	void forget_failure() { failure.clear(); }              // (the menu closed after it)
 	const std::string &local_address() const { return lan; }
@@ -130,6 +136,10 @@ private:
 	std::string failure;
 	void ended(const std::string &why, bool lost = false);   // (the match over: kept as the last match)
 	Step fail_step = Step::none;
+	std::string note;
+	bool local_slow = false;
+	mutable size_t start_scan[2] = {};   // (start_wait: how far each player's inputs have been looked through)
+	mutable bool start_seen[2] = {};
 	Try tried = Try::none;
 	std::string want_code;           // (host_room's want)
 	double patient_until = 0;

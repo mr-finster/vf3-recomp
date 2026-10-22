@@ -59,7 +59,7 @@ the hardware; none of its code is in this one.
 | Menu, keyboard and gamepads, two players, the arcade's settings, screen filters | Working |
 | Portable mode, your own ROM folder | Working |
 | macOS, Windows, Linux / Steam Deck | macOS (Apple silicon) and the Steam Deck: the downloads working, a steady 60 pictures a second on the Deck; Windows tested under Wine; Intel Macs not yet tried (the Mac build is universal) |
-| Online play | Experimental: rollback netplay, one player hosting and one joining by address (see [Online play](#online-play-experimental)) |
+| Online play | Experimental: rollback netplay with room codes, no setup (see [Online play](#online-play-experimental)) |
 
 **This is an alpha.** Please report anything that looks or plays differently from the arcade in
 [Issues](https://github.com/mr-finster/vf3-recomp/issues), with the `log.txt` from the game's data folder.
@@ -186,21 +186,16 @@ office, school and hotel networks), the match goes through a relay (Cloudflare's
 connection display says "relay" then. The room code only finds the other player: no game data goes through the
 lobby.
 
-**On the same network, or over a VPN** (no lobby needed): Online > **Play by address** > **Host by address** shows
-your address (e.g. `192.168.1.20`); the other player chooses **Join by address**, types it, **Connect**. Over a VPN made for this
-([Tailscale](https://tailscale.com), ZeroTier, Radmin VPN), type the host's VPN address instead (`100.x.y.z` for
-Tailscale). Port forwarding UDP 7700 to the host works too, but a room code is easier.
-
 **If it won't connect**
 
-- The Online page says what went wrong in plain words, under **Couldn't connect**. A room code: check it, and that
-  the host is still on their Host page (a room closes when the host leaves it). By address: check the address,
-  that the host is on its Host page, and the VPN.
+- The Online screen says what went wrong in plain words, under **Couldn't connect**, and which step it got to:
+  check the code, and that the host is still hosting (a room closes when the host stops). **Try again** goes again.
 - **Firewalls:** the first time you host, allow the game when asked. Windows: if you dismissed it, Windows Security >
   Firewall > Allow an app, tick Virtua Fighter 3 Recomp for **Private and Public**. Mac: System Settings > Network >
   Firewall > Options: allow it; each new version of the (unsigned) Mac app may need allowing again. Also System
   Settings > Privacy & Security > Local Network: on.
-- Hotel, school and public Wi-Fi often keep devices on the same network from seeing each other: use a room code.
+- Hotel, school and public Wi-Fi often keep devices on the same network from seeing each other: the match goes
+  through the relay instead, by itself.
 
 **For the smoothest match**
 

@@ -2547,6 +2547,7 @@ int main(int argc, char **argv)
 		game.hud_names[1].clear();
 		game.tiles_on = true;
 		menu.set_notice("");
+		menu.set_banner("");
 		menu.set_net("", 0);
 		board.rtc_time = -1;
 		if (nvram_away) {
@@ -2590,9 +2591,10 @@ int main(int argc, char **argv)
 				const int ms = online.ping();
 				menu.show_versus({ "PLAYER 1 \xC2\xB7 HOST", host, "PLAYER 2", guest,
 				                   std::string(online.via_relay() ? "Connected through the relay" : "Connected directly") + (ms > 0 ? " \xC2\xB7 " + std::to_string(ms) + " ms" : ""),
-				                   "Both press Start", online.via_relay() });
-			} else if (n.kind != Online::Notice::ended)   // (a match's end: the Online screen opens on it, MATCH OVER)
-				menu.toast(n.text, n.kind == Online::Notice::tip ? 9 : 7);
+				                   online.slow_local() ? "Through the relay: this Mac blocks your network. Turn on Local Network (System Settings) for a faster match"
+				                                       : "Both press Start", online.via_relay() });
+			}
+			// (nothing else said over the game: the Online screen says what came of it, when it's next opened)
 			fprintf(stderr, "online: %s\n", n.text.c_str());
 		}
 		if ((match_on && !online.playing()) || (nvram_away && !online.playing() && !online.starting())) end_match();   // (ended, left, or never got going)
@@ -2600,8 +2602,10 @@ int main(int argc, char **argv)
 		// never over the versus screen; and Connection back only after it was said)
 		static bool said_interrupted = false;
 		const bool interrupted = online.playing() && online.interrupted() && (said_interrupted || (online.hold_left() <= 6 && !menu.versus_showing()));
-		if (online.playing() && said_interrupted && !online.interrupted()) menu.toast("Connection back", 3);
 		said_interrupted = interrupted;
+		// the match's start: who's still to press Start, until both have (not over the versus screen, which says it)
+		const int wait = online.playing() && !menu.is_open() && !menu.versus_showing() && !interrupted ? online.start_wait() : 0;
+		menu.set_banner(wait == 1 ? "PRESS START" : wait == 2 ? "WAITING FOR " + online.opponent() : "", wait == 2 ? "to press Start" : "");
 		if (interrupted)
 			menu.set_notice("WAITING FOR " + online.opponent(), "The connection dropped. Holding the match for " + std::to_string(online.hold_left()) + " s...",
 			                "It carries on from right here if it comes back");
