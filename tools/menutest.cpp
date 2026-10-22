@@ -147,7 +147,7 @@ int main(int argc, char **argv)
 
 	std::string err;
 	if (!o.host(s, err)) fprintf(stderr, "menutest: hosting: %s\n", err.c_str());
-	gm.replace(online_menu::page(o, s, gm, changed), 6);
+	gm.replace(online_menu::page(o, s, gm, changed), 7);
 	shot("hosting.png", w, h);
 	o.stop();
 
