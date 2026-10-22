@@ -1,5 +1,7 @@
 #include "http.h"
 #include <algorithm>
+#include <atomic>
+#include <cstdint>
 #include <cstring>
 #include <mutex>
 #include <type_traits>
@@ -15,6 +17,15 @@
 #endif
 
 namespace vfnet::http {
+
+namespace {
+std::atomic<bool> cancelled{ false };
+std::atomic<int> on_way{ 0 };
+struct Counted { Counted() { on_way++; } ~Counted() { on_way--; } };
+} // namespace
+
+void cancel_all() { cancelled = true; }
+int active() { return on_way.load(); }
 
 #ifdef _WIN32
 
@@ -41,6 +52,8 @@ struct Handle
 Reply request(const std::string &method, const std::string &url, const std::string &body, int timeout_ms)
 {
 	Reply r;
+	if (cancelled) { r.error = "quitting"; return r; }
+	Counted counted;
 	std::wstring wurl = wide(url);
 	URL_COMPONENTS u{};
 	u.dwStructSize = sizeof u;
@@ -78,7 +91,7 @@ Reply request(const std::string &method, const std::string &url, const std::stri
 	r.status = int(status);
 	for (;;) {
 		DWORD avail = 0;
-		if (!WinHttpQueryDataAvailable(req.h, &avail) || avail == 0) break;
+		if (cancelled || !WinHttpQueryDataAvailable(req.h, &avail) || avail == 0) break;
 		if (r.body.size() + avail > 65536) break;   // (the lobby's replies are small)
 		std::string chunk(avail, '\0');
 		DWORD got = 0;
@@ -108,6 +121,7 @@ struct Curl
 	enum {
 		URL = 10002, POSTFIELDS = 10015, POSTFIELDSIZE = 60, HTTPHEADER = 10023, WRITEFUNCTION = 20011, WRITEDATA = 10001,
 		TIMEOUT_MS = 155, CONNECTTIMEOUT_MS = 156, NOSIGNAL = 99, USERAGENT = 10018, CUSTOMREQUEST = 10036, HTTPGET = 80,
+		NOPROGRESS = 43, XFERINFOFUNCTION = 20219,
 		RESPONSE_CODE = 0x200002, GLOBAL_ALL = 3,
 	};
 };
@@ -146,9 +160,13 @@ size_t write_body(char *p, size_t size, size_t n, void *user)
 
 } // namespace
 
+int progress(void *, int64_t, int64_t, int64_t, int64_t) { return cancelled ? 1 : 0; }   // (non-zero: curl gives it up)
+
 Reply request(const std::string &method, const std::string &url, const std::string &body, int timeout_ms)
 {
 	Reply r;
+	if (cancelled) { r.error = "quitting"; return r; }
+	Counted counted;
 	Curl &c = curl();
 	if (!c.ok) { r.error = "this system has no libcurl (install it, e.g. the libcurl4 package)"; return r; }
 	void *h = c.easy_init();
@@ -162,6 +180,8 @@ Reply request(const std::string &method, const std::string &url, const std::stri
 	c.easy_setopt(h, Curl::HTTPHEADER, headers);
 	c.easy_setopt(h, Curl::WRITEFUNCTION, &write_body);
 	c.easy_setopt(h, Curl::WRITEDATA, &r.body);
+	c.easy_setopt(h, Curl::NOPROGRESS, 0L);
+	c.easy_setopt(h, Curl::XFERINFOFUNCTION, &progress);
 	if (method == "GET") c.easy_setopt(h, Curl::HTTPGET, 1L);
 	else {
 		c.easy_setopt(h, Curl::POSTFIELDS, body.c_str());

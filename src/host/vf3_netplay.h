@@ -12,7 +12,8 @@
 
 namespace vf3net {
 
-constexpr int BOOT_FRAMES = 960;   // the boot, unseen, up to the SEGA logo (as the PC way's, main.cpp)
+constexpr int BOOT_FRAMES = 960;
+constexpr size_t STAGE_SELECT = 0x1E017;   // the arcade's VS stage select in its backup RAM: 0 on, 1 off (found by changing it)   // the boot, unseen, up to the SEGA logo (as the PC way's, main.cpp)
 
 // A player's switches as the session's input word (coin, start, the stick, the four buttons; never test or
 // service), and back

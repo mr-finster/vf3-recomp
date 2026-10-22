@@ -154,7 +154,7 @@ scale; View + RB: picture shape. For Arcade play on a pad, set a Coin button in 
   16:10, 16:9, 21:9), background filter, distant textures (sharp, or as the arcade's), smooth motion, screen filter (scanlines, CRT), CRT colours (an arcade monitor's, as Supermodel's presets), Show FPS, fullscreen.
 - **Sound:** volume, and the music's and the effects' own volumes.
 - **Game:** play style (PC: no boot screen, always free play; Arcade: the boot, coins and credits, its coin settings kept for it), reset.
-- **Arcade settings:** difficulty, rounds to win, energy, demo sound, country, and the arcade's own service menu (its
+- **Arcade settings:** difficulty, rounds to win, energy, stage select between two players (off as the arcade ships: every two-player match on the lava stage), demo sound, country, and the arcade's own service menu (its
   other settings, sound test, bookkeeping). A change restarts the game.
 - **Controls:** each player's pad, keys and buttons.
 - **Online:** a random opponent, host a match, join one, your name, input delay, the connection display (see below).
@@ -167,7 +167,9 @@ scale, choose a lower one (F5).
 Rollback netplay, as modern fighting games have it: your own inputs show at once (after the input delay), and the
 game quietly corrects the moment your opponent's arrive. Both players need **the same version** of the game (the
 same download) and **the same `vf3.zip`**; it tells you if not. Matches always play the PC way, free play, with the
-host's arcade settings (rounds, difficulty, energy). Each player uses their own Player 1 controls.
+host's arcade settings (rounds, difficulty, energy), and the arcade's stage select on: after picking fighters the
+challenger picks the stage (8 seconds; hold Start on one for its Dural version). Each player uses their own Player 1
+controls.
 
 **A random opponent:** Menu > **Online** > **RANDOM**. It finds whoever else is looking, the nearest first (the
 best connection), and widens the search the longer you wait; **Stop** gives up. Play solo while you wait: the match
@@ -216,7 +218,7 @@ lobby. The flags are the countries Cloudflare places each player's connection in
 **Good to know**
 
 - The menu doesn't pause a match (it goes on behind it, your inputs off). Leaving a match tells the other player.
-- Your opponent can see your IP address, as in any direct peer-to-peer game. **Hide my IP address** (Menu >
+- Your opponent can see your IP address, as in any direct peer-to-peer game (and a friend by code your local network's, in case you share one; a random opponent never gets that). **Hide my IP address** (Menu >
   Online > Settings) sends matches through the relay instead, so they see only Cloudflare's: it adds a
   little ping (more on the same network), so it's off unless you want it.
 - Not yet: spectating, replays, rematch without reconnecting.

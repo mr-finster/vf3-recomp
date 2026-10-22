@@ -53,9 +53,52 @@ std::string hex64(uint64_t v)
 	return b;
 }
 
-void log_line(const std::string &t) { fprintf(stderr, "online: %s\n", t.c_str()); }
+// Every address in a line for the log hidden as mask hides one, wherever it is in the line (an IPv4's last part,
+// an IPv6's all but its first two groups): log.txt is what players post with a report
+std::string masked_text(const std::string &t)
+{
+	std::string out;
+	for (size_t i = 0; i < t.size();) {
+		// an IPv4: four numbers, dots between, not inside a longer run of them
+		size_t j = i, parts = 0, last = 0;
+		if (isdigit(uint8_t(t[i])) && (i == 0 || (!isdigit(uint8_t(t[i - 1])) && t[i - 1] != '.'))) {
+			while (parts < 4) {
+				size_t k = j;
+				while (k < t.size() && k - j < 3 && isdigit(uint8_t(t[k]))) k++;
+				if (k == j) break;
+				parts++;
+				if (parts == 4) { last = j; j = k; break; }
+				if (k >= t.size() || t[k] != '.') break;
+				j = k + 1;
+			}
+		}
+		if (parts == 4 && (j >= t.size() || (!isdigit(uint8_t(t[j])) && t[j] != '.'))) {
+			out.append(t, i, last - i);
+			out += 'x';
+			i = j;
+			continue;
+		}
+		// an IPv6 in brackets: its first two groups kept
+		if (t[i] == '[') {
+			const size_t close = t.find(']', i);
+			if (close != std::string::npos && close - i > 3 && t.find_first_not_of("0123456789abcdefABCDEF:.", i + 1) == close) {
+				const size_t c1 = t.find(':', i + 1), c2 = c1 == std::string::npos ? c1 : t.find(':', c1 + 1);
+				out.append(t, i, (c2 != std::string::npos && c2 < close ? c2 : i + 1) - i);
+				out += ":...]";
+				i = close + 1;
+				continue;
+			}
+		}
+		out += t[i++];
+	}
+	return out;
+}
+
+void log_line(const std::string &t) { fprintf(stderr, "online: %s\n", masked_text(t).c_str()); }
 
 } // namespace
+
+std::string Online::log_masked(const std::string &t) { return masked_text(t); }
 
 struct Online::Job
 {
@@ -81,6 +124,10 @@ void Online::flush(int ms)
 {
 	for (int waited = 0; farewells.load() > 0 && waited < ms; waited += 20) std::this_thread::sleep_for(std::chrono::milliseconds(20));
 	quitting = true;
+	// (and any request still on its way given up, a moment for them to let go: no thread inside libcurl's or
+	// OpenSSL's as the program's ending, a crash at the quit otherwise)
+	vfnet::http::cancel_all();
+	for (int waited = 0; vfnet::http::active() > 0 && waited < 500; waited += 10) std::this_thread::sleep_for(std::chrono::milliseconds(10));
 }
 
 std::string Online::lobby_default()
@@ -175,7 +222,7 @@ bool Online::host(const OnlineSettings &s, std::string &error)
 	port = std::clamp(s.port, 1024, 65535);
 	lan = vfnet::lan_address();
 	if (!open_host(error)) return false;
-	fprintf(stderr, "online: hosting on UDP port %d (%s)\n", port, lan.empty() ? "no network address" : lan.c_str());
+	log_line("hosting on UDP port " + std::to_string(port) + " (" + (lan.empty() ? std::string("no network address") : lan) + ")");
 	return true;
 }
 
@@ -219,7 +266,7 @@ bool Online::join(const OnlineSettings &s, std::string &error)
 	session->trace = log_line;
 	joining_to = host + (p != 7700 ? ":" + std::to_string(p) : "");
 	ph = Phase::joining;
-	fprintf(stderr, "online: joining %s, port %d\n", host.c_str(), p);
+	log_line("joining " + host + ", port " + std::to_string(p));
 	return true;
 }
 
@@ -449,6 +496,15 @@ void Online::start_job(std::function<void(Job &)> work)
 std::string Online::me_json(const std::string &extra) const
 {
 	std::vector<std::string> cands = room ? room->candidates() : std::vector<std::string>();
+	if (random) {   // (a stranger isn't told this side's own network's address: only a friend by code, who may share it)
+		auto lan = [](const std::string &a) {
+			unsigned b[4];
+			if (sscanf(a.c_str(), "%u.%u.%u.%u", &b[0], &b[1], &b[2], &b[3]) == 4)
+				return b[0] == 10 || (b[0] == 172 && b[1] >= 16 && b[1] <= 31) || (b[0] == 192 && b[1] == 168) || (b[0] == 169 && b[1] == 254);
+			return a.size() > 3 && a[0] == '[' && (tolower(uint8_t(a[1])) == 'f') && strchr("cdeCDE", a[2]) != nullptr;
+		};
+		cands.erase(std::remove_if(cands.begin(), cands.end(), lan), cands.end());
+	}
 	return "{\"game\":" + vfnet::json::quote(identity.game) + ",\"version\":" + vfnet::json::quote(identity.build) + ",\"content\":" +
 	       vfnet::json::quote(hex64(identity.content)) + ",\"name\":" + vfnet::json::quote(identity.name) + ",\"cands\":" + vfnet::json::list(cands) +
 	       ",\"relay\":" + vfnet::json::quote(room ? room->relay_address() : "") + extra + "}";
@@ -1295,8 +1351,8 @@ menu_page settings_page(Online &o, OnlineSettings &s, game_menu &menu, std::func
 	menu_page p{ "Settings", "", {} };
 	p.items.push_back(delay_row(o, s, changed));
 	p.items.push_back(connection_row(s, changed));
-	p.items.push_back({ "Hide my IP address", "On: matches made with a code always go through the relay (Cloudflare's), so the other player "
-		"never sees your address. A little more ping. Off: directly when the routers allow it, which is quickest.",
+	p.items.push_back({ "Hide my IP address", "On: every online match (a code's or a random one) goes through the relay (Cloudflare's), so the other "
+		"player never sees your address. A little more ping. Off: directly when the routers allow it, which is quickest.",
 		[&s] { return std::string(s.hide_ip ? "On" : "Off"); }, [&s, changed](int) { s.hide_ip = !s.hide_ip; changed(); } });
 	p.items.push_back({ "Back", "", {}, {}, [&menu] { menu.pop(); } });
 	return p;

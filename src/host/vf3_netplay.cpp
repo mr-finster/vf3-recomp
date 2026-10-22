@@ -89,6 +89,9 @@ bool Adapter::begin(const std::vector<uint8_t> &blob)
 		if (booting && i % 60 == 59) booting();
 	}
 	if (board.coin_setting() < 0 || (!board.set_coin_setting(m3::Model3::COIN_FREE_PLAY) && !board.free_play())) return false;
+	// and its stage select on: the challenger picks the stage ("CHALLENGER, SELECT A STAGE"), as an arcade set so;
+	// off (as a fresh backup RAM has it) every match between two players is on the one stage, the lava's
+	board.backup[STAGE_SELECT] = 0;
 	board.power_on();
 	for (int i = 0; i < BOOT_FRAMES; i++) {
 		board.run_frame();

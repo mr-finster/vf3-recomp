@@ -16,4 +16,9 @@ struct Reply
 // method "GET" or "POST" (body sent as JSON); timeout_ms for the whole request
 Reply request(const std::string &method, const std::string &url, const std::string &body, int timeout_ms);
 
+// At a quit: every request on its way given up (curl's at once; WinHTTP's at its next step), none started after; and
+// how many are still on their way (the quit waits a moment for none, so no thread's inside them as the program ends)
+void cancel_all();
+int active();
+
 } // namespace vfnet::http
