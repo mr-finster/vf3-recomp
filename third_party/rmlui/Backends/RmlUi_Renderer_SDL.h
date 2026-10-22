@@ -41,6 +41,7 @@ private:
 
 	SDL_Renderer* renderer;
 	SDL_BlendMode blend_mode = {};
+	bool straight = false;   // vf3-recomp: the software renderer's colours and textures not premultiplied (its own blend, SDL's plain one)
 	SDL_Rect rect_scissor = {};
 	bool scissor_region_enabled = false;
 	Rml::UniquePtr<SDL_Vertex[]> sdl_vertices;
