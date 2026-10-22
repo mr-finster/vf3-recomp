@@ -2848,6 +2848,11 @@ int main(int argc, char **argv)
 			for (int i = 0; i < due && running && online.playing(); i++) {
 				m3::Controls live;
 				const hotkey hk = read_inputs(live, pads, pstate, cfg.ctl);
+				if (scripted) {   // (tests: an input script's player 1 as this player's, in a match too)
+					script.step(script_ctl, game_frame);
+					const uint16_t sb = vf3net::pack(script_ctl, 0);
+					vf3net::unpack(uint16_t(vf3net::pack(live, 0) | sb), 0, live);
+				}
 				const uint16_t bits = menu.is_open() ? 0 : uint16_t(vf3net::pack(live, 0) | vf3net::pack(live, 1));
 				game.builder.widen = std::max(1.0f, float(picture_aspect()) * 0.75f) * 1.05f;
 				const uint64_t te = SDL_GetTicksNS();
