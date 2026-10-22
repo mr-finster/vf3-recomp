@@ -658,7 +658,7 @@ void Session::quit()
 
 int auto_delay(double rtt_ms, double jitter_ms, double frame_ms, int target_rollback, int floor)
 {
-	const int feel = std::clamp(int(std::ceil(rtt_ms / 2 / frame_ms)), 1, 4);
+	const int feel = std::clamp(int(std::lround(rtt_ms / 2 / frame_ms)), 1, 3);
 	const int cover = int(std::ceil((rtt_ms / 2 + jitter_ms) / frame_ms)) - target_rollback;
 	return std::clamp(std::max({ feel, cover, floor }), 0, MAX_DELAY);
 }
@@ -678,7 +678,7 @@ int AutoDelay::update(const Session &session, double now, bool between_rounds)
 	char b[160];
 	if (!started) {   // (the first: at once, the character select's)
 		started = true;
-		checked_at = now;
+		started_at = checked_at = now;
 		stalls_at = s.stalls;
 		snprintf(b, sizeof b, "ping %.0f ms, jitter %.0f ms%s", s.rtt_ms, s.jitter_ms, slow ? ", a slow frame here" : "");
 		why = b;
@@ -698,10 +698,11 @@ int AutoDelay::update(const Session &session, double now, bool between_rounds)
 		const uint64_t held = s.stalls - stalls_at;
 		stalls_at = s.stalls;
 		checked_at = now;
-		if (held >= 10 && cur < std::min(MAX_DELAY, want(s) + 2) && target <= cur) {
+		// (not in a match's first 15 s: the two sides settling in, the Start presses, aren't the connection)
+		if (now - started_at >= 15000 && held >= 10 && cur < std::min(MAX_DELAY, want(s) + 2) && target <= cur) {
 			target = cur + 1;
 			floor = target;
-			floor_until = now + 60000;
+			floor_until = now + 30000;
 			snprintf(b, sizeof b, "%llu frames held back in 3 s", (unsigned long long)held);
 			why = b;
 		}
