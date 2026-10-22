@@ -2702,21 +2702,27 @@ int main(int argc, char **argv)
 			                "It carries on from right here if it comes back");
 		else if (online.starting()) menu.set_notice("STARTING THE MATCH", online.status());
 		else menu.set_notice("");
-		int level = 0;
-		std::string line = online.playing() && cfg.online.show_connection ? online.connection(level) : std::string();
+		std::string line;
 		if (cfg.online.show_connection && online.waiting() && !online.starting())   // (playing alone meanwhile: still waiting, and where)
 			line = online.phase() == Online::Phase::hosting && online.by_code()
 				? "Hosting   " + (online.room_code().empty() ? std::string("a room") : "room " + online.room_code()) + "   " + online.status()
 				: online.phase() == Online::Phase::hosting
 				? "Hosting   " + (online.local_address().empty() ? std::string("no network") : online.local_address()) + "   " + online.status()
 				: online.status();
-		if (menu.versus_showing()) line.clear();   // (the versus screen says who and how; and the start's quiet isn't news)
-		// (the details' figures change every frame: said 4 times a second, not laid out again each frame)
-		static std::string detail;
-		static uint64_t detail_at = 0;
-		if (!(online.playing() && cfg.online.show_connection == 2 && !line.empty())) detail.clear();
-		else if (detail.empty() || SDL_GetTicks() - detail_at >= 250) { detail = online.connection_detail(); detail_at = SDL_GetTicks(); }
-		menu.set_net(line, level, detail);
+		// (in a match: its figures, said 4 times a second, not laid out again each frame; the versus screen says who
+		// and how, and the start's quiet isn't news)
+		static game_menu::net_cells cells;
+		static uint64_t cells_at = 0;
+		static bool had_cells = false;
+		if (!online.playing() || !cfg.online.show_connection || menu.versus_showing()) {
+			had_cells = false;
+			menu.set_net(menu.versus_showing() ? std::string() : line, 0);
+		} else if (!had_cells || SDL_GetTicks() - cells_at >= 250 || online.interrupted() != cells.interrupted) {
+			had_cells = online.connection(cells, cfg.online.show_connection == 2);
+			cells_at = SDL_GetTicks();
+			if (had_cells) menu.set_net(cells);
+			else menu.set_net(std::string(), 0);
+		}
 		// the Online page as things change: its rows made again with the phase, its status lines a few times a second
 		if (menu.is_open() && (online.phase() != online_was || online.room_code() != online_code_was) && menu.top_name() == "Online" && !menu.capturing())
 			menu.replace(online_page(), -1);

@@ -57,7 +57,12 @@ public:
 	// Over the game, the menu open or not: online play's connection at the top (empty hides it; level 0 good,
 	// 1 fair, 2 poor), a notice for a few seconds near the bottom, and one that stays in the middle while it's
 	// true (empty title: gone)
-	void set_net(const std::string &text, int level, const std::string &detail = "");   // (detail: a smaller line under it)
+	void set_net(const std::string &text, int level);
+	// In a match, the same place: the figures in cells of a fixed width, in a mono font (nothing moves as they
+	// change); detailed, a second row of them
+	struct net_cells { std::string name; int level = 0, ping = 0, delay = 0, rollback = 0; bool relay = false, interrupted = false, detailed = false;
+	                   double jitter = 0, rb_avg = 0, ahead = 0, frame_ms = 0; };
+	void set_net(const net_cells &c);
 	void toast(const std::string &text, double seconds = 4);
 	void set_notice(const std::string &title, const std::string &sub = "", const std::string &small = "");
 	// A match found: the two players side by side, VS between, for a few seconds over the game's start (a line
@@ -100,8 +105,8 @@ private:
 	std::unique_ptr<impl> m;
 	bool m_open = false;
 	std::string m_banner = "\n\n";
-	std::string m_fps, m_net, m_net_detail, m_notice = "\n\n";   // (m_notice: its title and lines, "\n\n" none)
-	int m_net_level = -1;
+	std::string m_fps, m_net = "-", m_notice = "\n\n";   // (m_net: the connection's RML and class; m_notice: its title and lines, "\n\n" none)
+	void show_net(const std::string &rml, const char *cls);
 	uint64_t m_toast_until = 0;   // (SDL_GetTicks)
 	uint64_t m_vs_from = 0, m_vs_until = 0;   // the versus screen's (SDL_GetTicks)
 	void draw_versus(int w, int h);       // its two sides, under its names
