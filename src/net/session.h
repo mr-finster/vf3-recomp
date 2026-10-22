@@ -165,6 +165,7 @@ private:
 	uint32_t rollback_from = UINT32_MAX;   // the first frame whose guess was wrong
 	uint32_t their_ack = 0;                // how many of this side's inputs the other side has
 	std::vector<std::vector<uint8_t>> ring;   // the state before frame f at f % size
+	std::vector<uint32_t> ring_frame;          // (which frame's each slot holds: UINT32_MAX none)
 	uint32_t their_frame = 0;              // the other side's frame, as last told, and when
 	double their_frame_at = 0;
 	int their_adv = 0;

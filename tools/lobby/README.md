@@ -61,7 +61,7 @@ and the games started with `VF_LOBBY=http://127.0.0.1:8787`.
 ## What stops abuse
 
 - **Rate limits** per address (an IPv6 one by its /64), in `wrangler.toml`: 600 requests a minute in all, 60 rooms
-  opened or random searches, 20 joins, 30 relay logins, 180 waits; 6 random searches at once and 30 random
+  opened or random searches, 20 joins, 30 relay logins, 180 waits; 6 random searches at once and 120 random
   matches in 10 minutes; and 500 relay logins a day (an IPv4 address, or an IPv6 /48). High enough for a phone
   network's or a school's shared address (many players behind one); a flood, or a room code guessed at (31^6,
   about 900 million codes), is stopped.
@@ -75,9 +75,11 @@ and the games started with `VF_LOBBY=http://127.0.0.1:8787`.
   the same code, and no one else can take it while the other player waits on it.
 - **Addresses a game gives** are read whole (any way an IPv6 is written) and dropped if they'd point the other
   game at nowhere, everyone (multicast, broadcast) or itself (loopback).
-- **The relay's logins are capped**: `TURN_PER_DAY` in `src/index.js` (100,000 a day, about 50,000 match tries). Past it
-  no more are given out that day: matches still connect directly, only the relay's matches wait for tomorrow. The
-  relay is the one thing that costs by use, so this is what bounds the bill; raise it as players come.
+- **The relay's logins are capped**: `TURN_PER_DAY` in `src/index.js` (100,000 a day, about 50,000 match tries), and
+  500 a day from one address. Past it no more are given out that day: matches still connect directly, only the
+  relay's matches wait for tomorrow. The relay is the one thing that costs by use, and it's billed by its traffic
+  (the first 1000 GB a month free), not by its logins: a login works a day for any traffic, so the caps slow a
+  runaway, they don't bound the bill. The billing alert below is what does.
 - **A billing alert** (do this once): Cloudflare dashboard > **Notifications** > **Add**, pick the usage-based
   billing alert, and set an amount you'd want to hear about (say $5). Cloudflare has no hard spending cap for the
   relay; the cap above and this alert are what there is.
@@ -92,6 +94,11 @@ After changing anything here, `npx wrangler deploy` again.
 
 ## What it keeps
 
-A room: the host's name, game, version and addresses, for as long as the host's game keeps asking (it's gone 30
-seconds after the host stops, two hours at most). Requests are limited per IP address (Cloudflare's rate limiting, kept
-for a minute), and the relay's logins counted for the day. No logs are written by the Worker.
+A room: the host's name, country, game, version and addresses, for as long as the host's game keeps asking (it's
+gone 30 seconds after the host stops, two hours at most); after that, for two hours, only its key (so its host
+alone can open the code again). The random queue, in memory only: each searcher's name, country, addresses and
+rough location (Cloudflare's, for the nearest; never sent to anyone), while they search and a minute after; how
+many matches each address had in the last 10 minutes; and when recent matches were made (for the count). The
+relay's logins counted for the day, all told and per address (the address itself kept as the count's key, wiped
+each day). Requests are limited per IP address (Cloudflare's rate limiting, kept for a minute). No logs are
+written by the Worker.
