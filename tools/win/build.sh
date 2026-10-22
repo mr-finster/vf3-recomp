@@ -96,7 +96,7 @@ $T-windres $D/vf3.rc -O coff -o $D/vf3_res.o
 # the game: libgcc, libstdc++ and winpthreads linked in, so SDL3.dll is the only DLL it brings
 make -j$(nproc 2>/dev/null || sysctl -n hw.ncpu) CXX=${WIN_CXX:-$T-g++} OBJ=build/win/obj BIN=build/win/bin \
 	EXTRA_CFLAGS="-I$D/zlib/include" \
-	LDLIBS="$D/vf3_res.o -L$D/zlib/lib -lz -lws2_32 -mwindows -static -Wl,--stack,16777216" \
+	LDLIBS="$D/vf3_res.o -L$D/zlib/lib -lz -lws2_32 -lwinhttp -mwindows -static -Wl,--stack,16777216" \
 	SDL_CFLAGS="-I$D/sdl/include" SDL_LIBS="$D/sdl/lib/libSDL3.dll.a" \
 	FT_CFLAGS="-I$D/ft/include/freetype2" FT_LIBS="$D/ft/lib/libfreetype.a" \
 	build/win/bin/vf3

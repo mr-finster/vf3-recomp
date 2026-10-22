@@ -21,17 +21,20 @@ The plan: GGPO-style rollback netcode, as a library shared by VF1, VF2 and VF3 R
 | VF3 adapter (start, inputs, MIDI under rollback) | `vf3net`, 40 ms each way: 4,000 frames in step, every checkpoint the straight run's; 1.0-1.3 frame rollbacks, a step 4.7 ms on average (a slow cloud machine) |
 | Names under the energy bars | drawn in the HUD's style (`VF3_HUD_NAMES=P1,P2` for vf3run's shots) |
 | Online menu, notices, connection display | built into the game; drawn without the ROM by `menutest` (pictures below); not yet played |
-| Lobby server, room codes, quick match, watching, rematch, replays | not yet |
+| Lobby (`tools/lobby`, a Cloudflare Worker), room codes, STUN, hole punching, the TURN relay (`src/net/room_link`, `stun`, `http`) | `roomtest` against a local coturn: direct, both relays, one side's relay only, a wrong token, all pass. Two games through a local lobby (`wrangler dev`): a match direct, and one through the relays (Hide my IP on both), 30 s each, in step |
+| Quick match, watching, rematch, replays | not yet |
 
 ```sh
 build/bin/nettest                                              # the session, no ROM
 build/bin/vf3net vf3.zip --script /tmp/scripts/versus.txt      # two boards, 40 ms each way (--latency, --jitter, --loss, --delay)
-SDL_VIDEO_DRIVER=offscreen build/bin/menutest /tmp/shots       # the Online pages as pictures
+SDL_VIDEO_DRIVER=offscreen build/bin/menutest /tmp/shots       # the Online pages as pictures (VF_LOBBY=... adds the room pages)
+build/bin/roomtest                                             # room links against a TURN server on 127.0.0.1:3478 (user test:secret)
 ```
 
-To play: both start the game; one opens Online > Host a match (the page shows the address to give), the other
-Online > Join a match, types it, Connect. On one network that's all; over the internet the host forwards UDP port
-7700 to their computer until the lobby server does it for them. A match starts at the title screen, both on free
+To play: both start the game; one opens Online > Host a match (the page shows a room code), the other Online > Join
+with a code, types it. The lobby only hands each side the other's addresses (on their network, public as STUN saw
+it, their relay) and a token; the games try every way at once and keep the first that answers. By address (Host by
+address / Join by address) is still there for one network or a VPN. A match starts at the title screen, both on free
 play (both press Start); the menu doesn't pause it; Leave the match (or the other side going) goes back to playing alone, with
 the player's own NVRAM given back (a match plays on the host's).
 
@@ -101,8 +104,12 @@ of what it does, not because nobody looks. What another player can reach, and wh
 - **Cheating**: each side runs the whole game itself and only inputs cross, so a modified game can't change the
   other player's game; anything but the real inputs ends the match as a desync. What it can't stop is what no
   input-only netcode can: a bot or a macro playing for someone.
-- **Your address**: playing directly, the other player sees your IP address, as in any peer-to-peer game. The lobby
-  server's relay (step 3) will hide it, for those who'd rather; play only people you choose meanwhile.
+- **Your address**: playing directly, the other player sees your IP address, as in any peer-to-peer game. Hide my IP
+  address (Online > Settings) makes room-code matches go only through this side's relay: its own addresses are
+  never given to the lobby nor sent from.
+- **The lobby**: rooms are random 6-letter codes (31^6, about 900 million) with a per-IP limit on joins, so guessing
+  one is impractical; a guest gets in only with the room's token, which the session checks in its hello. TURN logins
+  come from the Worker for a day; the TURN key stays in the Worker's secrets.
 - **Not in yet**: a SECURITY.md saying where to report a hole privately.
 
 ## The menu: Online
