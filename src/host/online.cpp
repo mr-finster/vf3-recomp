@@ -10,6 +10,7 @@ vfnet::Config Online::config(const OnlineSettings &s) const
 {
 	vfnet::Config c;
 	c.delay = s.delay < 0 ? 2 : std::clamp(s.delay, 0, 6);   // (Auto starts at 2, then follows the ping)
+	c.checksum_every = 120;   // (the desync check's hash, 27 MB, every 2 s: every half second it was a frame's worst cost on a Steam Deck)
 	c.soft_sync = true;   // (main's frame clock slows a little while ahead: no frame held back, no hitch)
 	return c;
 }
@@ -152,6 +153,18 @@ void Online::poll(double t)
 			        "%llu stalls for the other side, %llu waits to keep in time, %.1f frames ahead\n", session->frame(), st.rtt_ms, session->delay(),
 			        (unsigned long long)(st.rollbacks - logged_rb), st.rollbacks > logged_rb ? double(st.resim_frames - logged_resim) / double(st.rollbacks - logged_rb) : 0.0,
 			        st.rollback_max, (unsigned long long)(st.stalls - logged_stalls), (unsigned long long)(st.waits - logged_waits), double(st.ahead));
+		if (logged_at > 0 && st.steps > logged_steps) {   // (where a frame's time went: what's slow on a slow machine)
+			const double n = double(st.steps - logged_steps);
+			fprintf(stderr, "online: a frame's step %.2f ms on average, %.1f the worst: its save %.2f, its frame %.2f, frames run again %.2f, "
+			        "the desync check %.2f\n", (st.save_ms - logged_save + st.run_ms - logged_run + st.resim_ms - logged_resim_ms + st.hash_ms - logged_hash) / n,
+			        st.step_max_ms, (st.save_ms - logged_save) / n, (st.run_ms - logged_run) / n, (st.resim_ms - logged_resim_ms) / n, (st.hash_ms - logged_hash) / n);
+		}
+		session->clear_step_max();
+		logged_steps = st.steps;
+		logged_save = st.save_ms;
+		logged_run = st.run_ms;
+		logged_resim_ms = st.resim_ms;
+		logged_hash = st.hash_ms;
 		logged_at = now;
 		logged_rb = st.rollbacks;
 		logged_resim = st.resim_frames;
@@ -214,6 +227,17 @@ std::string Online::connection(int &level) const
 	const int ms = int(st.rtt_ms + 0.5), rb = st.rollback_max;
 	level = ms < 60 && rb <= 2 ? 0 : ms < 120 && rb <= 4 ? 1 : 2;
 	return opponent() + "   " + std::to_string(ms) + " ms   rollback " + std::to_string(rb);
+}
+
+std::string Online::connection_detail() const
+{
+	if (!session || ph != Phase::playing) return "";
+	const auto &st = session->stats();
+	char b[200];
+	snprintf(b, sizeof b, "delay %d   jitter %.0f ms   rollback %.1f avg, %d peak   ahead %+.1f   step %.1f ms (save %.1f)",
+	         session->delay(), st.jitter_ms, st.rollbacks ? double(st.resim_frames) / double(st.rollbacks) : 0.0, st.rollback_max, st.lead,
+	         st.steps ? (st.save_ms + st.run_ms + st.resim_ms + st.hash_ms) / double(st.steps) : 0.0, st.steps ? st.save_ms / double(st.steps) : 0.0);
+	return b;
 }
 
 // ---- the menu ----
@@ -308,10 +332,11 @@ menu_item delay_row(Online &o, OnlineSettings &s, std::function<void()> changed)
 
 menu_item connection_row(OnlineSettings &s, std::function<void()> changed)
 {
-	return { "Connection display", "In a match, the other player's name, the ping and the rollback, small at the top of the screen; "
-		"the dot green, yellow or red for how good the connection is.",
-		[&s] { return std::string(s.show_connection ? "On" : "Off"); },
-		[&s, changed](int) { s.show_connection = !s.show_connection; changed(); } };
+	return { "Connection display", "In a match, small at the top of the screen: the other player's name, the ping and the rollback, "
+		"the dot green, yellow or red for how good the connection is. Detailed adds a line: the input delay, the jitter, the "
+		"rollbacks, how far ahead this side is, and what each frame costs here.",
+		[&s] { return std::string(s.show_connection == 2 ? "Detailed" : s.show_connection ? "On" : "Off"); },
+		[&s, changed](int d) { s.show_connection = (s.show_connection + (d < 0 ? 2 : 1)) % 3; changed(); } };
 }
 
 menu_page join_page(Online &o, OnlineSettings &s, game_menu &menu, std::function<void()> changed)

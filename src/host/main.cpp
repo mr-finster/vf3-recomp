@@ -503,7 +503,7 @@ struct settings
 		if (auto it = kv.find("online_address"); it != kv.end()) online.address = online_menu::clean_address(it->second);
 		num("online_delay", online.delay, -1, 6);
 		num("online_port", online.port, 1024, 65535);
-		flag("online_connection", online.show_connection);
+		num("online_connection", online.show_connection, 0, 2);
 		if (auto it = kv.find("gpu_3d_failed"); it != kv.end()) gpu3d_failed = it->second;
 		flag("fullscreen", fullscreen);
 		flag("arcade_mode", arcade);
@@ -567,7 +567,7 @@ struct settings
 		if (graphics) fprintf(f, "graphics = %d\n", graphics);
 		fprintf(f, "screen_filter = %d\nantialiasing = %d\nmusic_volume = %d\neffects_volume = %d\narcade_coins = %d\nframe_timings = %d\n", filter, aa, music, effects, arcade_coin, int(timings));
 		fprintf(f, "online_name = %s\nonline_delay = %d\nonline_connection = %d\nonline_port = %d\n", online.name.c_str(), online.delay,
-				int(online.show_connection), online.port);
+				online.show_connection, online.port);
 		if (!online.address.empty()) fprintf(f, "online_address = %s\n", online.address.c_str());
 		for (int p = 0; p < 2; p++) ctl[p].save(f, p);
 		const bool flushed = flush_to_disk(f);
@@ -843,12 +843,26 @@ struct Game
 		finish_frame(sound_on, picture);
 		sysinfo::note_frame();   // (on the thread that ran it: the game's own, when it has one)
 	}
-	void start_frame() { board.run_frame_start(); }
+	// what a frame's parts cost, ms in all (the pace line's: where a slow machine's time goes), and how many frames
+	double part_ms[5] = {};   // the board, waiting for the sound, the scene, the 2D layers, the sky
+	uint64_t part_n = 0;
+	static double ms_since(uint64_t t) { return double(SDL_GetTicksNS() - t) / 1e6; }
+	void start_frame()
+	{
+		const uint64_t t = SDL_GetTicksNS();
+		board.run_frame_start();
+		part_ms[0] += ms_since(t);
+	}
 	void finish_frame(bool sound_on, bool picture)
 	{
+		uint64_t t = SDL_GetTicksNS();
 		board.run_frame_end();
+		part_ms[0] += ms_since(t);
+		t = SDL_GetTicksNS();
 		if (!sound_thread.joinable()) sound_start();
 		sound_wait();   // (the frame before's sound, made meanwhile)
+		part_ms[1] += ms_since(t);
+		part_n++;
 		audio.insert(audio.end(), sound_out.begin(), sound_out.end());
 		sound_out.clear();
 		{
@@ -865,17 +879,23 @@ struct Game
 		frame++;
 		if (!picture) { have_prev = false; sky.reset(); return; }
 		newest ^= 1;
+		t = SDL_GetTicksNS();
 		builder.build(board, scene[newest]);
+		part_ms[2] += ms_since(t);
 		have_prev = frame > 1;
+		t = SDL_GetTicksNS();
 		tiles.aligned(below, above);
 		if (!hud_names[0].empty() || !hud_names[1].empty()) video::hud_names(board, above, hud_names);   // (a netplay match's)
 		tiles.aligned_wide(below_wide);
+		part_ms[3] += ms_since(t);
+		t = SDL_GetTicksNS();
 		bg_moved = video::TileGen::scrolled(prev_scroll, tiles.scroll, prev_below, below, bg_dx, bg_dy) && have_prev;
 		prev_scroll = tiles.scroll;
 		prev_below = below;
 		static const bool sky_lag = getenv("VF3_SKY_LAG") != nullptr;   // (tests: the game's own backdrop, 3 frames behind)
 		if (have_prev && !sky_lag) sky.frame(prev(), cur(), bg_moved, bg_dx, bg_dy);
 		else sky.reset();
+		part_ms[4] += ms_since(t);
 		bool full = false;   // (the 3D drawn full width: a stage; a close-up's or a title's 3D isn't)
 		for (auto &v : scene[newest].viewports) full |= v.full_screen && !v.models.empty();
 		full_3d = full;
@@ -1902,7 +1922,7 @@ int main(int argc, char **argv)
 	game.sound.gain = LEVEL * cfg.volume / 100.0;
 	game.sound.set_volumes(cfg.music / 100.0f, cfg.effects / 100.0f);
 	const int frame_bytes = int(SOUND_RATE / FRAME_HZ) * 4;
-	constexpr double MATCH_QUEUED = 5.0;   // (a match's: two frames more, for the frames the session holds back)
+	constexpr double MATCH_QUEUED = 6.0;   // (a match's: three frames more, for the frames the session holds back)
 	float sound_ratio = 1.0f;              // (a match's: the sound played a little slower or faster, SDL's frequency ratio)
 	constexpr double QUEUED = 3.0;   // (3.5 when the sound was made in the frame's own time: it's a frame later now; 2.5 kept it near
 	                                 // the frame and a half that runs an extra frame, two frames in a pass)
@@ -2568,7 +2588,7 @@ int main(int argc, char **argv)
 			line = online.phase() == Online::Phase::hosting
 				? "Hosting   " + (online.local_address().empty() ? std::string("no network") : online.local_address()) + "   " + online.status()
 				: online.status();
-		menu.set_net(line, level);
+		menu.set_net(line, level, online.playing() && cfg.online.show_connection == 2 ? online.connection_detail() : std::string());
 		// the Online page as things change: its rows made again with the phase, its status lines a few times a second
 		if (menu.is_open() && online.phase() != online_was && menu.top_name() == "Online" && !menu.capturing())
 			menu.replace(online_page(), online_menu::first_row(online));
@@ -2758,12 +2778,13 @@ int main(int argc, char **argv)
 				// A match: its frames come when the session lets them (a frame held back to keep in time, a wait for
 				// the other side), so the sound can't be kept fed by running frames sooner, as alone: that ran this
 				// side ahead, and the queue still ran dry at every wait (the music dropped out). Instead a deeper
-				// queue, and the sound itself played up to 4% slower or faster to keep it there.
+				// queue, and the sound itself played up to 1% slower or faster to keep it there.
 				const int q = SDL_GetAudioStreamQueued(audio);
 				if (q > frame_bytes * int(FRAME_HZ * 0.3)) sound_full = true;
-				queue_avg += (q - queue_avg) * std::min(1.0, dt / 0.25);
-				const float ratio = float(std::clamp(1 + (queue_avg / frame_bytes - MATCH_QUEUED) * 0.015, 0.96, 1.04));
-				if (std::fabs(ratio - sound_ratio) > 0.002f) { sound_ratio = ratio; SDL_SetAudioStreamFrequencyRatio(audio, ratio); }
+				queue_avg += (q - queue_avg) * std::min(1.0, dt / 2.0);
+				// (gently: the queue swings a few frames as frames come, and the ratio followed it, a pitch heard moving)
+				const float ratio = float(std::clamp(1 + (queue_avg / frame_bytes - MATCH_QUEUED) * 0.003, 0.99, 1.01));
+				if (std::fabs(ratio - sound_ratio) > 0.001f) { sound_ratio = ratio; SDL_SetAudioStreamFrequencyRatio(audio, ratio); }
 			} else if (audio) {
 				if (sound_ratio != 1.0f) { sound_ratio = 1.0f; SDL_SetAudioStreamFrequencyRatio(audio, 1.0f); }
 				const int q = SDL_GetAudioStreamQueued(audio);
@@ -2928,7 +2949,9 @@ int main(int argc, char **argv)
 			half_ns = SDL_GetTicksNS() - th;
 		}
 		// The picture: smooth motion's, between the last two frames, at every pass; else the newest frame's
-		const bool smooth = cfg.smooth && !ff;
+		// (in a match, each frame as it is: a picture between two frames the rollback may yet change showed the
+		// change as a ghost; and the in-between's time is better spent on the frames)
+		const bool smooth = cfg.smooth && !ff && !online.playing();
 		const uint64_t bt = SDL_GetTicksNS();
 		smooth_budget = std::min(2.0, smooth_budget + double(bt - smooth_t) * (gov.smooth_off ? 60 : 120) / 1e9);
 		smooth_t = bt;
@@ -3144,6 +3167,14 @@ int main(int argc, char **argv)
 			if (const int ns = pace.slow[0] + pace.slow[1] + pace.slow[2] + pace.slow[3])
 				fprintf(stderr, "  passes over a refresh and a half: %d (pictures only %d, first halves %d, second halves %d, whole frames %d), their work before the present %.2f ms\n",
 						ns, pace.slow[0], pace.slow[1], pace.slow[2], pace.slow[3], pace.slow_work_ms / ns);
+			if (game.emu_thread.joinable()) game.job_wait();   // (its counts: not while a frame's adding to them)
+			if (game.part_n) {
+				const double n = double(game.part_n);
+				fprintf(stderr, "  a frame's parts: the board %.2f ms, waiting for the sound %.2f, the scene %.2f, the 2D layers %.2f, the sky %.2f\n",
+						game.part_ms[0] / n, game.part_ms[1] / n, game.part_ms[2] / n, game.part_ms[3] / n, game.part_ms[4] / n);
+			}
+			for (double &v : game.part_ms) v = 0;
+			game.part_n = 0;
 			pace = {};
 			pace.t0 = SDL_GetTicksNS();
 			between_n = cut_n = 0;
