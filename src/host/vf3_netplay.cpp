@@ -8,6 +8,7 @@ namespace {
 
 // The switches' places in the input word
 enum : uint16_t { UP = 1, DOWN = 2, LEFT = 4, RIGHT = 8, PUNCH = 16, KICK = 32, GUARD = 64, ESCAPE = 128, START = 256, COIN = 512 };
+static_assert(START == START_BUTTON);
 
 constexpr uint32_t BLOB_MAGIC = 0x42334656;   // "VF3B"
 

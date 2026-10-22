@@ -137,6 +137,7 @@ bool Online::host(const OnlineSettings &s, std::string &error)
 	failure.clear();
 	fail_step = Step::none;
 	peer_name.clear();   // (the last try's other player: not this one's)
+	note.clear();
 	tried = Try::host;
 	patient_until = 0;
 	started_with = s;
@@ -157,6 +158,7 @@ bool Online::join(const OnlineSettings &s, std::string &error)
 	failure.clear();
 	fail_step = Step::none;
 	peer_name.clear();   // (the last try's other player: not this one's)
+	note.clear();
 	tried = Try::join;
 	patient_until = 0;
 	started_with = s;
@@ -198,6 +200,7 @@ bool Online::host_room(const OnlineSettings &s, std::string &error, const std::s
 	failure.clear();
 	fail_step = Step::none;
 	peer_name.clear();   // (the last try's other player: not this one's)
+	note.clear();
 	tried = Try::host_room;
 	want_code = online_menu::clean_code(want);
 	patient_until = 0;
@@ -242,6 +245,7 @@ bool Online::join_room(const OnlineSettings &s, const std::string &c, std::strin
 	failure.clear();
 	fail_step = Step::none;
 	peer_name.clear();   // (the last try's other player: not this one's)
+	note.clear();
 	tried = Try::join_room;
 	patient_until = patient ? now + 60000 : 0;
 	patient_for = waited_for;
@@ -295,6 +299,18 @@ bool Online::play_again(const OnlineSettings &s, std::string &error)
 	if (!m.any) { error = "No match to play again."; return false; }
 	if (m.by_code) return m.was_host ? host_room(s, error, m.code) : join_room(s, m.code, error, true);
 	return m.was_host ? host(s, error) : join(s, error);
+}
+
+int Online::start_wait() const
+{
+	if (!session || ph != Phase::playing) return 0;
+	for (int p = 0; p < 2; p++) {
+		const std::vector<uint16_t> &in = session->inputs(p);
+		for (; start_scan[p] < in.size() && !start_seen[p]; start_scan[p]++)
+			if (in[start_scan[p]] & vf3net::START_BUTTON) start_seen[p] = true;
+	}
+	const int me = local_player();
+	return !start_seen[me] ? 1 : !start_seen[me ^ 1] ? 2 : 0;
 }
 
 std::string Online::peer() const
@@ -448,6 +464,7 @@ void Online::room_poll()
 			const vfnet::http::Reply r = job->reply;
 			job.reset();
 			if (r.status == 200 && vfnet::json::parse(r.body, v)) {
+				if (wait_errors >= 3) note.clear();   // (reached again)
 				wait_errors = 0;
 				const vfnet::json::Value &g = v["guest"];
 				if (g.kind == vfnet::json::Value::object) {
@@ -462,7 +479,7 @@ void Online::room_poll()
 				return;
 			} else {   // (the service unreached for a moment: tried again in a while, the room kept)
 				retry_at = now + 2000;
-				if (++wait_errors == 3) notices.push_back({ Notice::refused, "Having trouble reaching the online service: still trying..." });
+				if (++wait_errors == 3) note = "Having trouble reaching the online service: still trying...";
 				log_line("waiting: " + (r.status ? "the service said " + std::to_string(r.status) : r.error));
 			}
 		}
@@ -527,10 +544,12 @@ void Online::poll(double t)
 				close_room();   // (the code's done its job)
 			}
 			notices.push_back({ Notice::joined, "Playing " + e.text + ": press Start" });
-			// (on one network through the relay, only because this Mac may not reach it: slower than need be, and why)
-			if (rooms && room && room->via_relay() && room->local_blocked())
-				notices.push_back({ Notice::tip, "Through the relay: this Mac blocks the game from your network. For a faster match on the "
-				                                    "same Wi-Fi: System Settings > Privacy & Security > Local Network, turn the game on." });
+			// (on one network through the relay, only because this Mac may not reach it: slower than need be, said on the
+			// versus screen)
+			local_slow = rooms && room && room->via_relay() && room->local_blocked();
+			start_scan[0] = start_scan[1] = 0;
+			start_seen[0] = start_seen[1] = false;
+			note.clear();
 			break;
 		case vfnet::Session::Event::ended: {
 			const auto why = session->end_reason();
@@ -539,6 +558,7 @@ void Online::poll(double t)
 			// before the game started); anything else ends it
 			if (!was_playing && is_host && (why == vfnet::Session::End::rejected || why == vfnet::Session::End::timeout || why == vfnet::Session::End::opponent_quit)) {
 				notices.push_back({ Notice::refused, "A player couldn't join: " + e.text });
+				note = "A player couldn't join: " + e.text;
 				if (rooms) {   // (the same code, open again, a new token: the last player's no good for it)
 					session.reset();
 					room->clear_peer();
@@ -717,73 +737,6 @@ namespace {
 const std::string NAME_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 .-!?";
 const std::string ADDRESS_LETTERS = "0123456789.:abcdefghijklmnopqrstuvwxyz-[]";
 
-// What's being typed into a row, and the mistake to show under it
-struct Typing
-{
-	bool on = false;
-	std::string text, before, error;
-};
-
-// Typing into a row. A keyboard types (Backspace takes a letter off, Enter is done, Esc puts it back as it was);
-// a pad: Up / Down change the last letter, Right adds one, Left takes one off, Y clears, A done, B as it was.
-// done: true if what's typed will do (else it says why in error, and typing goes on).
-void start_typing(game_menu &menu, std::shared_ptr<Typing> t, const std::string &letters, size_t max, bool upper,
-                  std::function<bool(const std::string &, std::string &)> done)
-{
-	t->on = true;
-	t->before = t->text;
-	t->error.clear();
-	SDL_Window *win = menu.window();
-	if (win) SDL_StartTextInput(win);
-	auto finish = [t, win] { t->on = false; if (win) SDL_StopTextInput(win); };
-	menu.capture("Type, or on a pad: Up / Down a letter, Right adds one, Left takes one off. A: done, B: as it was.",
-		[&menu, t, letters, max, upper, done, finish](const SDL_Event &e) -> bool {
-			bool enter = false;
-			auto add = [&](char ch) {
-				if (upper) ch = char(toupper(uint8_t(ch)));
-				else ch = char(tolower(uint8_t(ch)));
-				if (letters.find(ch) != std::string::npos && t->text.size() < max) t->text += ch;
-			};
-			auto turn = [&](int d) {
-				if (t->text.empty()) { t->text.push_back(letters[0]); return; }
-				const size_t at = letters.find(t->text.back());
-				const int n = int(letters.size());
-				t->text.back() = letters[size_t(((at == std::string::npos ? 0 : int(at)) + d + n) % n)];
-			};
-			if (e.type == SDL_EVENT_TEXT_INPUT) {
-				for (const char *p = e.text.text; p && *p; p++) add(*p);
-			} else if (e.type == SDL_EVENT_KEY_DOWN) {
-				if (e.key.scancode == SDL_SCANCODE_BACKSPACE) { if (!t->text.empty()) t->text.pop_back(); }
-				else if (e.key.scancode == SDL_SCANCODE_RETURN || e.key.scancode == SDL_SCANCODE_KP_ENTER) enter = true;
-				else if (e.key.scancode == SDL_SCANCODE_V && (e.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_GUI))) {   // (a code pasted)
-					if (char *clip = SDL_GetClipboardText()) { for (const char *p = clip; *p; p++) add(*p); SDL_free(clip); }
-				} else return false;   // (a letter: its text comes as text input)
-			} else if (e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
-				switch (e.gbutton.button) {
-				case SDL_GAMEPAD_BUTTON_SOUTH: enter = true; break;
-				case SDL_GAMEPAD_BUTTON_EAST: t->text = t->before; finish(); return true;
-				case SDL_GAMEPAD_BUTTON_NORTH: t->text.clear(); break;
-				case SDL_GAMEPAD_BUTTON_DPAD_UP: turn(+1); break;
-				case SDL_GAMEPAD_BUTTON_DPAD_DOWN: turn(-1); break;
-				case SDL_GAMEPAD_BUTTON_DPAD_RIGHT: if (t->text.size() < max) t->text.push_back(t->text.empty() ? letters[0] : t->text.back()); break;
-				case SDL_GAMEPAD_BUTTON_DPAD_LEFT: if (!t->text.empty()) t->text.pop_back(); break;
-				default: return false;
-				}
-			} else
-				return false;
-			t->error.clear();
-			if (enter) {
-				std::string why;
-				if (done(t->text, why)) { finish(); return true; }
-				t->error = why;
-			}
-			menu.refresh();
-			return false;
-		},
-		[t, win] { t->text = t->before; t->on = false; t->error.clear(); if (win) SDL_StopTextInput(win); });
-	menu.refresh();
-}
-
 menu_item delay_row(Online &o, OnlineSettings &s, std::function<void()> changed)
 {
 	return { "Input delay",
@@ -821,43 +774,6 @@ menu_item info(const std::string &text, bool big = false, bool heading = false)
 void again(Online &o, OnlineSettings &s, game_menu &menu, std::function<void()> changed)
 {
 	menu.replace(page(o, s, menu, changed), -1);
-}
-
-menu_page join_page(Online &o, OnlineSettings &s, game_menu &menu, std::function<void()> changed)
-{
-	menu_page p{ "Join by address", "", {} };
-	auto addr = std::make_shared<Typing>();
-	addr->text = s.address;
-	auto problem = std::make_shared<std::string>();
-	menu_item a{ "Address",
-		"The host's address, as their Online page shows it: four numbers with dots (192.168.1.20), a name, or either with :port "
-		"if they changed it from 7700. A: type it.",
-		[addr] { return addr->on ? addr->text + "_" : addr->text.empty() ? std::string("Not set") : addr->text; },
-		{},
-		[&menu, &s, addr, changed] {
-			start_typing(menu, addr, ADDRESS_LETTERS, 64, false, [&s, changed](const std::string &v, std::string &why) {
-				if (v.empty()) { why = "Type the host's address."; return false; }
-				s.address = v;
-				changed();
-				return true;
-			});
-		} };
-	a.below = [addr] { return addr->error; };
-	p.items.push_back(a);
-	menu_item c{ "Connect", "Joins the host's match. Once you're both in, the game starts at its title screen: both press Start.", {}, {},
-		[&o, &s, &menu, problem, changed] {
-			problem->clear();
-			if (s.address.empty()) { *problem = "Type the host's address first."; return; }
-			std::string err;
-			if (!o.join(s, err)) { *problem = err; return; }
-			menu.pop();   // (this page, and Play by address: the Online screen, joining)
-			menu.pop();
-			again(o, s, menu, changed);
-		} };
-	c.below = [problem] { return *problem; };
-	p.items.push_back(c);
-	p.items.push_back({ "Back", "", {}, {}, [&menu] { menu.pop(); } });
-	return p;
 }
 
 // ---- the screens (assets/ui/screen.rcss) ----
@@ -1081,30 +997,6 @@ menu_page settings_page(Online &o, OnlineSettings &s, game_menu &menu, std::func
 	p.items.push_back({ "Hide my IP address", "On: matches made with a code always go through the relay (Cloudflare's), so the other player "
 		"never sees your address. A little more ping. Off: directly when the routers allow it, which is quickest.",
 		[&s] { return std::string(s.hide_ip ? "On" : "Off"); }, [&s, changed](int) { s.hide_ip = !s.hide_ip; changed(); } });
-	p.items.push_back({ "Port", "The UDP port Host by address waits on (7700 unless another program has it). Room codes need no port.",
-		[&s] { return std::to_string(s.port); },
-		[&s, changed](int d) { s.port = std::clamp(s.port + d, 1024, 65535); changed(); } });
-	p.items.push_back({ "Back", "", {}, {}, [&menu] { menu.pop(); } });
-	return p;
-}
-
-menu_page address_page(Online &o, OnlineSettings &s, game_menu &menu, std::function<void()> changed)
-{
-	menu_page p{ "Play by address", "On the same network (Wi-Fi, a cable), or both on a VPN like Tailscale: no online service needed.", {} };
-	auto problem = std::make_shared<std::string>();
-	menu_item h{ "Host by address", "Waits for a player on your network (or your VPN) to join with your address.", {}, {},
-		[&o, &s, &menu, problem, changed] {
-			named(s, menu, changed, [&o, &s, &menu, problem, changed] {
-				std::string err;
-				if (!o.host(s, err)) { *problem = err; return; }
-				menu.pop();   // (this page: the Online screen, waiting)
-				again(o, s, menu, changed);
-			});
-		} };
-	h.below = [problem] { return *problem; };
-	p.items.push_back(h);
-	p.items.push_back({ "Join by address", "Joins a player hosting by address: on your network, or over a VPN.", {}, {},
-		[&o, &s, &menu, changed] { named(s, menu, changed, [&o, &s, &menu, changed] { menu.push(join_page(o, s, menu, changed)); }); } });
 	p.items.push_back({ "Back", "", {}, {}, [&menu] { menu.pop(); } });
 	return p;
 }
@@ -1205,7 +1097,8 @@ menu_page page(Online &o, OnlineSettings &s, game_menu &menu, std::function<void
 			r += "<div class=\"btns\">";
 			if (copy >= 0) r += "<div " + menu_row(copy, sel, "btn") + ">COPY CODE</div>";
 			r += "<div " + menu_row(stop, sel, "btn") + ">STOP</div></div>";
-			if (hosting) r += "<div class=\"note" + std::string(*copied ? " good" : "") + "\">" + (*copied ? std::string("Copied: paste it to your opponent") : E(o.status())) + "</div>";
+			if (hosting && !o.host_note().empty()) r += "<div class=\"problem\">" + E(o.host_note()) + "</div>";   // (a player who couldn't join: why)
+			else if (hosting) r += "<div class=\"note" + std::string(*copied ? " good" : "") + "\">" + (*copied ? std::string("Copied: paste it to your opponent") : E(o.status())) + "</div>";
 			r += "</div>";
 			return r + foot(pad, { { "A", "Enter", "select" }, { "B", "Esc", hosting ? "play solo while you wait" : "back to the game" } }) + "</div>";
 		};
@@ -1326,7 +1219,7 @@ menu_page page(Online &o, OnlineSettings &s, game_menu &menu, std::function<void
 	}
 
 	// ---- the two choices ----
-	const int chip = 0, host = 1, join = 2, addr = 3, settings = 4;
+	const int chip = 0, host = 1, join = 2, settings = 3;
 	auto change_name = [&s, &menu, changed] { menu.push(name_page(s, menu, changed, {})); };
 	p.items.push_back({ "Your name", "", {}, {}, change_name });
 	p.items.push_back({ "Host", "", {}, {}, [&o, &s, &menu, problem, changed] {
@@ -1339,7 +1232,6 @@ menu_page page(Online &o, OnlineSettings &s, game_menu &menu, std::function<void
 	p.items.push_back({ "Join", "", {}, {}, [&o, &s, &menu, changed] {
 		named(s, menu, changed, [&o, &s, &menu, changed] { menu.push(code_page(o, s, menu, changed)); });
 	} });
-	p.items.push_back({ "Play by address", "", {}, {}, [&o, &s, &menu, changed] { menu.push(address_page(o, s, menu, changed)); } });
 	p.items.push_back({ "Settings", "", {}, {}, [&o, &s, &menu, changed] { menu.push(settings_page(o, s, menu, changed)); } });
 	p.start = host;
 	p.on_event = [change_name](const SDL_Event &e) {
@@ -1356,7 +1248,7 @@ menu_page page(Online &o, OnlineSettings &s, game_menu &menu, std::function<void
 		     "<div " + menu_row(host, sel, "tile") + "><div class=\"t\">HOST</div><div class=\"s\">Get a code for your opponent</div></div>"
 		     "<div " + menu_row(join, sel, "tile") + "><div class=\"t\">JOIN</div><div class=\"s\">Type the code you were sent</div></div></div>";
 		if (!problem->empty()) r += "<div class=\"problem\">" + E(*problem) + "</div>";
-		r += "<div class=\"more\"><div>Same Wi-Fi or a VPN?</div><div " + menu_row(addr, sel, "link") + ">Play by address</div><div>\xC2\xB7</div><div " + menu_row(settings, sel, "link") + ">Settings</div></div></div>";
+		r += "<div class=\"more\"><div " + menu_row(settings, sel, "link") + ">Settings</div></div></div>";
 		return r + foot(pad, { { "A", "Enter", "select" }, { "B", "Esc", "back" } }) + "</div>";
 	};
 	return p;
