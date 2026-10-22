@@ -27,7 +27,6 @@
 			white-space: pre;
 			font-weight: 600;
 			color: #dfe7fb;
-			font-effect: outline(2dp #0b1430);
 		}
 		#net .dot {
 			display: inline-block;
@@ -36,11 +35,12 @@
 			border-radius: 5dp;
 			background-color: #7ee08a;
 		}
+		#net.plain { font-effect: outline(2dp #0b1430); }   /* (a line of words: hosting, waiting) */
 		#net.fair .dot { background-color: #ffd23f; }
 		#net.poor .dot { background-color: #ff6b5a; }
 		/* in a match: the figures in cells, each of a fixed width (a mono font: nothing moves as they change), the
 		   label small at the left, the figure at the right */
-		#net.cells { font-family: "JetBrains Mono"; font-size: 14dp; white-space: normal; font-effect: none; }
+		#net.cells { font-family: "JetBrains Mono"; font-size: 14dp; white-space: normal; }
 		#net .row { display: block; height: 21dp; }
 		#net .row.two { margin-top: 4dp; height: 17dp; font-size: 11.5dp; font-weight: 500; color: #b8c4e6; }
 		#net .c {
@@ -52,16 +52,17 @@
 			margin: 0 2.5dp;
 			border-radius: 5dp;
 			border: 1dp #2a3466;
-			background-color: #0b1430f0;
-			font-effect: none;
+			background-color: #0b1430;
 		}
-		#net .two .c { height: 17dp; line-height: 17dp; border-width: 0; border-radius: 4dp; background-color: #0b1430e6; }
+		#net .two .c { height: 17dp; line-height: 17dp; border-width: 0; border-radius: 4dp; background-color: #0d1736; }
 		#net .c .l { position: absolute; left: 8dp; top: 0; font-size: 10dp; letter-spacing: 1dp; color: #8fa0d0; }
 		#net .two .c .l { left: 7dp; font-size: 9.5dp; }
 		#net .c .v { position: absolute; right: 8dp; top: 0; }
 		#net .two .c .v { right: 7dp; }
 		#net .c.name { text-align: left; }
-		#net .c.name .dot { position: absolute; left: 8dp; top: 6dp; margin: 0; }
+		#net .c.name .dot { position: absolute; left: 7dp; top: 0; width: auto; height: auto; margin: 0; border-radius: 0; background-color: transparent; font-size: 13dp; color: #7ee08a; }
+		#net.fair .c.name .dot { color: #ffd23f; }
+		#net.poor .c.name .dot { color: #ff6b5a; }
 		#net .c.name .v { left: 24dp; right: auto; }
 		#net .c.via .v, #net .c.lost .v { left: 0; right: 0; text-align: center; }
 		#net .c.direct { color: #8fe08a; }
