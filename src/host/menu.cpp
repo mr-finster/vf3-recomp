@@ -109,19 +109,15 @@ void game_menu::show_net(const std::string &rml, const char *cls)
 	}
 }
 
-namespace {
-const char *net_level(int level) { return level <= 0 ? "good" : level == 1 ? "fair" : "poor"; }
-}
-
 void game_menu::set_net(const std::string &text, int level)
 {
-	show_net(text.empty() ? "" : "<span class=\"dot\"></span>" + escape(text), net_level(level));
+	show_net(text.empty() ? "" : "<span class=\"dot\"></span>" + escape(text), level <= 0 ? "plain good" : level == 1 ? "plain fair" : "plain poor");
 }
 
 void game_menu::set_net(const net_cells &c)
 {
-	// (each figure a cell of its own width: its label at the left, its figure at the right; the rows' cells 421dp
-	// in all with their margins, so the second's line up under the first's)
+	// (each figure a cell of its own width: its label at the left, its figure at the right; the second row
+	// narrower, centred under the first)
 	auto cell = [](const char *label, const std::string &v, int w, const char *cls = "") {
 		return std::string("<div class=\"c ") + cls + "\" style=\"width: " + std::to_string(w) + "dp;\">" +
 		       (*label ? std::string("<span class=\"l\">") + label + "</span>" : "") + "<span class=\"v\">" + escape(v) + "</span></div>";
@@ -129,13 +125,13 @@ void game_menu::set_net(const net_cells &c)
 	auto num = [](const char *f, double v) { char b[32]; snprintf(b, sizeof b, f, v); return std::string(b); };
 	std::string name = c.name;   // (10 letters fit)
 	if (name.size() > 10) name = name.substr(0, 9) + "\xE2\x80\xA6";
-	std::string rml = "<div class=\"row\"><div class=\"c name\" style=\"width: 118dp;\"><span class=\"dot\"></span><span class=\"v\">" + escape(name) + "</span></div>";
+	std::string rml = "<div class=\"row\"><div class=\"c name\" style=\"width: 118dp;\"><span class=\"v\">" + escape(name) + "</span><span class=\"dot\">\xE2\x97\x8F</span></div>";   // (a circle of the font: drawn round at any size)
 	if (c.interrupted) rml += cell("", "CONNECTION INTERRUPTED", 222, "lost");
 	else rml += cell("PING", std::to_string(std::min(c.ping, 9999)), 86) + cell("DELAY", std::to_string(c.delay), 76) + cell("RB", std::to_string(c.rollback), 50);
 	rml += cell("", c.relay ? "RELAY" : "DIRECT", 66, c.relay ? "via relay" : "via direct") + "</div>";
 	if (c.detailed && !c.interrupted)
-		rml += "<div class=\"row two\">" + cell("JITTER", num("%.0f", c.jitter), 100) + cell("RB AVG", num("%.1f", c.rb_avg), 100) +
-		       cell("AHEAD", num("%+.1f", c.ahead), 100) + cell("FRAME", num("%.1f", c.frame_ms), 101) + "</div>";
+		rml += "<div class=\"row two\">" + cell("JITTER", num("%.0f", c.jitter), 92) + cell("RB AVG", num("%.1f", c.rb_avg), 92) +
+		       cell("AHEAD", num("%+.1f", c.ahead), 86) + cell("FRAME", num("%.1f", c.frame_ms), 92) + "</div>";
 	show_net(rml, c.interrupted ? "cells poor" : c.level <= 0 ? "cells good" : c.level == 1 ? "cells fair" : "cells poor");
 }
 
