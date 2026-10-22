@@ -12,8 +12,15 @@
 
 namespace vf3net {
 
-constexpr int BOOT_FRAMES = 960;
-constexpr size_t STAGE_SELECT = 0x1E017;   // the arcade's VS stage select in its backup RAM: 0 on, 1 off (found by changing it)   // the boot, unseen, up to the SEGA logo (as the PC way's, main.cpp)
+constexpr int BOOT_FRAMES = 960;   // the boot, unseen, up to the SEGA logo (as the PC way's, main.cpp)
+constexpr size_t STAGE_SELECT = 0x1E017;   // the arcade's VS stage select in its backup RAM: 0 on, 1 off (found by changing it)
+// The game's count of the matches between two players since it was switched on (a word of RAM, r13 - 0x1f80): each
+// one's stage is the next of a list of 16 in its program (0x76fd6, at (count + 1) % 16), the stage select off. An
+// arcade's ran all day, so a challenge's stage was anyone's guess; a game just booted has 0, and its first match
+// between two players is always on the same stage (the lava's). Set after the boot: where in the list it starts.
+constexpr size_t VERSUS_COUNT = 0x106080;
+void set_versus_count(m3::Model3 &board, uint32_t count);
+uint32_t random_versus_count();   // (0 to 15, a fresh one each call)
 
 // A player's switches as the session's input word (coin, start, the stick, the four buttons; never test or
 // service), and back
@@ -22,7 +29,7 @@ void unpack(uint16_t bits, int player, m3::Controls &c);
 
 // A hash of the ROM's contents as loaded (the FREE PLAY notices as they are in the ROM, hidden or not)
 uint64_t content_hash(m3::Model3 &board);
-// The host's starting blob: its backup RAM and EEPROM
+// The host's starting blob: its backup RAM and EEPROM, and where the stages' list starts (random_versus_count)
 std::vector<uint8_t> start_blob(const m3::Model3 &board);
 constexpr uint16_t START_BUTTON = 256;   // (the input word's Start: pack's)
 

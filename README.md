@@ -154,8 +154,9 @@ scale; View + RB: picture shape. For Arcade play on a pad, set a Coin button in 
   16:10, 16:9, 21:9), background filter, distant textures (sharp, or as the arcade's), smooth motion, screen filter (scanlines, CRT), CRT colours (an arcade monitor's, as Supermodel's presets), Show FPS, fullscreen.
 - **Sound:** volume, and the music's and the effects' own volumes.
 - **Game:** play style (PC: no boot screen, always free play; Arcade: the boot, coins and credits, its coin settings kept for it), reset.
-- **Arcade settings:** difficulty, rounds to win, energy, stage select between two players (off as the arcade ships: every two-player match on the lava stage), demo sound, country, and the arcade's own service menu (its
-  other settings, sound test, bookkeeping). A change restarts the game.
+- **Arcade settings:** difficulty, rounds to win, energy, stage select between two players (off as the arcade ships:
+  each two-player match on the game's next stage, starting from a random one), demo sound, country, and the arcade's
+  own service menu (its other settings, sound test, bookkeeping). A change restarts the game.
 - **Controls:** each player's pad, keys and buttons.
 - **Online:** a random opponent, host a match, join one, your name, input delay, the connection display (see below).
 
@@ -167,9 +168,9 @@ scale, choose a lower one (F5).
 Rollback netplay, as modern fighting games have it: your own inputs show at once (after the input delay), and the
 game quietly corrects the moment your opponent's arrive. Both players need **the same version** of the game (the
 same download) and **the same `vf3.zip`**; it tells you if not. Matches always play the PC way, free play, with the
-host's arcade settings (rounds, difficulty, energy), and the arcade's stage select on: after picking fighters the
-challenger picks the stage (8 seconds; hold Start on one for its Dural version). Each player uses their own Player 1
-controls.
+host's arcade settings (rounds, difficulty, energy). The stage is the game's own next one, as on an arcade cabinet
+that's been on all day: a random one for the first match, the game's order after it. Each player uses their own
+Player 1 controls.
 
 **A random opponent:** Menu > **Online** > **RANDOM**. It finds whoever else is looking, the nearest first (the
 best connection), and widens the search the longer you wait; **Stop** gives up. Play solo while you wait: the match
@@ -212,9 +213,10 @@ lobby. The flags are the countries Cloudflare places each player's connection in
   at full speed against a far opponent with more delay instead (up to 15 frames); it lowers it again between rounds
   once the connection's better. Or set 0 to 10 yourself: higher means fewer corrections, lower a quicker response.
 - **Connection display:** On shows the other player, the ping, the input delay, the rollback and DIRECT or RELAY at
-  the top, each in a cell of its own that doesn't move as the numbers change (the dot green, yellow or red); Detailed
-  adds a row: the jitter, the average rollback, how far ahead your side runs and each frame's cost. Under about 100 ms ping plays well; past ~250 ms
-  the delay rises to keep the game at its full speed.
+  the bottom of the screen (the game's own bars and time are at the top), each in a cell of its own that doesn't move
+  as the numbers change (the dot green, yellow or red); Detailed adds a row: the jitter, the average rollback, how far
+  ahead your side runs and each frame's cost. Under about 100 ms ping plays well; past ~250 ms the delay rises to keep
+  the game at its full speed.
 
 **Good to know**
 
