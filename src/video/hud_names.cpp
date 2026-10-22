@@ -1,6 +1,7 @@
 #include "hud_names.h"
 #include "tilegen.h"
 #include "../machine/model3.h"
+#include <algorithm>
 #include <cstring>
 
 namespace video {
@@ -78,16 +79,37 @@ int text_width(const std::string &s)
 	return w > 0 ? w - (PITCH - GW) : 0;
 }
 
-// A run of six tiles on a map row, each the one before's next (a name's picture), from column c
-bool picture_at(const uint32_t *names, int row, int c)
+// A map entry's tile (the colour bits off); 0x20 is the HUD's blank
+uint32_t tile_at(const uint32_t *names, int row, int col)
 {
-	auto at = [&](int col) {
-		const uint32_t w = names[row * 32 + col / 2];
-		return (col & 1) ? (w & 0x3FFF) : ((w >> 16) & 0x3FFF);
-	};
-	for (int i = 1; i < 6; i++)
-		if (at(c + i) != at(c) + uint32_t(i)) return false;
-	return at(c) != 0 && at(c) != 0x20;
+	const uint32_t w = names[row * 32 + col / 2];
+	return ((col & 1) ? w : (w >> 16)) & 0x3FFF;
+}
+
+// The fight's HUD: its round markers under both bars, a pair of tiles each, two pairs a side (columns 22-25 and
+// 36-39 of rows 6 and 7), the same on every stage and for every fighter
+bool fight_hud(const uint32_t *names)
+{
+	for (int row = 6; row <= 7; row++)
+		for (int c : { 22, 36 }) {
+			const uint32_t a = tile_at(names, row, c);
+			if (a == 0 || a == 0x20 || tile_at(names, row, c + 1) != a + 1 || tile_at(names, row, c + 2) != a || tile_at(names, row, c + 3) != a + 1)
+				return false;
+		}
+	return true;
+}
+
+// The columns a fighter's name picture covers, rows 6 and 7, within [from, to]: its width is the name's (PAI's 4
+// tiles, TAKA-ARASHI's 10 in two pieces), and the two rows needn't be the same. False if there's none.
+bool picture_span(const uint32_t *names, int from, int to, int &c0, int &c1)
+{
+	c0 = 64; c1 = -1;
+	for (int row = 6; row <= 7; row++)
+		for (int c = from; c <= to; c++) {
+			const uint32_t t = tile_at(names, row, c);
+			if (t != 0 && t != 0x20) { c0 = std::min(c0, c); c1 = std::max(c1, c); }
+		}
+	return c1 >= c0;
 }
 
 void draw(std::vector<uint32_t> &px, int x0, int y0, const std::string &s)
@@ -127,17 +149,21 @@ bool hud_names(const m3::Model3 &board, std::vector<uint32_t> &above, const std:
 	const uint32_t reg = board.tile_regs[0x60 / 4];
 	if (!(reg & 0x80000000u) || (reg & 0x3FF) || ((reg >> 16) & 0x1FF)) return false;
 	const uint32_t *map = reinterpret_cast<const uint32_t *>(board.tile_ram.data() + 0xF8000);
-	constexpr int ROW = 6, P1_COL = 2, P2_COL = 54;
-	if (!picture_at(map, ROW, P1_COL) || !picture_at(map, ROW + 1, P1_COL) || !picture_at(map, ROW, P2_COL) || !picture_at(map, ROW + 1, P2_COL))
+	if (!fight_hud(map)) return false;
+	// each player's part of the row (short of the round markers): player 1's name from column 2, player 2's to
+	// column 59, as the game places its pictures
+	constexpr int ROW = 6, P1_FROM = 0, P1_TO = 20, P2_FROM = 41, P2_TO = 63;
+	int span[2][2];
+	if (!picture_span(map, P1_FROM, P1_TO, span[0][0], span[0][1]) || !picture_span(map, P2_FROM, P2_TO, span[1][0], span[1][1]))
 		return false;
 	// (the picture as aligned: TileGen::aligned moves it 2 pixels up and left)
-	constexpr int S = 2, TOP = ROW * 8 - S, TEXT_Y = TOP + 3;
+	constexpr int S = 2, TOP = ROW * 8 - S, TEXT_Y = TOP + 3, P1_X = 2 * 8 - S + 3, P2_RIGHT = 60 * 8 - S - 3;
 	for (int p = 0; p < 2; p++) {
 		if (names[p].empty()) continue;
-		const int box_x = (p ? P2_COL : P1_COL) * 8 - S, w = text_width(names[p]);
-		const int x = p ? box_x + 48 - 3 - w : box_x + 3;
-		// the fighter's name cleared: its picture's place, and the longer name's
-		const int from = std::max(0, std::min(box_x, x - 2)), to = std::min(W, std::max(box_x + 48, x + w + 2));
+		const int w = text_width(names[p]);
+		const int x = p ? P2_RIGHT - w : P1_X;
+		// the fighter's name cleared: its picture's tiles, and the place of the longer name
+		const int from = std::max(0, std::min(span[p][0] * 8 - S, x - 2)), to = std::min(W, std::max((span[p][1] + 1) * 8 - S, x + w + 2));
 		for (int y = TOP; y < TOP + 16; y++)
 			for (int X = from; X < to; X++) above[size_t(y) * W + X] = 0;
 		draw(above, x, TEXT_Y, names[p]);
