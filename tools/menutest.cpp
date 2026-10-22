@@ -99,12 +99,14 @@ void text(const char *t)
 
 int main(int argc, char **argv)
 {
-	if (argc < 2) { fprintf(stderr, "usage: SDL_VIDEO_DRIVER=offscreen menutest <out folder> [width height]\n"); return 2; }
+	if (argc < 2) { fprintf(stderr, "usage: SDL_VIDEO_DRIVER=offscreen [MENUTEST_RENDERER=gpu] menutest <out folder> [width height]\n"); return 2; }
 	out = argv[1];
 	const int w = argc > 3 ? atoi(argv[2]) : 1280, h = argc > 3 ? atoi(argv[3]) : 720;
 	if (!SDL_Init(SDL_INIT_VIDEO)) { fprintf(stderr, "menutest: %s\n", SDL_GetError()); return 1; }
 	SDL_Window *win = SDL_CreateWindow("menutest", w, h, 0);
-	ren = win ? SDL_CreateRenderer(win, "software") : nullptr;
+	// (MENUTEST_RENDERER=gpu: as the game draws on a GPU, e.g. Mesa's lavapipe without one; else SDL's software one)
+	const char *rd = getenv("MENUTEST_RENDERER");
+	ren = win ? SDL_CreateRenderer(win, rd && *rd ? rd : "software") : nullptr;
 	if (!ren) { fprintf(stderr, "menutest: %s\n", SDL_GetError()); return 1; }
 	game_menu gm;
 	menu = &gm;
@@ -342,6 +344,10 @@ int main(int argc, char **argv)
 	o.set_last_match(lm);
 	again();
 	shot("match_over.png", w, h);
+	m.wins[0] = m.wins[1] = 0;   // (no match finished: VS in its circle between the names)
+	o.set_last_match(lm);
+	again();
+	shot("match_over_vs.png", w, h);
 	m.was_host = false;
 	m.lost = m.relay = true;
 	m.why = "AKIRAFAN's game stopped answering.";
