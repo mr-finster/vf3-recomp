@@ -98,6 +98,8 @@ int main(int argc, char **argv)
 		}
 		if (scoring) {
 			score.frame(board);
+			static int was_players = -1;
+			if (score.players() != was_players) { printf("frame %llu: playing %d\n", (unsigned long long)f, score.players()); was_players = score.players(); }
 			for (int p = 0; p < 2; p++)
 				if (score.matches[p] != said[0][p] || score.rounds[p] != said[1][p]) {
 					printf("frame %llu: rounds %d-%d, matches %d-%d\n", (unsigned long long)f, score.rounds[0], score.rounds[1], score.matches[0], score.matches[1]);

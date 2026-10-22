@@ -364,7 +364,10 @@ int Online::start_wait() const
 			if (in[start_scan[p]] & vf3net::START_BUTTON) start_seen[p] = true;
 	}
 	const int me = local_player();
-	return !start_seen[me] ? 1 : !start_seen[me ^ 1] ? 2 : 0;
+	if (!start_seen[me] || !start_seen[me ^ 1]) return !start_seen[me] ? 1 : 2;
+	// after both have been in: one out of the game (a match lost; the winner plays on against the computer)
+	const int in = score.players();
+	return !both_in ? 0 : !(in >> me & 1) ? 3 : !(in >> (me ^ 1) & 1) ? 4 : 0;
 }
 
 std::string Online::peer() const
@@ -680,6 +683,7 @@ void Online::poll(double t)
 			// versus screen)
 			local_slow = rooms && room && room->via_relay() && room->local_blocked();
 			score = {};
+			both_in = false;
 			start_scan[0] = start_scan[1] = 0;
 			start_seen[0] = start_seen[1] = false;
 			note.clear();
@@ -800,6 +804,7 @@ bool Online::step(uint16_t input)
 {
 	if (!(ph == Phase::playing && session && session->step(input))) return false;
 	score.frame(board);   // (the score between the two, from the game's RAM: vf3net::Score)
+	if (score.players() == 3) both_in = true;
 	return true;
 }
 
