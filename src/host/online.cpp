@@ -456,6 +456,10 @@ void Online::poll(double t)
 				close_room();   // (the code's done its job)
 			}
 			notices.push_back({ Notice::joined, "Playing " + e.text + ": press Start" });
+			// (on one network through the relay, only because this Mac may not reach it: slower than need be, and why)
+			if (rooms && room && room->via_relay() && room->local_blocked())
+				notices.push_back({ Notice::joined, "Through the relay: this Mac blocks the game from your network. For a faster match on the "
+				                                    "same Wi-Fi: System Settings > Privacy & Security > Local Network, turn the game on." });
 			break;
 		case vfnet::Session::Event::ended: {
 			const auto why = session->end_reason();
