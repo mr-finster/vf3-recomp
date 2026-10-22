@@ -2,6 +2,8 @@
 #include <RmlUi/Core.h>
 #include "RmlUi_Platform_SDL.h"
 #include "RmlUi_Renderer_SDL.h"
+#include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <utility>
 
@@ -28,6 +30,13 @@ int first_selectable(const menu_page &p)
 }
 
 } // namespace
+
+std::string menu_escape(const std::string &s) { return escape(s); }
+
+std::string menu_row(int i, int sel, const std::string &cls)
+{
+	return "class=\"row" + (cls.empty() ? "" : " " + cls) + (i == sel ? " selected" : "") + "\" id=\"r" + std::to_string(i) + "\"";
+}
 
 // Mouse over a row selects it; a click selects and uses it.
 struct menu_listener : Rml::EventListener
@@ -61,6 +70,8 @@ struct game_menu::impl
 	Rml::Context *ctx = nullptr;
 	Rml::ElementDocument *doc = nullptr;
 	Rml::ElementDocument *overlay = nullptr;   // drawn over the game, menu or not (the FPS)
+	Rml::ElementDocument *screen = nullptr;    // a page that's a screen of its own (menu_page::screen)
+	Rml::ElementDocument *active(bool screen_page) const { return screen_page && screen ? screen : doc; }
 	menu_listener listener;
 };
 
@@ -105,15 +116,56 @@ void game_menu::toast(const std::string &text, double seconds)
 	m_toast_until = text.empty() ? 0 : SDL_GetTicks() + uint64_t(seconds * 1000);
 }
 
-void game_menu::set_notice(const std::string &title, const std::string &sub)
+void game_menu::set_notice(const std::string &title, const std::string &sub, const std::string &small)
 {
-	const std::string key = title + "\n" + sub;
+	const std::string key = title + "\n" + sub + "\n" + small;
 	if (!m->overlay || key == m_notice) return;
-	m_notice = key;   // (an empty one too, "\n": else it was made again every pass)
+	m_notice = key;   // (an empty one too, "\n\n": else it was made again every pass)
 	if (Rml::Element *e = m->overlay->GetElementById("notice")) {
-		e->SetInnerRML(title.empty() ? "" : "<div class=\"title\">" + escape(title) + "</div>" + (sub.empty() ? "" : "<div class=\"sub\">" + escape(sub) + "</div>"));
+		e->SetInnerRML(title.empty() ? "" : "<div class=\"card\"><div class=\"spin\"></div><div class=\"title\">" + escape(title) + "</div>" +
+		               (sub.empty() ? "" : "<div class=\"sub\">" + escape(sub) + "</div>") +
+		               (small.empty() ? "" : "<div class=\"small\">" + escape(small) + "</div>") + "</div>");
 		e->SetProperty("visibility", title.empty() ? "hidden" : "visible");
 	}
+}
+
+void game_menu::show_versus(const versus &v, double seconds)
+{
+	if (!m->overlay) return;
+	Rml::Element *e = m->overlay->GetElementById("vs");
+	if (!e) return;
+	e->SetInnerRML("<div class=\"pl left\">" + escape(v.left_label) + "</div><div class=\"nm left\">" + escape(v.left) + "</div>"
+	               "<div class=\"pl right\">" + escape(v.right_label) + "</div><div class=\"nm right\">" + escape(v.right) + "</div>"
+	               "<div class=\"badge\"><div>VS</div></div>"
+	               "<div class=\"bar\"><div class=\"line" + std::string(v.relay ? " relay" : "") + "\"><span class=\"dot\"></span>" + escape(v.line) + "</div>"
+	               "<div class=\"sub\">" + escape(v.sub) + "</div></div>");
+	e->SetProperty("visibility", "visible");
+	m_vs_from = SDL_GetTicks();
+	m_vs_until = m_vs_from + uint64_t(seconds * 1000);
+}
+
+// The versus screen's two sides: one slant through the middle, the badge on it (drawn here, the SDL renderer's
+// interface having no shapes but boxes: the names and the badge are the overlay's, over these)
+void game_menu::draw_versus(int w, int h)
+{
+	const uint64_t now = SDL_GetTicks();
+	const float dp = float(h) / 720.0f, mid = float(w) / 2, top_h = 560 * dp, lean = 60 * dp;
+	// (in, then out: a quarter of a second each)
+	const float a = std::clamp(std::min(float(now - m_vs_from), float(m_vs_until - now)) / 250.0f, 0.0f, 1.0f);
+	auto col = [a](uint32_t rgb) { return SDL_FColor{ float(rgb >> 16 & 255) / 255, float(rgb >> 8 & 255) / 255, float(rgb & 255) / 255, a }; };
+	auto quad = [&](SDL_FPoint p0, SDL_FPoint p1, SDL_FPoint p2, SDL_FPoint p3, uint32_t c0, uint32_t c1, uint32_t c2, uint32_t c3) {
+		const SDL_Vertex v[4] = { { p0, col(c0), {} }, { p1, col(c1), {} }, { p2, col(c2), {} }, { p3, col(c3), {} } };
+		const int idx[6] = { 0, 1, 2, 0, 2, 3 };
+		SDL_RenderGeometry(m->ren, nullptr, v, 4, idx, 6);
+	};
+	SDL_SetRenderDrawBlendMode(m->ren, SDL_BLENDMODE_BLEND);
+	const float W = float(w), H = float(h);
+	// the left (player 1's): yellow into orange; the right (player 2's): blue, darker down; the bar under them
+	quad({ 0, 0 }, { mid + lean, 0 }, { mid - lean, top_h }, { 0, top_h }, 0xf4d24c, 0xf2b23e, 0xf0922e, 0xf1a535);
+	quad({ mid + lean, 0 }, { W, 0 }, { W, top_h }, { mid - lean, top_h }, 0x3445a0, 0x3b4fb0, 0x24306b, 0x1a2250);
+	quad({ 0, top_h }, { W, top_h }, { W, H }, { 0, H }, 0x0b1026, 0x0b1026, 0x0b1026, 0x0b1026);
+	quad({ 0, top_h }, { W, top_h }, { W, top_h + 3 * dp }, { 0, top_h + 3 * dp }, 0xffffff, 0xffffff, 0xffffff, 0xffffff);
+	if (Rml::Element *e = m->overlay ? m->overlay->GetElementById("vs") : nullptr) e->SetProperty("opacity", std::to_string(a));
 }
 
 void game_menu::set_title(const std::string &text)
@@ -149,10 +201,16 @@ bool game_menu::init(SDL_Window *win, SDL_Renderer *ren, const std::string &asse
 	if (m->overlay) {
 		m->overlay->Show();
 		if (Rml::Element *e = m->overlay->GetElementById("notice")) e->SetProperty("visibility", "hidden");
+		if (Rml::Element *e = m->overlay->GetElementById("vs")) e->SetProperty("visibility", "hidden");
 	}
+	m->screen = m->ctx->LoadDocument(assets + "/ui/screen.rml");   // (without it a screen page shows as rows)
 	m->listener.menu = this;
-	m->doc->AddEventListener(Rml::EventId::Mouseover, &m->listener);
-	m->doc->AddEventListener(Rml::EventId::Click, &m->listener);
+	for (Rml::ElementDocument *d : { m->doc, m->screen })
+		if (d) {
+			d->AddEventListener(Rml::EventId::Mouseover, &m->listener);
+			d->AddEventListener(Rml::EventId::Click, &m->listener);
+		}
+	m_pad = SDL_HasGamepad();   // (a pad plugged in: the screens start as a pad's, a Steam Deck's)
 	return true;
 }
 
@@ -162,10 +220,9 @@ void game_menu::open(menu_page root)
 	m_stack = { std::move(root) };
 	m_sel_stack.clear();
 	m_sel = first_selectable(m_stack.back());
-	build();
-	m->doc->Show();
-	if (m->overlay) m->overlay->PullToFront();   // (its notices over the menu; the FPS hidden while it's open)
 	m_open = true;
+	build();
+	if (m->overlay) m->overlay->PullToFront();   // (its notices over the menu; the FPS hidden while it's open)
 	SDL_ShowCursor();
 }
 
@@ -175,8 +232,10 @@ void game_menu::close()
 	m_capture = nullptr;
 	if (auto c = std::exchange(m_capture_cancel, nullptr)) c();
 	m->doc->Hide();
+	if (m->screen) m->screen->Hide();
 	m_open = false;
 	m_stack.clear();
+	sync_text();
 	SDL_HideCursor();
 }
 
@@ -216,6 +275,33 @@ void game_menu::refresh()
 void game_menu::build()
 {
 	const menu_page &p = m_stack.back();
+	const bool scr = p.screen && m->screen;
+	if (m_open) {   // (the page's own document shown, the other hidden)
+		Rml::ElementDocument *show = scr ? m->screen : m->doc, *hide = scr ? m->doc : m->screen;
+		show->Show();
+		if (hide) hide->Hide();
+		if (m->overlay) m->overlay->PullToFront();
+	}
+	sync_text();
+	if (scr) {
+		Rml::Element *root = m->screen->GetElementById("screen");
+		if (!root) return;
+		root->SetInnerRML(p.screen(m_sel, m_pad));
+		m_pointer_moved = false;
+		// the selected item not on the screen now (the letters, gone with the pad): the page's own first one
+		m->screen->UpdateDocument();
+		auto shown = [&](int i) {
+			Rml::Element *e = m->screen->GetElementById("r" + std::to_string(i));
+			return e && e->GetBox().GetSize(Rml::BoxArea::Border).x > 0;
+		};
+		if (!shown(m_sel)) {
+			int pick = p.start >= 0 && shown(p.start) ? p.start : -1;
+			for (int i = 0; pick < 0 && i < int(p.items.size()); i++)
+				if (!p.items[i].info && shown(i)) pick = i;
+			if (pick >= 0 && pick != m_sel) { m_sel = pick; root->SetInnerRML(p.screen(m_sel, m_pad)); }
+		}
+		return;
+	}
 	std::string crumb;
 	for (size_t i = 1; i < m_stack.size(); i++) crumb += (i > 1 ? "  /  " : "") + m_stack[i].name;
 	m->doc->GetElementById("crumb")->SetInnerRML(escape(crumb));
@@ -279,15 +365,57 @@ void game_menu::select(int i)
 {
 	const menu_page &p = m_stack.back();
 	if (i < 0 || i >= int(p.items.size()) || p.items[i].info || i == m_sel) return;
-	if (auto *old = m->doc->GetElementById("r" + std::to_string(m_sel))) old->SetClass("selected", false);
+	Rml::ElementDocument *d = m->active(on_screen());
+	if (auto *old = d->GetElementById("r" + std::to_string(m_sel))) old->SetClass("selected", false);
 	m_sel = i;
-	if (auto *e = m->doc->GetElementById("r" + std::to_string(m_sel))) e->SetClass("selected", true);
+	if (auto *e = d->GetElementById("r" + std::to_string(m_sel))) e->SetClass("selected", true);
+	if (on_screen()) return;
 	scroll_to_selected();
 	show_help();
 }
 
+// A screen's items are laid out as it likes (tiles side by side, a grid of letters): the next one is the nearest
+// whose middle is that way, nearly in line counting for more than near
+void game_menu::move2d(int dx, int dy)
+{
+	if (!m->screen) return;
+	const menu_page &p = m_stack.back();
+	m->screen->UpdateDocument();
+	auto middle = [&](int i, Rml::Vector2f &c) {
+		Rml::Element *e = m->screen->GetElementById("r" + std::to_string(i));
+		if (!e) return false;
+		const Rml::Vector2f sz = e->GetBox().GetSize(Rml::BoxArea::Border);
+		if (sz.x <= 0 || sz.y <= 0) return false;
+		c = e->GetAbsoluteOffset(Rml::BoxArea::Border) + sz * 0.5f;
+		return true;
+	};
+	Rml::Vector2f at;
+	if (!middle(m_sel, at)) return;
+	int best = -1;
+	float best_score = 0;
+	for (int i = 0; i < int(p.items.size()); i++) {
+		Rml::Vector2f c;
+		if (i == m_sel || p.items[i].info || !middle(i, c)) continue;
+		const float along = (c.x - at.x) * float(dx) + (c.y - at.y) * float(dy);
+		const float across = std::abs((c.x - at.x) * float(dy)) + std::abs((c.y - at.y) * float(dx));
+		if (along < 4) continue;
+		const float score = along + across * 3;
+		if (best < 0 || score < best_score) { best = i; best_score = score; }
+	}
+	if (best >= 0) select(best);
+}
+
+void game_menu::sync_text()
+{
+	const bool want = m_open && on_screen() && m_stack.back().text && !m_pad;
+	if (want == m_text_on || !m->win) return;
+	m_text_on = want;
+	if (want) SDL_StartTextInput(m->win); else SDL_StopTextInput(m->win);
+}
+
 void game_menu::move(int d)
 {
+	if (on_screen()) { move2d(0, d); return; }
 	const menu_page &p = m_stack.back();
 	const int n = int(p.items.size());
 	int i = m_sel;
@@ -301,6 +429,7 @@ void game_menu::change(int d)
 {
 	if (m_stack.empty() || size_t(m_sel) >= m_stack.back().items.size()) return;   // (closed by a change before)
 	auto f = m_stack.back().items[m_sel].change;   // a copy: it may rebuild the pages
+	if (!f && on_screen()) { move2d(d, 0); return; }   // (a screen: Left / Right go across it)
 	if (!f) return;
 	f(d);
 	refresh();
@@ -353,6 +482,24 @@ void game_menu::activate()
 bool game_menu::handle_event(const SDL_Event &e)
 {
 	if (!m_open) return false;
+	// which is in use, a pad or the keyboard: a screen shows its letters for a pad, and the buttons each names
+	bool pad = m_pad;
+	if (e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN || (e.type == SDL_EVENT_GAMEPAD_AXIS_MOTION && std::abs(int(e.gaxis.value)) > 16000)) pad = true;
+	else if (e.type == SDL_EVENT_KEY_DOWN) pad = false;
+	m_text_fresh = false;
+	if (pad != m_pad) {
+		m_pad = pad;
+		const bool was = m_text_on;
+		if (on_screen() && !m_capture) build();
+		m_text_fresh = !was && m_text_on;
+	}
+	if (!m_capture && on_screen() && m_stack.back().on_event) {
+		auto f = m_stack.back().on_event;   // (a copy: it may push, pop or close)
+		if (f(e)) {
+			if (m_open) refresh();
+			return true;
+		}
+	}
 	if (m_capture) {
 		switch (e.type) {
 		case SDL_EVENT_KEY_DOWN:
@@ -443,7 +590,11 @@ bool game_menu::handle_event(const SDL_Event &e)
 void game_menu::render(bool fps)
 {
 	if (m_toast_until && SDL_GetTicks() >= m_toast_until) toast("");
-	if (!m_open && (m_fps.empty() || !fps) && m_net.empty() && !m_toast_until && m_notice == "\n") return;   // (nothing over the game)
+	if (m_vs_until && SDL_GetTicks() >= m_vs_until) {
+		m_vs_until = 0;
+		if (Rml::Element *e = m->overlay ? m->overlay->GetElementById("vs") : nullptr) e->SetProperty("visibility", "hidden");
+	}
+	if (!m_open && (m_fps.empty() || !fps) && m_net.empty() && !m_toast_until && m_notice == "\n\n" && !m_vs_until) return;   // (nothing over the game)
 	if (Rml::Element *e = m->overlay ? m->overlay->GetElementById("fps") : nullptr)
 		e->SetProperty("visibility", fps && !m_open && !m_fps.empty() ? "visible" : "hidden");
 	// the menu is laid out in window pixels, not the game's letterboxed picture
@@ -456,6 +607,7 @@ void game_menu::render(bool fps)
 	m->ctx->SetDimensions(Rml::Vector2i(w, h));
 	m->ctx->SetDensityIndependentPixelRatio(float(h) / 720.0f);
 	m->ctx->Update();
+	if (m_vs_until) draw_versus(w, h);
 	m->gfx->BeginOverlay();
 	m->ctx->Render();
 	m->gfx->EndFrame();

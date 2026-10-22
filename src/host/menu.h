@@ -30,7 +30,17 @@ struct menu_page
 	std::string note;                     // under the items when the selected one has no help
 	std::vector<menu_item> items;
 	int start = -1;                       // the row selected when it opens (or is made again with no row given)
+	// A screen of its own instead of rows (the Online pages, assets/ui/screen.rml): its RML, made again at each refresh,
+	// given the selected item and whether a pad is in use (else a keyboard). Each item that can be selected is an
+	// element with menu_row(i, sel) as its attributes; Up / Down / Left / Right go to the nearest one that way.
+	std::function<std::string(int sel, bool pad)> screen;
+	std::function<bool(const SDL_Event &)> on_event;   // (a screen's) the input first: true if it used it (typing)
+	bool text = false;                    // (a screen's) typed into: the keyboard's text on while it's shown
 };
+
+// A screen's selectable element: its class (row, and selected) and id, with more classes
+std::string menu_row(int i, int sel, const std::string &cls = "");
+std::string menu_escape(const std::string &s);
 
 class game_menu
 {
@@ -49,7 +59,12 @@ public:
 	// true (empty title: gone)
 	void set_net(const std::string &text, int level, const std::string &detail = "");   // (detail: a smaller line under it)
 	void toast(const std::string &text, double seconds = 4);
-	void set_notice(const std::string &title, const std::string &sub = "");
+	void set_notice(const std::string &title, const std::string &sub = "", const std::string &small = "");
+	// A match found: the two players side by side, VS between, for a few seconds over the game's start (a line
+	// under them: how it's connected, and what to do)
+	struct versus { std::string left_label, left, right_label, right, line, sub; bool relay = false; };
+	void show_versus(const versus &v, double seconds = 3.5);
+	bool versus_showing() const { return m_vs_until > SDL_GetTicks(); }
 
 	bool is_open() const { return m_open; }
 	bool capturing() const { return bool(m_capture); }   // (a key or a name being typed: every key its)
@@ -62,6 +77,9 @@ public:
 	const std::string &top_name() const { static const std::string none; return m_stack.empty() ? none : m_stack.back().name; }
 	SDL_Window *window() const;
 	int selected() const { return m_sel; }
+	bool pad_mode() const { return m_pad; }  // the last input a pad's (else the keyboard's or the mouse's)
+	// (a screen's on_event) this key turned the keyboard's text on: its own letter won't come as text, take it from the key
+	bool text_fresh() const { return m_text_fresh; }
 	void refresh();                       // redraw the values (changed from outside)
 	// Waits for a key or pad button: on_event sees each input event until it returns true. Esc
 	// cancels. The prompt shows under the items meanwhile.
@@ -78,13 +96,18 @@ public:
 private:
 	std::unique_ptr<impl> m;
 	bool m_open = false;
-	std::string m_fps, m_net, m_net_detail, m_notice = "\n";   // (m_notice: its title and line, "\n" none)
+	std::string m_fps, m_net, m_net_detail, m_notice = "\n\n";   // (m_notice: its title and lines, "\n\n" none)
 	int m_net_level = -1;
 	uint64_t m_toast_until = 0;   // (SDL_GetTicks)
+	uint64_t m_vs_from = 0, m_vs_until = 0;   // the versus screen's (SDL_GetTicks)
+	void draw_versus(int w, int h);       // its two sides, under its names
 	std::vector<menu_page> m_stack;
 	std::vector<int> m_sel_stack;
 	int m_sel = 0;
 	int m_stick_x = 0, m_stick_y = 0;    // the left stick's last direction, for edges
+	bool m_pad = false;                  // (pad_mode)
+	bool m_text_on = false;              // the keyboard's text turned on for a screen (and so to be turned off)
+	bool m_text_fresh = false;           // (text_fresh)
 	bool m_pointer_moved = false;        // (since the rows were last made: only then does hovering select)
 	std::function<bool(const SDL_Event &)> m_capture;
 	std::string m_capture_prompt;
@@ -94,6 +117,9 @@ private:
 	void show_help();                     // the selected item's help under the items
 	void scroll_to_selected();
 	void move(int d);
+	void move2d(int dx, int dy);          // (a screen's) to the nearest item that way
+	void sync_text();                     // the keyboard's text on for a screen that's typed into, else off
+	bool on_screen() const { return !m_stack.empty() && bool(m_stack.back().screen); }
 	void select(int i);
 	void change(int d);
 	void click_change(int d);

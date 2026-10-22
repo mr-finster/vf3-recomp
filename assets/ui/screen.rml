@@ -1,0 +1,10 @@
+<rml>
+<head>
+	<title>Screen</title>
+	<link type="text/rcss" href="screen.rcss"/>
+</head>
+<body>
+	<!-- a page that's a screen of its own (menu_page::screen: the Online pages), made by the host -->
+	<div id="screen"></div>
+</body>
+</rml>
