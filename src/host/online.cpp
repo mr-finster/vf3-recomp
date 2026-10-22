@@ -306,7 +306,7 @@ bool Online::find_random(const OnlineSettings &s, std::string &error)
 	step_at = now;
 	players = 0;
 	log_line("finding a random opponent: getting ready (" + identity.build + ", game files " + hex64(identity.content) + ")");
-	start_job(gather(lobby));
+	start_job(gather(lobby, turn_json()));
 	return true;
 }
 
@@ -342,7 +342,7 @@ bool Online::host_room(const OnlineSettings &s, std::string &error, const std::s
 	st = Step::getting_ready;
 	step_at = now;
 	log_line("hosting with a room code: getting ready (" + identity.build + ", game files " + hex64(identity.content) + ")");
-	start_job(gather(lobby));
+	start_job(gather(lobby, turn_json()));
 	return true;
 }
 
@@ -382,16 +382,16 @@ bool Online::join_room(const OnlineSettings &s, const std::string &c, std::strin
 	st = Step::getting_ready;
 	step_at = now;
 	log_line("joining room " + room_code() + ": getting ready (" + identity.build + ", game files " + hex64(identity.content) + ")");
-	start_job(gather(lobby));
+	start_job(gather(lobby, turn_json()));
 	return true;
 }
 
 // Getting ready for a room's match: the STUN server's address, and a relay's login (with this side's country)
-std::function<void(Online::Job &)> Online::gather(const std::string &base)
+std::function<void(Online::Job &)> Online::gather(const std::string &base, const std::string &body)
 {
-	return [base](Online::Job &j) {
+	return [base, body](Online::Job &j) {
 		j.stun = vfnet::RoomLink::resolve(STUN_HOST, STUN_PORT);
-		j.reply = vfnet::http::request("POST", base + "/v1/turn", "{}", 8000);
+		j.reply = vfnet::http::request("POST", base + "/v1/turn", body, 8000);
 		vfnet::json::Value v;
 		if (j.reply.status == 200 && vfnet::json::parse(j.reply.body, v)) {
 			j.country = v["country"].str();
@@ -491,6 +491,13 @@ void Online::start_job(std::function<void(Job &)> work)
 		work(*j);
 		j->done = true;
 	}).detach();
+}
+
+// What a relay's login is asked with: which game, its version, its ROM's hash (the lobby gives none to an empty ask)
+std::string Online::turn_json() const
+{
+	return "{\"game\":" + vfnet::json::quote(identity.game) + ",\"version\":" + vfnet::json::quote(identity.build) + ",\"content\":" +
+	       vfnet::json::quote(hex64(identity.content)) + "}";
 }
 
 std::string Online::me_json(const std::string &extra) const
