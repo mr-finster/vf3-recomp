@@ -85,13 +85,14 @@ void game_menu::set_fps(const std::string &text)
 	if (Rml::Element *e = m->overlay->GetElementById("fps")) e->SetInnerRML(escape(text));
 }
 
-void game_menu::set_net(const std::string &text, int level)
+void game_menu::set_net(const std::string &text, int level, const std::string &detail)
 {
-	if (!m->overlay || (text == m_net && level == m_net_level)) return;
+	if (!m->overlay || (text == m_net && level == m_net_level && detail == m_net_detail)) return;
 	m_net = text;
 	m_net_level = level;
+	m_net_detail = detail;
 	if (Rml::Element *e = m->overlay->GetElementById("net")) {
-		e->SetInnerRML(text.empty() ? "" : "<span class=\"dot\"></span>" + escape(text));
+		e->SetInnerRML(text.empty() ? "" : "<span class=\"dot\"></span>" + escape(text) + (detail.empty() ? "" : "<div class=\"detail\">" + escape(detail) + "</div>"));
 		e->SetClassNames(level <= 0 ? "good" : level == 1 ? "fair" : "poor");
 	}
 }

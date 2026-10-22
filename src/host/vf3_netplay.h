@@ -45,7 +45,8 @@ public:
 	bool load(const std::vector<uint8_t> &state) override;
 	void advance(const uint16_t input[2], bool resim) override;
 	// (the state's hash without its header: that's this board's own bookkeeping, not the game's)
-	uint64_t hash(const std::vector<uint8_t> &state) override;
+	uint64_t hash(const std::vector<uint8_t> &state);
+	size_t hash_skip() const override { return m3::Model3::STATE_HEADER; }
 	// The frame's MIDI bytes to send now (board.midi emptied): all of them the first time a frame runs; run again
 	// after a rollback, none if its bytes went already (the sound board can't take back what it played: a wrong
 	// guess's sound stays), and if it sent none and has some now, those (late)

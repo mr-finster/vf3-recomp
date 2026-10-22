@@ -18,7 +18,7 @@ struct OnlineSettings
 {
 	std::string name;             // up to vfnet::MAX_NAME letters, shown under the energy bar
 	int delay = -1;               // input delay: -1 Auto (from the ping), else 0-6 frames
-	bool show_connection = true;  // the ping and rollback at the top in a match
+	int show_connection = 1;      // at the top in a match: 0 nothing, 1 the name, ping and rollback, 2 those and the details
 	int port = 7700;              // the host's UDP port
 	std::string address;          // the last address joined
 };
@@ -58,6 +58,9 @@ public:
 	std::string status() const;   // a line for the menu: what's happening now
 	// The connection display: "MRFINSTER  42 ms  rollback 2", and how good (0 good, 1 fair, 2 poor)
 	std::string connection(int &level) const;
+	// The details under it: the input delay, the jitter, the rollbacks (average and the most), how far ahead, and
+	// what a frame's step costs here
+	std::string connection_detail() const;
 	// the other player's name, as the HUD can show it (only its letters: whatever else the other side sent, dropped)
 	std::string opponent() const;
 	int local_player() const { return is_host ? 0 : 1; }   // (the host is player 1)
@@ -83,7 +86,8 @@ private:
 	double now = 0, logged_at = 0, began_at = 0;
 	LastMatch last;
 	void ended(const std::string &why);   // (the match over: kept as the last match)
-	uint64_t logged_rb = 0, logged_resim = 0, logged_stalls = 0, logged_waits = 0;
+	uint64_t logged_rb = 0, logged_resim = 0, logged_stalls = 0, logged_waits = 0, logged_steps = 0;
+	double logged_save = 0, logged_run = 0, logged_resim_ms = 0, logged_hash = 0;
 	std::deque<Notice> notices;
 	vfnet::Config config(const OnlineSettings &s) const;
 	bool open_host(std::string &error);

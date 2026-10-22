@@ -46,7 +46,7 @@ public:
 	// Over the game, the menu open or not: online play's connection at the top (empty hides it; level 0 good,
 	// 1 fair, 2 poor), a notice for a few seconds near the bottom, and one that stays in the middle while it's
 	// true (empty title: gone)
-	void set_net(const std::string &text, int level);
+	void set_net(const std::string &text, int level, const std::string &detail = "");   // (detail: a smaller line under it)
 	void toast(const std::string &text, double seconds = 4);
 	void set_notice(const std::string &title, const std::string &sub = "");
 
@@ -77,7 +77,7 @@ public:
 private:
 	std::unique_ptr<impl> m;
 	bool m_open = false;
-	std::string m_fps, m_net, m_notice = "\n";   // (m_notice: its title and line, "\n" none)
+	std::string m_fps, m_net, m_net_detail, m_notice = "\n";   // (m_notice: its title and line, "\n" none)
 	int m_net_level = -1;
 	uint64_t m_toast_until = 0;   // (SDL_GetTicks)
 	std::vector<menu_page> m_stack;
