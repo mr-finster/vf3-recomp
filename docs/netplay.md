@@ -28,7 +28,7 @@ The plan: GGPO-style rollback netcode, as a library shared by VF1, VF2 and VF3 R
 build/bin/nettest                                              # the session, no ROM
 build/bin/vf3net vf3.zip --script /tmp/scripts/versus.txt      # two boards, 40 ms each way (--latency, --jitter, --loss, --delay)
 SDL_VIDEO_DRIVER=offscreen build/bin/menutest /tmp/shots       # the Online pages as pictures (VF_LOBBY=... adds the room pages)
-build/bin/roomtest                                             # room links against a TURN server on 127.0.0.1:3478 (user test:secret)
+build/bin/roomtest                                             # room links against a TURN server on 127.0.0.1:3478 (coturn: tools/roomtest.cpp)
 ```
 
 To play: both start the game; one opens Online > Host a match (the page shows a room code), the other Online > Join
