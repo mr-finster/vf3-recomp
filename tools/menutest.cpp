@@ -365,7 +365,9 @@ int main(int argc, char **argv)
 	for (const char *r : { "Display", "Sound", "Controls" }) m.items.push_back({ r, "", {}, {}, {} });
 	gm.open(m);
 	gm.set_title("ONLINE MATCH");
-	gm.set_net("MRFINSTER   42 ms   rollback 1", 0);
+	game_menu::net_cells near;
+	near.name = "MRFINSTER"; near.ping = 21; near.delay = 1; near.rollback = 0;
+	gm.set_net(near);
 	shot("in_match.png", w, h);
 	for (int i = 0; i < 3; i++) key(SDL_SCANCODE_DOWN);   // (to Leave the match: the Playing line is passed over)
 	key(SDL_SCANCODE_RETURN);
@@ -374,12 +376,19 @@ int main(int argc, char **argv)
 	gm.set_title("PAUSED");
 
 	gm.toast("Playing MRFINSTER");
-	gm.set_net("MRFINSTER   42 ms   rollback 1", 0, "delay 1   jitter 4 ms   rollback 1.3 avg, 2 peak   ahead -0.4   step 4.2 ms (save 0.8)");
+	game_menu::net_cells far;   // (a far one through the relay, Detailed, its name too long)
+	far.name = "GUESTPLAYER12"; far.level = 2; far.ping = 412; far.delay = 11; far.rollback = 6; far.relay = true;
+	far.detailed = true; far.jitter = 12; far.rb_avg = 3.1; far.ahead = 0.4; far.frame_ms = 9.8;
+	gm.set_net(far);
 	shot("overlay.png", w, h);
+	far.ping = 1234; far.delay = 15; far.ahead = -12.5; far.frame_ms = 17.4; far.name = "G";
+	gm.set_net(far);
+	shot("net_wide.png", w, h);
 	gm.toast("A player couldn't join: Your opponent has v0.1.6-alpha-13-gf9440e8, you have v0.1.7-netplay-test3: you both need the same version.");
 	shot("toast_long.png", w, h);
 	gm.toast("");
-	gm.set_net("MRFINSTER   connection interrupted", 2);
+	near.interrupted = true;
+	gm.set_net(near);
 	gm.set_notice("WAITING FOR G", "The connection dropped. Holding the match for 7 s...", "It carries on from right here if it comes back");
 	shot("interrupted.png", w, h);
 	gm.set_notice("");

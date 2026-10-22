@@ -1053,27 +1053,25 @@ std::string Online::status() const
 	}
 }
 
-std::string Online::connection(int &level) const
+bool Online::connection(game_menu::net_cells &c, bool detailed) const
 {
-	level = 0;
-	if (!session || ph != Phase::playing) return "";
+	if (!session || ph != Phase::playing) return false;
 	const auto &stt = session->stats();
-	if (session->interrupted()) { level = 2; return opponent() + "   connection interrupted"; }
-	const int ms = int(stt.rtt_ms + 0.5), rb = stt.rollback_max;
-	level = ms < 60 && rb <= 2 ? 0 : ms < 120 && rb <= 4 ? 1 : 2;
-	// (as Fightcade's: the ping, the input delay, the rollback)
-	return opponent() + "   " + std::to_string(ms) + " ms   delay " + std::to_string(session->delay()) + "   rollback " + std::to_string(rb) + (via_relay() ? "   relay" : "");
-}
-
-std::string Online::connection_detail() const
-{
-	if (!session || ph != Phase::playing) return "";
-	const auto &stt = session->stats();
-	char b[200];
-	snprintf(b, sizeof b, "jitter %.0f ms   rollback %.1f avg, %d peak   ahead %+.1f   step %.1f ms (save %.1f)",
-	         stt.jitter_ms, stt.rollbacks ? double(stt.resim_frames) / double(stt.rollbacks) : 0.0, stt.rollback_max, stt.lead,
-	         stt.steps ? (stt.save_ms + stt.run_ms + stt.resim_ms + stt.hash_ms) / double(stt.steps) : 0.0, stt.steps ? stt.save_ms / double(stt.steps) : 0.0);
-	return b;
+	c = {};
+	c.name = opponent();
+	c.relay = via_relay();
+	c.interrupted = session->interrupted();
+	c.ping = int(stt.rtt_ms + 0.5);
+	c.delay = session->delay();
+	c.rollback = stt.rollback_max;
+	c.level = c.interrupted ? 2 : c.ping < 60 && c.rollback <= 2 ? 0 : c.ping < 120 && c.rollback <= 4 ? 1 : 2;
+	if ((c.detailed = detailed)) {
+		c.jitter = stt.jitter_ms;
+		c.rb_avg = stt.rollbacks ? double(stt.resim_frames) / double(stt.rollbacks) : 0.0;
+		c.ahead = stt.lead;
+		c.frame_ms = stt.steps ? (stt.save_ms + stt.run_ms + stt.resim_ms + stt.hash_ms) / double(stt.steps) : 0.0;
+	}
+	return true;
 }
 
 // ---- the menu ----
@@ -1104,9 +1102,9 @@ menu_item delay_row(Online &o, OnlineSettings &s, std::function<void()> changed)
 
 menu_item connection_row(OnlineSettings &s, std::function<void()> changed)
 {
-	return { "Connection display", "In a match, small at the top of the screen: the other player's name, the ping and the rollback, "
-		"the dot green, yellow or red for how good the connection is. Detailed adds a line: the input delay, the jitter, the "
-		"rollbacks, how far ahead this side is, and what each frame costs here.",
+	return { "Connection display", "In a match, small at the top of the screen: the other player's name, the ping, the input delay, "
+		"the rollback and whether it's direct or through the relay, the dot green, yellow or red for how good the connection is. "
+		"Detailed adds a row: the jitter, the rollbacks' average, how far ahead this side is, and what each frame costs here.",
 		[&s] { return std::string(s.show_connection == 2 ? "Detailed" : s.show_connection ? "On" : "Off"); },
 		[&s, changed](int d) { s.show_connection = (s.show_connection + (d < 0 ? 2 : 1)) % 3; changed(); } };
 }

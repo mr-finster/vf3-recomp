@@ -94,11 +94,10 @@ public:
 	bool interrupted() const { return session && session->interrupted(); }
 	bool via_relay() const { return room && room->via_relay(); }
 	std::string status() const;   // a line for the menu: what's happening now
-	// The connection display: "MRFINSTER  42 ms  rollback 2", and how good (0 good, 1 fair, 2 poor)
-	std::string connection(int &level) const;
-	// The details under it: the input delay, the jitter, the rollbacks (average and the most), how far ahead, and
-	// what a frame's step costs here
-	std::string connection_detail() const;
+	// The connection display in a match: the other player, the ping, the input delay, the rollback, direct or
+	// through the relay, and how good (level 0 good, 1 fair, 2 poor); detailed, the jitter, the rollbacks' average,
+	// how far ahead this side is and what a frame's step costs here too. False: not in a match.
+	bool connection(game_menu::net_cells &c, bool detailed) const;
 	// the other player's name, as the HUD can show it (only its letters: whatever else the other side sent, dropped)
 	std::string opponent() const;
 	static bool local_address(const std::string &address);   // (a private network's: 192.168.x.x and the like)
