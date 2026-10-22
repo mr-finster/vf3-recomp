@@ -190,7 +190,7 @@ computer until they do). After leaving a match, **Play again** keeps the same co
 
 The games connect to each other directly whenever they can; when a network won't let them (phones' 5G, some
 office, school and hotel networks), the match goes through a relay (Cloudflare's) instead, automatically. The
-connection display says "relay" then. The room code only finds the other player: no game data goes through the
+connection display says RELAY then (DIRECT otherwise). The room code only finds the other player: no game data goes through the
 lobby. The flags are the countries Cloudflare places each player's connection in (a VPN shows its own).
 
 **If it won't connect**
@@ -211,8 +211,9 @@ lobby. The flags are the countries Cloudflare places each player's connection in
 - **Input delay** (Online > Settings): Auto picks from the ping and how fast your machine runs, and keeps the game
   at full speed against a far opponent with more delay instead (up to 15 frames); it lowers it again between rounds
   once the connection's better. Or set 0 to 10 yourself: higher means fewer corrections, lower a quicker response.
-- **Connection display:** On shows the other player, the ping, the input delay and the rollback at the top (the dot
-  green, yellow or red); Detailed adds the jitter and frame timings. Under about 100 ms ping plays well; past ~250 ms
+- **Connection display:** On shows the other player, the ping, the input delay, the rollback and DIRECT or RELAY at
+  the top, each in a cell of its own that doesn't move as the numbers change (the dot green, yellow or red); Detailed
+  adds a row: the jitter, the average rollback, how far ahead your side runs and each frame's cost. Under about 100 ms ping plays well; past ~250 ms
   the delay rises to keep the game at its full speed.
 
 **Good to know**

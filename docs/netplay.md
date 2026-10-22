@@ -146,7 +146,7 @@ look-alikes (no O/0, I/1), so they can be read out over voice chat and entered q
 | Lobby | The players online: name, ping (colour-coded, a wifi mark), playing or free. A on a name challenges; your own row says if you're free to be challenged. |
 | Watch | Matches being played now; A to watch one. |
 | Input delay | Auto (shows what it picked) or 0 to 10 frames. Says what it means: "fewer frames: more rollback". |
-| Connection display | On / Off: the ping and rollback in a match. |
+| Connection display | On / Detailed / Off: the ping, input delay, rollback and DIRECT / RELAY in a match (Detailed: the jitter, average rollback, frames ahead, frame cost). |
 | Server | Advanced: the lobby server's address. |
 
 **Being challenged**: a notice over the game, menu open or not: "MRFINSTER (42 ms) challenges you: A accept, B
@@ -159,8 +159,9 @@ their own Player 1 controls, whichever side they're on, so nobody has to rebind 
 
 **In a match**: the game never pauses. Start or Esc opens a smaller menu over the game while it goes on: the
 connection's details, Input delay (from the next match), Leave the match (asks first). The opponent sees "in the
-menu" by your name. The connection display is small and out of the way at the top of the screen: ping, the
-rollback frames, green / yellow / red.
+menu" by your name. The connection display is small and out of the way at the top of the screen: the ping, the
+input delay, the rollback frames and DIRECT / RELAY in fixed cells (a mono font, so nothing shifts as they change),
+green / yellow / red.
 
 **When something goes wrong**, it says what happened and what to do, in words, never a code:
 - "Connection interrupted" with a count down over the game, which waits; then "Your opponent left" and back to the

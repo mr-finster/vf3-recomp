@@ -98,16 +98,45 @@ void game_menu::set_fps(const std::string &text)
 	if (Rml::Element *e = m->overlay->GetElementById("fps")) e->SetInnerRML(escape(text));
 }
 
-void game_menu::set_net(const std::string &text, int level, const std::string &detail)
+void game_menu::show_net(const std::string &rml, const char *cls)
 {
-	if (!m->overlay || (text == m_net && level == m_net_level && detail == m_net_detail)) return;
-	m_net = text;
-	m_net_level = level;
-	m_net_detail = detail;
+	const std::string key = rml + "\n" + cls;
+	if (!m->overlay || key == m_net) return;
+	m_net = key;
 	if (Rml::Element *e = m->overlay->GetElementById("net")) {
-		e->SetInnerRML(text.empty() ? "" : "<span class=\"dot\"></span>" + escape(text) + (detail.empty() ? "" : "<div class=\"detail\">" + escape(detail) + "</div>"));
-		e->SetClassNames(level <= 0 ? "good" : level == 1 ? "fair" : "poor");
+		e->SetInnerRML(rml);
+		e->SetClassNames(cls);
 	}
+}
+
+namespace {
+const char *net_level(int level) { return level <= 0 ? "good" : level == 1 ? "fair" : "poor"; }
+}
+
+void game_menu::set_net(const std::string &text, int level)
+{
+	show_net(text.empty() ? "" : "<span class=\"dot\"></span>" + escape(text), net_level(level));
+}
+
+void game_menu::set_net(const net_cells &c)
+{
+	// (each figure a cell of its own width: its label at the left, its figure at the right; the rows' cells 421dp
+	// in all with their margins, so the second's line up under the first's)
+	auto cell = [](const char *label, const std::string &v, int w, const char *cls = "") {
+		return std::string("<div class=\"c ") + cls + "\" style=\"width: " + std::to_string(w) + "dp;\">" +
+		       (*label ? std::string("<span class=\"l\">") + label + "</span>" : "") + "<span class=\"v\">" + escape(v) + "</span></div>";
+	};
+	auto num = [](const char *f, double v) { char b[32]; snprintf(b, sizeof b, f, v); return std::string(b); };
+	std::string name = c.name;   // (10 letters fit)
+	if (name.size() > 10) name = name.substr(0, 9) + "\xE2\x80\xA6";
+	std::string rml = "<div class=\"row\"><div class=\"c name\" style=\"width: 118dp;\"><span class=\"dot\"></span><span class=\"v\">" + escape(name) + "</span></div>";
+	if (c.interrupted) rml += cell("", "CONNECTION INTERRUPTED", 222, "lost");
+	else rml += cell("PING", std::to_string(std::min(c.ping, 9999)), 86) + cell("DELAY", std::to_string(c.delay), 76) + cell("RB", std::to_string(c.rollback), 50);
+	rml += cell("", c.relay ? "RELAY" : "DIRECT", 66, c.relay ? "via relay" : "via direct") + "</div>";
+	if (c.detailed && !c.interrupted)
+		rml += "<div class=\"row two\">" + cell("JITTER", num("%.0f", c.jitter), 100) + cell("RB AVG", num("%.1f", c.rb_avg), 100) +
+		       cell("AHEAD", num("%+.1f", c.ahead), 100) + cell("FRAME", num("%.1f", c.frame_ms), 101) + "</div>";
+	show_net(rml, c.interrupted ? "cells poor" : c.level <= 0 ? "cells good" : c.level == 1 ? "cells fair" : "cells poor");
 }
 
 void game_menu::toast(const std::string &text, double seconds)
@@ -213,6 +242,8 @@ bool game_menu::init(SDL_Window *win, SDL_Renderer *ren, const std::string &asse
 	if (!Rml::Initialise()) return false;
 	for (const char *f : { "BarlowCondensed-Medium.ttf", "BarlowCondensed-SemiBold.ttf", "BarlowCondensed-BoldItalic.ttf" })
 		if (!Rml::LoadFontFace(assets + "/fonts/" + f)) return false;
+	// (online play's figures: without it, in Barlow, set below)
+	const bool mono = Rml::LoadFontFace(assets + "/fonts/JetBrainsMono-SemiBold.ttf", "JetBrains Mono", Rml::Style::FontStyle::Normal);
 	int w = 0, h = 0;
 	SDL_GetWindowSizeInPixels(win, &w, &h);
 	m->ctx = Rml::CreateContext("menu", Rml::Vector2i(w, h));
@@ -225,6 +256,7 @@ bool game_menu::init(SDL_Window *win, SDL_Renderer *ren, const std::string &asse
 		if (Rml::Element *e = m->overlay->GetElementById("notice")) e->SetProperty("visibility", "hidden");
 		if (Rml::Element *e = m->overlay->GetElementById("vs")) e->SetProperty("visibility", "hidden");
 		if (Rml::Element *e = m->overlay->GetElementById("banner")) e->SetProperty("visibility", "hidden");
+		if (Rml::Element *e = m->overlay->GetElementById("net"); e && !mono) e->SetProperty("font-family", "Barlow Condensed");
 	}
 	m->screen = m->ctx->LoadDocument(assets + "/ui/screen.rml");   // (without it a screen page shows as rows)
 	m->listener.menu = this;
