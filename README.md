@@ -171,19 +171,23 @@ host's arcade settings (rounds, difficulty, energy). Each player uses their own 
 
 **With a room code (anywhere: no setup, nothing to forward):**
 
-1. Both: Menu > Online > **Your name** (up to 10 letters, shown under your energy bar).
-2. One player: **Host a match**. The page shows a room code like `FR7-W25` (**Copy the code** puts it on the
-   clipboard): send it to the other player.
-3. The other: **Join with a code**, type it (or paste it), Enter. The two games find each other; once you're both
-   in, the game starts at its title screen: both press Start.
+1. Both: Menu > **Online**. The first time you host or join, it asks your name (up to 10 letters, shown under your
+   energy bar).
+2. One player: **HOST**. It shows a room code like `FR7-W25` (**Copy code** puts it on the clipboard): send it to
+   the other player.
+3. The other: **JOIN**, and type the code (or paste it). It joins by itself at the 6th letter; the steps on the screen
+   show how far it's got. Once you're both in, the game starts at its title screen: both press Start.
+
+On a controller the code and name screens show letters to pick with A (X deletes, Y pastes); on a keyboard just type.
+After a match, **Play again** keeps the same code: the host opens it again and the other player joins it by itself.
 
 The games connect to each other directly whenever they can; when a network won't let them (phones' 5G, some
 office, school and hotel networks), the match goes through a relay (Cloudflare's) instead, automatically. The
 connection display says "relay" then. The room code only finds the other player: no game data goes through the
 lobby.
 
-**On the same network, or over a VPN** (no lobby needed): **Host by address** shows your address (e.g.
-`192.168.1.20`); the other player chooses **Join by address**, types it, **Connect**. Over a VPN made for this
+**On the same network, or over a VPN** (no lobby needed): Online > **Play by address** > **Host by address** shows
+your address (e.g. `192.168.1.20`); the other player chooses **Join by address**, types it, **Connect**. Over a VPN made for this
 ([Tailscale](https://tailscale.com), ZeroTier, Radmin VPN), type the host's VPN address instead (`100.x.y.z` for
 Tailscale). Port forwarding UDP 7700 to the host works too, but a room code is easier.
 
@@ -202,7 +206,7 @@ Tailscale). Port forwarding UDP 7700 to the host works too, but a room code is e
 
 - A cable beats Wi-Fi. **Steam Deck:** turn off Wi-Fi power management (Settings > System > Developer Mode on, then
   Settings > Developer > Enable Wi-Fi power management off): it holds packets back in bursts.
-- **Input delay** (Menu > Online): Auto picks from the ping and how fast your machine runs. Higher means fewer
+- **Input delay** (Online > Settings): Auto picks from the ping and how fast your machine runs. Higher means fewer
   corrections, lower means a quicker response; 2 is a good start over the internet.
 - **Connection display:** On shows the other player, the ping and the rollback at the top (the dot green, yellow or
   red); Detailed adds the input delay, jitter and frame timings. Under about 100 ms ping plays well.

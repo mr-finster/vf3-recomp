@@ -1,8 +1,9 @@
 // menutest: the menu's Online pages and the notices over the game, drawn as the game draws them (RmlUi on SDL's
 // renderer) in a window nobody sees, and written as pictures: for looking at them without the ROM or a screen.
 //   SDL_VIDEO_DRIVER=offscreen menutest <out folder> [width height]
-// Writes online.png, online_typing.png, online_no_name.png, hosting.png, join.png, join_typed.png, in_match.png,
-// leave.png, overlay.png and interrupted.png.
+// Writes the Online screens (home, name and code entry on a keyboard and a pad, hosting and joining by address, and
+// with VF_LOBBY set a room's), the match over, the menu in a match, the notices, and the versus screen; and checks
+// what they do (where the keys go, what's typed, what each button starts). Exit 1 if any check fails.
 #include "../src/host/menu.h"
 #include "../src/host/online.h"
 #include "../src/host/png.h"
@@ -65,6 +66,15 @@ void key(SDL_Scancode sc)
 	e.key.scancode = sc;
 	e.key.key = SDL_GetKeyFromScancode(sc, SDL_KMOD_NONE, false);   // (as a real key press has both)
 	e.key.down = true;
+	menu->handle_event(e);
+}
+
+void pad(SDL_GamepadButton b)
+{
+	SDL_Event e{};
+	e.type = SDL_EVENT_GAMEPAD_BUTTON_DOWN;
+	e.gbutton.button = Uint8(b);
+	e.gbutton.down = true;
 	menu->handle_event(e);
 }
 
@@ -131,103 +141,181 @@ int main(int argc, char **argv)
 	printf("pointer: hovering selected row %d; row %d stayed selected as the rows were made again\n", hovered, chosen);
 	gm.close();
 	gm.open(root());
-	auto row = [&](const char *label) {   // (the Online page made again, that row selected)
-		menu_page pg = online_menu::page(o, s, gm, changed);
-		int at = -1;
-		for (size_t i = 0; i < pg.items.size(); i++)
-			if (pg.items[i].label == label) at = int(i);
-		if (at < 0) {
-			fprintf(stderr, "menutest: no row %s; the page's:", label);
-			for (auto &it : pg.items) fprintf(stderr, " [%s]", it.label.c_str());
-			fprintf(stderr, " (phase %d)\n", int(o.phase()));
-		}
-		gm.replace(pg, at);
-	};
+	int fails = 0;
+	auto check = [&](bool ok, const char *what) { if (!ok) { fprintf(stderr, "menutest: FAIL %s\n", what); fails++; } else printf("ok   %s\n", what); };
+	auto top = [&] { return gm.top_name(); };
 	auto poll_for = [&](double ms, std::function<bool()> until) {   // (the Online's work, in real time)
 		const uint64_t t0 = SDL_GetTicks();
 		while (SDL_GetTicks() - t0 < ms && !until()) { o.poll(double(SDL_GetTicks())); SDL_Delay(10); }
 	};
+	auto again = [&] { gm.replace(online_menu::page(o, s, gm, changed), -1); };
 	gm.push(online_menu::page(o, s, gm, changed));
-	shot("online.png", w, h);
+	shot("home.png", w, h);
+	check(gm.selected() == 1, "the home screen opens on Host");
+	key(SDL_SCANCODE_RIGHT);
+	check(gm.selected() == 2, "Right goes to Join");
+	key(SDL_SCANCODE_DOWN);
+	check(gm.selected() == 3 || gm.selected() == 4, "Down goes to the links");
+	key(SDL_SCANCODE_UP);
+	key(SDL_SCANCODE_UP);
+	check(gm.selected() == 0, "Up from the tiles goes to the name");
+	pad(SDL_GAMEPAD_BUTTON_DPAD_DOWN);   // (a pad now: its hints)
+	shot("home_pad.png", w, h);
+	check(gm.pad_mode(), "a pad's button: pad mode");
 
-	row("Your name");
-	key(SDL_SCANCODE_RETURN);   // (Your name: typing)
-	for (int i = 0; i < 9; i++) key(SDL_SCANCODE_BACKSPACE);
-	text("Akira");
-	shot("online_typing.png", w, h);
-	key(SDL_SCANCODE_ESCAPE);
+	// your name, on a pad: Y from the home screen
+	pad(SDL_GAMEPAD_BUTTON_NORTH);
+	check(top() == "Your name", "Y opens the name");
+	for (int i = 0; i < 3; i++) pad(SDL_GAMEPAD_BUTTON_WEST);   // (X takes letters off)
+	for (int i = 0; i < 5; i++) pad(SDL_GAMEPAD_BUTTON_DPAD_RIGHT);
+	pad(SDL_GAMEPAD_BUTTON_DPAD_DOWN);
+	shot("name_pad.png", w, h);
+	pad(SDL_GAMEPAD_BUTTON_SOUTH);   // (A: the letter selected, T)
+	pad(SDL_GAMEPAD_BUTTON_START);   // (saved)
+	check(s.name == "MRFINST", ("the pad typed the name (" + s.name + ")").c_str());
+	check(top() == "Online", "Start saves and goes back");
+	// on a keyboard
+	key(SDL_SCANCODE_UP);
+	key(SDL_SCANCODE_RETURN);
+	check(top() == "Your name", "Enter on the name opens it");
+	key(SDL_SCANCODE_BACKSPACE);
+	text("ER");
+	shot("name_key.png", w, h);
+	key(SDL_SCANCODE_SPACE);   // (types a space: doesn't press anything)
+	check(top() == "Your name", "Space types, it doesn't press");
+	key(SDL_SCANCODE_RETURN);
+	check(s.name == "MRFINSER", ("the keyboard typed the name (" + s.name + ")").c_str());
+	s.name = "MRFINSTER";
+	again();
 
+	// joining with a code: a keyboard, then a pad
+	key(SDL_SCANCODE_RIGHT);
+	key(SDL_SCANCODE_RETURN);
+	check(top() == "Join with a code", "Join opens the code");
+	text("zz");
+	key(SDL_SCANCODE_Z);   // (a letter's key: its letter comes as text, not twice)
+	text("z");
+	shot("join_key.png", w, h);
+	pad(SDL_GAMEPAD_BUTTON_DPAD_RIGHT);
+	for (int i = 0; i < 7; i++) pad(SDL_GAMEPAD_BUTTON_DPAD_RIGHT);
+	shot("join_pad.png", w, h);
+	pad(SDL_GAMEPAD_BUTTON_EAST);   // (B: back)
+	check(top() == "Online", "B goes back from the code");
+
+	// no name yet: asked for first, then on to the code
 	s.name.clear();
-	row("Host a match");
-	key(SDL_SCANCODE_RETURN);   // (Host with no name: asked for it)
-	shot("online_no_name.png", w, h);
+	again();
+	key(SDL_SCANCODE_RIGHT);   // (a keyboard again: Host to Join)
+	key(SDL_SCANCODE_RIGHT);
+	key(SDL_SCANCODE_RETURN);
+	check(top() == "Your name", "Join with no name asks for it");
+	shot("name_first.png", w, h);
+	text("AKIRA");
+	key(SDL_SCANCODE_RETURN);
+	check(s.name == "AKIRA" && top() == "Join with a code", "then goes on to the code");
 	key(SDL_SCANCODE_ESCAPE);
 	s.name = "MRFINSTER";
 
+	// by address: hosting, then joining a host that isn't there
 	std::string err;
 	if (!o.host(s, err)) fprintf(stderr, "menutest: hosting: %s\n", err.c_str());
-	gm.replace(online_menu::page(o, s, gm, changed), -1);
-	shot("hosting.png", w, h);
+	again();
+	shot("address_hosting.png", w, h);
 	o.stop();
-
-	row("Join by address");
-	key(SDL_SCANCODE_RETURN);
-	key(SDL_SCANCODE_DOWN);
-	key(SDL_SCANCODE_RETURN);   // (Connect with no address)
-	shot("join.png", w, h);
-	key(SDL_SCANCODE_UP);
-	key(SDL_SCANCODE_RETURN);
-	text("192.168.1.20");
-	key(SDL_SCANCODE_RETURN);
-	key(SDL_SCANCODE_DOWN);
-	key(SDL_SCANCODE_RETURN);   // (Connect)
+	s.address = "192.168.1.20";
+	if (!o.join(s, err)) fprintf(stderr, "menutest: joining: %s\n", err.c_str());
 	o.poll(1000);
-	gm.refresh();
-	shot("join_typed.png", w, h);
+	again();
+	shot("address_joining.png", w, h);
 	for (double t = 1000; t < 20000 && o.phase() == Online::Phase::joining; t += 100) o.poll(t);   // (no host: it gives up)
-	gm.refresh();
-	shot("join_failed.png", w, h);
-	o.stop();
-	gm.pop();
+	again();
+	shot("address_failed.png", w, h);
+	check(!o.join_failure().empty() && o.last_try() == Online::Try::join, "a join by address that failed: Couldn't connect, to try again");
+	key(SDL_SCANCODE_ESCAPE);
+	check(o.join_failure().empty() && gm.selected() == 1, "Esc on Couldn't connect: back to the choices");
 
-	// A room code's: hosting (the lobby: VF_LOBBY, e.g. tools/lobby's npx wrangler dev), and joining a code that isn't
+	// a room code's (the lobby: VF_LOBBY, e.g. tools/lobby's npx wrangler dev)
 	if (!Online::lobby_default().empty()) {
-		row("Host a match");
-		key(SDL_SCANCODE_RETURN);
+		again();
+		key(SDL_SCANCODE_RETURN);   // (Host)
 		poll_for(15000, [&] { return !o.room_code().empty() || o.phase() == Online::Phase::off; });
-		gm.replace(online_menu::page(o, s, gm, changed), -1);
+		again();
 		shot("room_host.png", w, h);
 		printf("room: hosting, code %s (%s)\n", o.room_code().c_str(), o.status().c_str());
-		key(SDL_SCANCODE_UP);
-		key(SDL_SCANCODE_RETURN);   // (Copy the code)
+		check(o.room_code().size() == 7, "hosting: a code");
+		const std::string kept = o.room_code();
+		key(SDL_SCANCODE_RETURN);   // (Copy code)
 		shot("room_copied.png", w, h);
+		char *clip = SDL_GetClipboardText();
+		check(clip && kept == clip, "Copy code puts it on the clipboard");
+		SDL_free(clip);
+		// the room's code kept by Play again (as after a match)
+		Online::LastMatch m;
+		m.any = m.was_host = m.by_code = true;
+		m.opponent = "G";
+		m.code = kept.size() == 7 ? kept.substr(0, 3) + kept.substr(4) : "";
 		o.stop();
-		row("Join with a code");
+		o.set_last_match(m);
+		again();
+		key(SDL_SCANCODE_RETURN);   // (Play again)
+		poll_for(15000, [&] { return !o.room_code().empty() || o.phase() == Online::Phase::off; });
+		check(o.room_code() == kept, ("Play again keeps the code (" + o.room_code() + " for " + kept + ")").c_str());
+		o.stop();
+		// joining a code nobody has: it says so, where it stopped
+		again();
+		key(SDL_SCANCODE_RIGHT);
 		key(SDL_SCANCODE_RETURN);
-		key(SDL_SCANCODE_RETURN);   // (the code: typing)
-		text("zzz-222");
-		shot("join_code.png", w, h);
-		key(SDL_SCANCODE_RETURN);   // (typed: joins)
+		text("zzz222");   // (the 6th letter: it joins)
+		check(top() == "Online" && o.phase() == Online::Phase::joining, "the 6th letter joins");
 		shot("room_joining.png", w, h);
 		poll_for(15000, [&] { return o.phase() == Online::Phase::off; });
-		gm.replace(online_menu::page(o, s, gm, changed), -1);
-		shot("room_join_failed.png", w, h);
+		again();
+		shot("room_failed.png", w, h);
 		printf("room: joining ZZZ-222: %s\n", o.join_failure().c_str());
+		check(o.failed_at() == Online::Step::finding, "the failure is at finding the room");
+		// a guest's Play again: waits for the host's room
+		Online::LastMatch g;
+		g.any = g.by_code = true;
+		g.opponent = "G";
+		g.code = "ZZZ222";
+		o.forget_failure();
+		o.set_last_match(g);
+		again();
+		key(SDL_SCANCODE_RETURN);   // (Play again: joins ZZZ-222, waiting for it)
+		poll_for(6000, [&] { return o.phase() == Online::Phase::off; });
+		again();
+		shot("room_patient.png", w, h);
+		check(o.phase() == Online::Phase::joining && o.patient(), ("a guest's Play again waits for the room (" + o.status() + ")").c_str());
 		o.stop();
 	}
 
-	o.set_last_match({ true, true, true, "RENODECK left the match.", "RENODECK", 194, 19 });
-	gm.replace(online_menu::page(o, s, gm, changed), -1);
-	shot("match_over_host.png", w, h);
-	o.set_last_match({ true, false, false, "Lost the connection to MRFINSTER.", "MRFINSTER", 61, 140 });
-	s.address = "192.168.1.20";
-	gm.replace(online_menu::page(o, s, gm, changed), -1);
-	shot("match_over_guest.png", w, h);
-	key(SDL_SCANCODE_RETURN);   // (Join MRFINSTER again: the page while joining)
-	o.poll(1000);
-	gm.replace(online_menu::page(o, s, gm, changed), -1);
-	shot("joining.png", w, h);
-	o.stop();
+	{
+	Online::LastMatch lm;
+	Online::LastMatch &m = lm;
+	m.any = m.was_host = m.by_code = true;
+	m.why = "G left the match.";
+	m.opponent = "G";
+	m.code = "FR7W25";
+	m.seconds = 760;
+	m.ping = 19;
+	o.set_last_match(lm);
+	again();
+	shot("match_over.png", w, h);
+	m.was_host = false;
+	m.lost = m.relay = true;
+	m.why = "G's game stopped answering.";
+	m.seconds = 195;
+	m.ping = 25;
+	o.set_last_match(m);
+	again();
+	shot("match_lost.png", w, h);
+	key(SDL_SCANCODE_RIGHT);
+	key(SDL_SCANCODE_RETURN);   // (Back: the choices)
+	check(!o.last_match().any && gm.selected() == 1, "Back after a match: the choices");
+	pad(SDL_GAMEPAD_BUTTON_DPAD_UP);
+	key(SDL_SCANCODE_ESCAPE);   // (B / Esc: back a page, the home screen's)
+	check(top() != "Online", "Esc on the choices: back a page");
+	}
 
 	gm.close();
 	menu_page m{ "", "", {} };
@@ -251,7 +339,14 @@ int main(int argc, char **argv)
 	shot("toast_long.png", w, h);
 	gm.toast("");
 	gm.set_net("MRFINSTER   connection interrupted", 2);
-	gm.set_notice("Connection interrupted", "Waiting for MRFINSTER...  6");
+	gm.set_notice("WAITING FOR G", "The connection dropped. Holding the match for 7 s...", "It carries on from right here if it comes back");
 	shot("interrupted.png", w, h);
+	gm.set_notice("");
+	gm.set_net("", 0);
+	gm.show_versus({ "PLAYER 1 \xC2\xB7 HOST", "MRFINSTER", "PLAYER 2", "G", "Connected directly \xC2\xB7 19 ms", "Both press Start", false });
+	for (int i = 0; i < 20; i++) { shot("", w, h); SDL_Delay(20); }   // (its fade in)
+	shot("versus.png", w, h);
+	if (fails) { fprintf(stderr, "menutest: %d failed\n", fails); return 1; }
+	printf("all passed\n");
 	return 0;
 }

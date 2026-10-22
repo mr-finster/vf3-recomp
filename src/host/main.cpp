@@ -2585,16 +2585,27 @@ int main(int argc, char **argv)
 				if (menu.is_open()) { menu.close(); menu_closed_elsewhere = true; }
 				clock_reset = true;
 				sync_menu_sound();
-			}
-			menu.toast(n.text, n.kind == Online::Notice::joined ? 4 : 7);
+				// who's playing who, over the title screen for a moment (the host is player 1)
+				const std::string host = online.is_hosting() ? online.identity.name : online.opponent(), guest = online.is_hosting() ? online.opponent() : online.identity.name;
+				const int ms = online.ping();
+				menu.show_versus({ "PLAYER 1 \xC2\xB7 HOST", host, "PLAYER 2", guest,
+				                   std::string(online.via_relay() ? "Connected through the relay" : "Connected directly") + (ms > 0 ? " \xC2\xB7 " + std::to_string(ms) + " ms" : ""),
+				                   "Both press Start", online.via_relay() });
+			} else if (n.kind != Online::Notice::ended)   // (a match's end: the Online screen opens on it, MATCH OVER)
+				menu.toast(n.text, n.kind == Online::Notice::tip ? 9 : 7);
 			fprintf(stderr, "online: %s\n", n.text.c_str());
 		}
 		if ((match_on && !online.playing()) || (nvram_away && !online.playing() && !online.starting())) end_match();   // (ended, left, or never got going)
-		static bool was_interrupted = false;   // (the connection back after an interruption: said)
-		if (online.playing() && was_interrupted && !online.interrupted()) menu.toast("Connection back", 3);
-		was_interrupted = online.playing() && online.interrupted();
-		if (online.playing() && online.interrupted()) menu.set_notice("Connection interrupted", "Waiting for " + online.opponent() + "...");
-		else if (online.starting()) menu.set_notice("Starting the match", online.status());
+		// (quiet a second is often only both games restarting their boards at the match's start: said after two, and
+		// never over the versus screen; and Connection back only after it was said)
+		static bool said_interrupted = false;
+		const bool interrupted = online.playing() && online.interrupted() && (said_interrupted || (online.hold_left() <= 6 && !menu.versus_showing()));
+		if (online.playing() && said_interrupted && !online.interrupted()) menu.toast("Connection back", 3);
+		said_interrupted = interrupted;
+		if (interrupted)
+			menu.set_notice("WAITING FOR " + online.opponent(), "The connection dropped. Holding the match for " + std::to_string(online.hold_left()) + " s...",
+			                "It carries on from right here if it comes back");
+		else if (online.starting()) menu.set_notice("STARTING THE MATCH", online.status());
 		else menu.set_notice("");
 		int level = 0;
 		std::string line = online.playing() && cfg.online.show_connection ? online.connection(level) : std::string();
@@ -2604,7 +2615,8 @@ int main(int argc, char **argv)
 				: online.phase() == Online::Phase::hosting
 				? "Hosting   " + (online.local_address().empty() ? std::string("no network") : online.local_address()) + "   " + online.status()
 				: online.status();
-		menu.set_net(line, level, online.playing() && cfg.online.show_connection == 2 ? online.connection_detail() : std::string());
+		if (menu.versus_showing()) line.clear();   // (the versus screen says who and how; and the start's quiet isn't news)
+		menu.set_net(line, level, online.playing() && cfg.online.show_connection == 2 && !line.empty() ? online.connection_detail() : std::string());
 		// the Online page as things change: its rows made again with the phase, its status lines a few times a second
 		if (menu.is_open() && (online.phase() != online_was || online.room_code() != online_code_was) && menu.top_name() == "Online" && !menu.capturing())
 			menu.replace(online_page(), -1);

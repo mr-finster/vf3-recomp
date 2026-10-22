@@ -112,6 +112,7 @@ public:
 	bool game_started() const { return began; }   // (in the handshake: the game's start is running or done)
 	End end_reason() const { return why; }
 	bool interrupted() const { return quiet; }
+	int quiet_left_s() const;   // (interrupted) the seconds before the other side's given up for gone
 	bool next_event(Event &e);
 	int local_player() const { return host ? 0 : 1; }
 	const std::string &opponent_name() const { return their_name; }

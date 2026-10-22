@@ -55,28 +55,79 @@
 			color: #0b1430;
 			decorator: horizontal-gradient(#ffd23f #ff8f1f);
 		}
-		/* a notice that stays, in the middle (the game waits under it) */
+		/* a notice that stays, in the middle (the game waits under it, dimmed): a card */
 		#notice {
 			position: absolute;
-			left: 0; right: 0;
-			top: 270dp;
-			padding: 22dp 0;
+			left: 0; right: 0; top: 0; bottom: 0;
+			background-color: #05081ab8;
+		}
+		#notice .card {
+			position: absolute;
+			left: 50%; top: 210dp;
+			width: 600dp; margin-left: -300dp;
+			height: 300dp;
+			padding-top: 52dp;
+			border-radius: 20dp;
+			border: 2dp #2a3466;
+			background-color: #0b1026;
 			text-align: center;
-			decorator: horizontal-gradient(#040818e0 #040818e0);
+		}
+		#notice .spin {
+			margin: 0 auto;
+			width: 56dp; height: 56dp;
+			border-radius: 28dp;
+			border: 5dp #f2d14b;
+			border-top-color: #f2d14b00;
 		}
 		#notice .title {
-			font-size: 46dp;
+			margin-top: 18dp;
+			font-size: 42dp;
 			font-weight: 700;
 			font-style: italic;
-			color: #ffd23f;
+			color: #ffffff;
 		}
 		#notice .sub {
-			margin-top: 6dp;
+			margin-top: 8dp;
+			font-size: 25dp;
+			font-weight: 500;
+			color: #8f9ac8;
+		}
+		#notice .small {
+			margin-top: 8dp;
 			font-size: 22dp;
 			font-weight: 500;
-			color: #dfe7fb;
+			color: #5d6799;
 		}
+		/* a match found: the two players, VS between (the two sides drawn under this by the menu: game_menu::draw_versus) */
+		#vs { position: absolute; left: 0; right: 0; top: 0; bottom: 0; }
+		#vs .pl { position: absolute; top: 210dp; font-size: 24dp; font-weight: 600; letter-spacing: 4dp; line-height: 24dp; }
+		#vs .nm { position: absolute; top: 230dp; font-size: 92dp; font-weight: 700; font-style: italic; line-height: 92dp; white-space: nowrap; }
+		#vs .left { left: 72dp; color: #0b1026; }
+		#vs .right { right: 72dp; text-align: right; }
+		#vs .pl.right { color: #c3cbf0; }
+		#vs .nm.right { color: #ffffff; }
+		#vs .badge {
+			position: absolute;
+			left: 50%; top: 210dp;
+			width: 140dp; height: 140dp; margin-left: -70dp;
+			border-radius: 70dp;
+			border: 5dp #ffffff;
+			background-color: #0b1026;
+		}
+		#vs .badge div {
+			position: absolute; left: 0; right: 0; top: 0; bottom: 0;
+			padding-right: 17dp; padding-bottom: 6dp;   /* (italic letters sit right and low of their box: measured, menutest versus.png) */
+			text-align: center;
+			font-size: 72dp; font-weight: 700; font-style: italic; line-height: 124dp;
+			color: #ffffff;
+		}
+		#vs .bar { position: absolute; left: 0; right: 0; top: 563dp; bottom: 0; text-align: center; padding-top: 38dp; }
+		#vs .line { font-size: 30dp; font-weight: 600; color: #8fe08a; }
+		#vs .line.relay { color: #f2d14b; }
+		#vs .dot { display: inline-block; width: 14dp; height: 14dp; margin-right: 12dp; border-radius: 7dp; background-color: #8fe08a; }
+		#vs .line.relay .dot { background-color: #f2d14b; }
+		#vs .sub { margin-top: 10dp; font-size: 26dp; font-weight: 500; color: #d8ddf5; }
 	</style>
 </head>
-<body><div id="fps"></div><div id="net"></div><div id="toast"></div><div id="notice"></div></body>
+<body><div id="vs"></div><div id="notice"></div><div id="fps"></div><div id="net"></div><div id="toast"></div></body>
 </rml>

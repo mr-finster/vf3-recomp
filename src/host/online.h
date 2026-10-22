@@ -36,15 +36,20 @@ public:
 	enum class Phase { off, hosting, joining, playing };
 	// Where a room code's match has got to (none: by address)
 	enum class Step { none, getting_ready, opening, waiting, finding, connecting };
-	struct Notice { enum Kind { joined, ended, refused } kind; std::string text; };
+	struct Notice { enum Kind { joined, ended, refused, tip } kind; std::string text; };   // (tip: a toast, nothing more)
 	// The match that ended last: what ended it, who and how long, for the Online page to show after it (and offer
 	// the same again)
 	struct LastMatch
 	{
 		bool any = false, was_host = false, by_code = false;
+		bool lost = false;            // the connection lost (else left, or out of step)
+		bool relay = false;           // it went through a relay
 		std::string why, opponent;
+		std::string code, address;    // the room's code, or the address joined (for the same again)
 		int seconds = 0, ping = 0;
 	};
+	// What was tried last (for Try again): hosting or joining, with a code or by address
+	enum class Try { none, host_room, join_room, host, join };
 
 	explicit Online(m3::Model3 &board) : adapter(board), board(board) {}
 	~Online();
@@ -52,8 +57,13 @@ public:
 	vfnet::Identity identity;     // the game, build and ROM hash (main's); the name from the settings
 
 	// With a room code: open a room (the code comes in a moment: room_code()), or join one
-	bool host_room(const OnlineSettings &s, std::string &error);
-	bool join_room(const OnlineSettings &s, const std::string &code, std::string &error);
+	// (want: the room's code from before, kept if it's free: a match's Play again; patient: no room yet is waited for,
+	// a minute, the host opening it again)
+	bool host_room(const OnlineSettings &s, std::string &error, const std::string &want = "");
+	bool join_room(const OnlineSettings &s, const std::string &code, std::string &error, bool patient = false);
+	// The same again: the last try (Try again), or the last match's (Play again)
+	bool try_again(const OnlineSettings &s, std::string &error);
+	bool play_again(const OnlineSettings &s, std::string &error);
 	// By address
 	bool host(const OnlineSettings &s, std::string &error);
 	bool join(const OnlineSettings &s, std::string &error);
@@ -93,6 +103,12 @@ public:
 	const LastMatch &last_match() const { return last; }
 	// Why the last try didn't get going ("" if it did, or none yet): shown on the page it was made from
 	const std::string &join_failure() const { return failure; }
+	Step failed_at() const { return fail_step; }   // (how far the failed try got)
+	Try last_try() const { return tried; }
+	bool patient() const { return now < patient_until; }   // (joining a room that isn't open yet: waiting for it)
+	std::string peer() const;     // the other player's name, as the lobby or the session has it ("" not yet)
+	// In a match whose connection's gone quiet: the seconds left before it's given up
+	int hold_left() const { return session ? session->quiet_left_s() : 0; }
 	void set_last_match(const LastMatch &m) { last = m; }   // ({}: forgotten, the menu closed after it; tests: one made up)
 	void forget_failure() { failure.clear(); }              // (the menu closed after it)
 	const std::string &local_address() const { return lan; }
@@ -112,7 +128,12 @@ private:
 	double now = 0, logged_at = 0, began_at = 0;
 	LastMatch last;
 	std::string failure;
-	void ended(const std::string &why);   // (the match over: kept as the last match)
+	void ended(const std::string &why, bool lost = false);   // (the match over: kept as the last match)
+	Step fail_step = Step::none;
+	Try tried = Try::none;
+	std::string want_code;           // (host_room's want)
+	double patient_until = 0;
+	std::string patient_for;         // (whose room's waited for)
 	uint64_t logged_rb = 0, logged_resim = 0, logged_stalls = 0, logged_waits = 0, logged_steps = 0;
 	double logged_save = 0, logged_run = 0, logged_resim_ms = 0, logged_hash = 0;
 	std::deque<Notice> notices;

@@ -4,7 +4,7 @@
 // themselves. No game traffic comes through here. It also gives out short-lived logins for Cloudflare's TURN relay
 // (for the players a direct connection can't reach), so the TURN key never leaves this Worker.
 //
-//   POST /v1/host   {game, version, content, name, cands, relay}    -> {code, key, token}
+//   POST /v1/host   {game, version, content, name, cands, relay, want?} -> {code, key, token}  (want: a code from before)
 //   POST /v1/join   {code, game, version, content, name, cands, relay} -> {name, cands, relay, token}  (or {error})
 //   POST /v1/wait   {code, key}   (the host's: waits up to 20 s for a player) -> {guest: null | {name, cands, relay}}
 //   POST /v1/reopen {code, key}   (the host's, after a player who didn't get going: the same code, open again)
@@ -116,8 +116,10 @@ export default {
 				if (!b) return json({ error: 'bad' }, 400);
 				const me = who(b);
 				if (!me.game || !me.version) return json({ error: 'bad' }, 400);
+				// (the host's code from before, a match's Play again: kept if no one's taken it meanwhile)
+				const want = normal_code(b.want);
 				for (let tries = 0; tries < 8; tries++) {   // (a code already in use: another)
-					const code = random_code();
+					const code = tries === 0 && code_ok(want) ? want : random_code();
 					const r = await room(env, code).fetch('https://room/open', { method: 'POST', body: JSON.stringify({ code, host: me }) });
 					if (r.status === 200) return r;
 				}
