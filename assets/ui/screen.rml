@@ -2,6 +2,7 @@
 <head>
 	<title>Screen</title>
 	<link type="text/rcss" href="screen.rcss"/>
+	<link type="text/rcss" href="flags.rcss"/>
 </head>
 <body>
 	<!-- a page that's a screen of its own (menu_page::screen: the Online pages), made by the host -->

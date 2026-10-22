@@ -75,10 +75,10 @@ div { display: block; }
 .chip .who { color: #8f9ac8; }
 .chip .me { color: #ffffff; font-size: 27dp; font-weight: 600; }
 .chip.selected .who, .chip.selected .me { color: #0b1026; }
-.tiles { display: flex; gap: 28dp; margin-top: 48dp; }
+.tiles { display: flex; gap: 24dp; margin-top: 48dp; }
 .tile {
-	width: 440dp;
-	height: 236dp;
+	width: 300dp;
+	height: 220dp;
 	border-radius: 20dp;
 	border: 3dp #2a3466;
 	background-color: #141b3d;
@@ -89,8 +89,8 @@ div { display: block; }
 	gap: 10dp;
 	color: #ffffff;
 }
-.tile .t { font-size: 62dp; line-height: 64dp; font-weight: 700; font-style: italic; }
-.tile .s { font-size: 25dp; font-weight: 600; color: #8f9ac8; }
+.tile .t { font-size: 56dp; line-height: 60dp; font-weight: 700; font-style: italic; }
+.tile .s { font-size: 23dp; font-weight: 600; color: #8f9ac8; }
 .tile.selected .s { color: #0b1026; }
 .more { display: flex; align-items: center; gap: 10dp; margin-top: 40dp; font-size: 24dp; color: #8f9ac8; }
 .link {
@@ -221,6 +221,7 @@ div { display: block; }
 	font-style: italic;
 	color: #ffffff;
 }
+.mini .score { font-size: 56dp; line-height: 60dp; font-weight: 700; font-style: italic; color: #ffffff; padding: 0 10dp; }
 .stats { display: flex; gap: 16dp; margin-top: 34dp; }
 .stat {
 	width: 200dp;
@@ -237,3 +238,6 @@ div { display: block; }
 
 /* a host's address, read out (by address) */
 .address { margin-top: 36dp; font-size: 84dp; line-height: 90dp; font-weight: 700; font-style: italic; color: #ffffff; }
+.flag { width: 32dp; height: 24dp; margin: 0 10dp; border: 1dp #ffffff55; vertical-align: middle; }
+.mini .flag { width: 40dp; height: 30dp; }
+.chip .flag { width: 28dp; height: 21dp; margin: 0; }

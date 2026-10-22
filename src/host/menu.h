@@ -62,11 +62,11 @@ public:
 	void set_notice(const std::string &title, const std::string &sub = "", const std::string &small = "");
 	// A match found: the two players side by side, VS between, for a few seconds over the game's start (a line
 	// under them: how it's connected, and what to do)
-	struct versus { std::string left_label, left, right_label, right, line, sub; bool relay = false; };
+	struct versus { std::string left_label, left, right_label, right, line, sub; bool relay = false; std::string left_country, right_country; };
 	void show_versus(const versus &v, double seconds = 3.5);
 	bool versus_showing() const { return m_vs_until > SDL_GetTicks(); }
 	// At the bottom in the middle over the game, while it's set: what the players are waited for (Press Start)
-	void set_banner(const std::string &title, const std::string &sub = "");
+	void set_banner(const std::string &title, const std::string &sub = "", const std::string &key = "");   // (key: a button, shown as one after the title)
 
 	bool is_open() const { return m_open; }
 	bool capturing() const { return bool(m_capture); }   // (a key or a name being typed: every key its)
@@ -98,7 +98,7 @@ public:
 private:
 	std::unique_ptr<impl> m;
 	bool m_open = false;
-	std::string m_banner = "\n";
+	std::string m_banner = "\n\n";
 	std::string m_fps, m_net, m_net_detail, m_notice = "\n\n";   // (m_notice: its title and lines, "\n\n" none)
 	int m_net_level = -1;
 	uint64_t m_toast_until = 0;   // (SDL_GetTicks)

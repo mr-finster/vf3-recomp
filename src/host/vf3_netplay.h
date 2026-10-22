@@ -25,6 +25,23 @@ uint64_t content_hash(m3::Model3 &board);
 std::vector<uint8_t> start_blob(const m3::Model3 &board);
 constexpr uint16_t START_BUTTON = 256;   // (the input word's Start: pack's)
 
+// The score between the two players, read from the game's own RAM after each frame (as Fightcade's detectors do,
+// tools/vf3detect.cpp found where): each player's rounds won in the match on now (0x10601a, 0x10601b: both back
+// to 0 when it's over), and which players are playing (0x106029: bit 0 player 1, bit 1 player 2; a side not
+// playing is the CPU's). A match counts only if both were playing at each round it was won (not the winner's
+// fights against the CPU after it, nor one a challenger broke into); each reading only once it's held 30 frames,
+// longer than any rollback, so a guessed frame never scores.
+struct Score
+{
+	int matches[2] = {}, rounds[2] = {};   // between the two players: matches won, and rounds won in them
+	void frame(const m3::Model3 &board);
+	static constexpr uint32_t ROUNDS_P1 = 0x10601a, ROUNDS_P2 = 0x10601b, PLAYING = 0x106029;
+private:
+	uint8_t seen[2] = {}, now[3] = {}, playing = 0;
+	int held = 0;
+	bool versus = false;   // (the match on now: both playing at every round so far)
+};
+
 class Adapter : public vfnet::Game
 {
 public:
