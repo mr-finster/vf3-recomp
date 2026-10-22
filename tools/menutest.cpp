@@ -44,6 +44,7 @@ void shot(const char *name, int w, int h)
 	SDL_RenderClear(ren);
 	draw_game(w, h);
 	menu->render(false);
+	if (!*name) return;   // (a frame only)
 	SDL_Surface *s = SDL_RenderReadPixels(ren, nullptr);
 	SDL_Surface *c = s ? SDL_ConvertSurface(s, SDL_PIXELFORMAT_ABGR8888) : nullptr;
 	if (s) SDL_DestroySurface(s);
@@ -62,6 +63,15 @@ void key(SDL_Scancode sc)
 	e.type = SDL_EVENT_KEY_DOWN;
 	e.key.scancode = sc;
 	e.key.down = true;
+	menu->handle_event(e);
+}
+
+void mouse(float x, float y)
+{
+	SDL_Event e{};
+	e.type = SDL_EVENT_MOUSE_MOTION;
+	e.motion.x = x;
+	e.motion.y = y;
 	menu->handle_event(e);
 }
 
@@ -105,6 +115,20 @@ int main(int argc, char **argv)
 
 	gm.open(root());
 	shot("root.png", w, h);
+	// a pointer resting over the rows: moving it selects, the rows made again under it (a value's change) don't
+	for (int y = h / 4; y < h * 3 / 4 && gm.selected() == 0; y += 4) { mouse(float(w) / 4, float(y)); shot("", w, h); }
+	const int hovered = gm.selected();
+	key(SDL_SCANCODE_DOWN);
+	key(SDL_SCANCODE_DOWN);
+	const int chosen = gm.selected();
+	for (int i = 0; i < 3; i++) { gm.refresh(); shot("", w, h); }
+	if (hovered == 0 || chosen == hovered || gm.selected() != chosen) {
+		fprintf(stderr, "menutest: the pointer: hovered %d, then %d chosen, %d after the rows were made again\n", hovered, chosen, gm.selected());
+		return 1;
+	}
+	printf("pointer: hovering selected row %d; row %d stayed selected as the rows were made again\n", hovered, chosen);
+	gm.close();
+	gm.open(root());
 	gm.push(online_menu::page(o, s, gm, changed));
 	shot("online.png", w, h);
 
@@ -141,6 +165,19 @@ int main(int argc, char **argv)
 	o.poll(1000);
 	gm.refresh();
 	shot("join_typed.png", w, h);
+	o.stop();
+
+	o.set_last_match({ true, true, "RENODECK left the match.", "RENODECK", 194, 19 });
+	gm.replace(online_menu::page(o, s, gm, changed), online_menu::first_row(o));
+	shot("match_over_host.png", w, h);
+	o.set_last_match({ true, false, "Lost the connection to MRFINSTER.", "MRFINSTER", 61, 140 });
+	s.address = "192.168.1.20";
+	gm.replace(online_menu::page(o, s, gm, changed), online_menu::first_row(o));
+	shot("match_over_guest.png", w, h);
+	key(SDL_SCANCODE_RETURN);   // (Join MRFINSTER again: the page while joining)
+	o.poll(1000);
+	gm.replace(online_menu::page(o, s, gm, changed), gm.selected());
+	shot("joining.png", w, h);
 	o.stop();
 
 	gm.close();

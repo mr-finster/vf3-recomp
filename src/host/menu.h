@@ -84,6 +84,7 @@ private:
 	std::vector<int> m_sel_stack;
 	int m_sel = 0;
 	int m_stick_x = 0, m_stick_y = 0;    // the left stick's last direction, for edges
+	bool m_pointer_moved = false;        // (since the rows were last made: only then does hovering select)
 	std::function<bool(const SDL_Event &)> m_capture;
 	std::string m_capture_prompt;
 	std::function<void()> m_capture_cancel;   // (Esc while capturing)

@@ -89,6 +89,7 @@ struct Case
 	// what should happen
 	vfnet::Session::End expect_a = vfnet::Session::End::none, expect_b = vfnet::Session::End::none;
 	bool expect_interrupt = false;
+	bool expect_host_untouched = false;   // (the host's game never started: a guest that never got far enough)
 };
 
 bool verbose = false;
@@ -133,6 +134,7 @@ bool run(const Case &c)
 	if (a.end_reason() != c.expect_a) fail("host ended " + std::to_string(int(a.end_reason())) + ", not " + std::to_string(int(c.expect_a)));
 	if (b.end_reason() != c.expect_b) fail("guest ended " + std::to_string(int(b.end_reason())) + ", not " + std::to_string(int(c.expect_b)));
 	if (c.expect_interrupt && !interrupted) fail("no interruption seen");
+	if (c.expect_host_untouched && !ga.began_with.empty()) fail("the host's game was set up for a match that never began");
 	// the ping shown: within a few ms of the wire's own (its latency both ways, half the jitter each on average)
 	const double true_rtt = c.ab.latency_ms + c.ba.latency_ms + (c.ab.jitter_ms + c.ba.jitter_ms) / 2;
 	if (c.expect_a == vfnet::Session::End::none && std::fabs(a.stats().rtt_ms - true_rtt) > 6 + true_rtt * 0.1)
@@ -213,6 +215,13 @@ int main(int argc, char **argv)
 		Case c{ "desync (the guest's frame 900 spoilt)", P{ 20, 2, 0 }, P{ 20, 2, 0 } };
 		c.corrupt_b = 900;
 		c.expect_a = c.expect_b = E::desync;
+		cases.push_back(c);
+	}
+	{
+		// (a Mac guest's first build: the host heard it, it heard nothing back)
+		Case c{ "the host's replies never arrive", P{ 20, 2, 1.0 }, P{ 20, 2, 0 } };
+		c.expect_a = c.expect_b = E::timeout;
+		c.expect_host_untouched = true;
 		cases.push_back(c);
 	}
 	{

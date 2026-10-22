@@ -30,6 +30,26 @@ namespace vfnet {
 
 // ---- UDP ----
 
+namespace {
+
+// The same sender: family, port and address (not the whole struct: macOS's carry a length the system fills in,
+// and an address made here had none, so every packet from the host was taken for a stranger's)
+bool same_address(const sockaddr_storage &a, const sockaddr_storage &b)
+{
+	if (a.ss_family != b.ss_family) return false;
+	if (a.ss_family == AF_INET6) {
+		const sockaddr_in6 &x = reinterpret_cast<const sockaddr_in6 &>(a), &y = reinterpret_cast<const sockaddr_in6 &>(b);
+		return x.sin6_port == y.sin6_port && memcmp(&x.sin6_addr, &y.sin6_addr, sizeof x.sin6_addr) == 0;
+	}
+	if (a.ss_family == AF_INET) {
+		const sockaddr_in &x = reinterpret_cast<const sockaddr_in &>(a), &y = reinterpret_cast<const sockaddr_in &>(b);
+		return x.sin_port == y.sin_port && x.sin_addr.s_addr == y.sin_addr.s_addr;
+	}
+	return false;
+}
+
+} // namespace
+
 struct UdpLink::Impl
 {
 	sock_t s = NO_SOCKET;
@@ -56,6 +76,11 @@ struct UdpLink::Impl
 			int off = 0;
 			setsockopt(s, IPPROTO_IPV6, IPV6_V6ONLY, reinterpret_cast<const char *>(&off), sizeof off);
 		}
+		// (room for a burst of the starting settings: macOS's UDP send buffer is 9 KB by default, so most of a
+		// window of them was dropped before it left)
+		int buf = 256 * 1024;
+		setsockopt(s, SOL_SOCKET, SO_SNDBUF, reinterpret_cast<const char *>(&buf), sizeof buf);
+		setsockopt(s, SOL_SOCKET, SO_RCVBUF, reinterpret_cast<const char *>(&buf), sizeof buf);
 #ifdef _WIN32
 		u_long nb = 1;
 		ioctlsocket(s, FIONBIO, &nb);
@@ -117,6 +142,9 @@ bool UdpLink::connect(const std::string &host, uint16_t port, std::string &error
 		sockaddr_in6 to{};
 		const sockaddr_in *v4 = reinterpret_cast<const sockaddr_in *>(res->ai_addr);
 		to.sin6_family = AF_INET6;
+#if defined(__APPLE__) || defined(__FreeBSD__)
+		to.sin6_len = sizeof to;   // (BSD's: the system's own addresses carry it)
+#endif
 		to.sin6_port = v4->sin_port;
 		uint8_t *b = reinterpret_cast<uint8_t *>(&to.sin6_addr);
 		b[10] = b[11] = 0xFF;
@@ -157,7 +185,7 @@ bool UdpLink::recv(std::vector<uint8_t> &out)
 			m->peer = from;
 			m->peer_len = from_len;
 			peer_set = true;
-		} else if (from_len != m->peer_len || memcmp(&from, &m->peer, size_t(from_len)) != 0)
+		} else if (!same_address(from, m->peer))
 			continue;   // (anyone else's: dropped)
 		out.assign(buf, buf + n);
 		return true;

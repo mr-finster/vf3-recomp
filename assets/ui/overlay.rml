@@ -23,6 +23,7 @@
 			top: 6dp;
 			text-align: center;
 			font-size: 17dp;
+			white-space: pre;
 			font-weight: 600;
 			color: #dfe7fb;
 			font-effect: outline(2dp #0b1430);

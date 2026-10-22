@@ -21,13 +21,26 @@ bool Online::open_host(std::string &error)
 	if (adapter.settle) adapter.settle();
 	identity.name = started_with.name;
 	session = std::make_unique<vfnet::Session>(*link, adapter, identity, config(started_with), true, vf3net::start_blob(board));
+	session->trace = [](const std::string &t) { fprintf(stderr, "online: %s\n", t.c_str()); };
 	ph = Phase::hosting;
 	return true;
+}
+
+void Online::ended(const std::string &why)
+{
+	last.any = true;
+	last.was_host = is_host;
+	last.why = why;
+	last.opponent = session ? session->opponent_name() : "";
+	last.seconds = int((now - began_at) / 1000);
+	last.ping = ping();
+	fprintf(stderr, "online: the match with %s ended after %d s: %s\n", last.opponent.c_str(), last.seconds, why.c_str());
 }
 
 bool Online::host(const OnlineSettings &s, std::string &error)
 {
 	stop();
+	last = {};
 	started_with = s;
 	is_host = true;
 	auto_delay = s.delay < 0;
@@ -42,6 +55,7 @@ bool Online::host(const OnlineSettings &s, std::string &error)
 bool Online::join(const OnlineSettings &s, std::string &error)
 {
 	stop();
+	last = {};
 	started_with = s;
 	is_host = false;
 	auto_delay = s.delay < 0;
@@ -65,6 +79,7 @@ bool Online::join(const OnlineSettings &s, std::string &error)
 	if (!link->connect(host, uint16_t(p), error)) { link.reset(); return false; }
 	identity.name = s.name;
 	session = std::make_unique<vfnet::Session>(*link, adapter, identity, config(s), false);
+	session->trace = [](const std::string &t) { fprintf(stderr, "online: %s\n", t.c_str()); };
 	joining_to = host + (p != 7700 ? ":" + std::to_string(p) : "");
 	ph = Phase::joining;
 	fprintf(stderr, "online: joining %s, port %d\n", host.c_str(), p);
@@ -73,6 +88,7 @@ bool Online::join(const OnlineSettings &s, std::string &error)
 
 void Online::stop()
 {
+	if (session && ph == Phase::playing) ended("You left the match.");
 	if (session && session->state() != vfnet::Session::State::ended) session->quit();
 	session.reset();
 	link.reset();
@@ -89,6 +105,7 @@ void Online::poll(double t)
 		switch (e.kind) {
 		case vfnet::Session::Event::connected:
 			ph = Phase::playing;
+			began_at = now;
 			notices.push_back({ Notice::joined, "Playing " + e.text + ": press Start" });
 			break;
 		case vfnet::Session::Event::ended: {
@@ -102,7 +119,14 @@ void Online::poll(double t)
 				if (!open_host(err)) { notices.push_back({ Notice::ended, err }); session.reset(); link.reset(); ph = Phase::off; }
 				return;
 			}
-			if (why != vfnet::Session::End::quit) notices.push_back({ was_playing ? Notice::ended : Notice::refused, e.text });
+			if (was_playing && why != vfnet::Session::End::quit) {
+				const std::string who = session->opponent_name().empty() ? std::string("your opponent") : session->opponent_name();
+				ended(why == vfnet::Session::End::opponent_quit ? who + " left the match."
+				      : why == vfnet::Session::End::disconnected ? "Lost the connection to " + who + "."
+				      : why == vfnet::Session::End::desync ? "The match went out of step." : e.text);
+			}
+			if (why != vfnet::Session::End::quit)
+				notices.push_back({ was_playing ? Notice::ended : Notice::refused, was_playing ? last.why : e.text });
 			session.reset();
 			link.reset();
 			ph = Phase::off;
@@ -111,6 +135,20 @@ void Online::poll(double t)
 		default:
 			break;
 		}
+	}
+	// the connection in the log every 10 s of a match (what a report needs: the ping, the rollbacks, the waits)
+	if (session && ph == Phase::playing && now - logged_at >= 10000) {
+		const auto &st = session->stats();
+		if (logged_at > 0)
+			fprintf(stderr, "online: frame %u, ping %.0f ms, delay %d, %llu rollbacks (%.1f frames on average, %d the most in the last second), "
+			        "%llu stalls for the other side, %llu waits to keep in time, %.1f frames ahead\n", session->frame(), st.rtt_ms, session->delay(),
+			        (unsigned long long)(st.rollbacks - logged_rb), st.rollbacks > logged_rb ? double(st.resim_frames - logged_resim) / double(st.rollbacks - logged_rb) : 0.0,
+			        st.rollback_max, (unsigned long long)(st.stalls - logged_stalls), (unsigned long long)(st.waits - logged_waits), double(st.ahead));
+		logged_at = now;
+		logged_rb = st.rollbacks;
+		logged_resim = st.resim_frames;
+		logged_stalls = st.stalls;
+		logged_waits = st.waits;
 	}
 	// Auto's input delay, once the ping is known (the character select): half the round trip in frames, 1 to 4
 	if (session && ph == Phase::playing && auto_delay && !auto_done && session->frame() > 120 && session->stats().rtt_ms > 0) {
@@ -173,6 +211,8 @@ std::string Online::connection(int &level) const
 // ---- the menu ----
 
 namespace online_menu {
+
+int first_row(const Online &o);
 
 namespace {
 
@@ -351,18 +391,54 @@ menu_page page(Online &o, OnlineSettings &s, game_menu &menu, std::function<void
 		p.items.push_back({ "Over the internet: forward UDP port " + std::to_string(o.local_port()) + " to this computer, and", "", {}, {}, {}, true });
 		p.items.push_back({ "give them your public address. (The lobby, coming next, does this for you.)", "", {}, {}, {}, true });
 		menu_item w{ "Stop waiting", "Stops hosting. You can play on your own meanwhile: close the menu, and the match starts when someone joins.", {}, {},
-			[&o, &s, &menu, changed] { o.stop(); menu.replace(page(o, s, menu, changed), 0); } };
+			[&o, &s, &menu, changed] { o.stop(); menu.replace(page(o, s, menu, changed), first_row(o)); } };
+		w.below = [&o] { return o.status(); };
+		w.good = [] { return true; };
+		p.items.push_back(w);
+	} else if (o.phase() == Online::Phase::joining) {
+		p.items.push_back({ "JOINING", "", {}, {}, {}, true });
+		p.items.back().heading = true;
+		menu_item to{ s.address, "", {}, {}, {}, true };
+		to.big = true;
+		p.items.push_back(to);
+		menu_item w{ "Stop joining", "Stops trying to join.", {}, {}, [&o, &s, &menu, changed] { o.stop(); menu.replace(page(o, s, menu, changed), first_row(o)); } };
 		w.below = [&o] { return o.status(); };
 		w.good = [] { return true; };
 		p.items.push_back(w);
 	} else {
+		if (const Online::LastMatch &m = o.last_match(); m.any) {   // (just after a match: what happened, and the same again)
+			p.items.push_back({ "MATCH OVER", "", {}, {}, {}, true });
+			p.items.back().heading = true;
+			menu_item why{ m.why, "", {}, {}, {}, true };
+			why.big = m.why.size() <= 28;
+			p.items.push_back(why);
+			char line[96];
+			snprintf(line, sizeof line, "%s%s  \u00b7  %d:%02d played  \u00b7  %d ms", m.opponent.empty() ? "" : "Against ", m.opponent.c_str(), m.seconds / 60, m.seconds % 60, m.ping);
+			p.items.push_back({ line, "", {}, {}, {}, true });
+			if (m.was_host)
+				p.items.push_back({ "Host again", "Waits for a player to join you again, as before (" + m.opponent + " can join with the same address).", {}, {},
+					[&o, &s, &menu, problem, changed] {
+						std::string err;
+						if (!o.host(s, err)) { *problem = err; menu.refresh(); return; }
+						menu.replace(page(o, s, menu, changed), first_row(o));
+					} });
+			else
+				p.items.push_back({ "Join " + (m.opponent.empty() ? std::string("again") : m.opponent + " again"),
+					"Joins " + s.address + " again: ask " + (m.opponent.empty() ? std::string("the host") : m.opponent) + " to host again first.", {}, {},
+					[&o, &s, &menu, problem, changed] {
+						std::string err;
+						if (!o.join(s, err)) { *problem = err; menu.refresh(); return; }
+						menu.replace(page(o, s, menu, changed), first_row(o));
+					} });
+			p.items.back().below = [&o, problem] { return o.waiting() ? o.status() : *problem; };
+		}
 		menu_item h{ "Host a match", "Waits for a player to join you (play on your own meanwhile). Matches always play the PC way, "
 			"free play, with your arcade settings (difficulty, rounds, time). You're player 1, with your own controls.", {}, {},
 			[&o, &s, &menu, problem, changed, type_name] {
 				auto go = [&o, &s, &menu, problem, changed] {
 					std::string err;
 					if (!o.host(s, err)) { *problem = err; menu.refresh(); return; }
-					menu.replace(page(o, s, menu, changed), 0);
+					menu.replace(page(o, s, menu, changed), first_row(o));
 				};
 				if (s.name.empty()) { *problem = "Your name first: type it above."; type_name(go); return; }
 				go();
@@ -386,6 +462,15 @@ menu_page page(Online &o, OnlineSettings &s, game_menu &menu, std::function<void
 		[&s, changed](int d) { s.port = std::clamp(s.port + d, 1024, 65535); changed(); } });
 	p.items.push_back({ "Back", "", {}, {}, [&menu] { menu.pop(); } });
 	return p;
+}
+
+int first_row(const Online &o)
+{
+	switch (o.phase()) {
+	case Online::Phase::hosting: return 6;   // (Stop waiting)
+	case Online::Phase::joining: return 3;   // (Stop joining)
+	default: return o.last_match().any ? 4 : 1;   // (Host / Join again, else Host a match)
+	}
 }
 
 void match_rows(Online &o, OnlineSettings &s, game_menu &menu, std::function<void()> changed, std::vector<menu_item> &rows)

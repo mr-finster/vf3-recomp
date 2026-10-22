@@ -37,6 +37,9 @@ struct menu_listener : Rml::EventListener
 		Rml::Element *e = ev.GetTargetElement();
 		while (e && !e->IsClassSet("row")) e = e->GetParentNode();
 		if (!e || e->IsClassSet("info") || menu->capturing()) return;   // (typing into a row: the pointer doesn't move off it)
+		// (a row comes under a still pointer when the rows are made again, a status line's change: that's no choice;
+		// on a Steam Deck the selection kept going back to the row under the pointer)
+		if (ev.GetId() == Rml::EventId::Mouseover && !menu->m_pointer_moved) return;
 		const int i = atoi(e->GetId().c_str() + 1);
 		menu->select(i);
 		if (ev.GetId() == Rml::EventId::Click) {
@@ -233,6 +236,7 @@ void game_menu::build()
 				rml += "<div class=\"row info " + std::string(it.good && it.good() ? "good" : "error") + "\"><span class=\"label\">" + escape(b) + "</span></div>";
 	}
 	m->doc->GetElementById("rows")->SetInnerRML(rml);
+	m_pointer_moved = false;
 	scroll_to_selected();
 	show_help();
 }
@@ -414,6 +418,7 @@ bool game_menu::handle_event(const SDL_Event &e)
 		return true;
 	}
 	case SDL_EVENT_MOUSE_MOTION: {
+		m_pointer_moved = true;
 		const float d = SDL_GetWindowPixelDensity(m->win);
 		m->ctx->ProcessMouseMove(int(e.motion.x * d), int(e.motion.y * d), 0);
 		return true;

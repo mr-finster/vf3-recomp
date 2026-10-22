@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <map>
 #include <string>
 #include <vector>
@@ -107,6 +108,7 @@ public:
 	const std::vector<uint16_t> &inputs(int player) const { return player == local_player() ? local : remote; }
 	const std::vector<uint8_t> &blob() const { return start_blob; }
 	void set_local_flags(uint8_t f) { my_flags = f; }   // e.g. 1: in the menu (shown to the other player)
+	std::function<void(const std::string &)> trace;   // the handshake's steps, in words (for a log)
 	uint8_t remote_flags() const { return their_flags; }
 
 	// (the protocol's version: both sides must have the same)
