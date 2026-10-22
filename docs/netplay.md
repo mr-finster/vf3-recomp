@@ -77,8 +77,19 @@ of what it does, not because nobody looks. What another player can reach, and wh
   a side hold more and more), the starting blob at most 4 MB. `netfuzz` plays sessions while a man in the middle
   spoils packets every way it can (bits, lengths, extreme values, splices, replays, made-up packets), built with
   AddressSanitizer and UBSan: 48,000 sessions and about 14 million spoilt packets, nothing out of bounds.
-- **A session's token**: the guest picks 64 random bits; every packet carries them and any other is dropped, and a
-  host only answers a sender whose packet is a session's. Someone who can't see the packets can't put one in.
+- **A session's token**: the guest picks 64 random bits; every packet carries them and any other is dropped (and
+  doesn't count as hearing from the other side). Someone who can't see the packets can't put one in.
+- **Whom a host listens to**: it locks onto a sender only once its hello is good (same protocol, build, game and
+  ROM), not onto the first datagram: a junk packet from anyone used to stop a host from ever being joined. A host
+  that locked onto someone who never finishes gives up after its handshake time and waits again.
+- **No amplifier**: a hello forged with someone else's address gets a few small welcomes back (at most 10, as small
+  as the hello), never the settings: those go only once the guest has said back the host's random 64 bits from
+  its welcome, which only the real address got. (Before, 340 bytes of forged hellos got 5 MB sent to a victim.)
+- **Floods**: a poll reads at most 64 of the session's packets and skips at most 256 strangers', so no flood holds
+  a frame up; a datagram too big for the buffer, or an ICMP error, is skipped, not taken for "nothing more".
+- **Text from the other side**: a name keeps only the letters the HUD has (A-Z, 0-9, space . - ! ?), and a refusal
+  is a reason code that each side words itself; the other side's version string is shown filtered and short.
+  Everything shown in the menu is escaped for its markup.
 - **The game itself** only ever gets the other player's buttons, an input word a frame, and (from a host) the
   arcade's backup RAM and EEPROM to start from. The game runs in the emulated board: the PowerPC's RAM accesses are
   checked against its 8 MB (the interpreter's and the recompiled code's), and the board's devices mask every
