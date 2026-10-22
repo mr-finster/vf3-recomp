@@ -171,10 +171,17 @@ void Online::poll(double t)
 		logged_stalls = st.stalls;
 		logged_waits = st.waits;
 	}
-	// Auto's input delay, once the ping is known (the character select): half the round trip in frames, 1 to 4
+	// Auto's input delay, once the ping is known (the character select): half the round trip in frames, 1 to 4;
+	// and 2 at least where a frame costs this machine much of its time (a Steam Deck's 11 ms of 17: each frame a
+	// rollback runs again costs it as much again, so fewer and shorter ones, for a frame's delay on this side only)
 	if (session && ph == Phase::playing && auto_delay && !auto_done && session->frame() > 120 && session->stats().rtt_ms > 0) {
 		const double frame_ms = 1000.0 / 57.524160;
-		session->set_delay(std::clamp(int(std::ceil(session->stats().rtt_ms / 2 / frame_ms)), 1, 4));
+		const auto &st = session->stats();
+		const double step_ms = st.steps ? (st.save_ms + st.run_ms) / double(st.steps) : 0.0;
+		const int by_ping = std::clamp(int(std::ceil(st.rtt_ms / 2 / frame_ms)), 1, 4);
+		const int d = std::max(by_ping, step_ms > 7.0 ? 2 : 1);
+		session->set_delay(d);
+		fprintf(stderr, "online: Auto input delay %d (ping %.0f ms, a frame's step %.1f ms here)\n", d, st.rtt_ms, step_ms);
 		auto_done = true;
 	}
 }
@@ -430,8 +437,9 @@ menu_page page(Online &o, OnlineSettings &s, game_menu &menu, std::function<void
 		p.items.push_back({ here, "", {}, {}, {}, true });
 		p.items.back().big = true;
 		p.items.push_back({ "Players on your network join with this address.", "", {}, {}, {}, true });
-		p.items.push_back({ "Over the internet: forward UDP port " + std::to_string(o.local_port()) + " to this computer, and", "", {}, {}, {}, true });
-		p.items.push_back({ "give them your public address. (The lobby, coming next, does this for you.)", "", {}, {}, {}, true });
+		p.items.push_back({ "Over the internet: forward UDP port " + std::to_string(o.local_port()) + " to this computer", "", {}, {}, {}, true });
+		p.items.push_back({ "and give them your public address, or both join a VPN", "", {}, {}, {}, true });
+		p.items.push_back({ "like Tailscale and use its address (README: Online play).", "", {}, {}, {}, true });
 		menu_item w{ "Stop waiting", "Stops hosting. You can play on your own meanwhile: close the menu, and the match starts when someone joins.", {}, {},
 			[&o, &s, &menu, changed] { o.stop(); menu.replace(page(o, s, menu, changed), first_row(o)); } };
 		w.below = [&o] { return o.status(); };
@@ -512,7 +520,7 @@ menu_page page(Online &o, OnlineSettings &s, game_menu &menu, std::function<void
 int first_row(const Online &o)
 {
 	switch (o.phase()) {
-	case Online::Phase::hosting: return 6;   // (Stop waiting)
+	case Online::Phase::hosting: return 7;   // (Stop waiting)
 	case Online::Phase::joining: return 3;   // (Stop joining)
 	default: return o.last_match().any ? 4 : 1;   // (Host / Join again, else Host a match)
 	}

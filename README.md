@@ -59,7 +59,7 @@ the hardware; none of its code is in this one.
 | Menu, keyboard and gamepads, two players, the arcade's settings, screen filters | Working |
 | Portable mode, your own ROM folder | Working |
 | macOS, Windows, Linux / Steam Deck | macOS (Apple silicon) and the Steam Deck: the downloads working, a steady 60 pictures a second on the Deck; Windows tested under Wine; Intel Macs not yet tried (the Mac build is universal) |
-| Online play | Not yet |
+| Online play | Experimental: rollback netplay, one player hosting and one joining by address (see [Online play](#online-play-experimental)) |
 
 **This is an alpha.** Please report anything that looks or plays differently from the arcade in
 [Issues](https://github.com/mr-finster/vf3-recomp/issues), with the `log.txt` from the game's data folder.
@@ -157,9 +157,64 @@ scale; View + RB: picture shape. For Arcade play on a pad, set a Coin button in 
 - **Arcade settings:** difficulty, rounds to win, energy, demo sound, country, and the arcade's own service menu (its
   other settings, sound test, bookkeeping). A change restarts the game.
 - **Controls:** each player's pad, keys and buttons.
+- **Online:** your name, host a match, join one, input delay, the connection display (see below).
 
 The settings stay as you set them, as in Virtua Fighter 1 and 2 Recomp: if the computer can't keep up at a render
 scale, choose a lower one (F5).
+
+## Online play (experimental)
+
+Rollback netplay, as modern fighting games have it: your own inputs show at once (after the input delay), and the
+game quietly corrects the moment your opponent's arrive. Both players need **the same version** of the game (the
+same download) and **the same `vf3.zip`**; it tells you if not. Matches always play the PC way, free play, with the
+host's arcade settings (rounds, difficulty, energy). Each player uses their own Player 1 controls.
+
+**On the same network** (home Wi-Fi or a cable):
+
+1. Both: Menu > Online > **Your name** (up to 10 letters, shown under your energy bar).
+2. One player: **Host a match**. The page shows your address (e.g. `192.168.1.20`).
+3. The other: **Join a match**, type that address, **Connect**. Once you're both in, the game starts at its title
+   screen: both press Start.
+
+**Over the internet** the host has to be reachable from outside, one of these ways:
+
+- **A VPN made for this (easiest):** both install [Tailscale](https://tailscale.com) (free) and join the same
+  network; the joining player types the host's Tailscale address (`100.x.y.z`, shown in the Tailscale app), not
+  the one the game shows. ZeroTier and Radmin VPN work the same way.
+- **Port forwarding:** on the host's router, forward **UDP port 7700** to the host's computer (the address the
+  Host page shows), and give the other player your **public** address (search "what is my IP"). Some internet
+  providers (most mobile and satellite ones, and some home ones: "CGNAT") don't allow this; use a VPN instead.
+
+The joining player never needs to forward anything. A lobby that does all this for you is planned.
+
+**If it won't connect**
+
+- "Couldn't reach the host": check the address; that the host is on its Host page; on the internet, the forwarding
+  or the VPN. Players on the same network should use the address the Host page shows, not the public one.
+- **Firewalls:** the first time you host, allow the game when asked. Windows: if you dismissed it, Windows Security >
+  Firewall > Allow an app, tick Virtua Fighter 3 Recomp for **Private and Public**. Mac: System Settings > Network >
+  Firewall > Options: allow it; each new version of the (unsigned) Mac app may need allowing again. Also System
+  Settings > Privacy & Security > Local Network: on.
+- Hotel, school and public Wi-Fi often keep devices on the same network from seeing each other; use a VPN.
+
+**For the smoothest match**
+
+- A cable beats Wi-Fi. **Steam Deck:** turn off Wi-Fi power management (Settings > System > Developer Mode on, then
+  Settings > Developer > Enable Wi-Fi power management off): it holds packets back in bursts.
+- **Input delay** (Menu > Online): Auto picks from the ping and how fast your machine runs. Higher means fewer
+  corrections, lower means a quicker response; 2 is a good start over the internet.
+- **Connection display:** On shows the other player, the ping and the rollback at the top (the dot green, yellow or
+  red); Detailed adds the input delay, jitter and frame timings. Under about 100 ms ping plays well.
+
+**Good to know**
+
+- The menu doesn't pause a match (it goes on behind it, your inputs off). Leaving a match tells the other player.
+- Your opponent sees your IP address, as in any direct peer-to-peer game: play people you know.
+- Not yet: a lobby, spectating, replays, rematch without reconnecting.
+
+**Reporting a problem:** please include **both players'** `log.txt` (the game's data folder: Windows `%APPDATA%\Virtua
+Fighter 3 Recomp`, Mac `~/Library/Application Support/Virtua Fighter 3 Recomp`, Steam Deck / Linux the game's own
+folder or `~/.local/share/Virtua Fighter 3 Recomp`), what each is playing on, Wi-Fi or cable, and the ping shown.
 
 ## How it works
 
