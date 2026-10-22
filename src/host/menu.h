@@ -29,6 +29,7 @@ struct menu_page
 	std::string name;
 	std::string note;                     // under the items when the selected one has no help
 	std::vector<menu_item> items;
+	int start = -1;                       // the row selected when it opens (or is made again with no row given)
 };
 
 class game_menu

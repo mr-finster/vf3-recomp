@@ -65,6 +65,8 @@
 //   VF3_PACE_LOG=1       the pacing and the pictures' times every 2 s
 //   VF3_KEYS=k@F,...     presses key k (an SDL key name) when game frame F is reached; the window 3 frames later
 //                        goes to build/host_window_F.png
+//   VF3_HOST_ROOM=1      hosts a room code's match at pass 60 (the code in log.txt), as Online > Host a match
+//   VF3_JOIN_CODE=XXXXXX joins that room at pass 60, as Online > Join with a code (VF_LOBBY: another lobby)
 //   VF3_MENU_KEYS=k,...  presses these keys (esc, up, down, left, right, enter, or SDL key names) 6 passes of the
 //                        loop apart from pass 30
 //   VF3_SHOT_AT=n,...    the window as drawn at these passes of the loop, to build/host_window_at_N.png
@@ -501,9 +503,12 @@ struct settings
 		if (auto it = kv.find("roms_folder"); it != kv.end()) roms_folder = it->second;
 		if (auto it = kv.find("online_name"); it != kv.end()) online.name = online_menu::clean_name(it->second);
 		if (auto it = kv.find("online_address"); it != kv.end()) online.address = online_menu::clean_address(it->second);
+		if (auto it = kv.find("online_lobby"); it != kv.end() && (it->second.rfind("https://", 0) == 0 || it->second.rfind("http://", 0) == 0))
+			online.lobby = it->second.substr(0, 200);   // (another lobby than the built-in one: tests, a server of one's own)
 		num("online_delay", online.delay, -1, 6);
 		num("online_port", online.port, 1024, 65535);
 		num("online_connection", online.show_connection, 0, 2);
+		flag("online_hide_ip", online.hide_ip);
 		if (auto it = kv.find("gpu_3d_failed"); it != kv.end()) gpu3d_failed = it->second;
 		flag("fullscreen", fullscreen);
 		flag("arcade_mode", arcade);
@@ -569,6 +574,8 @@ struct settings
 		fprintf(f, "online_name = %s\nonline_delay = %d\nonline_connection = %d\nonline_port = %d\n", online.name.c_str(), online.delay,
 				online.show_connection, online.port);
 		if (!online.address.empty()) fprintf(f, "online_address = %s\n", online.address.c_str());
+		if (!online.lobby.empty()) fprintf(f, "online_lobby = %s\n", online.lobby.c_str());
+		fprintf(f, "online_hide_ip = %d\n", int(online.hide_ip));
 		for (int p = 0; p < 2; p++) ctl[p].save(f, p);
 		const bool flushed = flush_to_disk(f);
 		if (fclose(f) == 0 && flushed && replace_file(path, tmp)) return true;
@@ -2366,7 +2373,7 @@ int main(int argc, char **argv)
 		p.items.push_back({ "Game", "Play style and reset.", {}, {}, [&] { menu.push(game_page()); } });
 		p.items.push_back({ "Arcade settings", "Difficulty, rounds, energy, demo sound, country and the service menu. Changing them restarts the game.", {}, {},
 							[&] { if (arcade_before.empty()) arcade_before = arcade_bytes(); menu.push(arcade_page()); } });
-		p.items.push_back({ "Online", "Play someone over the network: host a match, or join one.", {}, {}, [&] { menu.push(online_page()); menu.select_row(online_menu::first_row(online)); } });
+		p.items.push_back({ "Online", "Play someone over the network: host a match, or join one.", {}, {}, [&] { menu.push(online_page()); } });
 		p.items.push_back({ "Controls", "Each player's controller, keys and buttons.", {}, {}, [&] { menu.push(controls_page()); } });
 		p.items.push_back({ "Quit", "Saves and closes the game.", {}, {}, [&] { running = false; } });
 		return p;
@@ -2554,7 +2561,6 @@ int main(int argc, char **argv)
 			menu.open(main_page());
 			menu.select_row(5);   // (Online)
 			menu.push(online_page());
-			menu.select_row(online_menu::first_row(online));
 		}
 		sync_menu_sound();
 	};
@@ -2598,7 +2604,7 @@ int main(int argc, char **argv)
 		menu.set_net(line, level, online.playing() && cfg.online.show_connection == 2 ? online.connection_detail() : std::string());
 		// the Online page as things change: its rows made again with the phase, its status lines a few times a second
 		if (menu.is_open() && online.phase() != online_was && menu.top_name() == "Online" && !menu.capturing())
-			menu.replace(online_page(), online_menu::first_row(online));
+			menu.replace(online_page(), -1);
 		else if (menu.is_open() && online.phase() != online_was && !menu.capturing())
 			menu.refresh();   // (the Join page: its line under Connect, joining no longer, and why)
 		else if (menu.is_open() && online.playing() && !menu.capturing() && SDL_GetTicks() - online_refresh_t > 500) {
@@ -2647,6 +2653,14 @@ int main(int argc, char **argv)
 		if (std::exchange(match_job_taken, false)) { pass_kind = 3; new_frame = true; }
 		uint64_t pass_work_ns = 0;
 		const bool menu_was_open = menu.is_open();
+		// (tests: a room hosted, or joined with its code, as the menu would, once the game's past its start)
+		static const char *test_host_room = getenv("VF3_HOST_ROOM"), *test_join_code = getenv("VF3_JOIN_CODE");
+		if ((test_host_room || test_join_code) && pass == 60) {
+			online_page();   // (the identity, as opening the Online page sets it)
+			std::string err;
+			if (!(test_join_code ? online.join_room(cfg.online, test_join_code, err) : online.host_room(cfg.online, err)))
+				fprintf(stderr, "online: (test) %s\n", err.c_str());
+		}
 		if (!menu_keys.empty() && pass >= 30 && (pass - 30) % 6 == 0 && (pass - 30) / 6 < menu_keys.size()) {
 			const std::string &k = menu_keys[(pass - 30) / 6];
 			SDL_Scancode sc = k == "esc" ? SDL_SCANCODE_ESCAPE : k == "up" ? SDL_SCANCODE_UP : k == "down" ? SDL_SCANCODE_DOWN
@@ -2711,7 +2725,7 @@ int main(int argc, char **argv)
 		}
 		sync_menu_sound();
 		if ((menu_was_open && !menu.is_open()) || std::exchange(menu_closed_elsewhere, false)) {
-			if (online.phase() == Online::Phase::off) online.set_last_match({});   // (MATCH OVER: just after one, not for ever)
+			if (online.phase() == Online::Phase::off) { online.set_last_match({}); online.forget_failure(); }   // (MATCH OVER, COULDN'T CONNECT: just after, not for ever)
 			if (cfg_dirty && quit_after < 0 && cfg.save(settings_path)) cfg_dirty = false;
 			if (!arcade_before.empty()) {
 				const bool changed = arcade_before != arcade_bytes();

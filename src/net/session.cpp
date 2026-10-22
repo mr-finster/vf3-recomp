@@ -103,7 +103,7 @@ Session::Session(Link &link, Game &game, const Identity &me_, const Config &cfg_
 	cfg.checksum_every = std::max(cfg.checksum_every, 1);
 	ring.resize(size_t(cfg.max_rollback) + 2);
 	if (!host) {   // (the guest's token, at random: the host takes it from the hello)
-		token = random64();
+		token = cfg.token ? cfg.token : random64();
 		have_token = true;
 	}
 	if (host) {
@@ -267,6 +267,7 @@ bool Session::receive(const std::vector<uint8_t> &p)
 	const uint64_t t_ = in.u64();
 	if (!in.ok) return false;
 	if (have_token ? t_ != token : type != HELLO) return false;   // (not this session's)
+	if (!have_token && cfg.token && t_ != cfg.token) return false;   // (a lobby's room: only the one who joined it)
 	handle(p);
 	return true;
 }

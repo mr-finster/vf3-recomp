@@ -63,6 +63,9 @@ struct Config
 	// the host program keeps in time itself, its frames a little slower while stats().lead is over 0 (no frame
 	// held back, which shows as a hitch); the session waits a whole frame only when it's this far ahead
 	bool soft_sync = false;
+	// a match made in a lobby: the session's token, from it (the guest's; a host takes no hello but with it), so
+	// only the player who joined with the room's code gets in. 0: the guest picks one, as a direct match's
+	uint64_t token = 0;
 	double hard_wait_lead = 2.5;
 };
 

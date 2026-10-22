@@ -169,33 +169,34 @@ game quietly corrects the moment your opponent's arrive. Both players need **the
 same download) and **the same `vf3.zip`**; it tells you if not. Matches always play the PC way, free play, with the
 host's arcade settings (rounds, difficulty, energy). Each player uses their own Player 1 controls.
 
-**On the same network** (home Wi-Fi or a cable):
+**With a room code (anywhere: no setup, nothing to forward):**
 
 1. Both: Menu > Online > **Your name** (up to 10 letters, shown under your energy bar).
-2. One player: **Host a match**. The page shows your address (e.g. `192.168.1.20`).
-3. The other: **Join a match**, type that address, **Connect**. Once you're both in, the game starts at its title
-   screen: both press Start.
+2. One player: **Host a match**. The page shows a room code like `FR7-W25` (**Copy the code** puts it on the
+   clipboard): send it to the other player.
+3. The other: **Join with a code**, type it (or paste it), Enter. The two games find each other; once you're both
+   in, the game starts at its title screen: both press Start.
 
-**Over the internet** the host has to be reachable from outside, one of these ways:
+The games connect to each other directly whenever they can; when a network won't let them (phones' 5G, some
+office, school and hotel networks), the match goes through a relay (Cloudflare's) instead, automatically. The
+connection display says "relay" then. The room code only finds the other player: no game data goes through the
+lobby.
 
-- **A VPN made for this (easiest):** both install [Tailscale](https://tailscale.com) (free) and join the same
-  network; the joining player types the host's Tailscale address (`100.x.y.z`, shown in the Tailscale app), not
-  the one the game shows. ZeroTier and Radmin VPN work the same way.
-- **Port forwarding:** on the host's router, forward **UDP port 7700** to the host's computer (the address the
-  Host page shows), and give the other player your **public** address (search "what is my IP"). Some internet
-  providers (most mobile and satellite ones, and some home ones: "CGNAT") don't allow this; use a VPN instead.
-
-The joining player never needs to forward anything. A lobby that does all this for you is planned.
+**On the same network, or over a VPN** (no lobby needed): **Host by address** shows your address (e.g.
+`192.168.1.20`); the other player chooses **Join by address**, types it, **Connect**. Over a VPN made for this
+([Tailscale](https://tailscale.com), ZeroTier, Radmin VPN), type the host's VPN address instead (`100.x.y.z` for
+Tailscale). Port forwarding UDP 7700 to the host works too, but a room code is easier.
 
 **If it won't connect**
 
-- "Couldn't reach the host": check the address; that the host is on its Host page; on the internet, the forwarding
-  or the VPN. Players on the same network should use the address the Host page shows, not the public one.
+- The Online page says what went wrong in plain words, under **Couldn't connect**. A room code: check it, and that
+  the host is still on their Host page (a room closes when the host leaves it). By address: check the address,
+  that the host is on its Host page, and the VPN.
 - **Firewalls:** the first time you host, allow the game when asked. Windows: if you dismissed it, Windows Security >
   Firewall > Allow an app, tick Virtua Fighter 3 Recomp for **Private and Public**. Mac: System Settings > Network >
   Firewall > Options: allow it; each new version of the (unsigned) Mac app may need allowing again. Also System
   Settings > Privacy & Security > Local Network: on.
-- Hotel, school and public Wi-Fi often keep devices on the same network from seeing each other; use a VPN.
+- Hotel, school and public Wi-Fi often keep devices on the same network from seeing each other: use a room code.
 
 **For the smoothest match**
 
@@ -209,8 +210,10 @@ The joining player never needs to forward anything. A lobby that does all this f
 **Good to know**
 
 - The menu doesn't pause a match (it goes on behind it, your inputs off). Leaving a match tells the other player.
-- Your opponent sees your IP address, as in any direct peer-to-peer game: play people you know.
-- Not yet: a lobby, spectating, replays, rematch without reconnecting.
+- Your opponent can see your IP address, as in any direct peer-to-peer game. **Hide my IP address** (Menu >
+  Online > Settings) sends room-code matches through the relay instead, so they see only Cloudflare's: it adds a
+  little ping (more on the same network), so it's off unless you want it.
+- Not yet: spectating, replays, rematch without reconnecting.
 
 **Reporting a problem:** please include **both players'** `log.txt` (the game's data folder: Windows `%APPDATA%\Virtua
 Fighter 3 Recomp`, Mac `~/Library/Application Support/Virtua Fighter 3 Recomp`, Steam Deck / Linux the game's own
