@@ -107,7 +107,7 @@ void game_menu::set_notice(const std::string &title, const std::string &sub)
 {
 	const std::string key = title + "\n" + sub;
 	if (!m->overlay || key == m_notice) return;
-	m_notice = key;   // (an empty one too: else it was made again every pass)
+	m_notice = key;   // (an empty one too, "\n": else it was made again every pass)
 	if (Rml::Element *e = m->overlay->GetElementById("notice")) {
 		e->SetInnerRML(title.empty() ? "" : "<div class=\"title\">" + escape(title) + "</div>" + (sub.empty() ? "" : "<div class=\"sub\">" + escape(sub) + "</div>"));
 		e->SetProperty("visibility", title.empty() ? "hidden" : "visible");
@@ -441,7 +441,7 @@ bool game_menu::handle_event(const SDL_Event &e)
 void game_menu::render(bool fps)
 {
 	if (m_toast_until && SDL_GetTicks() >= m_toast_until) toast("");
-	if (!m_open && (m_fps.empty() || !fps) && m_net.empty() && !m_toast_until && m_notice.empty()) return;
+	if (!m_open && (m_fps.empty() || !fps) && m_net.empty() && !m_toast_until && m_notice == "\n") return;   // (nothing over the game)
 	if (Rml::Element *e = m->overlay ? m->overlay->GetElementById("fps") : nullptr)
 		e->SetProperty("visibility", fps && !m_open && !m_fps.empty() ? "visible" : "hidden");
 	// the menu is laid out in window pixels, not the game's letterboxed picture
