@@ -86,16 +86,30 @@ uint32_t tile_at(const uint32_t *names, int row, int col)
 	return ((col & 1) ? w : (w >> 16)) & 0x3FFF;
 }
 
-// The fight's HUD: its round markers under both bars, two tiles side by side each, two a side (columns 22-25 and
-// 36-39 of rows 6 and 7), the same on every stage and for every fighter. A round won turns its marker red: other
+// The fight's HUD: its round markers under both bars, two tiles side by side each, at least two a side (columns
+// 22-25 and 36-39 of rows 6 and 7), the same on every stage and for every fighter. A round won turns its marker red: other
 // tiles, still side by side (so each marker on its own, not all alike: from the second round they differ).
-bool fight_hud(const uint32_t *names)
+bool marker_at(const uint32_t *names, int c)
 {
-	for (int row = 6; row <= 7; row++)
-		for (int c : { 22, 24, 36, 38 }) {
-			const uint32_t a = tile_at(names, row, c);
-			if (a == 0 || a == 0x20 || tile_at(names, row, c + 1) != a + 1) return false;
-		}
+	if (c < 0 || c + 1 >= 64) return false;
+	for (int row = 6; row <= 7; row++) {
+		const uint32_t a = tile_at(names, row, c);
+		if (a == 0 || a == 0x20 || tile_at(names, row, c + 1) != a + 1) return false;
+	}
+	return true;
+}
+
+// ... and as many markers as the rounds to win (2 to 5: a match between two players has 3 by default), out from
+// the timer: player 1's from column 22 leftwards, player 2's from 36 rightwards. first / last: the columns they
+// take, the names' places end there.
+bool fight_hud(const uint32_t *names, int &p1_first, int &p2_last)
+{
+	for (int c : { 22, 24, 36, 38 })
+		if (!marker_at(names, c)) return false;
+	p1_first = 22;
+	while (p1_first > 22 - 2 * 4 && marker_at(names, p1_first - 2)) p1_first -= 2;
+	p2_last = 39;
+	while (p2_last < 39 + 2 * 3 && marker_at(names, p2_last + 1)) p2_last += 2;
 	return true;
 }
 
@@ -149,10 +163,12 @@ bool hud_names(const m3::Model3 &board, std::vector<uint32_t> &above, const std:
 	const uint32_t reg = board.tile_regs[0x60 / 4];
 	if (!(reg & 0x80000000u) || (reg & 0x3FF) || ((reg >> 16) & 0x1FF)) return false;
 	const uint32_t *map = reinterpret_cast<const uint32_t *>(board.tile_ram.data() + 0xF8000);
-	if (!fight_hud(map)) return false;
-	// each player's part of the row (short of the round markers): player 1's name from column 2, player 2's to
-	// column 59, as the game places its pictures
-	constexpr int ROW = 6, P1_FROM = 0, P1_TO = 20, P2_FROM = 41, P2_TO = 63;
+	int p1_first = 0, p2_last = 0;
+	if (!fight_hud(map, p1_first, p2_last)) return false;
+	// each player's part of the row (short of the round markers, however many): player 1's name from column 2,
+	// player 2's to column 59, as the game places its pictures
+	constexpr int ROW = 6;
+	const int P1_FROM = 0, P1_TO = p1_first - 1, P2_FROM = p2_last + 1, P2_TO = 63;
 	int span[2][2];
 	if (!picture_span(map, P1_FROM, P1_TO, span[0][0], span[0][1]) || !picture_span(map, P2_FROM, P2_TO, span[1][0], span[1][1]))
 		return false;
@@ -163,7 +179,9 @@ bool hud_names(const m3::Model3 &board, std::vector<uint32_t> &above, const std:
 		const int w = text_width(names[p]);
 		const int x = p ? P2_RIGHT - w : P1_X;
 		// the fighter's name cleared: its picture's tiles, and the place of the longer name
-		const int from = std::max(0, std::min(span[p][0] * 8 - S, x - 2)), to = std::min(W, std::max((span[p][1] + 1) * 8 - S, x + w + 2));
+		int from = std::max(0, std::min(span[p][0] * 8 - S, x - 2)), to = std::min(W, std::max((span[p][1] + 1) * 8 - S, x + w + 2));
+		if (p == 0) to = std::min(to, p1_first * 8 - S - 1);       // (never into the round markers)
+		else from = std::max(from, (p2_last + 1) * 8 - S + 1);
 		for (int y = TOP; y < TOP + 16; y++)
 			for (int X = from; X < to; X++) above[size_t(y) * W + X] = 0;
 		draw(above, x, TEXT_Y, names[p]);

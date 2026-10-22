@@ -198,6 +198,8 @@ int main(int argc, char **argv)
 	gm.toast("Playing MRFINSTER");
 	gm.set_net("MRFINSTER   42 ms   rollback 1", 0);
 	shot("overlay.png", w, h);
+	gm.toast("A player couldn't join: Your opponent has v0.1.6-alpha-13-gf9440e8, you have v0.1.7-netplay-test3: you both need the same version.");
+	shot("toast_long.png", w, h);
 	gm.toast("");
 	gm.set_net("MRFINSTER   connection interrupted", 2);
 	gm.set_notice("Connection interrupted", "Waiting for MRFINSTER...  6");

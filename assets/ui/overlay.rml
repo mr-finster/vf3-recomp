@@ -37,20 +37,20 @@
 		}
 		#net.fair .dot { background-color: #ffd23f; }
 		#net.poor .dot { background-color: #ff6b5a; }
-		/* a notice that comes and goes, near the bottom */
+		/* a notice that comes and goes, at the bottom right (out of the menu's way and the HUD's) */
 		#toast {
 			position: absolute;
-			left: 0; right: 0;
-			bottom: 64dp;
-			text-align: center;
+			right: 24dp;
+			bottom: 24dp;
+			max-width: 560dp;
 		}
 		#toast span {
-			display: inline-block;
-			max-width: 80%;
-			padding: 8dp 26dp;
-			font-size: 28dp;
+			display: block;
+			padding: 8dp 20dp;
+			font-size: 22dp;
 			font-weight: 700;
 			font-style: italic;
+			text-align: right;
 			color: #0b1430;
 			decorator: horizontal-gradient(#ffd23f #ff8f1f);
 		}

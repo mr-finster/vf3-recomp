@@ -932,18 +932,24 @@ struct Game
 	std::mutex emu_m;
 	std::condition_variable emu_cv;
 	bool emu_busy = false, emu_quit = false, emu_sound_on = true;
+	std::function<void()> emu_job;   // (instead of a frame: a netplay match's step, its rollback with it)
+	std::thread::id emu_id;
 	void job_start(bool sound_on)
 	{
 		if (!emu_thread.joinable())
 			emu_thread = std::thread([this] {
 				fast_thread();
 				std::unique_lock<std::mutex> lk(emu_m);
+				emu_id = std::this_thread::get_id();
 				for (;;) {
 					emu_cv.wait(lk, [this] { return emu_busy || emu_quit; });
 					if (emu_quit) return;
 					const bool snd = emu_sound_on;
+					std::function<void()> job = std::move(emu_job);
+					emu_job = nullptr;
 					lk.unlock();
-					run_frame(snd, true);
+					if (job) job();
+					else run_frame(snd, true);
 					lk.lock();
 					emu_busy = false;
 					emu_cv.notify_all();
@@ -956,8 +962,18 @@ struct Game
 		}
 		emu_cv.notify_all();
 	}
+	// Anything on the game's thread: a match's step (the session's saves and loads, the frames it runs again)
+	void job_run(std::function<void()> f)
+	{
+		{
+			std::lock_guard<std::mutex> lk(emu_m);
+			emu_job = std::move(f);
+		}
+		job_start(true);
+	}
 	void job_wait()
 	{
+		if (std::this_thread::get_id() == emu_id) return;   // (the job itself, settling before a save: nothing to wait for)
 		std::unique_lock<std::mutex> lk(emu_m);
 		emu_cv.wait(lk, [this] { return !emu_busy; });
 	}
@@ -2566,10 +2582,38 @@ int main(int argc, char **argv)
 		online_was = online.phase();
 	};
 
+	// A match's step on the game's thread: started after the pass's inputs, run while the picture's drawn and the
+	// screen's waited for, taken at the next pass's start, before anything else looks at the game (in a match every
+	// frame ran here before, and its rollback's frames with it, the picture waiting on all of it: on a Steam Deck
+	// passes went past their refresh)
+	struct { bool on = false, ok = false; double ms = 0; } match_job;
+	bool match_job_taken = false;
+	auto take_match_job = [&] {
+		if (!match_job.on) return;
+		game.job_wait();
+		match_job.on = false;
+		if (!match_job.ok) {   // (it couldn't run: still due)
+			frames_run -= 1;
+			frame_clock = std::min(frame_clock, double(frames_run) + 1.0);
+			return;
+		}
+		game.publish();
+		game_frame++;
+		pace.frames++;
+		pace.emu_ms += match_job.ms;
+		match_job_taken = true;
+		if (audio && !game.audio.empty())
+			SDL_PutAudioStreamData(audio, game.audio.data(), int(game.audio.size() * sizeof(int16_t)));
+		game.audio.clear();
+		if (quit_after >= 0 && int64_t(game_frame) >= quit_after) running = false;   // (tests)
+	};
+
 	while (running) {
 		pass++;
 		const uint64_t pass_t0 = SDL_GetTicksNS();
 		int pass_kind = 0;   // (the pace line's: 0 a picture only, 1 a frame's first half, 2 its second, 3 a whole frame)
+		take_match_job();
+		if (std::exchange(match_job_taken, false)) { pass_kind = 3; new_frame = true; }
 		uint64_t pass_work_ns = 0;
 		const bool menu_was_open = menu.is_open();
 		if (!menu_keys.empty() && pass >= 30 && (pass - 30) % 6 == 0 && (pass - 30) / 6 < menu_keys.size()) {
@@ -2774,6 +2818,16 @@ int main(int argc, char **argv)
 				game.builder.widen = std::max(1.0f, float(picture_aspect()) * 0.75f) * 1.05f;
 				const uint64_t te = SDL_GetTicksNS();
 				online.poll(double(te) / 1e6);
+				if (hk == hotkey::menu) open_menu();
+				if (emu_threaded && i + 1 == due) {   // (the pass's last: on the game's thread, taken next pass)
+					match_job = { true, false, 0 };
+					game.job_run([&, bits] {
+						const uint64_t t0 = SDL_GetTicksNS();
+						match_job.ok = online.step(bits);
+						match_job.ms = double(SDL_GetTicksNS() - t0) / 1e6;
+					});
+					break;
+				}
 				if (!online.step(bits)) {
 					frames_run -= uint64_t(due - i);
 					frame_clock = std::min(frame_clock, double(frames_run) + 1.0);
@@ -2788,7 +2842,6 @@ int main(int argc, char **argv)
 				if (audio && !game.audio.empty())
 					SDL_PutAudioStreamData(audio, game.audio.data(), int(game.audio.size() * sizeof(int16_t)));
 				game.audio.clear();
-				if (hk == hotkey::menu) open_menu();
 				if (quit_after >= 0 && int64_t(game_frame) >= quit_after) running = false;   // (tests)
 			}
 			due = 0;
@@ -3098,6 +3151,7 @@ int main(int argc, char **argv)
 		if (!stopped && double(SDL_GetTicksNS() - pass_t0) > 1.5e9 / std::max(60.0, screen_hz)) { pace.slow[pass_kind]++; pace.slow_work_ms += double(pass_work_ns) / 1e6; }
 		(void)shown;
 	}
+	if (game.emu_thread.joinable()) game.job_wait();   // (a match's step still running)
 	online.stop();   // (closed in a match: the other side is told at once, not after a silence)
 	if (nvram_away) {   // (closed in a match: this player's own NVRAM back, to be saved, not the host's)
 		if (game.emu_thread.joinable()) game.job_wait();
