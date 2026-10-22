@@ -31,10 +31,10 @@ SDL_VIDEO_DRIVER=offscreen build/bin/menutest /tmp/shots       # the Online page
 build/bin/roomtest                                             # room links against a TURN server on 127.0.0.1:3478 (coturn: tools/roomtest.cpp)
 ```
 
-To play: both start the game; one opens Online > Host a match (the page shows a room code), the other Online > Join
-with a code, types it. The lobby only hands each side the other's addresses (on their network, public as STUN saw
+To play: both start the game; one opens Online > HOST (a room code), the other Online > JOIN and types it (joined at
+the 6th letter). The lobby only hands each side the other's addresses (on their network, public as STUN saw
 it, their relay) and a token; the games try every way at once and keep the first that answers. By address (Host by
-address / Join by address) is still there for one network or a VPN. A match starts at the title screen, both on free
+address, under Play by address) is still there for one network or a VPN. A match starts at the title screen, both on free
 play (both press Start); the menu doesn't pause it; Leave the match (or the other side going) goes back to playing alone, with
 the player's own NVRAM given back (a match plays on the host's).
 

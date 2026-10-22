@@ -215,6 +215,12 @@ void Session::guest_failed()
 	finish(End::rejected, "The game couldn't start from the host's settings.");
 }
 
+int Session::quiet_left_s() const
+{
+	if (!quiet) return 0;
+	return std::max(0, int(std::ceil((cfg.disconnect_ms - (now - last_heard)) / 1000.0)));
+}
+
 void Session::poll(double t)
 {
 	now = t;
