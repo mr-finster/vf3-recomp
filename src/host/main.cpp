@@ -2599,6 +2599,8 @@ int main(int argc, char **argv)
 		// the Online page as things change: its rows made again with the phase, its status lines a few times a second
 		if (menu.is_open() && online.phase() != online_was && menu.top_name() == "Online" && !menu.capturing())
 			menu.replace(online_page(), online_menu::first_row(online));
+		else if (menu.is_open() && online.phase() != online_was && !menu.capturing())
+			menu.refresh();   // (the Join page: its line under Connect, joining no longer, and why)
 		else if (menu.is_open() && online.playing() && !menu.capturing() && SDL_GetTicks() - online_refresh_t > 500) {
 			online_refresh_t = SDL_GetTicks();   // (the menu in a match: its Playing row's ping)
 			menu.refresh();
