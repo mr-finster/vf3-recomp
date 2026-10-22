@@ -86,15 +86,15 @@ uint32_t tile_at(const uint32_t *names, int row, int col)
 	return ((col & 1) ? w : (w >> 16)) & 0x3FFF;
 }
 
-// The fight's HUD: its round markers under both bars, a pair of tiles each, two pairs a side (columns 22-25 and
-// 36-39 of rows 6 and 7), the same on every stage and for every fighter
+// The fight's HUD: its round markers under both bars, two tiles side by side each, two a side (columns 22-25 and
+// 36-39 of rows 6 and 7), the same on every stage and for every fighter. A round won turns its marker red: other
+// tiles, still side by side (so each marker on its own, not all alike: from the second round they differ).
 bool fight_hud(const uint32_t *names)
 {
 	for (int row = 6; row <= 7; row++)
-		for (int c : { 22, 36 }) {
+		for (int c : { 22, 24, 36, 38 }) {
 			const uint32_t a = tile_at(names, row, c);
-			if (a == 0 || a == 0x20 || tile_at(names, row, c + 1) != a + 1 || tile_at(names, row, c + 2) != a || tile_at(names, row, c + 3) != a + 1)
-				return false;
+			if (a == 0 || a == 0x20 || tile_at(names, row, c + 1) != a + 1) return false;
 		}
 	return true;
 }

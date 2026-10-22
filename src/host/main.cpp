@@ -2703,6 +2703,7 @@ int main(int argc, char **argv)
 				rate *= 1 - std::clamp((queue_avg / frame_bytes - QUEUED) * 0.005, -0.01, 0.01);
 				if (q < frame_bytes) low = int(std::ceil(QUEUED - double(q) / frame_bytes));   // (under a frame's: extra frames)
 			}
+			rate *= 1 - online.slow_down();   // (a match: ahead of the other side, a little slower till it's caught up)
 			frame_clock += dt * rate;
 			due = int(int64_t(std::floor(frame_clock)) - int64_t(frames_run));
 			if (due > 8) due = 1, frame_clock = double(frames_run + 1);

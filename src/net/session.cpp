@@ -469,8 +469,9 @@ bool Session::step(uint16_t input)
 	at /= double(adv_theirs.size());
 	const double lead = (am - at) / 2;   // (half the difference: the other side catches up the other half)
 	stats_.ahead = int(std::lround(lead));
+	stats_.lead = have_their_t ? lead : 0;
 	if (wait_cool > 0) wait_cool--;
-	else if (lead >= 1.0 && have_their_t) {
+	else if (lead >= (cfg.soft_sync ? cfg.hard_wait_lead : 1.0) && have_their_t) {
 		wait_cool = 20;
 		stats_.waits++;
 		return false;

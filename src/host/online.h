@@ -7,6 +7,7 @@
 #include "vf3_netplay.h"
 #include "../net/link.h"
 #include "../net/session.h"
+#include <algorithm>
 #include <deque>
 #include <functional>
 #include <memory>
@@ -62,6 +63,8 @@ public:
 	int delay_now() const { return session ? session->delay() : 0; }
 	void set_delay(int setting);  // the menu's, in a match (Auto: from the ping)
 	int ping() const { return session ? int(session->stats().rtt_ms + 0.5) : 0; }
+	// In a match: how much slower to run the frames to keep in time with the other side (0, or up to 0.04: 4%)
+	double slow_down() const { return playing() && session ? std::clamp(session->stats().lead * 0.02, 0.0, 0.04) : 0.0; }
 	const LastMatch &last_match() const { return last; }
 	void set_last_match(const LastMatch &m) { last = m; }   // (tests)
 	const std::string &local_address() const { return lan; }
