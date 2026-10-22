@@ -92,6 +92,8 @@ div { display: block; }
 .tile .t { font-size: 56dp; line-height: 60dp; font-weight: 700; font-style: italic; }
 .tile .s { font-size: 23dp; font-weight: 600; color: #8f9ac8; }
 .tile.selected .s { color: #0b1026; }
+.tile .s .live { display: inline-block; width: 12dp; height: 12dp; border-radius: 6dp; margin-right: 9dp; vertical-align: middle; background-color: #8fe08a; }
+.tile.selected .s .live { background-color: #0b1026; }
 .more { display: flex; align-items: center; gap: 10dp; margin-top: 40dp; font-size: 24dp; color: #8f9ac8; }
 .link {
 	padding: 4dp 12dp;
@@ -120,11 +122,11 @@ div { display: block; }
 .box.set { border-color: #d8ddf5; }
 .box.on { border-color: #f2d14b; }
 .box.ok { border-color: #8fe08a; }
-.box.big { width: 104dp; height: 130dp; font-size: 98dp; line-height: 124dp; border-color: #f2d14b; }
+.box.big { width: 94dp; height: 112dp; font-size: 84dp; line-height: 106dp; border-color: #f2d14b; }
 .box.nm { width: 68dp; height: 86dp; font-size: 60dp; line-height: 80dp; border-radius: 10dp; }
 .box .caret { margin: 0 auto; margin-top: 74dp; width: 44dp; height: 6dp; border-radius: 3dp; background-color: #f2d14b; }
 .box.nm .caret { margin-top: 56dp; width: 34dp; }
-.box.big .caret { margin-top: 94dp; }
+.box.big .caret { margin-top: 80dp; }
 .dash { width: 28dp; height: 7dp; border-radius: 4dp; background-color: #8f9ac8; margin: 0 6dp; }
 .dash.y { background-color: #f2d14b; }
 
@@ -153,41 +155,48 @@ div { display: block; }
 .typed .small { font-size: 22dp; color: #8f9ac8; }
 .problem { margin-top: 18dp; font-size: 24dp; color: #ff7a6b; text-align: center; }
 
-/* the steps, left to right: dots joined by lines, a label under each dot */
-.steps { display: flex; align-items: flex-start; width: 680dp; height: 76dp; }
-.st { position: relative; width: 40dp; height: 40dp; }
+/* the steps, left to right: rings joined by lines, a label centred under each (the one on now: a ring with a dot in it;
+   done: filled, a tick; failed: filled, a cross) */
+.stepsat { margin-top: 40dp; }
+.steps { display: flex; align-items: flex-start; width: 720dp; height: 90dp; }
+.st { position: relative; width: 46dp; height: 46dp; }
 .st .dot {
-	width: 40dp;
-	height: 40dp;
-	border-radius: 20dp;
+	box-sizing: border-box;
+	width: 46dp;
+	height: 46dp;
+	border-radius: 23dp;
 	border: 3dp #3a4682;
 }
 .st .lbl {
 	position: absolute;
-	left: -60dp; top: 50dp;
+	left: -57dp; top: 62dp;
 	width: 160dp;
 	text-align: center;
 	font-size: 20dp;
+	line-height: 24dp;
 	font-weight: 600;
 	letter-spacing: 1.5dp;
 	color: #5d6799;
 	white-space: nowrap;
 }
 .st.done .dot { border-color: #8fe08a; background-color: #8fe08a; }
-.st.done .dot img { display: block; margin: 5dp auto 0 auto; width: 24dp; height: 24dp; }
+.st.done .dot img { display: block; margin: 8dp auto 0 auto; width: 24dp; height: 24dp; }
 .st.done .lbl { color: #8fe08a; }
-.st.now .dot { border-color: #f2d14b; border-top-color: #f2d14b00; }
+.st.now .dot { border-color: #f2d14b; }
+.st.now .pip { width: 14dp; height: 14dp; border-radius: 7dp; margin: 13dp auto 0 auto; background-color: #f2d14b; }
 .st.now .lbl { color: #ffffff; }
-.st.bad .dot { border-color: #ff7a6b; background-color: #ff7a6b; color: #0b1026; text-align: center; font-size: 30dp; line-height: 30dp; font-weight: 600; }
+.st.bad .dot { border-color: #ff7a6b; background-color: #ff7a6b; color: #0b1026; text-align: center; font-size: 30dp; line-height: 40dp; font-weight: 600; }
 .st.bad .lbl { color: #ff7a6b; }
-.ln { flex: 1; height: 4dp; margin-top: 18dp; margin-left: 6dp; margin-right: 6dp; border-radius: 2dp; background-color: #3a4682; }
+.ln { flex: 1; height: 4dp; margin-top: 21dp; margin-left: 10dp; margin-right: 10dp; border-radius: 2dp; background-color: #3a4682; }
 .ln.done { background-color: #8fe08a; }
 
-.status { margin-top: 34dp; font-size: 28dp; line-height: 38dp; font-weight: 600; color: #ffffff; text-align: center; }
+.status { margin-top: 28dp; font-size: 28dp; line-height: 38dp; font-weight: 600; color: #ffffff; text-align: center; }
+.status.good { color: #8fe08a; }
+.status.bad { color: #ff7a6b; }
 .status .why { display: block; font-size: 23dp; line-height: 31dp; font-weight: 500; color: #8f9ac8; }
-.status.plain { font-size: 26dp; line-height: 34dp; font-weight: 500; color: #d8ddf5; max-width: 760dp; }
+.status.plain { font-size: 26dp; line-height: 34dp; font-weight: 500; color: #d8ddf5; max-width: 860dp; }
 
-.btns { display: flex; gap: 20dp; margin-top: 36dp; }
+.btns { display: flex; gap: 20dp; margin-top: 30dp; }
 .btn {
 	width: 260dp;
 	height: 68dp;

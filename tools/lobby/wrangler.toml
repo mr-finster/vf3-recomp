@@ -28,12 +28,12 @@ new_sqlite_classes = ["Queue"]
 [[ratelimits]]
 name = "ANY_LIMIT"
 namespace_id = "1001"
-simple = { limit = 120, period = 60 }
+simple = { limit = 600, period = 60 }   # (high: a phone network or a school puts many players behind one address)
 
 [[ratelimits]]
 name = "HOST_LIMIT"
 namespace_id = "1002"
-simple = { limit = 20, period = 60 }
+simple = { limit = 60, period = 60 }
 
 [[ratelimits]]
 name = "JOIN_LIMIT"
@@ -43,4 +43,4 @@ simple = { limit = 20, period = 60 }
 [[ratelimits]]
 name = "TURN_LIMIT"
 namespace_id = "1004"
-simple = { limit = 10, period = 60 }
+simple = { limit = 30, period = 60 }

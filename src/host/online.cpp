@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <chrono>
 #include <thread>
 
 namespace {
@@ -148,6 +149,7 @@ bool Online::host(const OnlineSettings &s, std::string &error)
 	random = false;
 	ticket.clear();
 	country_peer.clear();
+	country_me.clear();   // (by address: no lobby to say where either is)
 	tried = Try::host;
 	patient_until = 0;
 	started_with = s;
@@ -172,6 +174,7 @@ bool Online::join(const OnlineSettings &s, std::string &error)
 	random = false;
 	ticket.clear();
 	country_peer.clear();
+	country_me.clear();   // (by address: no lobby to say where either is)
 	tried = Try::join;
 	patient_until = 0;
 	started_with = s;
@@ -233,6 +236,7 @@ bool Online::find_random(const OnlineSettings &s, std::string &error)
 	identity.name = s.name;
 	rooms = true;
 	random = true;
+	random_misses = 0;
 	code.clear();
 	ph = Phase::joining;
 	st = Step::getting_ready;
@@ -365,9 +369,42 @@ int Online::start_wait() const
 	}
 	const int me = local_player();
 	if (!start_seen[me] || !start_seen[me ^ 1]) return !start_seen[me] ? 1 : 2;
-	// after both have been in: one out of the game (a match lost; the winner plays on against the computer)
+	// after both have been in: one out of the game (a match lost; the winner plays on against the computer), until
+	// they press Start (the game's back in only once a fighter's chosen: nothing to say over its character select)
 	const int in = score.players();
-	return !both_in ? 0 : !(in >> me & 1) ? 3 : !(in >> (me ^ 1) & 1) ? 4 : 0;
+	if (!both_in) return 0;
+	bool out[2];
+	for (int p = 0; p < 2; p++) {
+		const std::vector<uint16_t> &inputs = session->inputs(p);
+		if (in >> p & 1) { out_scan[p] = SIZE_MAX; out_pressed[p] = false; out[p] = false; continue; }
+		if (out_scan[p] == SIZE_MAX) out_scan[p] = inputs.size();   // (from now: a Start held through the match's end isn't one)
+		for (; out_scan[p] < inputs.size() && !out_pressed[p]; out_scan[p]++)
+			if (inputs[out_scan[p]] & vf3net::START_BUTTON) out_pressed[p] = true;
+		out[p] = !out_pressed[p];
+	}
+	return out[me] ? 3 : out[me ^ 1] ? 4 : 0;
+}
+
+int Online::players_online(const OnlineSettings &s)
+{
+	using namespace std::chrono;
+	const double now = duration<double, std::milli>(steady_clock::now().time_since_epoch()).count();
+	if (ph == Phase::off && !online_asking->load() && now - online_asked > 30000 && !identity.game.empty()) {
+		const std::string where = s.lobby.empty() ? lobby_default() : s.lobby;
+		if (!where.empty() && where != "none") {
+			online_asked = now;
+			online_asking->store(true);
+			const std::string url = where + "/v1/random/count", body = "{\"game\":" + vfnet::json::quote(identity.game) + ",\"version\":" +
+				vfnet::json::quote(identity.build) + ",\"content\":" + vfnet::json::quote(hex64(identity.content)) + "}";
+			std::thread([url, body, count = online_count, asking = online_asking] {
+				const vfnet::http::Reply r = vfnet::http::request("POST", url, body, 5000);
+				vfnet::json::Value v;
+				if (r.status == 200 && vfnet::json::parse(r.body, v) && v["players"].kind == vfnet::json::Value::number) count->store(int(v["players"].n));
+				asking->store(false);
+			}).detach();
+		}
+	}
+	return online_count->load();
 }
 
 std::string Online::peer() const
@@ -534,6 +571,16 @@ void Online::room_poll()
 					log_line("a player joined the room (" + online_menu::clean_name(peer_name) + "): their addresses " + masked(g["cands"].strings()) +
 					         ", relay " + mask(g["relay"].str()) + "; connecting");
 				}
+			} else if (r.status == 404 && random) {   // (a random match's room lost: another opponent)
+				session.reset();
+				room->clear_peer();
+				key.clear();
+				is_host = false;
+				ph = Phase::joining;
+				peer_name.clear();
+				country_peer.clear();
+				search();
+				return;
 			} else if (r.status == 404) {
 				room_failed("The room closed (the online service lost it): host again for a new code.");
 				return;
@@ -557,7 +604,9 @@ void Online::room_poll()
 			job.reset();
 			if (r.status == 404 && !ticket.empty()) { ticket.clear(); retry_at = now; break; }   // (the lobby forgot it: in again)
 			if (r.status != 200 || !vfnet::json::parse(r.body, v)) {
-				if (r.status == 0 && ++wait_errors >= 3) { room_failed(lobby_says(r, "", identity.build)); return; }
+				// (no answer three times, or one that won't change: an old lobby, another without random matches)
+				const bool never = r.status >= 400 && r.status < 500 && r.status != 429;
+				if (never || (r.status == 0 && ++wait_errors >= 3)) { room_failed(lobby_says(r, "", identity.build)); return; }
 				retry_at = now + 3000;   // (busy, or a moment's trouble: again soon)
 				break;
 			}
@@ -628,7 +677,6 @@ void Online::joined(const vfnet::json::Value &v)
 void Online::search()
 {
 	st = Step::searching;
-	search_since = now;
 	ticket.clear();
 	players = 0;
 	wait_errors = 0;
@@ -684,6 +732,9 @@ void Online::poll(double t)
 			local_slow = rooms && room && room->via_relay() && room->local_blocked();
 			score = {};
 			both_in = false;
+			random_misses = 0;
+			out_scan[0] = out_scan[1] = SIZE_MAX;
+			out_pressed[0] = out_pressed[1] = false;
 			start_scan[0] = start_scan[1] = 0;
 			start_seen[0] = start_seen[1] = false;
 			note.clear();
@@ -728,6 +779,16 @@ void Online::poll(double t)
 				      why == vfnet::Session::End::disconnected);
 			}
 			if (room && !was_playing) log_line("didn't connect: " + room->report(mask));
+			// a random opponent never reached (gone meanwhile, or no way between the two): another, twice more at most
+			if (!was_playing && !is_host && rooms && random && room && why != vfnet::Session::End::quit && ++random_misses < 3) {
+				session.reset();
+				room->clear_peer();
+				ph = Phase::joining;
+				peer_name.clear();
+				country_peer.clear();
+				search();
+				return;
+			}
 			if (!was_playing && !is_host && why != vfnet::Session::End::quit) {
 				failure = e.text;
 				fail_step = rooms ? st : Step::connecting;
@@ -831,7 +892,7 @@ std::string Online::status() const
 		switch (st) {
 		case Step::getting_ready: return "Getting ready...";
 		case Step::opening: return "Opening a room...";
-		case Step::waiting: return "Waiting for your opponent to type the code...";
+		case Step::waiting: return "Send it to your opponent: they choose Join and type it";
 		case Step::searching:
 			return players > 1 ? "Looking for an opponent near you (" + std::to_string(players - 1) + " more searching)..." : "Looking for an opponent near you...";
 		case Step::finding:
@@ -982,7 +1043,7 @@ std::string steps(const std::vector<std::pair<std::string, Mark>> &v)
 	for (size_t i = 0; i < v.size(); i++) {
 		if (i) r += "<div class=\"ln" + std::string(v[i - 1].second == done ? " done" : "") + "\"></div>";
 		static const char *const cls[] = { "", " now", " done", " bad" };
-		const std::string in = v[i].second == done ? "<img src=\"check.bmp\"/>" : v[i].second == bad ? "\xC3\x97" : "";   // (×)
+		const std::string in = v[i].second == done ? "<img src=\"check.bmp\"/>" : v[i].second == bad ? "\xC3\x97" : v[i].second == now ? "<div class=\"pip\"></div>" : "";   // (×)
 		r += "<div class=\"st" + std::string(cls[v[i].second]) + "\"><div class=\"dot\">" + in + "</div><div class=\"lbl\">" + E(v[i].first) + "</div></div>";
 	}
 	return r + "</div>";
@@ -1228,16 +1289,13 @@ menu_page page(Online &o, OnlineSettings &s, game_menu &menu, std::function<void
 			const bool started = o.starting(), found = st != Online::Step::getting_ready && st != Online::Step::searching;
 			const std::string who = o.peer();
 			std::string r = "<div class=\"scr\"><div class=\"col\">";
-			if (!found) {
-				char t[16];
-				snprintf(t, sizeof t, "%d:%02d", o.searching_for() / 60, o.searching_for() % 60);
-				r += "<div class=\"title\">FINDING AN OPPONENT</div><div class=\"sub\">Nearest first: the longer it takes, the further it looks</div>"
-				     "<div class=\"clock\">" + std::string(t) + "</div>";
-			} else
+			if (!found)
+				r += "<div class=\"title\">FINDING AN OPPONENT</div><div class=\"sub\">&nbsp;</div>";
+			else
 				r += "<div class=\"title\">OPPONENT FOUND</div><div class=\"sub\">" + flag_and(o.peer_country(), who.empty() ? std::string("Your opponent") : who) + "</div>";
 			const std::vector<std::pair<std::string, Mark>> v = { { "SEARCH", found ? done : now }, { "FOUND", found ? done : todo },
 				{ "CONNECT", started ? done : found ? now : todo }, { "FIGHT", started ? now : todo } };
-			r += "<div style=\"margin-top: " + std::string(found ? "84dp" : "40dp") + "\">" + steps(v) + "</div><div class=\"status\">" + E(o.status()) + "</div>";
+			r += "<div class=\"stepsat\">" + steps(v) + "</div><div class=\"status\">" + E(o.status()) + "</div>";
 			r += "<div class=\"btns\"><div " + menu_row(stop, sel, "btn") + ">STOP</div></div></div>";
 			return r + foot(pad, { { "A", "Enter", "select" }, { "B", "Esc", "play solo while you wait" } }) + "</div>";
 		};
@@ -1266,9 +1324,9 @@ menu_page page(Online &o, OnlineSettings &s, game_menu &menu, std::function<void
 			std::string r = "<div class=\"scr\"><div class=\"col\">";
 			std::vector<std::pair<std::string, Mark>> v;
 			if (hosting) {
-				r += "<div class=\"title\">YOUR ROOM CODE</div><div class=\"sub\">Send it to your opponent: they choose Join</div>";
+				r += "<div class=\"title\">YOUR ROOM CODE</div>";
 				const std::string c = o.room_code();
-				r += "<div style=\"margin-top: 36dp\">" + boxes(c.empty() ? "" : c.substr(0, 3) + c.substr(4), 6, "big", false, true, "") + "</div>";
+				r += "<div style=\"margin-top: 28dp\">" + boxes(c.empty() ? "" : c.substr(0, 3) + c.substr(4), 6, "big", false, true, "") + "</div>";
 				const bool open = st == Online::Step::waiting || st == Online::Step::connecting;
 				v = { { "ROOM OPEN", open ? done : now }, { "OPPONENT", st == Online::Step::connecting ? done : open ? now : todo },
 				      { "CONNECT", started ? done : st == Online::Step::connecting ? now : todo }, { "FIGHT", started ? now : todo } };
@@ -1278,16 +1336,17 @@ menu_page page(Online &o, OnlineSettings &s, game_menu &menu, std::function<void
 				const bool found = st == Online::Step::connecting;
 				v = { { "CODE", done }, { "ROOM FOUND", found ? done : now }, { "CONNECT", started ? done : found ? now : todo }, { "FIGHT", started ? now : todo } };
 			}
-			r += "<div style=\"margin-top: " + std::string(hosting ? "44dp" : "84dp") + "\">" + steps(v) + "</div>";
-			if (!hosting) {
-				std::string why = st == Online::Step::connecting && !started ? "Directly first, then through the relay. Usually a few seconds." : "";
+			r += "<div class=\"stepsat\">" + steps(v) + "</div>";
+			// the state under the steps, as on every screen with them (a host's: the code copied, or a player who couldn't join)
+			if (hosting && *copied) r += "<div class=\"status good\">Copied: paste it to your opponent</div>";
+			else if (hosting && !o.host_note().empty()) r += "<div class=\"status bad\">" + E(o.host_note()) + "</div>";
+			else {
+				std::string why = !hosting && st == Online::Step::connecting && !started ? "Directly first, then through the relay. Usually a few seconds." : "";
 				r += "<div class=\"status\">" + E(o.status()) + (why.empty() ? "" : "<span class=\"why\">" + E(why) + "</span>") + "</div>";
 			}
 			r += "<div class=\"btns\">";
 			if (copy >= 0) r += "<div " + menu_row(copy, sel, "btn") + ">COPY CODE</div>";
 			r += "<div " + menu_row(stop, sel, "btn") + ">STOP</div></div>";
-			if (hosting && !o.host_note().empty()) r += "<div class=\"problem\">" + E(o.host_note()) + "</div>";   // (a player who couldn't join: why)
-			else if (hosting) r += "<div class=\"note" + std::string(*copied ? " good" : "") + "\">" + (*copied ? std::string("Copied: paste it to your opponent") : E(o.status())) + "</div>";
 			r += "</div>";
 			return r + foot(pad, { { "A", "Enter", "select" }, { "B", "Esc", hosting ? "play solo while you wait" : "back to the game" } }) + "</div>";
 		};
@@ -1313,7 +1372,7 @@ menu_page page(Online &o, OnlineSettings &s, game_menu &menu, std::function<void
 				r += "<div class=\"title\">JOINING " + E(s.address) + "</div><div class=\"sub\">By address</div>";
 				v = { { "CONNECT", started ? done : now }, { "FIGHT", started ? now : todo } };
 			}
-			r += "<div style=\"margin-top: 48dp\">" + steps(v) + "</div><div class=\"status\">" + E(o.status()) + "</div>";
+			r += "<div class=\"stepsat\">" + steps(v) + "</div><div class=\"status\">" + E(o.status()) + "</div>";
 			r += "<div class=\"btns\"><div " + menu_row(stop, sel, "btn") + ">STOP</div></div></div>";
 			return r + foot(pad, { { "A", "Enter", "select" }, { "B", "Esc", hosting ? "play solo while you wait" : "back to the game" } }) + "</div>";
 		};
@@ -1365,7 +1424,7 @@ menu_page page(Online &o, OnlineSettings &s, game_menu &menu, std::function<void
 				sub = t == Online::Try::join ? "to " + s.address : "Hosting by address";
 				v = { { "CONNECT", bad }, { "FIGHT", todo } };
 			}
-			r += "<div class=\"sub\">" + E(sub) + "</div><div style=\"margin-top: 70dp\">" + steps(v) + "</div>"
+			r += "<div class=\"sub\">" + E(sub) + "</div><div class=\"stepsat\">" + steps(v) + "</div>"
 			     "<div class=\"status plain\">" + E(o.join_failure()) + "</div>";
 			if (!problem->empty()) r += "<div class=\"problem\">" + E(*problem) + "</div>";
 			r += "<div class=\"btns\"><div " + menu_row(again_i, sel, "btn") + ">TRY AGAIN</div><div " + menu_row(back, sel, "btn") + ">BACK</div></div></div>";
@@ -1459,8 +1518,9 @@ menu_page page(Online &o, OnlineSettings &s, game_menu &menu, std::function<void
 		if (s.name.empty()) r += "<div class=\"me\">Set your name</div>";
 		else r += "<div class=\"who\">Playing as</div>" + flag(o.my_country()) + "<div class=\"me\">" + E(s.name) + "</div>";
 		if (pad) r += "<div class=\"key\">Y</div><div class=\"who\">change</div>";
+		const int players = o.players_online(s);   // (playing at random now: on the Random card)
 		r += "</div><div class=\"tiles\">"
-		     "<div " + menu_row(rnd, sel, "tile") + "><div class=\"t\">RANDOM</div><div class=\"s\">Anyone near you</div></div>"
+		     "<div " + menu_row(rnd, sel, "tile") + "><div class=\"t\">RANDOM</div><div class=\"s\">" + (players > 0 ? "<span class=\"live\"></span>" + std::to_string(players) + " online" : std::string("Anyone near you")) + "</div></div>"
 		     "<div " + menu_row(host, sel, "tile") + "><div class=\"t\">HOST</div><div class=\"s\">Get a code for a friend</div></div>"
 		     "<div " + menu_row(join, sel, "tile") + "><div class=\"t\">JOIN</div><div class=\"s\">Type a friend's code</div></div></div>";
 		if (!problem->empty()) r += "<div class=\"problem\">" + E(*problem) + "</div>";
