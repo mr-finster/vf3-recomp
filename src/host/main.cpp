@@ -1655,13 +1655,15 @@ int main(int argc, char **argv)
 			const bool seen = game.view.full_3d && rows > 0 && edge_rows * 20 < video::H && covered * 100 < long(rows) * video::W * 50;
 			// a stage stays one through a round's opening wipe and the like (2D over part of it for under 20 frames);
 			// a picture over all of it (the next match's, a close-up) or the 3D gone ends it at once. In a match a
-			// stage is one only seen 8 frames running, more than a rollback goes back: a frame guessed wrong (the
-			// character select's start, the other player not yet known to have pressed Start) looked like a stage for
-			// a frame, the hold kept the sides on for 20, and the select flashed 16:9
+			// stage shows from its second frame, and is held only once seen 8 frames running, more than a rollback
+			// goes back: a frame guessed wrong (the character select's start, the other player not yet known to have
+			// pressed Start) looked like a stage, the hold kept the sides on for 20 frames, and the select flashed
+			// 16:9; waiting the 8 frames before showing it, a stage's sides came in visibly late
 			static int stage_hold = 0, stage_seen = 0;
 			stage_seen = seen ? stage_seen + 1 : 0;
-			bool stage = seen && (stage_hold > 0 || stage_seen >= (online.playing() ? 8 : 1));
-			if (stage) stage_hold = 20;
+			const bool match = online.playing();
+			bool stage = seen && (stage_hold > 0 || stage_seen >= (match ? 2 : 1));
+			if (stage && (!match || stage_seen >= 8)) stage_hold = 20;
 			else if (stage_hold > 0 && game.view.full_3d && covered * 100 < long(std::max(rows, 1)) * video::W * 50) { stage_hold--; stage = true; }
 			else stage_hold = 0;
 			// On a stage the sky is stretched across the picture and the letterbox bands carried across the sides;
