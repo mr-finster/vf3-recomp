@@ -30,6 +30,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 	<key>NSHighResolutionCapable</key><true/>
 	<key>LSApplicationCategoryType</key><string>public.app-category.arcade-games</string>
 	<key>GCSupportsControllerUserInteraction</key><true/>
+	<key>NSLocalNetworkUsageDescription</key><string>Online play: to host a match or join one on your network.</string>
 </dict>
 </plist>
 PLIST
