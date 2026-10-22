@@ -3044,7 +3044,7 @@ int main(int argc, char **argv)
 				fps_n = 0;
 			}
 		}
-		if (menu.is_open() || fps_shown) menu.render(fps_shown);
+		menu.render(fps_shown);   // (the menu, or what's over the game: the FPS, a match's connection line, toasts, notices)
 		for (auto it = window_shots.begin(); it != window_shots.end();)
 			if (*it <= game_frame) { read_window("build/host_window_" + std::to_string(*it - 3) + ".png"); it = window_shots.erase(it); }
 			else ++it;

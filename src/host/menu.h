@@ -77,7 +77,7 @@ public:
 private:
 	std::unique_ptr<impl> m;
 	bool m_open = false;
-	std::string m_fps, m_net, m_notice;
+	std::string m_fps, m_net, m_notice = "\n";   // (m_notice: its title and line, "\n" none)
 	int m_net_level = -1;
 	uint64_t m_toast_until = 0;   // (SDL_GetTicks)
 	std::vector<menu_page> m_stack;
