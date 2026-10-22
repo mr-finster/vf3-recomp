@@ -164,6 +164,9 @@ private:
 	double online_asked = -1e18;   // (when, in ms)
 	bool reopening = false;  // (opening: the same room again, after a player who couldn't join)
 	int random_misses = 0;   // (random opponents in a row not reached)
+	vfnet::AutoDelay adelay;   // (Auto's input delay through a match)
+	int round_ends_seen = 0;
+	uint32_t round_end_frame = 0;
 	bool both_in = false;   // (both have been in the game at once, as its RAM has it: start_wait's rematches)
 	mutable size_t out_scan[2] = { SIZE_MAX, SIZE_MAX };   // (a player out of the game: their inputs looked through from then)
 	mutable bool out_pressed[2] = {};                     // (and they've pressed Start since: on their way back in)

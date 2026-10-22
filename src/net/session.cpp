@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <chrono>
 #include <random>
@@ -98,7 +99,7 @@ Session::Session(Link &link, Game &game, const Identity &me_, const Config &cfg_
 	: link(link), game(game), me(me_), cfg(cfg_), host(host)
 {
 	me.name = clean_name(me.name);
-	cfg.delay = std::clamp(cfg.delay, 0, 10);
+	cfg.delay = std::clamp(cfg.delay, 0, MAX_DELAY);
 	cfg.max_rollback = std::clamp(cfg.max_rollback, 1, 30);
 	cfg.checksum_every = std::max(cfg.checksum_every, 1);
 	ring.resize(size_t(cfg.max_rollback) + 2);
@@ -637,6 +638,79 @@ void Session::quit()
 	if (st == State::ended) return;
 	for (int i = 0; i < 3; i++) send_packet(Out(QUIT, token).b);
 	finish(End::quit, "You left the match.");
+}
+
+int auto_delay(double rtt_ms, double jitter_ms, double frame_ms, int target_rollback, int floor)
+{
+	const int feel = std::clamp(int(std::ceil(rtt_ms / 2 / frame_ms)), 1, 4);
+	const int cover = int(std::ceil((rtt_ms / 2 + jitter_ms) / frame_ms)) - target_rollback;
+	return std::clamp(std::max({ feel, cover, floor }), 0, MAX_DELAY);
+}
+
+int AutoDelay::want(const Session::Stats &s) const
+{
+	// (a rollback of 6 of the 7 the session can go back: one spare for a late packet; 4 on a slow machine)
+	return auto_delay(s.rtt_ms, s.jitter_ms, frame_ms, slow ? 4 : 6, slow ? 2 : 1);
+}
+
+int AutoDelay::update(const Session &session, double now, bool between_rounds)
+{
+	const Session::Stats &s = session.stats();
+	const uint32_t f = session.frame();
+	if (f <= 120 || s.rtt_ms <= 0) return -1;   // (the ping not known well yet)
+	const int cur = session.delay(), keep = now < floor_until ? floor : 0, w = std::max(want(s), keep);
+	char b[160];
+	if (!started) {   // (the first: at once, the character select's)
+		started = true;
+		checked_at = now;
+		stalls_at = s.stalls;
+		snprintf(b, sizeof b, "ping %.0f ms, jitter %.0f ms%s", s.rtt_ms, s.jitter_ms, slow ? ", a slow frame here" : "");
+		why = b;
+		return w;
+	}
+	// up: the ping's wanted more for half a second, or frames held back in the last 3 s
+	if (w > cur) {
+		if (higher_since < 0) higher_since = now;
+		if (now - higher_since >= 500 && w > target) {
+			target = w;
+			snprintf(b, sizeof b, "ping %.0f ms, jitter %.0f ms", s.rtt_ms, s.jitter_ms);
+			why = b;
+		}
+	} else
+		higher_since = -1;
+	if (now - checked_at >= 3000) {
+		const uint64_t held = s.stalls - stalls_at;
+		stalls_at = s.stalls;
+		checked_at = now;
+		if (held >= 10 && cur < std::min(MAX_DELAY, want(s) + 2) && target <= cur) {
+			target = cur + 1;
+			floor = target;
+			floor_until = now + 60000;
+			snprintf(b, sizeof b, "%llu frames held back in 3 s", (unsigned long long)held);
+			why = b;
+		}
+	}
+	if (target > cur) {   // (a frame at a time, every 6)
+		lower_since = -1;
+		if (f - stepped_at >= 6) { stepped_at = f; return cur + 1; }
+		return -1;
+	}
+	target = -1;
+	// down: between rounds only, a lower one enough (with a tenth more ping) for 10 s
+	Session::Stats margin = s;
+	margin.rtt_ms *= 1.1;
+	const int lower = std::max(want(margin), keep);
+	if (lower < cur) {
+		if (lower_since < 0) lower_since = now;
+		if (between_rounds && now - lower_since >= 10000) {
+			lower_since = -1;
+			snprintf(b, sizeof b, "ping %.0f ms, jitter %.0f ms, between rounds", s.rtt_ms, s.jitter_ms);
+			why = b;
+			return lower;
+		}
+	} else
+		lower_since = -1;
+	return -1;
 }
 
 } // namespace vfnet
