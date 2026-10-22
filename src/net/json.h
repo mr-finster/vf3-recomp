@@ -138,7 +138,7 @@ struct Parser
 			const std::string num(p, k);
 			char *end = nullptr;
 			v.n = k ? strtod(num.c_str(), &end) : 0;
-			if (!k || end == num.c_str() || !std::isfinite(v.n) || std::fabs(v.n) > 1e15) ok = false;
+			if (!k || end == num.c_str() || !std::isfinite(v.n)) ok = false;   // (big ones kept: those who read them clamp)
 			else { v.kind = Value::number; p += end - num.c_str(); }
 		}
 		depth--;

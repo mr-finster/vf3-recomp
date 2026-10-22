@@ -70,6 +70,7 @@ Online::~Online() = default;
 // Goodbyes to the lobby (a room closed, a search left): on threads of their own, counted, so a quit can wait a
 // moment for them (a game closed mid-search would otherwise be left in the queue, matched with someone)
 static std::atomic<int> farewells{ 0 };
+static std::atomic<bool> quitting{ false };   // (flush's time up: the waits for a reply given up)
 static void farewell(const std::string &url, const std::string &body)
 {
 	farewells++;
@@ -79,6 +80,7 @@ static void farewell(const std::string &url, const std::string &body)
 void Online::flush(int ms)
 {
 	for (int waited = 0; farewells.load() > 0 && waited < ms; waited += 20) std::this_thread::sleep_for(std::chrono::milliseconds(20));
+	quitting = true;
 }
 
 std::string Online::lobby_default()
@@ -668,7 +670,7 @@ void Online::room_poll()
 				// (no answer three times, or one that won't change: an old lobby, another without random matches)
 				const bool never = r.status >= 400 && r.status < 500 && r.status != 429;
 				if (never || (r.status == 0 && ++wait_errors >= 3)) { room_failed(lobby_says(r, "", identity.build)); return; }
-				retry_at = now + 3000;   // (busy, or a moment's trouble: again soon)
+				retry_at = now + (r.status == 429 ? 10000 : 3000);   // (busy, or a moment's trouble: again soon; busy, less often)
 				break;
 			}
 			wait_errors = 0;
@@ -764,7 +766,7 @@ void Online::stop()
 		const std::string base = lobby, me = me_json("");
 		farewells++;
 		std::thread([j = job, base, me] {
-			for (int i = 0; i < 400 && !j->done; i++) std::this_thread::sleep_for(std::chrono::milliseconds(100));
+			for (int i = 0; i < 400 && !j->done && !quitting; i++) std::this_thread::sleep_for(std::chrono::milliseconds(100));
 			vfnet::json::Value v;
 			if (j->done && j->reply.status == 200 && vfnet::json::parse(j->reply.body, v)) {
 				const std::string code = v["code"].str(), key = v["key"].str(), ticket = v["ticket"].str();

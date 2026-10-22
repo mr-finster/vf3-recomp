@@ -169,6 +169,7 @@ function sender(req, groups = 4) {   // (groups: an IPv6 one by its first so man
 	if (!ip.includes(':')) return ip;
 	const b = v6_bytes(ip);
 	if (!b) return ip;
+	if (b.slice(0, 10).every((x) => x === 0) && b[10] === 0xff && b[11] === 0xff) return b.slice(12).join('.');   // (an IPv4, mapped)
 	const g = [];
 	for (let i = 0; i < groups; i++) g.push(((b[2 * i] << 8) | b[2 * i + 1]).toString(16));
 	return g.join(':') + '::/' + groups * 16;
@@ -229,8 +230,12 @@ export default {
 				const day = await limits.fetch('https://limits/', { method: 'POST', body: JSON.stringify({ per_day: TURN_PER_DAY, who: from, per_who: TURN_PER_ADDRESS_DAY }) });
 				if (day.status === 429) return json({ error: 'no_turn' }, 503);
 				if (day.status === 409) return json({ error: 'busy' }, 429);   // (this address's day's used)
-				const t = await turn(env, country_of(req));
-				if (t.status !== 200) await limits.fetch('https://limits/', { method: 'POST', body: JSON.stringify({ refund: true, who: from }) });
+				let t = null;
+				try {
+					t = await turn(env, country_of(req));
+				} finally {   // (a login not given, however it failed: not counted)
+					if (!t || t.status !== 200) await limits.fetch('https://limits/', { method: 'POST', body: JSON.stringify({ refund: true, who: from }) });
+				}
 				return t;
 			}
 
@@ -341,7 +346,8 @@ export class Room {
 		const b = await req.json();
 		const r = await this.load();
 		if (op === '/open') {
-			if (r) return json({ error: 'taken' }, 409);
+			if (r && b.old_key && b.old_key === r.key) await this.drop();   // (its own host, again before its close arrived: a Play again)
+			if (this.r) return json({ error: 'taken' }, 409);
 			if (this.gone && (!b.old_key || b.old_key !== this.gone.key)) return json({ error: 'taken' }, 409);
 			if (this.gone) {
 				this.gone = null;
@@ -434,7 +440,7 @@ export class Limits {
 // either has waited, anyone after 40 s. The one who waited longer hosts: a room's opened as theirs, the other
 // joined into it, and from there it's a room's match like any other (its code kept for Play again). Kept in memory
 // only: those searching ask every 20 s, and one gone quiet 25 s is dropped.
-const RANDOM_WAIT_MS = 20000, RANDOM_GONE_MS = 25000, RANDOM_KEPT_MS = 60000, RANDOM_PER_ADDRESS = 6, RANDOM_PLAYING_MS = 600000, RANDOM_MATCHES_PER_ADDRESS = 30;
+const RANDOM_WAIT_MS = 20000, RANDOM_GONE_MS = 25000, RANDOM_KEPT_MS = 60000, RANDOM_PER_ADDRESS = 6, RANDOM_PLAYING_MS = 600000, RANDOM_MATCHES_PER_ADDRESS = 120;   // (high: a phone network's address is many players')
 function reach_km(seconds) {
 	return seconds < 8 ? 1500 : seconds < 20 ? 4000 : seconds < 40 ? 9000 : Infinity;
 }
@@ -459,6 +465,8 @@ export class Queue {
 		const now = Date.now();
 		for (const [t, w] of this.waiting)
 			if (now - w.seen > (w.result ? RANDOM_KEPT_MS : RANDOM_GONE_MS)) this.waiting.delete(t);
+		for (const [a, times] of this.made)
+			if (!times.length || now - times[times.length - 1] > RANDOM_PLAYING_MS) this.made.delete(a);
 	}
 	searching() {
 		let n = 0;
