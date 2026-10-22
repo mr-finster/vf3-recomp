@@ -159,7 +159,7 @@ their own Player 1 controls, whichever side they're on, so nobody has to rebind 
 
 **In a match**: the game never pauses. Start or Esc opens a smaller menu over the game while it goes on: the
 connection's details, Input delay (from the next match), Leave the match (asks first). The opponent sees "in the
-menu" by your name. The connection display is small and out of the way at the top of the screen: the ping, the
+menu" by your name. The connection display is small and out of the way at the bottom of the screen (the game's own bars and time are at the top): the ping, the
 input delay, the rollback frames and DIRECT / RELAY in fixed cells (a mono font, so nothing shifts as they change),
 green / yellow / red.
 
@@ -178,7 +178,7 @@ the game, the connection was lost, a desync, or you left), both games go back to
 menu on the Online page, under MATCH OVER: what ended it ("RENODECK left the match."), against whom, how long and
 the ping, and one row on the selection to play again: Host again for the host, Join RENODECK again for the guest
 (the same address). Closing the game in a match tells the other side at once, so they don't wait out a silence.
-While hosting or joining with the menu closed, the line at the top says so (Hosting, the address, the status); in
+While hosting or joining with the menu closed, the line at the bottom says so (Hosting, the address, the status); in
 a match it's the connection line, on both players' screens; "Connection back" after an interruption.
 
 What the menu needs for this, beyond what it has: VF1's additions (typing, a line under a row for status or an

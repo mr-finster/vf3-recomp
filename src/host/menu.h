@@ -54,7 +54,7 @@ public:
 	void set_title(const std::string &text);    // (PAUSED; a match goes on under the menu: ONLINE MATCH)
 	void select_row(int i) { select(i); }
 	void set_fps(const std::string &text);      // the small FPS at the top right; empty hides it
-	// Over the game, the menu open or not: online play's connection at the top (empty hides it; level 0 good,
+	// Over the game, the menu open or not: online play's connection at the bottom (empty hides it; level 0 good,
 	// 1 fair, 2 poor), a notice for a few seconds near the bottom, and one that stays in the middle while it's
 	// true (empty title: gone)
 	void set_net(const std::string &text, int level);

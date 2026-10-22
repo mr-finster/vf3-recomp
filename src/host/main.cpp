@@ -1216,6 +1216,7 @@ int main(int argc, char **argv)
 			game_frame++;
 		}
 		game.tiles_on = true;
+		if (!scripted) vf3net::set_versus_count(board, vf3net::random_versus_count());   // (vf3net::VERSUS_COUNT: the first match between two players' stage)
 		fprintf(stderr, "boot: %llu frames in %.2f s, unseen\n", (unsigned long long)game_frame,
 				std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
 	};
@@ -2251,7 +2252,7 @@ int main(int argc, char **argv)
 		energy("Energy (vs CPU)", "Each fighter's energy in a match against the computer (the arcade's ENERGY MAX).", 8, 160, 360);
 		energy("Energy (vs player)", "Each fighter's energy in a match between two players.", 12, 180, 400);
 		choice("Stage select (vs player)", "A match between two players: the challenger picks the stage (the arcade's own screen, 8 seconds; "
-		       "hold Start on one for its Dural version). Off, every such match is on the same stage. Online matches always have it on.",
+		       "hold Start on one for its Dural version). Off, as most arcades had it, each match goes to the game's next stage. Online matches have it off.",
 		       0x17, 0, 1, [&](int v) { return on_off(v == 0); });
 		choice("Demo sound", "Sound during the demo that plays between games.", 7, 0, 1, [&](int v) { return on_off(v == 0); });
 		choice("Country", "The arcade's region: Japan, USA, Export or Asia. It changes the game's text and what it shows.", 0x1E, 0, 3,
@@ -3067,6 +3068,7 @@ int main(int argc, char **argv)
 			} else { game.run_frame(!ff, true); pass_kind = 3; }
 			game.publish();
 			game_frame++;
+			if (game_frame == BOOT_FRAMES && !scripted && !skip_boot()) vf3net::set_versus_count(board, vf3net::random_versus_count());   // (the boot seen: as after an unseen one)
 			pace.frames++;
 			pace.emu_ms += double(SDL_GetTicksNS() - te) / 1e6;
 			t9.frames++;
