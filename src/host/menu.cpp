@@ -71,6 +71,7 @@ struct game_menu::impl
 	Rml::Context *ctx = nullptr;
 	Rml::ElementDocument *doc = nullptr;
 	Rml::ElementDocument *overlay = nullptr;   // drawn over the game, menu or not (the FPS)
+	bool mono = false;   // JetBrains Mono loaded (the connection display's; Barlow if not)
 	Rml::ElementDocument *screen = nullptr;    // a page that's a screen of its own (menu_page::screen)
 	Rml::ElementDocument *active(bool screen_page) const { return screen_page && screen ? screen : doc; }
 	menu_listener listener;
@@ -125,7 +126,7 @@ void game_menu::set_net(const net_cells &c)
 	auto num = [](const char *f, double v) { char b[32]; snprintf(b, sizeof b, f, v); return std::string(b); };
 	std::string name = c.name;   // (10 letters fit)
 	if (name.size() > 10) name = name.substr(0, 9) + "\xE2\x80\xA6";
-	std::string rml = "<div class=\"row\"><div class=\"c name\" style=\"width: 118dp;\"><span class=\"v\">" + escape(name) + "</span><span class=\"dot\">\xE2\x97\x8F</span></div>";   // (a circle of the font: drawn round at any size)
+	std::string rml = "<div class=\"row\"><div class=\"c name\" style=\"width: 118dp;\"><span class=\"v\">" + escape(name) + "</span><span class=\"dot\">" + (m->mono ? "\xE2\x97\x8F" : "\xE2\x80\xA2") + "</span></div>";   // (a circle of the font: drawn round at any size; Barlow has only the bullet)
 	if (c.interrupted) rml += cell("", "CONNECTION INTERRUPTED", 222, "lost");
 	else rml += cell("PING", std::to_string(std::min(c.ping, 9999)), 86) + cell("DELAY", std::to_string(c.delay), 76) + cell("RB", std::to_string(c.rollback), 50);
 	rml += cell("", c.relay ? "RELAY" : "DIRECT", 66, c.relay ? "via relay" : "via direct") + "</div>";
@@ -239,7 +240,7 @@ bool game_menu::init(SDL_Window *win, SDL_Renderer *ren, const std::string &asse
 	for (const char *f : { "BarlowCondensed-Medium.ttf", "BarlowCondensed-SemiBold.ttf", "BarlowCondensed-BoldItalic.ttf" })
 		if (!Rml::LoadFontFace(assets + "/fonts/" + f)) return false;
 	// (online play's figures: without it, in Barlow, set below)
-	const bool mono = Rml::LoadFontFace(assets + "/fonts/JetBrainsMono-SemiBold.ttf", "JetBrains Mono", Rml::Style::FontStyle::Normal);
+	const bool mono = m->mono = Rml::LoadFontFace(assets + "/fonts/JetBrainsMono-SemiBold.ttf", "JetBrains Mono", Rml::Style::FontStyle::Normal);
 	int w = 0, h = 0;
 	SDL_GetWindowSizeInPixels(win, &w, &h);
 	m->ctx = Rml::CreateContext("menu", Rml::Vector2i(w, h));
