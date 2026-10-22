@@ -5,6 +5,8 @@
 #include <cstdio>
 #include <map>
 #include <memory>
+#include <cctype>
+#include <cmath>
 #include <string>
 #include <vector>
 
@@ -128,10 +130,15 @@ struct Parser
 		else if (lit("false")) { v.kind = Value::boolean; v.b = false; }
 		else if (lit("null")) v.kind = Value::null;
 		else {
+			// (JSON's numbers only: a sign, digits, a point, an exponent; never nan, inf or hex, which strtod takes;
+			// and nothing past what a double holds)
+			size_t k = 0;
+			const size_t most = size_t(std::min<ptrdiff_t>(e - p, 32));
+			while (k < most && (isdigit(uint8_t(p[k])) || p[k] == '-' || p[k] == '+' || p[k] == '.' || p[k] == 'e' || p[k] == 'E')) k++;
+			const std::string num(p, k);
 			char *end = nullptr;
-			const std::string num(p, size_t(std::min<ptrdiff_t>(e - p, 32)));
-			v.n = strtod(num.c_str(), &end);
-			if (end == num.c_str()) ok = false;
+			v.n = k ? strtod(num.c_str(), &end) : 0;
+			if (!k || end == num.c_str() || !std::isfinite(v.n) || std::fabs(v.n) > 1e15) ok = false;
 			else { v.kind = Value::number; p += end - num.c_str(); }
 		}
 		depth--;

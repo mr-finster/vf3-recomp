@@ -64,6 +64,16 @@ std::string text_of(const sockaddr_storage &ss)
 	return std::string(host) + ":" + std::to_string(ntohs(a.sin_port));
 }
 
+// One way of writing an address, whoever wrote it (the STUN parser writes IPv6 in full, the socket's in short, a
+// lobby in either case): compared as text, they must be written the same. "" if it isn't one.
+bool sockaddr_of(const std::string &a, bool v6_socket, sockaddr_storage &ss, socklen_t &len);
+std::string canon(const std::string &a)
+{
+	sockaddr_storage ss{};
+	socklen_t len;
+	return sockaddr_of(a, true, ss, len) ? text_of(ss) : std::string();
+}
+
 // "ip:port" (numbers only) as a socket address for a socket of this family (IPv4 mapped on an IPv6 one)
 bool sockaddr_of(const std::string &a, bool v6_socket, sockaddr_storage &ss, socklen_t &len)
 {
@@ -141,7 +151,8 @@ bool private_address(const std::string &a)
 	unsigned b[4];
 	if (sscanf(ip.c_str(), "%u.%u.%u.%u", &b[0], &b[1], &b[2], &b[3]) == 4)
 		return b[0] == 10 || (b[0] == 172 && b[1] >= 16 && b[1] <= 31) || (b[0] == 192 && b[1] == 168) || (b[0] == 169 && b[1] == 254);
-	const std::string l = ip.substr(0, 2);
+	std::string l = ip.substr(0, 2);
+	for (char &c : l) c = char(tolower(uint8_t(c)));
 	return !ip.empty() && (l == "fc" || l == "fd" || l == "fe");
 }
 
@@ -186,6 +197,10 @@ struct RoomLink::Impl
 	std::string turn_server, user, password, realm, nonce, relay;
 	std::vector<uint8_t> key;
 	int turn_tries = 0;
+	std::string alloc_tid;            // the latest ALLOCATE asked: its id, and its bytes (sent again as they are)
+	std::vector<uint8_t> alloc_bytes;
+	bool alloc_keyed = false;
+	double turn_first = 0;             // (when the first ALLOCATE went: the relay's time to answer counts from it)          // (with the login: a 401 to it is the login refused)
 	double turn_next = 0, refresh_at = 0, perm_at = 0;
 	bool perm_dirty = false;
 	double lifetime_s = 600;
@@ -262,7 +277,7 @@ struct RoomLink::Impl
 	}
 
 	// ---- TURN ----
-	void turn_send(stun::Message &q)
+	std::vector<uint8_t> turn_send(stun::Message &q)
 	{
 		stun::random_tid(q.tid);
 		if (!key.empty()) {
@@ -271,16 +286,23 @@ struct RoomLink::Impl
 			q.add_string(stun::A_NONCE, nonce);
 		}
 		pending[tid_key(q.tid)] = q.type;
-		send_to(turn_server, q.encode(key));
+		std::vector<uint8_t> bytes = q.encode(key);
+		send_to(turn_server, bytes);
 		if (pending.size() > 64) pending.erase(pending.begin());
+		return bytes;
 	}
+	// A new ALLOCATE (at the start, or with a new login or nonce); one not answered is sent again as it was, the same
+	// id: a new id for the same thing is another request to the relay, and the second of two is refused (437)
 	void allocate()
 	{
 		stun::Message q;
 		q.type = stun::ALLOCATE;
 		q.add_u32(stun::A_TRANSPORT, 17u << 24);   // (UDP)
 		q.add_u32(stun::A_LIFETIME, 600);
-		turn_send(q);
+		alloc_keyed = !key.empty();
+		alloc_bytes = turn_send(q);
+		alloc_tid = tid_key(q.tid);
+		turn_next = now_ms() + 500;
 	}
 	void refresh(uint32_t lifetime)
 	{
@@ -293,17 +315,19 @@ struct RoomLink::Impl
 	// address it won't relay to (a private network's, as Cloudflare's does), and one refused mustn't take the rest
 	void permit()
 	{
-		for (const std::string &a : peer) {
-			stun::Address x;
-			if (private_address(a) || !stun_of(a, x)) continue;
-			x.port = 0;
-			stun::Message q;
-			q.type = stun::PERMISSION;
-			q.add_address(stun::A_PEER, x);
-			turn_send(q);
-			perm_of[tid_key(q.tid)] = a;
-			if (perm_of.size() > 64) perm_of.erase(perm_of.begin());
-		}
+		for (const std::string &a : peer) permit_one(a);
+	}
+	void permit_one(const std::string &a)
+	{
+		stun::Address x;
+		if (private_address(a) || !stun_of(a, x)) return;
+		x.port = 0;
+		stun::Message q;
+		q.type = stun::PERMISSION;
+		q.add_address(stun::A_PEER, x);
+		turn_send(q);
+		perm_of[tid_key(q.tid)] = a;
+		if (perm_of.size() > 64) perm_of.erase(perm_of.begin());
 	}
 	void turn_reply(const stun::Message &r)
 	{
@@ -314,22 +338,25 @@ struct RoomLink::Impl
 		const int code = r.error_code();
 		std::string perm_for;
 		if (auto p = perm_of.find(tid_key(r.tid)); p != perm_of.end()) { perm_for = p->second; perm_of.erase(p); }
+		// an ALLOCATE's answer counts only for the latest asked, and only while it's being asked (a late one's
+		// answer, or one to a copy, says nothing of the allocation there is)
+		if (asked == stun::ALLOCATE && (turn != ASKING || tid_key(r.tid) != alloc_tid)) return;
 		if (code == 401 || code == 438) {   // (a login wanted, or a nonce gone stale: again with the new one)
 			const std::string rl = r.get_string(stun::A_REALM), nc = r.get_string(stun::A_NONCE);
 			if (nc.empty()) { if (asked == stun::ALLOCATE) { turn = FAILED; note("the relay refused this side: " + std::to_string(code)); } return; }
-			if (code == 401 && asked == stun::ALLOCATE && !key.empty() && rl == realm) { turn = FAILED; note("the relay refused the login"); return; }
+			if (code == 401 && asked == stun::ALLOCATE && alloc_keyed && rl == realm) { turn = FAILED; note("the relay refused the login"); return; }
 			if (!rl.empty()) realm = rl;
 			nonce = nc;
 			key = stun::long_term_key(user, realm, password);
 			if (asked == stun::ALLOCATE) allocate();
 			else if (asked == stun::REFRESH) refresh(uint32_t(lifetime_s));
-			else if (asked == stun::PERMISSION) permit();
+			else if (asked == stun::PERMISSION && !perm_for.empty()) permit_one(perm_for);   // (that one again: not all of them)
 			return;
 		}
 		if (r.type == stun::ALLOCATE_OK) {
 			stun::Address a;
-			if (r.get_address(stun::A_RELAYED, a)) relay = a.text();
-			if (pub.empty() && r.get_address(stun::A_XOR_MAPPED, a)) pub = a.text();
+			if (r.get_address(stun::A_RELAYED, a)) relay = canon(a.text());
+			if (pub.empty() && r.get_address(stun::A_XOR_MAPPED, a)) pub = canon(a.text());
 			if (const auto *v = r.get(stun::A_LIFETIME); v && v->size() == 4)
 				lifetime_s = std::max(60.0, double(uint32_t((*v)[0]) << 24 | uint32_t((*v)[1]) << 16 | uint32_t((*v)[2]) << 8 | (*v)[3]));
 			turn = relay.empty() ? FAILED : READY;
@@ -337,7 +364,11 @@ struct RoomLink::Impl
 			perm_dirty = have_peer;
 		} else if (r.type == stun::ALLOCATE_ERR) { turn = FAILED; note("the relay refused this side: " + std::to_string(code)); }
 		else if (r.type == stun::REFRESH_OK) refresh_at = now_ms() + lifetime_s * 500;
-		else if (r.type == stun::REFRESH_ERR) note("the relay refused to keep it: " + std::to_string(code));
+		else if (r.type == stun::REFRESH_ERR) {   // (the allocation gone: a sleep, the relay restarted; nothing more through it)
+			note("the relay refused to keep it: " + std::to_string(code));
+			relay.clear();
+			turn = FAILED;
+		}
 		else if (r.type == stun::PERMISSION_OK) { perm_at = now_ms(); note("the relay let through ", perm_for); }
 		else if (r.type == stun::PERMISSION_ERR) note("the relay refused ", perm_for, ": " + std::to_string(code));
 	}
@@ -382,7 +413,11 @@ struct RoomLink::Impl
 			else stun_done = true;
 		}
 		if (turn == ASKING && t >= turn_next) {
-			if (turn_tries++ < 8) { allocate(); turn_next = t + 500; }
+			if (turn_tries == 0) turn_first = t;
+			if (turn_tries++ < 8) {
+				if (alloc_bytes.empty()) allocate();
+				else { send_to(turn_server, alloc_bytes); turn_next = t + 500; }   // (the same request again)
+			}
 			else { turn = FAILED; note("the relay didn't answer"); }
 		}
 		if (turn == READY) {
@@ -391,7 +426,7 @@ struct RoomLink::Impl
 		}
 		if (t - started > 4000) {   // (gathering's time is up: what's found is what there is)
 			stun_done = true;
-			if (turn == ASKING && relay.empty() && t - started > 6000) { turn = FAILED; note("the relay didn't answer in time"); }
+			if (turn == ASKING && relay.empty() && turn_tries > 0 && t - turn_first > 6000) { turn = FAILED; note("the relay didn't answer in time"); }
 		}
 		if (host && have_peer && !is_locked && t < punch_until && t >= punch_next) {
 			static const uint8_t knock[8] = { 'V', 'F', 'N', 'Q', 0, 0, 0, 0 };
@@ -497,6 +532,9 @@ void RoomLink::use_turn(const std::string &server, const std::string &user, cons
 	m->started = now_ms();
 	m->turn_tries = 0;
 	m->turn_next = 0;
+	m->alloc_tid.clear();
+	m->alloc_bytes.clear();
+	m->key.clear();
 }
 
 bool RoomLink::gathered() const { return m->stun_done && m->turn != Impl::ASKING; }
@@ -520,17 +558,19 @@ std::string RoomLink::public_address() const { return m->pub; }
 void RoomLink::set_peer(const std::vector<std::string> &cands, const std::string &relay, bool host)
 {
 	m->peer.clear();
-	for (const std::string &a : cands) {
+	for (const std::string &given : cands) {
 		sockaddr_storage ss;
 		socklen_t len;
-		if (m->peer.size() < 8 && player_address(a, m->loopback_ok) && sockaddr_of(a, m->v6, ss, len) && std::find(m->peer.begin(), m->peer.end(), a) == m->peer.end())
+		const std::string a = canon(given);
+		if (m->peer.size() < 8 && !a.empty() && player_address(a, m->loopback_ok) && sockaddr_of(a, m->v6, ss, len) && std::find(m->peer.begin(), m->peer.end(), a) == m->peer.end())
 			m->peer.push_back(a);
 	}
 	sockaddr_storage ss;
 	socklen_t len;
 	m->peer_relay.clear();
-	if (!relay.empty() && player_address(relay, m->loopback_ok) && sockaddr_of(relay, m->v6, ss, len) &&
-	    std::find(m->peer.begin(), m->peer.end(), relay) == m->peer.end()) { m->peer.push_back(relay); m->peer_relay = relay; }
+	const std::string relay_c = canon(relay);
+	if (!relay_c.empty() && player_address(relay_c, m->loopback_ok) && sockaddr_of(relay_c, m->v6, ss, len) &&
+	    std::find(m->peer.begin(), m->peer.end(), relay_c) == m->peer.end()) { m->peer.push_back(relay_c); m->peer_relay = relay_c; }
 	m->host = host;
 	m->have_peer = !m->peer.empty();
 	m->is_locked = false;
@@ -584,7 +624,7 @@ bool RoomLink::recv(std::vector<uint8_t> &out)
 			if (!stun::Message::decode(buf, len, r)) continue;
 			if (who == m->stun_server && r.type == stun::BINDING_OK && m->pending.erase(tid_key(r.tid))) {
 				stun::Address a;
-				if (r.get_address(stun::A_XOR_MAPPED, a) || r.get_address(stun::A_MAPPED, a)) m->pub = a.text();
+				if (r.get_address(stun::A_XOR_MAPPED, a) || r.get_address(stun::A_MAPPED, a)) m->pub = canon(a.text());
 				m->stun_done = true;
 				continue;
 			}
@@ -596,7 +636,7 @@ bool RoomLink::recv(std::vector<uint8_t> &out)
 			if (!d || !r.get_address(stun::A_PEER, peer) || d->size() > sizeof buf) continue;
 			memcpy(buf, d->data(), d->size());
 			len = d->size();
-			came = { peer.text(), true };
+			came = { canon(peer.text()), true };
 		}
 		if (len >= 4 && memcmp(data, "VFN", 3) == 0 && m->peer_ip(came.to)) {
 			Impl::Count &c = m->counts[(came.relay ? "r " : "d ") + came.to];
@@ -617,9 +657,11 @@ bool RoomLink::recv(std::vector<uint8_t> &out)
 			m->last = came;   // (the session locks onto it if its hello is good)
 			m->have_last = true;
 		} else {
+			// (the session locks onto it once it's the host's welcome, with this game's token: an address alone
+			// isn't enough, a relay's being shared by everyone on it)
 			if (!m->peer_ip(came.to)) continue;
-			m->way = came;   // (the first way the host answered by: that's the one)
-			m->is_locked = true;
+			m->last = came;
+			m->have_last = true;
 		}
 		out.assign(data, data + len);
 		return true;

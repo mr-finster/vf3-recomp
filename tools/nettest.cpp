@@ -123,8 +123,10 @@ bool run(const Case &c)
 		vfnet::Session::Event e;
 		while (a.next_event(e)) { if (e.kind == e.interrupted) interrupted = true; if (verbose) printf("    A event %d: %s\n", int(e.kind), e.text.c_str()); }
 		while (b.next_event(e)) { if (e.kind == e.interrupted) interrupted = true; if (verbose) printf("    B event %d: %s\n", int(e.kind), e.text.c_str()); }
-		const bool done_a = a.state() == vfnet::Session::State::ended || a.frame() >= c.frames;
-		const bool done_b = b.state() == vfnet::Session::State::ended || b.frame() >= c.frames;
+		// (20 frames past those checked: the last checked frames' corrections, the inputs come after their first run,
+		// rolled back to by a step after them)
+		const bool done_a = a.state() == vfnet::Session::State::ended || a.frame() >= c.frames + 20;
+		const bool done_b = b.state() == vfnet::Session::State::ended || b.frame() >= c.frames + 20;
 		if (done_a && done_b) break;
 		t += 1;
 	}
@@ -142,7 +144,7 @@ bool run(const Case &c)
 
 	if (c.expect_a == vfnet::Session::End::none) {
 		// both sides' inputs the same, and each side's states those of a straight run of them
-		const uint32_t n = std::min(a.confirmed(), b.confirmed());
+		const uint32_t n = std::min({ a.confirmed(), b.confirmed(), c.frames });
 		if (n + 20 < c.frames) fail("only " + std::to_string(n) + " frames confirmed");
 		for (uint32_t f = 0; f < n && ok; f++)
 			for (int p = 0; p < 2; p++)

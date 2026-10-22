@@ -67,6 +67,20 @@ struct Online::Job
 
 Online::~Online() = default;
 
+// Goodbyes to the lobby (a room closed, a search left): on threads of their own, counted, so a quit can wait a
+// moment for them (a game closed mid-search would otherwise be left in the queue, matched with someone)
+static std::atomic<int> farewells{ 0 };
+static void farewell(const std::string &url, const std::string &body)
+{
+	farewells++;
+	std::thread([url, body] { vfnet::http::request("POST", url, body, 5000); farewells--; }).detach();
+}
+
+void Online::flush(int ms)
+{
+	for (int waited = 0; farewells.load() > 0 && waited < ms; waited += 20) std::this_thread::sleep_for(std::chrono::milliseconds(20));
+}
+
 std::string Online::lobby_default()
 {
 	const char *e = getenv("VF_LOBBY");
@@ -242,7 +256,7 @@ bool Online::find_random(const OnlineSettings &s, std::string &error)
 	st = Step::getting_ready;
 	step_at = now;
 	players = 0;
-	log_line("finding a random opponent: getting ready");
+	log_line("finding a random opponent: getting ready (" + identity.build + ", game files " + hex64(identity.content) + ")");
 	start_job(gather(lobby));
 	return true;
 }
@@ -260,6 +274,7 @@ bool Online::host_room(const OnlineSettings &s, std::string &error, const std::s
 	country_peer.clear();
 	tried = Try::host_room;
 	want_code = online_menu::clean_code(want);
+	reopening = false;
 	patient_until = 0;
 	started_with = s;
 	is_host = true;
@@ -277,7 +292,7 @@ bool Online::host_room(const OnlineSettings &s, std::string &error, const std::s
 	ph = Phase::hosting;
 	st = Step::getting_ready;
 	step_at = now;
-	log_line("hosting with a room code: getting ready");
+	log_line("hosting with a room code: getting ready (" + identity.build + ", game files " + hex64(identity.content) + ")");
 	start_job(gather(lobby));
 	return true;
 }
@@ -317,7 +332,7 @@ bool Online::join_room(const OnlineSettings &s, const std::string &c, std::strin
 	ph = Phase::joining;
 	st = Step::getting_ready;
 	step_at = now;
-	log_line("joining room " + room_code() + ": getting ready");
+	log_line("joining room " + room_code() + ": getting ready (" + identity.build + ", game files " + hex64(identity.content) + ")");
 	start_job(gather(lobby));
 	return true;
 }
@@ -332,7 +347,7 @@ std::function<void(Online::Job &)> Online::gather(const std::string &base)
 		if (j.reply.status == 200 && vfnet::json::parse(j.reply.body, v)) {
 			j.country = v["country"].str();
 			for (const vfnet::json::Value &sv : v["servers"].items) {
-				const std::string ip = vfnet::RoomLink::resolve(sv["host"].str(), int(sv["port"].n));
+				const std::string ip = vfnet::RoomLink::resolve(sv["host"].str(), int(std::clamp(sv["port"].n, 0.0, 65535.0)));
 				if (!ip.empty()) { j.turn = ip; j.user = sv["username"].str(); j.password = sv["credential"].str(); break; }
 			}
 		}
@@ -342,7 +357,7 @@ std::function<void(Online::Job &)> Online::gather(const std::string &base)
 bool Online::try_again(const OnlineSettings &s, std::string &error)
 {
 	switch (tried) {
-	case Try::host_room: return host_room(s, error);
+	case Try::host_room: { const std::string w = want_code; return host_room(s, error, w); }   // (a Play again's code still wanted)
 	case Try::join_room: { const std::string c = code; return join_room(s, c, error); }
 	case Try::host: return host(s, error);
 	case Try::join: return join(s, error);
@@ -399,7 +414,7 @@ int Online::players_online(const OnlineSettings &s)
 			std::thread([url, body, count = online_count, asking = online_asking] {
 				const vfnet::http::Reply r = vfnet::http::request("POST", url, body, 5000);
 				vfnet::json::Value v;
-				if (r.status == 200 && vfnet::json::parse(r.body, v) && v["players"].kind == vfnet::json::Value::number) count->store(int(v["players"].n));
+				if (r.status == 200 && vfnet::json::parse(r.body, v) && v["players"].kind == vfnet::json::Value::number) count->store(int(std::clamp(v["players"].n, 0.0, 1e6)));
 				asking->store(false);
 			}).detach();
 		}
@@ -464,8 +479,9 @@ void Online::room_failed(const std::string &why)
 void Online::close_room()
 {
 	if (!rooms || !is_host || key.empty()) return;
-	const std::string url = lobby_url("/v1/close"), body = "{\"code\":" + vfnet::json::quote(code) + ",\"key\":" + vfnet::json::quote(key) + "}";
-	std::thread([url, body] { vfnet::http::request("POST", url, body, 5000); }).detach();
+	farewell(lobby_url("/v1/close"), "{\"code\":" + vfnet::json::quote(code) + ",\"key\":" + vfnet::json::quote(key) + "}");
+	kept_code = code;   // (a Play again opens it again: the lobby keeps the code for its host, by this key)
+	kept_key = key;
 	key.clear();
 }
 
@@ -497,6 +513,29 @@ std::string lobby_says(const vfnet::http::Reply &r, const std::string &code, con
 
 } // namespace
 
+// A room's host after a player who couldn't join: a random match's, another opponent (its code known to no one
+// else); one with a code, the same code open again with a new token (the last player's no good for it)
+void Online::host_again(const std::string &why)
+{
+	notices.push_back({ Notice::refused, "A player couldn't join: " + why });
+	note = "A player couldn't join: " + why;
+	session.reset();
+	room->clear_peer();
+	if (random) {
+		close_room();
+		is_host = false;
+		ph = Phase::joining;
+		peer_name.clear();
+		country_peer.clear();
+		search();
+		return;
+	}
+	st = Step::opening;
+	reopening = true;
+	const std::string url = lobby_url("/v1/reopen"), body = "{\"code\":" + vfnet::json::quote(code) + ",\"key\":" + vfnet::json::quote(key) + "}";
+	start_job([url, body](Job &j) { j.reply = vfnet::http::request("POST", url, body, 10000); });
+}
+
 void Online::room_poll()
 {
 	if (!room) return;
@@ -526,7 +565,8 @@ void Online::room_poll()
 				search();
 			} else if (is_host) {
 				st = Step::opening;
-				const std::string body = me_json(want_code.empty() ? "" : ",\"want\":" + vfnet::json::quote(want_code));
+				const std::string body = me_json(want_code.empty() ? "" : ",\"want\":" + vfnet::json::quote(want_code) +
+				                                 (want_code == kept_code ? ",\"key\":" + vfnet::json::quote(kept_key) : std::string()));
 				start_job([base, body](Job &j) { j.reply = vfnet::http::request("POST", base + "/v1/host", body, 10000); });
 			} else {
 				st = Step::finding;
@@ -539,6 +579,15 @@ void Online::room_poll()
 		if (job && job->done) {
 			vfnet::json::Value v;
 			const bool ok = job->reply.status == 200 && vfnet::json::parse(job->reply.body, v) && v["code"].str().size() == 6 && !v["key"].str().empty();
+			if (!ok && reopening && job->reply.status == 404) {
+				// (the room let go meanwhile, its host not asking while it connected: the same code opened anew, as its
+				// host's, by its key; the lobby keeps it for that)
+				reopening = false;
+				const std::string base = lobby, body = me_json(",\"want\":" + vfnet::json::quote(code) + ",\"key\":" + vfnet::json::quote(key));
+				start_job([base, body](Job &j) { j.reply = vfnet::http::request("POST", base + "/v1/host", body, 10000); });
+				return;
+			}
+			reopening = false;
 			if (!ok) { room_failed("Couldn't open a room: " + lobby_says(job->reply, room_code(), identity.build)); return; }
 			code = v["code"].str();
 			key = v["key"].str();
@@ -568,6 +617,7 @@ void Online::room_poll()
 					peer_name = g["name"].str();
 					room->set_peer(g["cands"].strings(), g["relay"].str(), true);
 					st = Step::connecting;
+					step_at = now;
 					log_line("a player joined the room (" + online_menu::clean_name(peer_name) + "): their addresses " + masked(g["cands"].strings()) +
 					         ", relay " + mask(g["relay"].str()) + "; connecting");
 				}
@@ -584,11 +634,22 @@ void Online::room_poll()
 			} else if (r.status == 404) {
 				room_failed("The room closed (the online service lost it): host again for a new code.");
 				return;
+			} else if (r.status >= 400 && r.status < 500 && r.status != 429) {   // (an answer that won't change)
+				room_failed(lobby_says(r, code, identity.build));
+				return;
 			} else {   // (the service unreached for a moment: tried again in a while, the room kept)
 				retry_at = now + 2000;
 				if (++wait_errors == 3) note = "Having trouble reaching the online service: still trying...";
 				log_line("waiting: " + (r.status ? "the service said " + std::to_string(r.status) : r.error));
 			}
+		}
+		break;
+	case Step::connecting:   // (a host told a player's coming who never makes a sound: gone meanwhile; the session waits
+		// for its first hello before it counts the time, so it's counted here)
+		if (is_host && session && session->opponent_name().empty() && !session->game_started() && now - step_at > 30000) {
+			log_line("no word from the player the room was given: " + room->report(mask));
+			host_again("they never reached this side.");
+			return;
 		}
 		break;
 	case Step::searching:   // (a random opponent: asked for, then waited for, 20 s at a time)
@@ -633,7 +694,7 @@ void Online::room_poll()
 				log_line("a random opponent (" + online_menu::clean_name(peer_name) + ", " + (country_peer.empty() ? "?" : country_peer) + "): joining room " + room_code());
 			} else {
 				ticket = v["ticket"].str();
-				players = int(v["players"].n);
+				players = int(std::clamp(v["players"].n, 0.0, 1e6));
 				retry_at = now;   // (the next wait at once: it's the lobby that waits)
 			}
 		}
@@ -694,9 +755,26 @@ void Online::stop()
 {
 	if (room && ph != Phase::playing && st == Step::connecting) log_line("stopped while connecting: " + room->report(mask));
 	if (rooms && st == Step::searching && !ticket.empty()) {   // (out of the queue: no one's matched with a game gone)
-		const std::string url = lobby_url("/v1/random/leave"), body = me_json(",\"ticket\":" + vfnet::json::quote(ticket));
-		std::thread([url, body] { vfnet::http::request("POST", url, body, 5000); }).detach();
+		farewell(lobby_url("/v1/random/leave"), me_json(",\"ticket\":" + vfnet::json::quote(ticket)));
 		ticket.clear();
+	}
+	// a request to the lobby still on its way: what it brings back (a room opened, a place in the queue, a match
+	// made) closed or left as soon as it's here, not left for the lobby's timeouts with someone matched to it
+	if (rooms && job && !job->done && (st == Step::opening || st == Step::searching)) {
+		const std::string base = lobby, me = me_json("");
+		farewells++;
+		std::thread([j = job, base, me] {
+			for (int i = 0; i < 400 && !j->done; i++) std::this_thread::sleep_for(std::chrono::milliseconds(100));
+			vfnet::json::Value v;
+			if (j->done && j->reply.status == 200 && vfnet::json::parse(j->reply.body, v)) {
+				const std::string code = v["code"].str(), key = v["key"].str(), ticket = v["ticket"].str();
+				if (!code.empty() && !key.empty())
+					vfnet::http::request("POST", base + "/v1/close", "{\"code\":" + vfnet::json::quote(code) + ",\"key\":" + vfnet::json::quote(key) + "}", 5000);
+				else if (!ticket.empty() && !me.empty())
+					vfnet::http::request("POST", base + "/v1/random/leave", me.substr(0, me.size() - 1) + ",\"ticket\":" + vfnet::json::quote(ticket) + "}", 5000);
+			}
+			farewells--;
+		}).detach();
 	}
 	if (session && ph == Phase::playing) ended("You left the match.");
 	if (session && session->state() != vfnet::Session::State::ended) session->quit();
@@ -722,6 +800,10 @@ void Online::poll(double t)
 		case vfnet::Session::Event::connected:
 			ph = Phase::playing;
 			began_at = now;
+			// (the log's figures from this session's own: the last match's would wrap the first line's differences)
+			logged_at = now;
+			logged_rb = logged_resim = logged_stalls = logged_waits = logged_steps = 0;
+			logged_save = logged_run = logged_resim_ms = logged_hash = 0;
 			if (rooms) {
 				log_line(std::string("connected ") + (room->via_relay() ? "through a relay" : "directly") + ", " + mask(room->way()) + ": " + room->report(mask));
 				close_room();   // (the code's done its job)
@@ -746,27 +828,9 @@ void Online::poll(double t)
 			// a host goes on waiting after a player who couldn't join (another version, another ROM, gone quiet
 			// before the game started); anything else ends it
 			if (!was_playing && is_host && (why == vfnet::Session::End::rejected || why == vfnet::Session::End::timeout || why == vfnet::Session::End::opponent_quit)) {
+				if (rooms) { host_again(e.text); return; }
 				notices.push_back({ Notice::refused, "A player couldn't join: " + e.text });
 				note = "A player couldn't join: " + e.text;
-				if (rooms && random) {   // (a random opponent: another one, the room's code known to no one else)
-					session.reset();
-					room->clear_peer();
-					close_room();
-					is_host = false;
-					ph = Phase::joining;
-					peer_name.clear();
-					country_peer.clear();
-					search();
-					return;
-				}
-				if (rooms) {   // (the same code, open again, a new token: the last player's no good for it)
-					session.reset();
-					room->clear_peer();
-					st = Step::opening;
-					const std::string url = lobby_url("/v1/reopen"), body = "{\"code\":" + vfnet::json::quote(code) + ",\"key\":" + vfnet::json::quote(key) + "}";
-					start_job([url, body](Job &j) { j.reply = vfnet::http::request("POST", url, body, 10000); });
-					return;
-				}
 				std::string err;
 				if (!open_host(err)) { notices.push_back({ Notice::ended, err }); session.reset(); link.reset(); ph = Phase::off; }
 				return;
