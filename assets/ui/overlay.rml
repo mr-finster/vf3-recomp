@@ -17,11 +17,12 @@
 			color: #ffd23f;
 			font-effect: outline(2dp #0b1430);
 		}
-		/* online play's connection: small, at the top in the middle, between the energy bars' names and the time */
+		/* online play's connection: small, at the bottom in the middle, where a fight between two players has nothing
+		   (the game's own energy bars, names and time at the top) */
 		#net {
 			position: absolute;
 			left: 0; right: 0;
-			top: 6dp;
+			bottom: 10dp;
 			text-align: center;
 			font-size: 17dp;
 			white-space: pre;
@@ -42,7 +43,7 @@
 		   label small at the left, the figure at the right */
 		#net.cells { font-family: "JetBrains Mono"; font-size: 14dp; white-space: normal; }
 		#net .row { display: block; height: 21dp; }
-		#net .row.two { margin-top: 4dp; height: 17dp; font-size: 11.5dp; font-weight: 500; color: #b8c4e6; }
+		#net .row.two { margin-bottom: 4dp; height: 17dp; font-size: 11.5dp; font-weight: 500; color: #b8c4e6; }
 		#net .c {
 			display: inline-block;
 			position: relative;
@@ -72,7 +73,7 @@
 		#toast {
 			position: absolute;
 			right: 24dp;
-			bottom: 24dp;
+			bottom: 44dp;   /* (over the connection display) */
 			max-width: 560dp;
 		}
 		#toast span {

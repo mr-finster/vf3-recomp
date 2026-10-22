@@ -1102,7 +1102,7 @@ menu_item delay_row(Online &o, OnlineSettings &s, std::function<void()> changed)
 
 menu_item connection_row(OnlineSettings &s, std::function<void()> changed)
 {
-	return { "Connection display", "In a match, small at the top of the screen: the other player's name, the ping, the input delay, "
+	return { "Connection display", "In a match, small at the bottom of the screen: the other player's name, the ping, the input delay, "
 		"the rollback and whether it's direct or through the relay, the dot green, yellow or red for how good the connection is. "
 		"Detailed adds a row: the jitter, the rollbacks' average, how far ahead this side is, and what each frame costs here.",
 		[&s] { return std::string(s.show_connection == 2 ? "Detailed" : s.show_connection ? "On" : "Off"); },

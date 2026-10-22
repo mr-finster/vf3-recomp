@@ -1,6 +1,7 @@
 #include "vf3_netplay.h"
 #include <algorithm>
 #include <cstring>
+#include <random>
 
 namespace vf3net {
 
@@ -40,6 +41,16 @@ uint64_t content_hash(m3::Model3 &b)
 	return h;
 }
 
+void set_versus_count(m3::Model3 &b, uint32_t count)
+{
+	memcpy(b.ram.data() + VERSUS_COUNT, &count, 4);   // (the RAM's words in the host's order)
+}
+
+uint32_t random_versus_count()
+{
+	return std::random_device{}() % 16;
+}
+
 std::vector<uint8_t> start_blob(const m3::Model3 &b)
 {
 	std::vector<uint8_t> out(4);
@@ -47,6 +58,7 @@ std::vector<uint8_t> start_blob(const m3::Model3 &b)
 	out.insert(out.end(), b.backup.begin(), b.backup.end());
 	const uint8_t *e = reinterpret_cast<const uint8_t *>(b.eeprom.regs);
 	out.insert(out.end(), e, e + sizeof b.eeprom.regs);
+	out.push_back(uint8_t(random_versus_count()));
 	return out;
 }
 
@@ -71,7 +83,7 @@ void Adapter::take_midi(std::vector<uint8_t> &out)
 bool Adapter::begin(const std::vector<uint8_t> &blob)
 {
 	uint32_t magic = 0;
-	if (blob.size() != 4 + board.backup.size() + sizeof board.eeprom.regs) return false;
+	if (blob.size() != 4 + board.backup.size() + sizeof board.eeprom.regs + 1) return false;
 	memcpy(&magic, blob.data(), 4);
 	if (magic != BLOB_MAGIC) return false;
 	if (settle) settle();
@@ -89,14 +101,15 @@ bool Adapter::begin(const std::vector<uint8_t> &blob)
 		if (booting && i % 60 == 59) booting();
 	}
 	if (board.coin_setting() < 0 || (!board.set_coin_setting(m3::Model3::COIN_FREE_PLAY) && !board.free_play())) return false;
-	// and its stage select on: the challenger picks the stage ("CHALLENGER, SELECT A STAGE"), as an arcade set so;
-	// off (as a fresh backup RAM has it) every match between two players is on the one stage, the lava's
-	board.backup[STAGE_SELECT] = 0;
+	// and its stage select off, as most arcades had it (no stage screen: the game's own next stage), starting at
+	// the host's random place in the stages' list, as an arcade on all day would be
+	board.backup[STAGE_SELECT] = 1;
 	board.power_on();
 	for (int i = 0; i < BOOT_FRAMES; i++) {
 		board.run_frame();
 		if (booting && i % 60 == 59) booting();
 	}
+	set_versus_count(board, blob.back() % 16);
 	board.midi.clear();
 	frame = 0;
 	midi_sent.clear();

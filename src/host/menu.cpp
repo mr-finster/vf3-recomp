@@ -129,9 +129,9 @@ void game_menu::set_net(const net_cells &c)
 	if (c.interrupted) rml += cell("", "CONNECTION INTERRUPTED", 222, "lost");
 	else rml += cell("PING", std::to_string(std::min(c.ping, 9999)), 86) + cell("DELAY", std::to_string(c.delay), 76) + cell("RB", std::to_string(c.rollback), 50);
 	rml += cell("", c.relay ? "RELAY" : "DIRECT", 66, c.relay ? "via relay" : "via direct") + "</div>";
-	if (c.detailed && !c.interrupted)
-		rml += "<div class=\"row two\">" + cell("JITTER", num("%.0f", c.jitter), 92) + cell("RB AVG", num("%.1f", c.rb_avg), 92) +
-		       cell("AHEAD", num("%+.1f", c.ahead), 86) + cell("FRAME", num("%.1f", c.frame_ms), 92) + "</div>";
+	if (c.detailed && !c.interrupted)   // (above it: the first row stays where it is either way)
+		rml = "<div class=\"row two\">" + cell("JITTER", num("%.0f", c.jitter), 92) + cell("RB AVG", num("%.1f", c.rb_avg), 92) +
+		      cell("AHEAD", num("%+.1f", c.ahead), 86) + cell("FRAME", num("%.1f", c.frame_ms), 92) + "</div>" + rml;
 	show_net(rml, c.interrupted ? "cells poor" : c.level <= 0 ? "cells good" : c.level == 1 ? "cells fair" : "cells poor");
 }
 
