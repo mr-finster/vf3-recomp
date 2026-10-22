@@ -117,7 +117,7 @@ public:
 	uint8_t remote_flags() const { return their_flags; }
 
 	// (the protocol's version: both sides must have the same)
-	static constexpr uint16_t PROTOCOL = 1;
+	static constexpr uint16_t PROTOCOL = 2;
 
 private:
 	Link &link;
@@ -131,12 +131,19 @@ private:
 	std::string their_name;
 	Stats stats_;
 	double now = 0, started = 0, last_heard = 0, last_sent = 0, last_hello = 0;
-	bool quiet = false, began = false;
+	bool quiet = false, began = false, restart_clock = false;
 
 	// the starting blob (the host's; the guest's as it comes, in chunks)
 	std::vector<uint8_t> start_blob;
 	std::vector<bool> chunk_have;
 	uint32_t chunks_acked = 0, blob_size = 0, chunk_count = 0;
+	// the host's, at random in its welcome: the guest's acks and ready say it back, so the settings (tens of KB)
+	// only go to an address that's shown it gets what's sent there (else a hello forged with someone else's address
+	// sent them there: 33 KB for a 34-byte packet)
+	uint64_t nonce = 0;
+	bool proven = false;
+	int welcomes = 0;
+	void send_welcome();
 
 	// the rollback
 	uint32_t cur = 0;                      // the next frame to run
@@ -174,7 +181,9 @@ private:
 	void send_hello();
 	void send_blob();
 	void send_inputs();
-	void receive(const std::vector<uint8_t> &p);
+	bool receive(const std::vector<uint8_t> &p);   // false: not this session's
+	void handle(const std::vector<uint8_t> &p);    // (this session's: its token checked)
+	void guest_failed();
 	void got_inputs(uint32_t first, const uint16_t *in, uint32_t n);
 	void start_running();
 	void run_frame(uint32_t f, bool resim);

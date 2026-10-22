@@ -17,11 +17,14 @@ struct Link
 {
 	virtual void send(const uint8_t *p, size_t n) = 0;
 	virtual bool recv(std::vector<uint8_t> &out) = 0;   // the next datagram that's come, false if none
+	// A host's, the session's to call: the sender of the datagram recv gave last is the peer from now on (its
+	// hello was good). Before that, a host answers whoever sent the last datagram, and takes anyone's.
+	virtual void lock() {}
 	virtual ~Link() = default;
 };
 
-// A UDP socket. A host binds a port and takes as its peer the first address a session's datagram comes from; a
-// guest is given the host's address. Non-blocking.
+// A UDP socket. A host binds a port and takes as its peer the address the session locks on (a good hello's: not
+// just the first sender, who could be anyone's forged packet); a guest is given the host's address. Non-blocking.
 std::string lan_address();   // this machine's address on its network, as others there would reach it ("" if none)
 class UdpLink : public Link
 {
@@ -35,6 +38,7 @@ public:
 	bool has_peer() const { return peer_set; }
 	void send(const uint8_t *p, size_t n) override;
 	bool recv(std::vector<uint8_t> &out) override;
+	void lock() override;
 
 private:
 	struct Impl;

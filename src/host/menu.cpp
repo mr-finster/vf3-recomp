@@ -107,7 +107,7 @@ void game_menu::set_notice(const std::string &title, const std::string &sub)
 {
 	const std::string key = title + "\n" + sub;
 	if (!m->overlay || key == m_notice) return;
-	m_notice = title.empty() ? "" : key;
+	m_notice = key;   // (an empty one too: else it was made again every pass)
 	if (Rml::Element *e = m->overlay->GetElementById("notice")) {
 		e->SetInnerRML(title.empty() ? "" : "<div class=\"title\">" + escape(title) + "</div>" + (sub.empty() ? "" : "<div class=\"sub\">" + escape(sub) + "</div>"));
 		e->SetProperty("visibility", title.empty() ? "hidden" : "visible");

@@ -262,7 +262,59 @@ int main(int argc, char **argv)
 		printf("  %-4s UDP on %-10s frames %u/%u\n", ok ? "ok" : "FAIL", where, a.frame(), b.frame());
 		failed += !ok;
 	}
+	// Strangers on the host's port: a junk "VFNP" packet first (the host mustn't lock on its sender), then a real guest
+	{
+		vfnet::UdpLink la, lx, lb;
+		std::string err;
+		bool ok = la.bind(0, err) && lx.connect("127.0.0.1", la.local_port(), err) && lb.connect("127.0.0.1", la.local_port(), err);
+		Toy ga, gb;
+		vfnet::Config cfg;
+		vfnet::Session a(la, ga, { "toy", "v1", 42, "HOST" }, cfg, true, std::vector<uint8_t>(5000, 1));
+		vfnet::Session b(lb, gb, { "toy", "v1", 42, "GUEST" }, cfg, false);
+		const uint8_t junk[] = { 'V', 'F', 'N', 'P', 0xEE };
+		lx.send(junk, sizeof junk);
+		Player pa(1), pb(2);
+		double t = 1000;
+		for (int i = 0; ok && i < 1000000 && (a.frame() < 300 || b.frame() < 300); i++, t += 0.05) {
+			a.poll(t); b.poll(t);
+			if (i % 340 == 0) { a.step(pa.next()); b.step(pb.next()); }
+		}
+		ok = ok && a.frame() >= 300 && b.frame() >= 300;
+		printf("  %-4s a stranger's junk first, then the guest: frames %u/%u\n", ok ? "ok" : "FAIL", a.frame(), b.frame());
+		failed += !ok;
+	}
+	// A hello forged with someone else's address (that address never answers): the host sends it a few small
+	// welcomes, never its settings, and gives up after its handshake time (so it can wait for a player again)
+	{
+		vfnet::UdpLink la, lx;
+		std::string err;
+		bool ok = la.bind(0, err) && lx.connect("127.0.0.1", la.local_port(), err);
+		Toy ga;
+		vfnet::Config cfg;
+		cfg.handshake_ms = 3000;
+		vfnet::Session a(la, ga, { "toy", "v1", 42, "HOST" }, cfg, true, std::vector<uint8_t>(60000, 1));
+		std::vector<uint8_t> h = { 'V', 'F', 'N', 'P', 1 };
+		for (int i = 0; i < 8; i++) h.push_back(uint8_t(0x11 * (i + 1)));   // (a token)
+		h.push_back(uint8_t(vfnet::Session::PROTOCOL)); h.push_back(0);
+		for (const char *str : { "toy", "v1" }) { h.push_back(uint8_t(strlen(str))); h.insert(h.end(), str, str + strlen(str)); }
+		for (int i = 0; i < 8; i++) h.push_back(i ? 0 : 42);   // (the content hash)
+		h.push_back(1); h.push_back('X');   // (a name)
+		h.push_back(2);                     // (a delay)
+		size_t got = 0, blobs = 0;
+		std::vector<uint8_t> in;
+		double t = 1000;
+		for (int i = 0; ok && i < 100000 && a.state() == vfnet::Session::State::handshake; i++, t += 1) {
+			if (i % 100 == 0 && i < 1000) lx.send(h.data(), h.size());   // (ten hellos, a second)
+			a.poll(t);
+			while (lx.recv(in)) { got += in.size(); blobs += in.size() > 4 && in[4] == 4; }
+		}
+		const size_t sent = h.size() * 10;
+		ok = ok && blobs == 0 && got < sent * 4 && a.end_reason() == vfnet::Session::End::timeout;
+		printf("  %-4s a forged hello: %zu bytes sent, %zu back, %zu settings packets; the host gave up (%s)\n", ok ? "ok" : "FAIL", sent, got, blobs,
+		       a.end_reason() == vfnet::Session::End::timeout ? "timeout" : "not");
+		failed += !ok;
+	}
 	if (failed) printf("%d cases FAILED\n", failed);
-	else printf("all %zu cases passed\n", cases.size() + 2);
+	else printf("all %zu cases passed\n", cases.size() + 4);
 	return failed ? 1 : 0;
 }

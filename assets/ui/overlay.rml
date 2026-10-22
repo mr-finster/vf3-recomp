@@ -45,6 +45,8 @@
 			text-align: center;
 		}
 		#toast span {
+			display: inline-block;
+			max-width: 80%;
 			padding: 8dp 26dp;
 			font-size: 28dp;
 			font-weight: 700;

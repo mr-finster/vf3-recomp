@@ -107,6 +107,7 @@
 #include <SDL3/SDL_main.h>   // WinMain, and argv as UTF-8
 #endif
 #include <algorithm>
+#include <utility>
 #include <cctype>
 #include <array>
 #include <chrono>
@@ -499,7 +500,7 @@ struct settings
 		num("renderer_3d", renderer3d, 0, 2);
 		if (auto it = kv.find("roms_folder"); it != kv.end()) roms_folder = it->second;
 		if (auto it = kv.find("online_name"); it != kv.end()) online.name = online_menu::clean_name(it->second);
-		if (auto it = kv.find("online_address"); it != kv.end()) online.address = it->second;
+		if (auto it = kv.find("online_address"); it != kv.end()) online.address = online_menu::clean_address(it->second);
 		num("online_delay", online.delay, -1, 6);
 		num("online_port", online.port, 1024, 65535);
 		flag("online_connection", online.show_connection);
@@ -2455,6 +2456,7 @@ int main(int argc, char **argv)
 	// ---- online play (online.h): the match's frames through the session, its notices over the game ----
 	online.adapter.settle = [&] { if (game.emu_thread.joinable()) game.job_wait(); };
 	online.adapter.program_changed = [&] { game.program_changed(); };
+	online.adapter.booting = [] { SDL_PumpEvents(); };   // (the boot's 2 s: the system doesn't take the game for hung)
 	online.adapter.run = [&](bool resim) {
 		if (!resim) { game.run_frame(true, true); return; }
 		const bool tiles = game.tiles_on;   // (a frame run again after a rollback: the board alone, no picture or sound)
@@ -2480,8 +2482,11 @@ int main(int argc, char **argv)
 	bool match_on = false;
 	Online::Phase online_was = Online::Phase::off;
 	uint64_t online_refresh_t = 0;
+	bool menu_closed_elsewhere = false;   // (the menu closed by a match starting: its closing's bookkeeping still owed)
 	auto end_match = [&] {   // back to playing on its own, from the boot, with this player's NVRAM
-		const bool was_on = match_on;
+		if (game.emu_thread.joinable()) game.job_wait();   // (nothing of a frame still running while it's all put back)
+		half = false;
+		const bool reopen = match_on || nvram_away;   // (a match, or one that started and never got going)
 		if (match_on) fprintf(stderr, "online: the match ended at frame %llu; back to playing alone\n", (unsigned long long)game_frame);
 		match_on = false;
 		game.take_midi = nullptr;
@@ -2499,7 +2504,7 @@ int main(int argc, char **argv)
 		menu.set_title("PAUSED");
 		reset_game();
 		// back on the Online page: what ended the match, and the same again a press away
-		if (was_on && menu.ready()) {
+		if (reopen && menu.ready()) {
 			if (menu.is_open()) menu.close();
 			menu.open(main_page());
 			menu.select_row(5);   // (Online)
@@ -2522,16 +2527,17 @@ int main(int argc, char **argv)
 				};
 				game.tiles_on = true;
 				game_frame = vf3net::BOOT_FRAMES;
-				game.hud_names[online.local_player()] = cfg.online.name;
+				game.hud_names[online.local_player()] = online.identity.name;   // (the name the other side was sent)
 				game.hud_names[online.local_player() ^ 1] = online.opponent();
-				menu.close();
+				arcade_before.clear();   // (the board's arcade settings are the host's now: no restart for them)
+				if (menu.is_open()) { menu.close(); menu_closed_elsewhere = true; }
 				clock_reset = true;
 				sync_menu_sound();
 			}
 			menu.toast(n.text, n.kind == Online::Notice::joined ? 4 : 7);
 			fprintf(stderr, "online: %s\n", n.text.c_str());
 		}
-		if ((match_on && !online.playing()) || (nvram_away && online.phase() == Online::Phase::off)) end_match();   // (ended, left, or never got going)
+		if ((match_on && !online.playing()) || (nvram_away && !online.playing() && !online.starting())) end_match();   // (ended, left, or never got going)
 		static bool was_interrupted = false;   // (the connection back after an interruption: said)
 		if (online.playing() && was_interrupted && !online.interrupted()) menu.toast("Connection back", 3);
 		was_interrupted = online.playing() && online.interrupted();
@@ -2546,7 +2552,12 @@ int main(int argc, char **argv)
 				: online.status();
 		menu.set_net(line, level);
 		// the Online page as things change: its rows made again with the phase, its status lines a few times a second
-		if (menu.is_open() && online.phase() != online_was && menu.top_name() == "Online") menu.replace(online_page(), menu.selected());
+		if (menu.is_open() && online.phase() != online_was && menu.top_name() == "Online" && !menu.capturing())
+			menu.replace(online_page(), online_menu::first_row(online));
+		else if (menu.is_open() && online.playing() && !menu.capturing() && SDL_GetTicks() - online_refresh_t > 500) {
+			online_refresh_t = SDL_GetTicks();   // (the menu in a match: its Playing row's ping)
+			menu.refresh();
+		}
 		else if (menu.is_open() && online.waiting() && SDL_GetTicks() - online_refresh_t > 250) {
 			online_refresh_t = SDL_GetTicks();
 			static std::string said;
@@ -2624,12 +2635,13 @@ int main(int argc, char **argv)
 			}
 		}
 		sync_menu_sound();
-		if (menu_was_open && !menu.is_open()) {
+		if ((menu_was_open && !menu.is_open()) || std::exchange(menu_closed_elsewhere, false)) {
+			if (online.phase() == Online::Phase::off) online.set_last_match({});   // (MATCH OVER: just after one, not for ever)
 			if (cfg_dirty && quit_after < 0 && cfg.save(settings_path)) cfg_dirty = false;
 			if (!arcade_before.empty()) {
 				const bool changed = arcade_before != arcade_bytes();
 				arcade_before.clear();
-				if (changed) reset_game();
+				if (changed && !nvram_away) reset_game();   // (never in a match: that's a desync)
 			}
 			pstate[0] = pstate[1] = pad_state{};
 			pstate[0].back_was = pstate[1].back_was = true;
@@ -2839,7 +2851,7 @@ int main(int argc, char **argv)
 		// a frame's work at most (the pictures go between the last two frames finished: this one isn't yet)
 		static const bool no_halves = getenv("VF3_NO_HALVES") != nullptr;   // (tests: whole frames, as before)
 		if (!half && !no_halves && rec.dir.empty() && running && !stopped && !ff && cfg.smooth && (due == 0 || emu_threaded) && !menu.is_open() && first_shown &&
-			online.phase() == Online::Phase::off &&   // (online: whole frames, each through the session)
+			online.phase() == Online::Phase::off && !match_on && !nvram_away &&   // (online: whole frames, each through the session; none as one ends)
 			frame_clock - double(frames_run) >= 0.5) {
 			const uint64_t th = SDL_GetTicksNS();
 			frame_inputs(half_hk, half_act, half_left);
@@ -3087,6 +3099,12 @@ int main(int argc, char **argv)
 		(void)shown;
 	}
 	online.stop();   // (closed in a match: the other side is told at once, not after a silence)
+	if (nvram_away) {   // (closed in a match: this player's own NVRAM back, to be saved, not the host's)
+		if (game.emu_thread.joinable()) game.job_wait();
+		board.backup = own_backup;
+		memcpy(board.eeprom.regs, own_eeprom, sizeof own_eeprom);
+		nvram_away = false;
+	}
 	saver.finish();
 	saved_hash = ~nvram_hash();   // (the last copies written here whatever the writer did)
 	save_nvram(true);

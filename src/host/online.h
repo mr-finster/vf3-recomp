@@ -58,15 +58,17 @@ public:
 	std::string status() const;   // a line for the menu: what's happening now
 	// The connection display: "MRFINSTER  42 ms  rollback 2", and how good (0 good, 1 fair, 2 poor)
 	std::string connection(int &level) const;
-	std::string opponent() const { return session ? session->opponent_name() : ""; }
+	// the other player's name, as the HUD can show it (only its letters: whatever else the other side sent, dropped)
+	std::string opponent() const;
 	int local_player() const { return is_host ? 0 : 1; }   // (the host is player 1)
 	int delay_now() const { return session ? session->delay() : 0; }
 	void set_delay(int setting);  // the menu's, in a match (Auto: from the ping)
 	int ping() const { return session ? int(session->stats().rtt_ms + 0.5) : 0; }
-	// In a match: how much slower to run the frames to keep in time with the other side (0, or up to 0.04: 4%)
-	double slow_down() const { return playing() && session ? std::clamp(session->stats().lead * 0.02, 0.0, 0.04) : 0.0; }
+	// In a match: how much slower to run the frames to keep in time with the other side (0, or up to 0.02: 2%)
+	// (gently: much more and the sound's queue ran dry, and its catching up ran frames in a burst)
+	double slow_down() const { return playing() && session ? std::clamp(session->stats().lead * 0.01, 0.0, 0.02) : 0.0; }
 	const LastMatch &last_match() const { return last; }
-	void set_last_match(const LastMatch &m) { last = m; }   // (tests)
+	void set_last_match(const LastMatch &m) { last = m; }   // ({}: forgotten, the menu closed after it; tests: one made up)
 	const std::string &local_address() const { return lan; }
 	int local_port() const { return port; }
 
@@ -92,12 +94,14 @@ namespace online_menu {
 
 // The Online page (out of a match). changed: a setting changed (settings.ini to be saved).
 menu_page page(Online &o, OnlineSettings &s, game_menu &menu, std::function<void()> changed);
+// The row the Online page starts on: waiting, its Stop; after a match, the one that plays again
+int first_row(const Online &o);
 // The menu's rows in a match (the game goes on under it): who and how the connection is, input delay, the
 // connection display, leaving the match
-// The row the Online page starts on: after a match, the one that plays again
-int first_row(const Online &o);
 void match_rows(Online &o, OnlineSettings &s, game_menu &menu, std::function<void()> changed, std::vector<menu_item> &rows);
 // The name as typed: upper case, the letters the game's HUD can show, at most vfnet::MAX_NAME
 std::string clean_name(const std::string &s);
+// An address as settings.ini has it: the letters one is typed with, lower case, at most 64
+std::string clean_address(const std::string &s);
 
 } // namespace online_menu

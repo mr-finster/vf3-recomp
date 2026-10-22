@@ -55,6 +55,8 @@ struct UdpLink::Impl
 	sock_t s = NO_SOCKET;
 	sockaddr_storage peer{};
 	socklen_t peer_len = 0;
+	sockaddr_storage last{};   // (a host's before it locks: the last datagram's sender, answered)
+	socklen_t last_len = 0;
 #ifdef _WIN32
 	bool wsa = false;
 #endif
@@ -167,29 +169,49 @@ uint16_t UdpLink::local_port() const
 
 void UdpLink::send(const uint8_t *p, size_t n)
 {
-	if (m->s == NO_SOCKET || !peer_set) return;
-	sendto(m->s, reinterpret_cast<const char *>(p), int(n), 0, reinterpret_cast<const sockaddr *>(&m->peer), m->peer_len);
+	if (m->s == NO_SOCKET) return;
+	if (peer_set) sendto(m->s, reinterpret_cast<const char *>(p), int(n), 0, reinterpret_cast<const sockaddr *>(&m->peer), m->peer_len);
+	else if (m->last_len) sendto(m->s, reinterpret_cast<const char *>(p), int(n), 0, reinterpret_cast<const sockaddr *>(&m->last), m->last_len);
+}
+
+void UdpLink::lock()
+{
+	if (peer_set || !m->last_len) return;
+	m->peer = m->last;
+	m->peer_len = m->last_len;
+	peer_set = true;
 }
 
 bool UdpLink::recv(std::vector<uint8_t> &out)
 {
 	if (m->s == NO_SOCKET) return false;
-	for (;;) {
+	// (at most so many others' datagrams skipped in one call: a flood of them can't hold the caller here)
+	for (int skipped = 0; skipped < 256; skipped++) {
 		uint8_t buf[2048];
 		sockaddr_storage from{};
 		socklen_t from_len = sizeof from;
 		const auto n = recvfrom(m->s, reinterpret_cast<char *>(buf), sizeof buf, 0, reinterpret_cast<sockaddr *>(&from), &from_len);
-		if (n < 0) return false;
-		if (!peer_set) {   // a host's first game datagram ("VFNP" first): its sender is the peer from now on
+		if (n < 0) {
+			// nothing more, or one datagram's error (too big for the buffer, a port unreachable that came back):
+			// that one's skipped, not the rest (else anyone's oversized datagrams cut every read short)
+#ifdef _WIN32
+			const int e = WSAGetLastError();
+			if (e == WSAEMSGSIZE || e == WSAECONNRESET) continue;
+#else
+			if (errno == ECONNREFUSED || errno == EINTR) continue;
+#endif
+			return false;
+		}
+		if (!peer_set) {   // a host's, before it locks: any session's datagram ("VFNP" first), its sender answered
 			if (n < 4 || memcmp(buf, "VFNP", 4) != 0) continue;
-			m->peer = from;
-			m->peer_len = from_len;
-			peer_set = true;
+			m->last = from;
+			m->last_len = from_len;
 		} else if (!same_address(from, m->peer))
 			continue;   // (anyone else's: dropped)
 		out.assign(buf, buf + n);
 		return true;
 	}
+	return false;
 }
 
 std::string UdpLink::peer_address() const

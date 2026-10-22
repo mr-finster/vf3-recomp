@@ -83,10 +83,16 @@ bool Adapter::begin(const std::vector<uint8_t> &blob)
 	if (program_changed) program_changed();
 	board.rtc_time = 0;
 	board.power_on();
-	for (int i = 0; i < 300 && board.coin_setting() < 0; i++) board.run_frame();
+	for (int i = 0; i < 300 && board.coin_setting() < 0; i++) {
+		board.run_frame();
+		if (booting && i % 60 == 59) booting();
+	}
 	if (board.coin_setting() < 0 || (!board.set_coin_setting(m3::Model3::COIN_FREE_PLAY) && !board.free_play())) return false;
 	board.power_on();
-	for (int i = 0; i < BOOT_FRAMES; i++) board.run_frame();
+	for (int i = 0; i < BOOT_FRAMES; i++) {
+		board.run_frame();
+		if (booting && i % 60 == 59) booting();
+	}
 	board.midi.clear();
 	frame = 0;
 	midi_sent.clear();

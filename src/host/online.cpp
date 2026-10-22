@@ -32,10 +32,17 @@ void Online::ended(const std::string &why)
 	last.any = true;
 	last.was_host = is_host;
 	last.why = why;
-	last.opponent = session ? session->opponent_name() : "";
+	last.opponent = opponent();
 	last.seconds = int((now - began_at) / 1000);
 	last.ping = ping();
 	fprintf(stderr, "online: the match with %s ended after %d s: %s\n", last.opponent.c_str(), last.seconds, why.c_str());
+}
+
+std::string Online::opponent() const
+{
+	if (!session) return "";
+	const std::string n = online_menu::clean_name(session->opponent_name());
+	return n.empty() ? std::string(is_host ? "PLAYER 2" : "PLAYER 1") : n;
 }
 
 bool Online::host(const OnlineSettings &s, std::string &error)
@@ -121,7 +128,7 @@ void Online::poll(double t)
 				return;
 			}
 			if (was_playing && why != vfnet::Session::End::quit) {
-				const std::string who = session->opponent_name().empty() ? std::string("your opponent") : session->opponent_name();
+				const std::string who = opponent();
 				ended(why == vfnet::Session::End::opponent_quit ? who + " left the match."
 				      : why == vfnet::Session::End::disconnected ? "Lost the connection to " + who + "."
 				      : why == vfnet::Session::End::desync ? "The match went out of step." : e.text);
@@ -182,7 +189,7 @@ void Online::set_delay(int setting)
 std::string Online::status() const
 {
 	if (!session) return "";
-	const std::string who = session->opponent_name();
+	const std::string who = session->opponent_name().empty() ? std::string() : opponent();
 	switch (ph) {
 	case Phase::hosting:
 		if (who.empty()) return "Waiting for a player to join...";
@@ -203,17 +210,15 @@ std::string Online::connection(int &level) const
 	level = 0;
 	if (!session || ph != Phase::playing) return "";
 	const auto &st = session->stats();
-	if (session->interrupted()) { level = 2; return session->opponent_name() + "   connection interrupted"; }
+	if (session->interrupted()) { level = 2; return opponent() + "   connection interrupted"; }
 	const int ms = int(st.rtt_ms + 0.5), rb = st.rollback_max;
 	level = ms < 60 && rb <= 2 ? 0 : ms < 120 && rb <= 4 ? 1 : 2;
-	return session->opponent_name() + "   " + std::to_string(ms) + " ms   rollback " + std::to_string(rb);
+	return opponent() + "   " + std::to_string(ms) + " ms   rollback " + std::to_string(rb);
 }
 
 // ---- the menu ----
 
 namespace online_menu {
-
-int first_row(const Online &o);
 
 namespace {
 
@@ -341,11 +346,22 @@ menu_page join_page(Online &o, OnlineSettings &s, game_menu &menu, std::function
 	c.good = [problem] { return problem->empty(); };
 	p.items.push_back(c);
 	p.items.push_back({ "Stop", "Stops trying to join.", {}, {}, [&o, problem] { o.stop(); problem->clear(); } });
-	p.items.push_back({ "Back", "", {}, {}, [&menu] { menu.pop(); } });
+	// (the Online page under it made again: it was made before Connect, and shows joining now, or what came of it)
+	p.items.push_back({ "Back", "", {}, {}, [&o, &s, &menu, changed] { menu.pop(); menu.replace(page(o, s, menu, changed), first_row(o)); } });
 	return p;
 }
 
 } // namespace
+
+std::string clean_address(const std::string &s)
+{
+	std::string out;
+	for (char ch : s) {
+		ch = char(tolower(uint8_t(ch)));
+		if (ADDRESS_LETTERS.find(ch) != std::string::npos && out.size() < 64) out += ch;
+	}
+	return out;
+}
 
 std::string clean_name(const std::string &s)
 {
@@ -446,13 +462,16 @@ menu_page page(Online &o, OnlineSettings &s, game_menu &menu, std::function<void
 			} };
 		h.below = [problem] { return *problem; };
 		p.items.push_back(h);
+		auto join_problem = std::make_shared<std::string>();
 		p.items.push_back({ "Join a match", "Joins a player who's hosting, by their address. Matches always play the PC way, free play, "
 			"with the host's arcade settings. You're player 2, with your own controls: Player 1's keys or pad work.", {}, {},
-			[&o, &s, &menu, problem, changed, type_name] {
+			[&o, &s, &menu, join_problem, changed, type_name] {
 				auto go = [&o, &s, &menu, changed] { menu.push(join_page(o, s, menu, changed)); };
-				if (s.name.empty()) { *problem = "Your name first: type it above."; type_name(go); return; }
+				if (s.name.empty()) { *join_problem = "Your name first: type it above."; type_name(go); return; }
+				join_problem->clear();
 				go();
 			} });
+		p.items.back().below = [join_problem] { return *join_problem; };
 	}
 	p.items.push_back({ "SETTINGS", "", {}, {}, {}, true });
 	p.items.back().heading = true;

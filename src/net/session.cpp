@@ -1,5 +1,6 @@
 #include "session.h"
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstring>
 #include <chrono>
@@ -33,6 +34,10 @@ constexpr uint32_t MAGIC = 0x504E4656;   // "VFNP"
 constexpr size_t CHUNK = 1024;            // the starting blob's pieces
 constexpr uint32_t CHUNK_WINDOW = 32;     // sent ahead of the last acknowledged
 constexpr uint32_t MAX_INPUTS = 240;      // in one packet
+constexpr int MAX_PACKETS = 64;           // read in one poll (a flood can't hold the frame up)
+constexpr int MAX_WELCOMES = 10;          // a host's welcome to a hello that's never answered, at most
+// why a host refused (the guest says it in its own words: no text from the other side is shown as it came)
+enum : uint8_t { R_VERSION = 1, R_GAME, R_ROM };
 enum : uint8_t { HELLO = 1, WELCOME, REJECT, BLOB, BLOB_ACK, READY, GO, INPUT, QUIT };
 
 // The packets' fields, little-endian
@@ -60,10 +65,28 @@ struct In
 	std::string str() { const size_t n = u8(); if (!need(n)) return {}; std::string s(reinterpret_cast<const char *>(p), n); p += n; return s; }
 };
 
-std::string clean_name(std::string s)
+// what the other side says of itself, shown to the player: printable ASCII only, so short
+std::string printable(const std::string &s, size_t max)
 {
-	if (s.size() > size_t(MAX_NAME)) s.resize(size_t(MAX_NAME));
-	return s;
+	std::string out;
+	for (char c : s)
+		if (c >= 0x20 && c < 0x7F && out.size() < max) out += c;
+	return out;
+}
+
+std::string clean_name(const std::string &s) { return printable(s, size_t(MAX_NAME)); }
+std::string clean_build(const std::string &s)
+{
+	std::string out;
+	for (char c : printable(s, 40))
+		if (isalnum(uint8_t(c)) || c == '.' || c == '-' || c == '+' || c == '_') out += c;
+	return out.empty() ? std::string("another version") : out;
+}
+
+uint64_t random64()
+{
+	std::random_device rd;
+	return (uint64_t(rd()) << 32 ^ rd()) ^ uint64_t(std::chrono::steady_clock::now().time_since_epoch().count()) * 0x9E3779B97F4A7C15ull;
 }
 
 } // namespace
@@ -77,8 +100,7 @@ Session::Session(Link &link, Game &game, const Identity &me_, const Config &cfg_
 	cfg.checksum_every = std::max(cfg.checksum_every, 1);
 	ring.resize(size_t(cfg.max_rollback) + 2);
 	if (!host) {   // (the guest's token, at random: the host takes it from the hello)
-		std::random_device rd;
-		token = (uint64_t(rd()) << 32 ^ rd()) ^ uint64_t(std::chrono::steady_clock::now().time_since_epoch().count()) * 0x9E3779B97F4A7C15ull;
+		token = random64();
 		have_token = true;
 	}
 	if (host) {
@@ -126,13 +148,21 @@ void Session::send_hello()
 	last_hello = now;
 }
 
-void Session::send_blob()
+void Session::send_welcome()
 {
 	Out w(WELCOME, token);
 	w.str(me.name);
 	w.u32(blob_size);
 	w.u32(chunk_count);
+	w.u64(nonce);
 	send_packet(w.b);
+	welcomes++;
+	last_hello = now;
+}
+
+void Session::send_blob()
+{
+	if (!proven) return;
 	for (uint32_t i = chunks_acked; i < std::min(chunk_count, chunks_acked + CHUNK_WINDOW); i++) {
 		Out o(BLOB, token);
 		o.u32(i);
@@ -149,7 +179,7 @@ void Session::send_inputs()
 	Out o(INPUT, token);
 	o.u32(uint32_t(remote.size()));   // (their inputs this side has)
 	o.u32(cur);
-	o.u8(uint8_t(int8_t(std::clamp(adv_mine.empty() ? 0 : adv_mine.back(), -100, 100))));
+	o.u8(uint8_t(int8_t(have_their_t && !adv_mine.empty() ? std::clamp(adv_mine.back(), -100, 100) : 0)));   // (0 till it's heard: no lead to tell)
 	o.u8(my_flags);
 	o.u32(uint32_t(int64_t(now)));
 	o.u32(have_their_t ? their_t : 0);
@@ -176,17 +206,24 @@ void Session::start_running()
 	events.push_back({ Event::connected, their_name });
 }
 
+void Session::guest_failed()
+{
+	for (int i = 0; i < 3; i++) send_packet(Out(QUIT, token).b);   // (the host told at once, not left waiting out its time)
+	finish(End::rejected, "The game couldn't start from the host's settings.");
+}
+
 void Session::poll(double t)
 {
 	now = t;
 	if (started == 0) started = last_heard = t ? t : 1e-9;
+	if (restart_clock) { restart_clock = false; started = last_heard = t; }
 	std::vector<uint8_t> p;
-	while (st != State::ended && link.recv(p)) {
+	for (int k = 0; k < MAX_PACKETS && st != State::ended && link.recv(p); k++) {
 		In in(p);
 		if (in.u32() != MAGIC || !in.ok) continue;
+		if (!receive(p)) continue;   // (only this session's packets say the other side's there)
 		last_heard = now;
 		if (quiet) { quiet = false; events.push_back({ Event::resumed, "" }); }
-		receive(p);
 	}
 	if (st == State::ended) return;
 	if (st == State::handshake) {
@@ -198,10 +235,12 @@ void Session::poll(double t)
 		if (now - last_hello >= 100) {
 			if (!host) {
 				if (chunk_count == 0 && their_name.empty()) send_hello();
-				else if (began) { send_packet(Out(READY, token).b); last_hello = now; }
-				else { Out a(BLOB_ACK, token); a.u32(chunks_acked); send_packet(a.b); last_hello = now; }
-			} else if (!their_name.empty() && !began)
-				send_blob();
+				else if (began) { Out r(READY, token); r.u64(nonce); send_packet(r.b); last_hello = now; }
+				else { Out a(BLOB_ACK, token); a.u32(chunks_acked); a.u64(nonce); send_packet(a.b); last_hello = now; }
+			} else if (!their_name.empty() && !began) {
+				if (proven) send_blob();
+				else if (welcomes < MAX_WELCOMES && now - last_hello >= 200) send_welcome();   // (unanswered: soon given up)
+			}
 		}
 		return;
 	}
@@ -217,14 +256,24 @@ void Session::poll(double t)
 	if (now - last_sent >= 50) send_inputs();   // (keeps the other side hearing from us while waiting)
 }
 
-void Session::receive(const std::vector<uint8_t> &p)
+bool Session::receive(const std::vector<uint8_t> &p)
 {
 	In in(p);
 	in.u32();
 	const uint8_t type = in.u8();
 	const uint64_t t_ = in.u64();
-	if (!in.ok) return;
-	if (have_token ? t_ != token : type != HELLO) return;   // (not this session's)
+	if (!in.ok) return false;
+	if (have_token ? t_ != token : type != HELLO) return false;   // (not this session's)
+	handle(p);
+	return true;
+}
+
+void Session::handle(const std::vector<uint8_t> &p)
+{
+	In in(p);
+	in.u32();
+	const uint8_t type = in.u8();
+	const uint64_t t_ = in.u64();
 	switch (type) {
 	case HELLO: {
 		if (!host || st != State::handshake) return;
@@ -234,34 +283,42 @@ void Session::receive(const std::vector<uint8_t> &p)
 		const std::string name = clean_name(in.str());
 		in.u8();
 		if (!in.ok) return;
-		std::string mine, theirs;
+		std::string mine;
+		uint8_t reason = 0;
 		if (proto != PROTOCOL || build != me.build)
-			mine = "Your opponent has " + build + ", you have " + me.build + ": you both need the same version.",
-			theirs = "The host has " + me.build + ", you have " + build + ": you both need the same version.";
+			mine = "Your opponent has " + clean_build(build) + ", you have " + me.build + ": you both need the same version.", reason = R_VERSION;
 		else if (game_ != me.game)
-			mine = theirs = "Your opponent is playing another game.";
+			mine = "Your opponent is playing another game.", reason = R_GAME;
 		else if (content != me.content)
-			mine = theirs = "Your game files (the ROM) aren't the same as your opponent's.";
-		if (!mine.empty()) {
+			mine = "Your game files (the ROM) aren't the same as your opponent's.", reason = R_ROM;
+		if (reason) {
 			Out r(REJECT, t_);
-			r.str(theirs);
-			for (int i = 0; i < 3; i++) send_packet(r.b);
+			r.u8(reason);
+			r.str(me.build);
+			for (int i = 0; i < 2; i++) send_packet(r.b);
 			finish(End::rejected, mine);
 			return;
 		}
-		token = t_;   // (from now on only this guest's packets)
-		have_token = true;
-		if (their_name.empty()) started = now;   // (the handshake's time from the first hello)
-		if (their_name.empty() && trace) trace("a player's hello: " + (name.empty() ? std::string("PLAYER 2") : name) + "; sending the settings");
-		their_name = name.empty() ? "PLAYER 2" : name;
-		send_blob();
+		if (!have_token) {   // (the first good hello: from now on only this guest's packets, from its address)
+			token = t_;
+			have_token = true;
+			nonce = random64();
+			link.lock();
+			started = now;   // (the handshake's time from the first hello)
+			their_name = name.empty() ? "PLAYER 2" : name;
+			if (trace) trace("a player's hello: " + their_name + "; sending the settings");
+		}
+		// (again for a hello again, its welcome lost; not more often than the resends, nor once it's answered)
+		if (!proven && welcomes < MAX_WELCOMES && (welcomes == 0 || now - last_hello >= 100)) send_welcome();
 		return;
 	}
 	case WELCOME: {
-		if (host || st != State::handshake || chunk_count) return;
+		if (host || st != State::handshake || chunk_count || began) return;
 		const std::string name = clean_name(in.str());
 		const uint32_t size = in.u32(), count = in.u32();
-		if (!in.ok || count != (size + CHUNK - 1) / CHUNK || size > cfg.max_blob) return;
+		const uint64_t n_ = in.u64();
+		if (!in.ok || size > cfg.max_blob || count != (size_t(size) + CHUNK - 1) / CHUNK) return;
+		nonce = n_;
 		their_name = name.empty() ? "PLAYER 1" : name;
 		if (trace) trace("the host answered (" + their_name + "): its settings, " + std::to_string(size) + " bytes");
 		blob_size = size;
@@ -270,14 +327,29 @@ void Session::receive(const std::vector<uint8_t> &p)
 		chunk_have.assign(count, false);
 		if (count == 0) {
 			began = true;
-			if (!game.begin(start_blob)) { finish(End::rejected, "The game couldn't start from the host's settings."); return; }
-			send_packet(Out(READY, token).b);
+			if (!game.begin(start_blob)) { guest_failed(); return; }
+			restart_clock = true;   // (its own boot took seconds: the handshake's time from now, for the host's)
+			Out r(READY, token);
+			r.u64(nonce);
+			send_packet(r.b);
+		} else {   // (at once: the host sends its settings only once it's heard this)
+			Out a(BLOB_ACK, token);
+			a.u32(0);
+			a.u64(nonce);
+			send_packet(a.b);
+			last_hello = now;
 		}
 		return;
 	}
 	case REJECT: {
-		const std::string text = in.str();
-		if (!host && in.ok) finish(End::rejected, text);
+		if (host || st != State::handshake) return;
+		const uint8_t reason = in.u8();
+		const std::string build = clean_build(in.str());
+		if (!in.ok) return;
+		finish(End::rejected, reason == R_VERSION ? "The host has " + build + ", you have " + me.build + ": you both need the same version."
+		                      : reason == R_GAME ? "The host is playing another game."
+		                      : reason == R_ROM ? "Your game files (the ROM) aren't the same as the host's."
+		                                        : "The host couldn't take you.");
 		return;
 	}
 	case BLOB: {
@@ -290,26 +362,36 @@ void Session::receive(const std::vector<uint8_t> &p)
 		while (chunks_acked < chunk_count && chunk_have[chunks_acked]) chunks_acked++;
 		Out a(BLOB_ACK, token);
 		a.u32(chunks_acked);
+		a.u64(nonce);
 		send_packet(a.b);
 		if (chunks_acked == chunk_count) {
 			if (trace) trace("the host's settings all here: starting the game");
 			began = true;
-			if (!game.begin(start_blob)) { finish(End::rejected, "The game couldn't start from the host's settings."); return; }
-			send_packet(Out(READY, token).b);
+			if (!game.begin(start_blob)) { guest_failed(); return; }
+			restart_clock = true;   // (its own boot took seconds: the handshake's time from now, for the host's)
+			Out r(READY, token);
+			r.u64(nonce);
+			send_packet(r.b);
 		}
 		return;
 	}
 	case BLOB_ACK: {
-		if (!host || st != State::handshake) return;
+		if (!host || st != State::handshake || began) return;
 		const uint32_t n = in.u32();
-		if (in.ok && n > chunks_acked && n <= chunk_count) {
-			chunks_acked = n;
-			send_blob();   // (the window moves on)
-		}
+		if (!in.ok || in.u64() != nonce || !in.ok) return;   // (not from where the welcome went)
+		const bool first = !proven;
+		proven = true;
+		if (n > chunks_acked && n <= chunk_count) chunks_acked = n;
+		else if (!first) return;
+		send_blob();   // (the first window, or the window moved on)
 		return;
 	}
 	case READY: {
 		if (!host || their_name.empty()) return;
+		if (!proven) {   // (an empty blob: the ready is the first answer to the welcome)
+			if (in.u64() != nonce || !in.ok) return;
+			proven = true;
+		}
 		// the host's game starts once the guest's has (not at the hello: a guest that never got this far left the
 		// host's game set up for a match it had never had, and playing on it alone after)
 		if (!began) {
@@ -455,26 +537,30 @@ bool Session::step(uint16_t input)
 	}
 
 	// time sync: how far ahead of the other side this one is (its frame now, from what it last said and the time
-	// since, and half the round trip), against how far ahead it says it is; the one ahead waits a frame
-	const double theirs_now = double(their_frame) + (now - their_frame_at + stats_.rtt_ms / 2) / cfg.frame_ms;
-	const int ahead = int(std::lround(std::clamp(double(cur) - theirs_now, -120.0, 120.0)));   // (whatever the other side says)
-	adv_mine.push_back(ahead);
-	adv_theirs.push_back(their_adv);
-	while (adv_mine.size() > 60) adv_mine.pop_front();
-	while (adv_theirs.size() > 60) adv_theirs.pop_front();
-	double am = 0, at = 0;
-	for (int a : adv_mine) am += a;
-	for (int a : adv_theirs) at += a;
-	am /= double(adv_mine.size());
-	at /= double(adv_theirs.size());
-	const double lead = (am - at) / 2;   // (half the difference: the other side catches up the other half)
-	stats_.ahead = int(std::lround(lead));
-	stats_.lead = have_their_t ? lead : 0;
-	if (wait_cool > 0) wait_cool--;
-	else if (lead >= (cfg.soft_sync ? cfg.hard_wait_lead : 1.0) && have_their_t) {
-		wait_cool = 20;
-		stats_.waits++;
-		return false;
+	// since, and half the round trip), against how far ahead it says it is; the one ahead waits a frame. Only once
+	// it's heard from the other side: before, "their frame" is 0 and this side seemed thousands of frames ahead,
+	// which held the start of every match up, and slowed it after.
+	if (have_their_t) {
+		const double theirs_now = double(their_frame) + (now - their_frame_at + stats_.rtt_ms / 2) / cfg.frame_ms;
+		const int ahead = int(std::lround(std::clamp(double(cur) - theirs_now, -120.0, 120.0)));   // (whatever the other side says)
+		adv_mine.push_back(ahead);
+		adv_theirs.push_back(their_adv);
+		while (adv_mine.size() > 60) adv_mine.pop_front();
+		while (adv_theirs.size() > 60) adv_theirs.pop_front();
+		double am = 0, at = 0;
+		for (int a : adv_mine) am += a;
+		for (int a : adv_theirs) at += a;
+		am /= double(adv_mine.size());
+		at /= double(adv_theirs.size());
+		const double lead = (am - at) / 2;   // (half the difference: the other side catches up the other half)
+		stats_.ahead = int(std::lround(lead));
+		stats_.lead = lead;
+		if (wait_cool > 0) wait_cool--;
+		else if (lead >= (cfg.soft_sync ? cfg.hard_wait_lead : 1.0)) {
+			wait_cool = 20;
+			stats_.waits++;
+			return false;
+		}
 	}
 
 	game.save(ring[cur % R]);
