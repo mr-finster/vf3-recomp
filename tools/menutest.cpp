@@ -9,6 +9,7 @@
 #include <SDL3/SDL.h>
 #include <cstdio>
 #include <cstring>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -62,6 +63,7 @@ void key(SDL_Scancode sc)
 	SDL_Event e{};
 	e.type = SDL_EVENT_KEY_DOWN;
 	e.key.scancode = sc;
+	e.key.key = SDL_GetKeyFromScancode(sc, SDL_KMOD_NONE, false);   // (as a real key press has both)
 	e.key.down = true;
 	menu->handle_event(e);
 }
@@ -129,9 +131,26 @@ int main(int argc, char **argv)
 	printf("pointer: hovering selected row %d; row %d stayed selected as the rows were made again\n", hovered, chosen);
 	gm.close();
 	gm.open(root());
+	auto row = [&](const char *label) {   // (the Online page made again, that row selected)
+		menu_page pg = online_menu::page(o, s, gm, changed);
+		int at = -1;
+		for (size_t i = 0; i < pg.items.size(); i++)
+			if (pg.items[i].label == label) at = int(i);
+		if (at < 0) {
+			fprintf(stderr, "menutest: no row %s; the page's:", label);
+			for (auto &it : pg.items) fprintf(stderr, " [%s]", it.label.c_str());
+			fprintf(stderr, " (phase %d)\n", int(o.phase()));
+		}
+		gm.replace(pg, at);
+	};
+	auto poll_for = [&](double ms, std::function<bool()> until) {   // (the Online's work, in real time)
+		const uint64_t t0 = SDL_GetTicks();
+		while (SDL_GetTicks() - t0 < ms && !until()) { o.poll(double(SDL_GetTicks())); SDL_Delay(10); }
+	};
 	gm.push(online_menu::page(o, s, gm, changed));
 	shot("online.png", w, h);
 
+	row("Your name");
 	key(SDL_SCANCODE_RETURN);   // (Your name: typing)
 	for (int i = 0; i < 9; i++) key(SDL_SCANCODE_BACKSPACE);
 	text("Akira");
@@ -139,7 +158,7 @@ int main(int argc, char **argv)
 	key(SDL_SCANCODE_ESCAPE);
 
 	s.name.clear();
-	gm.replace(online_menu::page(o, s, gm, changed), 1);
+	row("Host a match");
 	key(SDL_SCANCODE_RETURN);   // (Host with no name: asked for it)
 	shot("online_no_name.png", w, h);
 	key(SDL_SCANCODE_ESCAPE);
@@ -147,12 +166,12 @@ int main(int argc, char **argv)
 
 	std::string err;
 	if (!o.host(s, err)) fprintf(stderr, "menutest: hosting: %s\n", err.c_str());
-	gm.replace(online_menu::page(o, s, gm, changed), 7);
+	gm.replace(online_menu::page(o, s, gm, changed), -1);
 	shot("hosting.png", w, h);
 	o.stop();
 
-	gm.replace(online_menu::page(o, s, gm, changed), 2);
-	key(SDL_SCANCODE_RETURN);   // (Join a match)
+	row("Join by address");
+	key(SDL_SCANCODE_RETURN);
 	key(SDL_SCANCODE_DOWN);
 	key(SDL_SCANCODE_RETURN);   // (Connect with no address)
 	shot("join.png", w, h);
@@ -169,17 +188,44 @@ int main(int argc, char **argv)
 	gm.refresh();
 	shot("join_failed.png", w, h);
 	o.stop();
+	gm.pop();
 
-	o.set_last_match({ true, true, "RENODECK left the match.", "RENODECK", 194, 19 });
-	gm.replace(online_menu::page(o, s, gm, changed), online_menu::first_row(o));
+	// A room code's: hosting (the lobby: VF_LOBBY, e.g. tools/lobby's npx wrangler dev), and joining a code that isn't
+	if (!Online::lobby_default().empty()) {
+		row("Host a match");
+		key(SDL_SCANCODE_RETURN);
+		poll_for(15000, [&] { return !o.room_code().empty() || o.phase() == Online::Phase::off; });
+		gm.replace(online_menu::page(o, s, gm, changed), -1);
+		shot("room_host.png", w, h);
+		printf("room: hosting, code %s (%s)\n", o.room_code().c_str(), o.status().c_str());
+		key(SDL_SCANCODE_UP);
+		key(SDL_SCANCODE_RETURN);   // (Copy the code)
+		shot("room_copied.png", w, h);
+		o.stop();
+		row("Join with a code");
+		key(SDL_SCANCODE_RETURN);
+		key(SDL_SCANCODE_RETURN);   // (the code: typing)
+		text("zzz-222");
+		shot("join_code.png", w, h);
+		key(SDL_SCANCODE_RETURN);   // (typed: joins)
+		shot("room_joining.png", w, h);
+		poll_for(15000, [&] { return o.phase() == Online::Phase::off; });
+		gm.replace(online_menu::page(o, s, gm, changed), -1);
+		shot("room_join_failed.png", w, h);
+		printf("room: joining ZZZ-222: %s\n", o.join_failure().c_str());
+		o.stop();
+	}
+
+	o.set_last_match({ true, true, true, "RENODECK left the match.", "RENODECK", 194, 19 });
+	gm.replace(online_menu::page(o, s, gm, changed), -1);
 	shot("match_over_host.png", w, h);
-	o.set_last_match({ true, false, "Lost the connection to MRFINSTER.", "MRFINSTER", 61, 140 });
+	o.set_last_match({ true, false, false, "Lost the connection to MRFINSTER.", "MRFINSTER", 61, 140 });
 	s.address = "192.168.1.20";
-	gm.replace(online_menu::page(o, s, gm, changed), online_menu::first_row(o));
+	gm.replace(online_menu::page(o, s, gm, changed), -1);
 	shot("match_over_guest.png", w, h);
 	key(SDL_SCANCODE_RETURN);   // (Join MRFINSTER again: the page while joining)
 	o.poll(1000);
-	gm.replace(online_menu::page(o, s, gm, changed), gm.selected());
+	gm.replace(online_menu::page(o, s, gm, changed), -1);
 	shot("joining.png", w, h);
 	o.stop();
 

@@ -21,6 +21,7 @@ std::string escape(const std::string &s)
 
 int first_selectable(const menu_page &p)
 {
+	if (p.start >= 0 && p.start < int(p.items.size()) && !p.items[size_t(p.start)].info) return p.start;
 	for (size_t i = 0; i < p.items.size(); i++)
 		if (!p.items[i].info) return int(i);
 	return 0;

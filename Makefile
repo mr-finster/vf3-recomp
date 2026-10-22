@@ -22,9 +22,12 @@ FT_LIBS ?= $(shell pkg-config --libs freetype2 2>/dev/null || echo -L/opt/homebr
 # the date of the last commit. Builds without git are handed them in the environment.
 VF3_VERSION ?= $(shell git describe --tags --always 2>/dev/null || echo dev)
 VF3_DATE ?= $(shell git log -1 --format=%cd --date=format:'%b %-d %Y' 2>/dev/null)
+# and the lobby the room codes use (tools/lobby/README.md): its https address, "" for none (Online then offers only
+# the by-address matches)
+VF_LOBBY_URL ?=
 $(OBJ)/version.h: FORCE
 	@mkdir -p $(OBJ)
-	@printf '#define VF3_VERSION "%s"\n#define VF3_DATE "%s"\n' "$(VF3_VERSION)" "$(VF3_DATE)" > $@.tmp
+	@printf '#define VF3_VERSION "%s"\n#define VF3_DATE "%s"\n#define VF_LOBBY_URL "%s"\n' "$(VF3_VERSION)" "$(VF3_DATE)" "$(VF_LOBBY_URL)" > $@.tmp
 	@cmp -s $@.tmp $@ && rm -f $@.tmp || mv $@.tmp $@
 FORCE:
 
@@ -36,8 +39,10 @@ $(OBJ)/third_party/rmlui/%.o: CXXFLAGS += $(RML_CFLAGS) $(FT_CFLAGS) $(SDL_CFLAG
 $(OBJ)/src/host/main.o $(OBJ)/src/host/menu.o $(OBJ)/src/host/online.o $(OBJ)/src/host/sysinfo.o $(OBJ)/src/host/d3d11_map.o $(OBJ)/src/gpu/r3d_gpu.o $(OBJ)/tools/menutest.o: CXXFLAGS += $(SDL_CFLAGS) $(RML_CFLAGS)
 $(OBJ)/src/host/main.o: $(OBJ)/version.h
 $(OBJ)/src/host/main.o: CXXFLAGS += -I$(OBJ)
+$(OBJ)/src/host/online.o: $(OBJ)/version.h
+$(OBJ)/src/host/online.o: CXXFLAGS += -I$(OBJ)
 # Netplay (src/net): rollback sessions and their links, nothing of the game's (shared with VF1 and VF2 Recomp)
-NET = src/net/session.cpp src/net/link.cpp
+NET = src/net/session.cpp src/net/link.cpp src/net/room_link.cpp src/net/stun.cpp src/net/http.cpp
 
 HOST = src/host/main.cpp src/host/menu.cpp src/host/online.cpp src/host/vf3_netplay.cpp src/host/sysinfo.cpp src/host/d3d11_map.cpp src/gpu/r3d_gpu.cpp $(NET)
 
@@ -69,6 +74,10 @@ $(BIN)/vf3lock: $(call objs,$(CORE) tools/vf3lock.cpp) $(SLJIT_OBJ)
 	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDLIBS)
 
 $(BIN)/vf3soak: $(call objs,$(CORE) tools/vf3soak.cpp) $(SLJIT_OBJ)
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDLIBS)
+
+$(BIN)/roomtest: $(call objs,$(NET) tools/roomtest.cpp)
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDLIBS)
 

@@ -1,0 +1,16 @@
+# The lobby for VF1, VF2 and VF3 Recomp's online play (tools/lobby/README.md: setting it up)
+name = "vf-lobby"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "Room"
+
+[[durable_objects.bindings]]
+name = "LIMITS"
+class_name = "Limits"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Room", "Limits"]

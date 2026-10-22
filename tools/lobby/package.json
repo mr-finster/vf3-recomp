@@ -1,0 +1,6 @@
+{
+  "name": "vf-lobby",
+  "private": true,
+  "scripts": { "dev": "wrangler dev", "deploy": "wrangler deploy" },
+  "devDependencies": { "wrangler": "4.151.3" }
+}
