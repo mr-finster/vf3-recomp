@@ -12,6 +12,7 @@
 #include "../net/link.h"
 #include "../net/room_link.h"
 #include "../net/session.h"
+#include "../net/json.h"
 #include <algorithm>
 #include <deque>
 #include <functional>
@@ -35,7 +36,7 @@ class Online
 public:
 	enum class Phase { off, hosting, joining, playing };
 	// Where a room code's match has got to (none: by address)
-	enum class Step { none, getting_ready, opening, waiting, finding, connecting };
+	enum class Step { none, getting_ready, opening, waiting, finding, searching, connecting };   // (searching: a random opponent)
 	struct Notice { enum Kind { joined, ended, refused, tip } kind; std::string text; };   // (tip: a toast, nothing more)
 	// The match that ended last: what ended it, who and how long, for the Online page to show after it (and offer
 	// the same again)
@@ -43,13 +44,16 @@ public:
 	{
 		bool any = false, was_host = false, by_code = false;
 		bool lost = false;            // the connection lost (else left, or out of step)
+		bool random = false;          // a random opponent's (else a code's or an address's)
 		bool relay = false;           // it went through a relay
 		std::string why, opponent;
 		std::string code, address;    // the room's code, or the address joined (for the same again)
 		int seconds = 0, ping = 0;
+		int wins[2] = {};             // matches won between the two: player 1's (the host's), player 2's
+		std::string country[2];       // (and their countries: two letters, "" not known)
 	};
 	// What was tried last (for Try again): hosting or joining, with a code or by address
-	enum class Try { none, host_room, join_room, host, join };
+	enum class Try { none, host_room, join_room, host, join, random };
 
 	explicit Online(m3::Model3 &board) : adapter(board), board(board) {}
 	~Online();
@@ -61,6 +65,11 @@ public:
 	// a minute, the host opening it again)
 	bool host_room(const OnlineSettings &s, std::string &error, const std::string &want = "");
 	bool join_room(const OnlineSettings &s, const std::string &code, std::string &error, bool patient = false);
+	// A random opponent: the nearest of those searching (the lobby's), then a room's match like any other
+	bool find_random(const OnlineSettings &s, std::string &error);
+	bool random_match() const { return random; }
+	int searching_for() const { return st == Step::searching ? int((now - search_since) / 1000) : 0; }   // (seconds)
+	int searching_with() const { return players; }   // (others searching too, as the lobby last said)
 	// The same again: the last try (Try again), or the last match's (Play again)
 	bool try_again(const OnlineSettings &s, std::string &error);
 	bool play_again(const OnlineSettings &s, std::string &error);
@@ -107,6 +116,9 @@ public:
 	Try last_try() const { return tried; }
 	bool patient() const { return now < patient_until; }   // (joining a room that isn't open yet: waiting for it)
 	std::string peer() const;     // the other player's name, as the lobby or the session has it ("" not yet)
+	// Countries (two letters, "" not known), as the lobby has them from where each connects
+	const std::string &my_country() const { return country_me; }
+	const std::string &peer_country() const { return country_peer; }
 	// In a match whose connection's gone quiet: the seconds left before it's given up
 	int hold_left() const { return session ? session->quiet_left_s() : 0; }
 	// What the host's screen says besides how it's going: a player who couldn't join and why, the lobby hard to
@@ -138,12 +150,17 @@ private:
 	Step fail_step = Step::none;
 	std::string note;
 	bool local_slow = false;
+	vf3net::Score score;
 	mutable size_t start_scan[2] = {};   // (start_wait: how far each player's inputs have been looked through)
 	mutable bool start_seen[2] = {};
 	Try tried = Try::none;
 	std::string want_code;           // (host_room's want)
 	double patient_until = 0;
 	std::string patient_for;         // (whose room's waited for)
+	bool random = false;
+	std::string ticket, country_me, country_peer;
+	double search_since = 0;
+	int players = 0;
 	uint64_t logged_rb = 0, logged_resim = 0, logged_stalls = 0, logged_waits = 0, logged_steps = 0;
 	double logged_save = 0, logged_run = 0, logged_resim_ms = 0, logged_hash = 0;
 	std::deque<Notice> notices;
@@ -154,6 +171,7 @@ private:
 
 	// ---- a room code's match ----
 	struct Job;                         // a request to the lobby, on a thread of its own
+	static std::function<void(Job &)> gather(const std::string &base);
 	std::shared_ptr<Job> job;
 	std::string lobby, code, key, peer_name;
 	uint64_t room_token = 0;
@@ -165,6 +183,9 @@ private:
 	void room_poll();
 	void room_session(bool host);       // the session, with the lobby's token, on the room's link
 	void room_failed(const std::string &why);
+	void joined(const vfnet::json::Value &v);   // (the room found: connecting to its host)
+	void search();                      // (into the queue for a random opponent)
+	static std::string country(const std::string &c);
 	void close_room();                  // (the host's: the lobby told, on a thread, nothing waited for)
 };
 

@@ -1,4 +1,5 @@
 #include "menu.h"
+#include "flags.h"
 #include <RmlUi/Core.h>
 #include "RmlUi_Platform_SDL.h"
 #include "RmlUi_Renderer_SDL.h"
@@ -129,13 +130,15 @@ void game_menu::set_notice(const std::string &title, const std::string &sub, con
 	}
 }
 
-void game_menu::set_banner(const std::string &title, const std::string &sub)
+void game_menu::set_banner(const std::string &title, const std::string &sub, const std::string &button)
 {
-	const std::string key = title + "\n" + sub;
+	const std::string key = title + "\n" + sub + "\n" + button;
 	if (!m->overlay || key == m_banner) return;
 	m_banner = key;
 	if (Rml::Element *e = m->overlay->GetElementById("banner")) {
-		e->SetInnerRML(title.empty() ? "" : "<div class=\"in\"><div class=\"title\">" + escape(title) + "</div>" + (sub.empty() ? "" : "<div class=\"sub\">" + escape(sub) + "</div>") + "</div>");
+		e->SetInnerRML(title.empty() ? "" : "<div class=\"in\"><div class=\"title\">" + escape(title) +
+		               (button.empty() ? "" : "<span class=\"button\">" + escape(button) + "</span>") + "</div>" +
+		               (sub.empty() ? "" : "<div class=\"sub\">" + escape(sub) + "</div>") + "</div>");
 		e->SetProperty("visibility", title.empty() ? "hidden" : "visible");
 	}
 }
@@ -149,8 +152,12 @@ void game_menu::show_versus(const versus &v, double seconds)
 	if (!m->overlay) return;
 	Rml::Element *e = m->overlay->GetElementById("vs");
 	if (!e) return;
-	e->SetInnerRML("<div class=\"pl left\">" + escape(v.left_label) + "</div><div class=\"nm left\">" + escape(v.left) + "</div>"
-	               "<div class=\"pl right\">" + escape(v.right_label) + "</div><div class=\"nm right\">" + escape(v.right) + "</div>"
+	// (each name's flag out from the middle: player 1's on its left, player 2's on its right)
+	auto fl = [](const std::string &c) {
+		return flags::index_of(c) < 0 ? std::string() : "<img class=\"vflag\" sprite=\"flag-" + std::string{ char(c[0] | 0x20), char(c[1] | 0x20) } + "\"/>";
+	};
+	e->SetInnerRML("<div class=\"pl left\">" + escape(v.left_label) + "</div><div class=\"nm left\">" + fl(v.left_country) + escape(v.left) + "</div>"
+	               "<div class=\"pl right\">" + escape(v.right_label) + "</div><div class=\"nm right\">" + escape(v.right) + fl(v.right_country) + "</div>"
 	               "<div class=\"badge\"><div>VS</div></div>"
 	               "<div class=\"bar\"><div class=\"line" + std::string(v.relay ? " relay" : "") + "\"><span class=\"dot\"></span>" + escape(v.line) + "</div>"
 	               "<div class=\"sub\">" + escape(v.sub) + "</div></div>");
@@ -610,7 +617,7 @@ void game_menu::render(bool fps)
 		m_vs_until = 0;
 		if (Rml::Element *e = m->overlay ? m->overlay->GetElementById("vs") : nullptr) e->SetProperty("visibility", "hidden");
 	}
-	if (!m_open && (m_fps.empty() || !fps) && m_net.empty() && !m_toast_until && m_notice == "\n\n" && !m_vs_until && m_banner == "\n") return;   // (nothing over the game)
+	if (!m_open && (m_fps.empty() || !fps) && m_net.empty() && !m_toast_until && m_notice == "\n\n" && !m_vs_until && m_banner == "\n\n") return;   // (nothing over the game)
 	if (Rml::Element *e = m->overlay ? m->overlay->GetElementById("fps") : nullptr)
 		e->SetProperty("visibility", fps && !m_open && !m_fps.empty() ? "visible" : "hidden");
 	// the menu is laid out in window pixels, not the game's letterboxed picture

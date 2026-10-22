@@ -118,6 +118,7 @@ int main(int argc, char **argv)
 	const double fa = cfg.frame_ms, fb = cfg.frame_ms * 1.002;
 	const auto t0 = Clock::now();
 	bool connected = false;
+	vf3net::Score score_a, score_b, score_c;   // (the detector on each side, as the game runs it: after each step, guesses and all)
 	while (sa.state() != vfnet::Session::State::ended && sb.state() != vfnet::Session::State::ended &&
 	       (long(sa.frame()) < frames || long(sb.frame()) < frames)) {
 		wire.now = t;
@@ -130,7 +131,7 @@ int main(int argc, char **argv)
 		if (t >= next_a) {
 			const auto s0 = Clock::now();
 			const uint64_t rb0 = sa.stats().resim_frames;
-			if (sa.step(vf3net::pack(real[std::min(na, real.size() - 1)], 0))) na++;
+			if (sa.step(vf3net::pack(real[std::min(na, real.size() - 1)], 0))) { na++; score_a.frame(A.m); }
 			const double ms = std::chrono::duration<double, std::milli>(Clock::now() - s0).count();
 			if (connected) ta.add(ms);
 			if (slow && ms > 40) printf("  slow step: host frame %u, %.1f ms, %llu frames run again\n", sa.frame(), ms, (unsigned long long)(sa.stats().resim_frames - rb0));
@@ -138,7 +139,7 @@ int main(int argc, char **argv)
 		}
 		if (t >= next_b) {
 			const auto s0 = Clock::now();
-			if (sb.step(vf3net::pack(real[std::min(nb, real.size() - 1)], 1))) nb++;
+			if (sb.step(vf3net::pack(real[std::min(nb, real.size() - 1)], 1))) { nb++; score_b.frame(B.m); }
 			if (connected) tb.add(std::chrono::duration<double, std::milli>(Clock::now() - s0).count());
 			next_b += fb / (1 - (soft ? std::clamp(sb.stats().lead * 0.02, 0.0, 0.04) : 0.0));
 		}
@@ -162,7 +163,17 @@ int main(int argc, char **argv)
 			const uint16_t in[2] = { sa.inputs(0)[f], sa.inputs(1)[f] };
 			if (in[0] != sb.inputs(0)[f] || in[1] != sb.inputs(1)[f]) { printf("the two sides' inputs differ at frame %u\n", f); failed = true; break; }
 			C.adapter.advance(in, false);
+			score_c.frame(C.m);
 		}
+		// the score each side's detector kept, through its rollbacks, against the straight run's
+		printf("the score: host %d-%d, guest %d-%d, straight %d-%d (rounds %d-%d)\n", score_a.matches[0], score_a.matches[1], score_b.matches[0],
+		       score_b.matches[1], score_c.matches[0], score_c.matches[1], score_c.rounds[0], score_c.rounds[1]);
+		for (int p = 0; p < 2; p++)
+			if (score_a.matches[p] != score_c.matches[p] || score_b.matches[p] != score_c.matches[p] || score_a.rounds[p] != score_c.rounds[p] || score_b.rounds[p] != score_c.rounds[p]) {
+				printf("the score differs from the straight run's\n");
+				failed = true;
+				break;
+			}
 		for (auto &[f, h] : C.adapter.checkpoints) {
 			if (f > n) break;
 			if (A.adapter.checkpoints[f] != h) { printf("the host's board differs from a straight run after frame %u\n", f); failed = true; break; }

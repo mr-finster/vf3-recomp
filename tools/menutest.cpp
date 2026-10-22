@@ -128,7 +128,8 @@ int main(int argc, char **argv)
 	gm.open(root());
 	shot("root.png", w, h);
 	// a pointer resting over the rows: moving it selects, the rows made again under it (a value's change) don't
-	for (int y = h / 4; y < h * 3 / 4 && gm.selected() == 0; y += 4) { mouse(float(w) / 4, float(y)); shot("", w, h); }
+	for (int x = w / 8; x < w && gm.selected() == 0; x += w / 8)   // (where the rows are: across, then down)
+		for (int y = 0; y < h && gm.selected() == 0; y += 4) { mouse(float(x), float(y)); shot("", w, h); }
 	const int hovered = gm.selected();
 	key(SDL_SCANCODE_DOWN);
 	key(SDL_SCANCODE_DOWN);
@@ -151,11 +152,11 @@ int main(int argc, char **argv)
 	auto again = [&] { gm.replace(online_menu::page(o, s, gm, changed), -1); };
 	gm.push(online_menu::page(o, s, gm, changed));
 	shot("home.png", w, h);
-	check(gm.selected() == 1, "the home screen opens on Host");
+	check(gm.selected() == 1, "the home screen opens on Random");
 	key(SDL_SCANCODE_RIGHT);
-	check(gm.selected() == 2, "Right goes to Join");
+	check(gm.selected() == 2, "Right goes to Host");
 	key(SDL_SCANCODE_DOWN);
-	check(gm.selected() == 3 || gm.selected() == 4, "Down goes to the links");
+	check(gm.selected() == 4, "Down goes to Settings");
 	key(SDL_SCANCODE_UP);
 	key(SDL_SCANCODE_UP);
 	check(gm.selected() == 0, "Up from the tiles goes to the name");
@@ -189,6 +190,7 @@ int main(int argc, char **argv)
 	again();
 
 	// joining with a code: a keyboard, then a pad
+	key(SDL_SCANCODE_RIGHT);
 	key(SDL_SCANCODE_RIGHT);
 	key(SDL_SCANCODE_RETURN);
 	check(top() == "Join with a code", "Join opens the code");
@@ -236,7 +238,37 @@ int main(int argc, char **argv)
 
 	// a room code's (the lobby: VF_LOBBY, e.g. tools/lobby's npx wrangler dev)
 	if (!Online::lobby_default().empty()) {
+		// a random opponent: this one searching, and another (a second game's, here) found
 		again();
+		key(SDL_SCANCODE_RETURN);   // (Random)
+		poll_for(8000, [&] { return o.step_now() == Online::Step::searching || o.phase() == Online::Phase::off; });
+		poll_for(1500, [] { return false; });
+		again();
+		shot("random_searching.png", w, h);
+		check(o.step_now() == Online::Step::searching, ("Random: searching (" + o.status() + ")").c_str());
+		static m3::Model3 board2;
+		board2.backup.assign(0x20000, 0);
+		Online o2(board2);
+		o2.identity = o.identity;
+		OnlineSettings s2 = s;
+		s2.name = "G";
+		if (!o2.find_random(s2, err)) fprintf(stderr, "menutest: the other's random: %s\n", err.c_str());
+		const uint64_t r0 = SDL_GetTicks();
+		while (SDL_GetTicks() - r0 < 15000 && !(o.step_now() == Online::Step::connecting && o2.step_now() == Online::Step::connecting)) {
+			o.poll(double(SDL_GetTicks()));
+			o2.poll(double(SDL_GetTicks()));
+			SDL_Delay(10);
+		}
+		again();
+		shot("random_found.png", w, h);
+		check(o.room_code() == o2.room_code() && !o.room_code().empty() && o.is_hosting() != o2.is_hosting(),
+		      ("two searching are matched: one room, a host and a guest (" + o.room_code() + ", " + o2.room_code() + ")").c_str());
+		check(o.peer() == "G" && o2.peer() == "MRFINSTER", ("each has the other's name (" + o.peer() + ", " + o2.peer() + ")").c_str());
+		check(!o.peer_country().empty() || !o.my_country().empty(), ("countries from the lobby (" + o.my_country() + ", " + o.peer_country() + ")").c_str());
+		o2.stop();
+		o.stop();
+		again();
+		key(SDL_SCANCODE_RIGHT);
 		key(SDL_SCANCODE_RETURN);   // (Host)
 		poll_for(15000, [&] { return !o.room_code().empty() || o.phase() == Online::Phase::off; });
 		again();
@@ -263,6 +295,7 @@ int main(int argc, char **argv)
 		o.stop();
 		// joining a code nobody has: it says so, where it stopped
 		again();
+		key(SDL_SCANCODE_RIGHT);
 		key(SDL_SCANCODE_RIGHT);
 		key(SDL_SCANCODE_RETURN);
 		text("zzz222");   // (the 6th letter: it joins)
@@ -298,6 +331,10 @@ int main(int argc, char **argv)
 	m.code = "FR7W25";
 	m.seconds = 760;
 	m.ping = 19;
+	m.wins[0] = 3;
+	m.wins[1] = 2;
+	m.country[0] = "AU";
+	m.country[1] = "JP";
 	o.set_last_match(lm);
 	again();
 	shot("match_over.png", w, h);
@@ -343,11 +380,11 @@ int main(int argc, char **argv)
 	shot("interrupted.png", w, h);
 	gm.set_notice("");
 	gm.set_net("", 0);
-	gm.show_versus({ "PLAYER 1 \xC2\xB7 HOST", "MRFINSTER", "PLAYER 2", "G", "Connected directly \xC2\xB7 19 ms", "Both press Start", false });
+	gm.show_versus({ "PLAYER 1 \xC2\xB7 HOST", "MRFINSTER", "PLAYER 2", "G", "Connected directly \xC2\xB7 19 ms", "Both press Start", false, "AU", "JP" });
 	for (int i = 0; i < 20; i++) { shot("", w, h); SDL_Delay(20); }   // (its fade in)
 	shot("versus.png", w, h);
 	for (int i = 0; i < 20; i++) { shot("", w, h); SDL_Delay(200); }   // (gone after its 3.5 s)
-	gm.set_banner("PRESS START");
+	gm.set_banner("PRESS", "", "OPTIONS");
 	shot("press_start.png", w, h);
 	gm.set_banner("WAITING FOR G", "to press Start");
 	shot("waiting_start.png", w, h);

@@ -156,7 +156,7 @@ void draw(std::vector<uint32_t> &px, int x0, int y0, const std::string &s)
 
 } // namespace
 
-bool hud_names(const m3::Model3 &board, std::vector<uint32_t> &above, const std::string names[2])
+bool hud_names(const m3::Model3 &board, std::vector<uint32_t> &above, const std::string names[2], const HudFlag *flags[2])
 {
 	if (board.tile_ram.size() < 0x100000 || above.size() < size_t(W) * H) return false;
 	// layer A (0): on, and not scrolled (the HUD's own place)
@@ -176,7 +176,12 @@ bool hud_names(const m3::Model3 &board, std::vector<uint32_t> &above, const std:
 	constexpr int S = 2, TOP = ROW * 8 - S, TEXT_Y = TOP + 3, P1_X = 2 * 8 - S + 3, P2_RIGHT = 60 * 8 - S - 3;
 	for (int p = 0; p < 2; p++) {
 		if (names[p].empty()) continue;
-		const int w = text_width(names[p]);
+		const int tw = text_width(names[p]);
+		// the flag, out from the middle of the name, if it fits short of the round markers (5 of them leave no room)
+		const HudFlag *fl = flags && flags[p] && flags[p]->w > 0 ? flags[p] : nullptr;
+		const int gap = 4, limit = p ? (p2_last + 1) * 8 - S + 1 : p1_first * 8 - S - 1;
+		if (fl && (p ? P2_RIGHT - tw - gap - fl->w < limit : P1_X + fl->w + gap + tw > limit)) fl = nullptr;
+		const int w = tw + (fl ? fl->w + gap : 0);
 		const int x = p ? P2_RIGHT - w : P1_X;
 		// the fighter's name cleared: its picture's tiles, and the place of the longer name
 		int from = std::max(0, std::min(span[p][0] * 8 - S, x - 2)), to = std::min(W, std::max((span[p][1] + 1) * 8 - S, x + w + 2));
@@ -184,7 +189,18 @@ bool hud_names(const m3::Model3 &board, std::vector<uint32_t> &above, const std:
 		else from = std::max(from, (p2_last + 1) * 8 - S + 1);
 		for (int y = TOP; y < TOP + 16; y++)
 			for (int X = from; X < to; X++) above[size_t(y) * W + X] = 0;
-		draw(above, x, TEXT_Y, names[p]);
+		if (fl) {
+			// in a black edge, as the letters are, its middle on the letters' middle
+			const int fx = p ? x + tw + gap : x, fy = TEXT_Y + (GH - fl->h) / 2;
+			for (int y = -1; y <= fl->h; y++)
+				for (int X = -1; X <= fl->w; X++) {
+					const int ax = fx + X, ay = fy + y;
+					if (ax < 0 || ax >= W || ay < 0 || ay >= H) continue;
+					const bool edge = y < 0 || y >= fl->h || X < 0 || X >= fl->w;
+					above[size_t(ay) * W + ax] = edge ? 0xFF000000u : fl->px[size_t(y) * size_t(fl->w) + size_t(X)];
+				}
+		}
+		draw(above, p ? x : x + (fl ? fl->w + gap : 0), TEXT_Y, names[p]);
 	}
 	return true;
 }

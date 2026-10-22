@@ -144,4 +144,25 @@ void Adapter::advance(const uint16_t input[2], bool resim)
 	}
 }
 
+void Score::frame(const m3::Model3 &board)
+{
+	auto byte = [&](uint32_t a) { return board.ram[a ^ 3]; };   // (the RAM's host-order words: the game's byte)
+	const uint8_t r[3] = { byte(ROUNDS_P1), byte(ROUNDS_P2), uint8_t(byte(PLAYING) & 3) };
+	if (memcmp(r, now, 3) != 0) { memcpy(now, r, 3); held = 0; return; }
+	if (++held != 30) return;   // (once, when it's held long enough)
+	playing = r[2];
+	for (int p = 0; p < 2; p++)
+		if (r[p] == seen[p] + 1) {
+			if (seen[0] + seen[1] == 0) versus = playing == 3;   // (the match's first round)
+			if (playing != 3) versus = false;
+			if (versus) rounds[p]++;
+		}
+	if (r[0] == 0 && r[1] == 0 && seen[0] + seen[1] > 0) {   // (the match over: whoever had more won it)
+		if (versus && seen[0] != seen[1]) matches[seen[0] > seen[1] ? 0 : 1]++;
+		versus = false;
+	}
+	seen[0] = r[0];
+	seen[1] = r[1];
+}
+
 } // namespace vf3net
