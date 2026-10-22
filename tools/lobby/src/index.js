@@ -27,10 +27,11 @@ const CODE_LENGTH = 6;
 const HOST_GONE_MS = 30000;      // a host not heard from this long has gone (its wait comes every 20 s)
 const ROOM_LIFE_MS = 2 * 3600e3; // and no room lasts longer
 const WAIT_MS = 20000;
-// The relay's logins a day, all players together: what the relay can cost is bounded by its logins (a login works
-// a day), so past this none are given out until the next day (UTC) and the games connect directly or not at all.
-// About two a match: room for a busy day; raise it as the players come.
-const TURN_PER_DAY = 10000;
+// The relay's logins a day, all players together, past which none are given out until the next day (UTC) and the
+// games connect directly or not at all. A game asks for one at every try (direct or not), so it's about two a
+// match; Cloudflare bills the relay by its traffic (the first 1000 GB a month free), not its logins, and a relayed
+// hour is ~10 MB: this bounds a runaway, the per-address cap below bounds any one address.
+const TURN_PER_DAY = 100000;
 // And from one address a day (an IPv4 one, or an IPv6 /48): room for a school's or a phone network's shared
 // address, but one address alone can't take the day's
 const TURN_PER_ADDRESS_DAY = 500;
