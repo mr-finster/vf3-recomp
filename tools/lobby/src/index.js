@@ -13,6 +13,7 @@
 //   POST /v1/random {game, version, content, name, cands, relay} -> {ticket, waiting, players} or a match
 //   POST /v1/random/wait  {ticket}  (waits up to 20 s) -> the same
 //   POST /v1/random/leave {ticket}
+//   POST /v1/random/count {game, version, content} -> {players}: searching, or in a random match made in the last 10 minutes
 //   A match: {role: "host", code, key, token, name, country} (the room's, opened as theirs, the other already in it)
 //   or {role: "guest", code, name, cands, relay, token, country} (as /v1/join's). Players meet the nearest first.
 //   GET  /v1/ping   -> {ok, protocol}
@@ -166,16 +167,26 @@ export default {
 			}
 
 			// a random opponent: the nearest of those searching, the same game, version and ROM
-			if (path === '/v1/random' || path === '/v1/random/wait' || path === '/v1/random/leave') {
+			if (path === '/v1/random' || path === '/v1/random/wait' || path === '/v1/random/leave' || path === '/v1/random/count') {
 				if (path === '/v1/random' && (await limited(env, req, 'HOST_LIMIT'))) return json({ error: 'busy' }, 429);
 				const b = await body_of(req);
 				if (!b) return json({ error: 'bad' }, 400);
 				const me = who(b, req);
 				if (!me.game || !me.version) return json({ error: 'bad' }, 400);
 				const q = env.QUEUES.get(env.QUEUES.idFromName('q|' + me.game + '|' + me.version + '|' + me.content));
+				if (path === '/v1/random/count') {   // (asked by everyone on the Online screen: kept 30 s at the edge, the queue asked once a place)
+					const key = new Request('https://count.vf-lobby/' + encodeURIComponent(me.game + '|' + me.version + '|' + me.content));
+					const edge = !env.TURN_STATIC;   // (not on a test's own lobby: its count's checked as it changes)
+					const kept = edge && (await caches.default.match(key));
+					if (kept) return kept;
+					const r = await q.fetch('https://queue/count', { method: 'POST', body: '{}' });
+					const out = new Response(await r.text(), { status: r.status, headers: { 'content-type': 'application/json', 'cache-control': 'max-age=30' } });
+					if (edge && r.status === 200) await caches.default.put(key, out.clone());
+					return out;
+				}
 				return q.fetch('https://queue' + (path === '/v1/random' ? '/enter' : path.slice(10)), {
 					method: 'POST',
-					body: JSON.stringify({ me, geo: geo_of(req), ticket: clean(b.ticket, 32) }),
+					body: JSON.stringify({ me, geo: geo_of(req), from: sender(req), ticket: clean(b.ticket, 32) }),
 				});
 			}
 
@@ -319,7 +330,7 @@ export class Limits {
 // either has waited, anyone after 40 s. The one who waited longer hosts: a room's opened as theirs, the other
 // joined into it, and from there it's a room's match like any other (its code kept for Play again). Kept in memory
 // only: those searching ask every 20 s, and one gone quiet 25 s is dropped.
-const RANDOM_WAIT_MS = 20000, RANDOM_GONE_MS = 25000, RANDOM_KEPT_MS = 60000;
+const RANDOM_WAIT_MS = 20000, RANDOM_GONE_MS = 25000, RANDOM_KEPT_MS = 60000, RANDOM_PER_ADDRESS = 6, RANDOM_PLAYING_MS = 600000;
 function reach_km(seconds) {
 	return seconds < 8 ? 1500 : seconds < 20 ? 4000 : seconds < 40 ? 9000 : Infinity;
 }
@@ -334,7 +345,8 @@ export class Queue {
 	constructor(ctx, env) {
 		this.ctx = ctx;
 		this.env = env;
-		this.waiting = new Map();   // ticket -> { me, geo, since, seen, result, waiters }
+		this.waiting = new Map();   // ticket -> { me, geo, from, since, seen, result, waiters, partner, room, left }
+		this.matched = [];          // (when each match was made, the last RANDOM_PLAYING_MS: for the count)
 	}
 	prune() {
 		const now = Date.now();
@@ -346,12 +358,13 @@ export class Queue {
 		for (const w of this.waiting.values()) if (!w.result) n++;
 		return n;
 	}
-	// The nearest other one searching that this one may be matched with now
+	// The nearest other one searching that this one may be matched with now: only one waiting on an answer this
+	// moment (a game gone without saying so has none open)
 	nearest(ticket, w) {
 		const now = Date.now();
 		let pick = null, best = Infinity;
 		for (const [t, o] of this.waiting) {
-			if (t === ticket || o.result) continue;
+			if (t === ticket || o.result || o.waiters.length === 0) continue;
 			const d = km(w.geo, o.geo), waited = Math.max(now - w.since, now - o.since) / 1000;
 			if (d <= reach_km(waited) && d < best) { pick = o; best = d; }
 		}
@@ -362,8 +375,24 @@ export class Queue {
 		if (!o) return;
 		const host = o.since <= w.since ? o : w, guest = host === o ? w : o;
 		w.result = o.result = 'pairing';   // (both taken before anything's awaited: no one else picks them meanwhile)
-		const m = await this.open(host, guest);
-		if (!m) { w.result = o.result = null; return; }
+		let m = null;
+		try {
+			m = await this.open(host, guest);
+		} catch (e) {
+			m = null;
+		}
+		if (m && (host.left || guest.left)) {   // (one gave up while the room was made: the other searches on)
+			await this.close(m.host.code, m.host.key);
+			m = null;
+		}
+		if (!m) {
+			for (const x of [host, guest]) if (!x.left) { x.result = null; for (const done of x.waiters.splice(0)) done(); }
+			return;
+		}
+		this.matched.push(Date.now());
+		host.partner = guest;
+		guest.partner = host;
+		host.room = guest.room = { code: m.host.code, key: m.host.key };
 		this.settle(host, m.host);
 		this.settle(guest, m.guest);
 	}
@@ -374,7 +403,7 @@ export class Queue {
 			if (r.status !== 200) continue;
 			const h = await r.json();
 			const j = await room(this.env, code).fetch('https://room/join', { method: 'POST', body: JSON.stringify({ guest: guest.me }) });
-			if (j.status !== 200) return null;
+			if (j.status !== 200) { await this.close(code, h.key); return null; }
 			const g = await j.json();
 			return {
 				host: { role: 'host', code, key: h.key, token: h.token, name: guest.me.name, country: guest.me.country },
@@ -383,16 +412,19 @@ export class Queue {
 		}
 		return null;
 	}
+	async close(code, key) {
+		try {
+			await room(this.env, code).fetch('https://room/close', { method: 'POST', body: JSON.stringify({ key }) });
+		} catch (e) {}
+	}
 	settle(w, result) {
 		w.result = result;
 		w.seen = Date.now();
 		for (const done of w.waiters.splice(0)) done();
 	}
+	// (a match is kept till RANDOM_KEPT_MS, not dropped once said: an answer lost on the way is asked for again)
 	answer(ticket, w) {
-		if (w.result && w.result !== 'pairing') {
-			this.waiting.delete(ticket);
-			return json(w.result);
-		}
+		if (w.result && w.result !== 'pairing') return json(w.result);
 		return json({ ticket, waiting: true, players: this.searching() });
 	}
 	async fetch(req) {
@@ -400,9 +432,16 @@ export class Queue {
 		const b = await req.json();
 		this.prune();
 		const now = Date.now();
+		if (op === '/count') {
+			this.matched = this.matched.filter((t) => now - t < RANDOM_PLAYING_MS);
+			return json({ players: this.searching() + 2 * this.matched.length });
+		}
 		if (op === '/enter') {
+			let mine = 0;   // (a few tickets an address at most: no one place soaks up everyone searching)
+			for (const o of this.waiting.values()) if (o.from === b.from && !o.result) mine++;
+			if (mine >= RANDOM_PER_ADDRESS) return json({ error: 'busy' }, 429);
 			const ticket = random_hex(12);
-			const w = { me: b.me, geo: b.geo, since: now, seen: now, result: null, waiters: [] };
+			const w = { me: b.me, geo: b.geo, from: b.from, since: now, seen: now, result: null, waiters: [], partner: null, room: null, left: false };
 			this.waiting.set(ticket, w);
 			await this.try_match(ticket, w);
 			return this.answer(ticket, w);
@@ -412,6 +451,15 @@ export class Queue {
 		w.seen = now;
 		if (op === '/leave') {
 			this.waiting.delete(b.ticket);
+			w.left = true;   // (mid-pairing: try_match sees it)
+			const o = w.partner;
+			if (o && !o.left && w.room) {   // (matched already: the room's gone, the other back to searching)
+				await this.close(w.room.code, w.room.key);
+				o.result = null;
+				o.partner = o.room = null;
+				o.since = Date.now();
+				for (const done of o.waiters.splice(0)) done();
+			}
 			return json({ ok: true });
 		}
 		if (op === '/wait') {

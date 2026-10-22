@@ -32,7 +32,7 @@ int main(int argc, char **argv)
 	std::string rom, script_path;
 	long frames = -1;
 	uint32_t check[2] = { 0, 0 };
-	bool checking = false, rare = false, scoring = false;
+	bool checking = false, rare = false, scoring = false, free_play = false;
 	for (int i = 1; i < argc; i++) {
 		std::string a = argv[i];
 		if (a == "--frames" && i + 1 < argc) frames = strtol(argv[++i], nullptr, 10);
@@ -43,7 +43,8 @@ int main(int argc, char **argv)
 			check[1] = uint32_t(strtoul(v.substr(v.find(',') + 1).c_str(), nullptr, 16));
 			checking = true;
 		} else if (a == "--score") scoring = true;   // (the detector itself, vf3net::Score: what it counts, and when)
-		else if (a == "--rare") rare = true;   // (every byte that changes only a few times: with when, for the players' joined flags)
+		else if (a == "--rare") rare = true;
+		else if (a == "--free-play") free_play = true;   // (as an online match plays: free play, the PC way)   // (every byte that changes only a few times: with when, for the players' joined flags)
 		else if (a[0] != '-' && rom.empty()) rom = a;
 		else { fprintf(stderr, "usage: vf3detect <vf3.zip> --script FILE [--frames N] [--check P1ADDR,P2ADDR]\n"); return 2; }
 	}
@@ -60,6 +61,16 @@ int main(int argc, char **argv)
 	board.cpu.rec = &rec;
 	board.rtc_time = 0;
 	board.reset();
+	if (free_play) {   // (as vf3net::Adapter's start: the coin setting free play, then from the power on again)
+		board.hide_free_play_text();
+		board.power_on();
+		for (int i = 0; i < 300 && board.coin_setting() < 0; i++) board.run_frame();
+		if (board.coin_setting() < 0 || (!board.set_coin_setting(m3::Model3::COIN_FREE_PLAY) && !board.free_play())) {
+			fprintf(stderr, "vf3detect: free play couldn't be set\n");
+			return 1;
+		}
+		board.power_on();
+	}
 
 	const size_t n = board.ram.size();
 	std::vector<uint8_t> prev = board.ram;
