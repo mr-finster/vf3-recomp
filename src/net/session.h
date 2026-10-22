@@ -24,6 +24,8 @@
 
 namespace vfnet {
 
+constexpr int MAX_DELAY = 15;   // input delay's most, frames (Auto's at a very far opponent: ~260 ms)
+
 constexpr int MAX_NAME = 10;   // a player's name, in letters
 
 uint64_t hash64(const uint8_t *p, size_t n);   // (the default state hash: the same on every platform)
@@ -105,7 +107,7 @@ public:
 	void quit();               // leave: the other side is told
 	// The input delay from now on (Auto's, once the ping is known): longer repeats the input for the frames between,
 	// shorter keeps the inputs already sent and takes new ones once the frames reach them
-	void set_delay(int frames) { cfg.delay = std::clamp(frames, 0, 10); }
+	void set_delay(int frames) { cfg.delay = std::clamp(frames, 0, MAX_DELAY); }
 	int delay() const { return cfg.delay; }
 
 	State state() const { return st; }
@@ -204,6 +206,35 @@ private:
 	void run_frame(uint32_t f, bool resim);
 	void check_hashes(bool work);   // work: a part of a hash done now (a step's; a packet's only compares)
 	uint16_t remote_input(uint32_t f) const;
+};
+
+// Auto's input delay for a connection, as Fightcade picks one: from the round trip. Half of it in frames at least
+// (1 to 4: how it feels), and as many more as keep the frames guessed (the one-way trip and its jitter, less the
+// delay) within target_rollback, so the game is never held back for the other side's inputs and runs at its full
+// speed at any ping: what a far opponent costs is input delay, not frames. floor: this machine's least.
+int auto_delay(double rtt_ms, double jitter_ms, double frame_ms, int target_rollback, int floor);
+
+// Auto's delay through a match: the first as soon as the ping's known (the character select); up once the ping's
+// wanted more for half a second, or frames are being held back for the other side (a slowdown: an input held a
+// frame longer is the lesser), a frame at a time every 6 (a jump of several, one input held that much longer, is
+// felt); down only between rounds (a press dropped otherwise), once a lower one's been enough for 10 s with a
+// tenth more ping to spare (no see-saw at a boundary), and not below one the holding back called for, for a minute.
+class AutoDelay
+{
+public:
+	bool slow = false;   // this machine: a frame's step past 7 ms (a Steam Deck: each frame run again costs it dear)
+	double frame_ms = 1000.0 / 57.524160;
+	int want(const Session::Stats &s) const;
+	// Each frame: the delay to change to now, or -1; why it changed in `why`
+	int update(const Session &session, double now_ms, bool between_rounds);
+	std::string why;
+private:
+	bool started = false;
+	double checked_at = 0, lower_since = -1, higher_since = -1, floor_until = 0;
+	uint64_t stalls_at = 0;
+	int floor = 0;    // (a delay the holding back called for: kept a while)
+	int target = -1;  // (raising to: a frame at a time)
+	uint32_t stepped_at = 0;
 };
 
 } // namespace vfnet

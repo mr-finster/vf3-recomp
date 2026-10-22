@@ -507,7 +507,7 @@ struct settings
 		if (auto it = kv.find("online_address"); it != kv.end()) online.address = online_menu::clean_address(it->second);
 		if (auto it = kv.find("online_lobby"); it != kv.end() && (it->second.rfind("https://", 0) == 0 || it->second.rfind("http://", 0) == 0))
 			online.lobby = it->second.substr(0, 200);   // (another lobby than the built-in one: tests, a server of one's own)
-		num("online_delay", online.delay, -1, 6);
+		num("online_delay", online.delay, -1, 10);
 		num("online_port", online.port, 1024, 65535);
 		num("online_connection", online.show_connection, 0, 2);
 		flag("online_hide_ip", online.hide_ip);

@@ -96,7 +96,7 @@ std::string Online::lobby_default()
 vfnet::Config Online::config(const OnlineSettings &s) const
 {
 	vfnet::Config c;
-	c.delay = s.delay < 0 ? 2 : std::clamp(s.delay, 0, 6);   // (Auto starts at 2, then follows the ping)
+	c.delay = s.delay < 0 ? 2 : std::clamp(s.delay, 0, 10);   // (Auto starts at 2, then follows the ping)
 	c.checksum_every = 120;   // (the desync check's hash, 27 MB, every 2 s: every half second it was a frame's worst cost on a Steam Deck)
 	c.soft_sync = true;   // (main's frame clock slows a little while ahead: no frame held back, no hitch)
 	return c;
@@ -815,6 +815,9 @@ void Online::poll(double t)
 			// versus screen)
 			local_slow = rooms && room && room->via_relay() && room->local_blocked();
 			score = {};
+			adelay = {};
+			round_ends_seen = 0;
+			round_end_frame = 0;
 			both_in = false;
 			random_misses = 0;
 			out_scan[0] = out_scan[1] = SIZE_MAX;
@@ -912,18 +915,24 @@ void Online::poll(double t)
 		logged_stalls = stt.stalls;
 		logged_waits = stt.waits;
 	}
-	// Auto's input delay, once the ping is known (the character select): half the round trip in frames, 1 to 4;
-	// and 2 at least where a frame costs this machine much of its time (a Steam Deck's 11 ms of 17: each frame a
-	// rollback runs again costs it as much again, so fewer and shorter ones, for a frame's delay on this side only)
-	if (session && ph == Phase::playing && auto_delay && !auto_done && session->frame() > 120 && session->stats().rtt_ms > 0) {
-		const double frame_ms = 1000.0 / 57.524160;
+	// Auto's input delay (vfnet::AutoDelay): from the ping, enough that the game runs at full speed at any ping, up
+	// at once when it must, down between rounds; where a frame costs this machine much of its time (a Steam Deck's
+	// 11 ms of 17), shorter rollbacks and a frame's delay more, each frame run again costing it as much again
+	if (session && ph == Phase::playing && auto_delay) {
 		const auto &stt = session->stats();
 		const double step_ms = stt.steps ? (stt.save_ms + stt.run_ms) / double(stt.steps) : 0.0;
-		const int by_ping = std::clamp(int(std::ceil(stt.rtt_ms / 2 / frame_ms)), 1, 4);
-		const int d = std::max(by_ping, step_ms > 7.0 ? 2 : 1);
-		session->set_delay(d);
-		fprintf(stderr, "online: Auto input delay %d (ping %.0f ms, a frame's step %.1f ms here)\n", d, stt.rtt_ms, step_ms);
-		auto_done = true;
+		if (!auto_done) adelay.slow = step_ms > 7.0;   // (judged once, as the match starts: not changed under it)
+		// (a round's just ended: its end's seen ~half a second after it, and the game shows who won for seconds more,
+		// no one in control; a delay lowered then drops nothing anyone pressed)
+		if (score.round_ends != round_ends_seen) { round_ends_seen = score.round_ends; round_end_frame = session->frame(); }
+		const bool between_rounds = round_ends_seen > 0 && session->frame() - round_end_frame < 90;
+		const int was = session->delay(), d = adelay.update(*session, now, between_rounds);
+		if (d >= 0 && d != was) {
+			session->set_delay(d);
+			log_line((auto_done ? "input delay " + std::to_string(was) + " to " : "Auto input delay ") + std::to_string(d) + " (" + adelay.why + ")");
+		} else if (d >= 0 && !auto_done)
+			log_line("Auto input delay " + std::to_string(d) + " (" + adelay.why + ")");
+		if (d >= 0) auto_done = true;
 	}
 }
 
@@ -947,6 +956,7 @@ void Online::set_delay(int setting)
 {
 	auto_delay = setting < 0;
 	auto_done = false;
+	adelay = {};   // (Auto again: from the ping as it is now)
 	if (session && !auto_delay) session->set_delay(setting);
 }
 
@@ -995,7 +1005,8 @@ std::string Online::connection(int &level) const
 	if (session->interrupted()) { level = 2; return opponent() + "   connection interrupted"; }
 	const int ms = int(stt.rtt_ms + 0.5), rb = stt.rollback_max;
 	level = ms < 60 && rb <= 2 ? 0 : ms < 120 && rb <= 4 ? 1 : 2;
-	return opponent() + "   " + std::to_string(ms) + " ms   rollback " + std::to_string(rb) + (via_relay() ? "   relay" : "");
+	// (as Fightcade's: the ping, the input delay, the rollback)
+	return opponent() + "   " + std::to_string(ms) + " ms   delay " + std::to_string(session->delay()) + "   rollback " + std::to_string(rb) + (via_relay() ? "   relay" : "");
 }
 
 std::string Online::connection_detail() const
@@ -1003,8 +1014,8 @@ std::string Online::connection_detail() const
 	if (!session || ph != Phase::playing) return "";
 	const auto &stt = session->stats();
 	char b[200];
-	snprintf(b, sizeof b, "delay %d   jitter %.0f ms   rollback %.1f avg, %d peak   ahead %+.1f   step %.1f ms (save %.1f)",
-	         session->delay(), stt.jitter_ms, stt.rollbacks ? double(stt.resim_frames) / double(stt.rollbacks) : 0.0, stt.rollback_max, stt.lead,
+	snprintf(b, sizeof b, "jitter %.0f ms   rollback %.1f avg, %d peak   ahead %+.1f   step %.1f ms (save %.1f)",
+	         stt.jitter_ms, stt.rollbacks ? double(stt.resim_frames) / double(stt.rollbacks) : 0.0, stt.rollback_max, stt.lead,
 	         stt.steps ? (stt.save_ms + stt.run_ms + stt.resim_ms + stt.hash_ms) / double(stt.steps) : 0.0, stt.steps ? stt.save_ms / double(stt.steps) : 0.0);
 	return b;
 }
@@ -1022,13 +1033,14 @@ menu_item delay_row(Online &o, OnlineSettings &s, std::function<void()> changed)
 {
 	return { "Input delay",
 		"The frames between pressing a button and it happening, on your side only. Fewer: the game answers sooner, "
-		"and the other player's moves can jump a little more (rollback). Auto picks from the ping and this machine's speed.",
+		"and the other player's moves can jump a little more (rollback). Auto picks from the ping and this machine's speed, "
+		"and keeps the game at full speed against a far opponent with more delay (up to 15); it only ever lowers it between rounds.",
 		[&o, &s] {
 			if (s.delay >= 0) return std::to_string(s.delay) + (s.delay == 1 ? " frame" : " frames");
 			return o.playing() ? "Auto (" + std::to_string(o.delay_now()) + ")" : std::string("Auto");
 		},
 		[&o, &s, changed](int d) {
-			s.delay = std::clamp(s.delay + d, -1, 6);
+			s.delay = std::clamp(s.delay + d, -1, 10);
 			if (o.playing()) o.set_delay(s.delay);
 			changed();
 		} };

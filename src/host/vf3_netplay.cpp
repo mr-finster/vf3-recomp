@@ -153,6 +153,7 @@ void Score::frame(const m3::Model3 &board)
 	playing = r[2];
 	for (int p = 0; p < 2; p++)
 		if (r[p] == seen[p] + 1) {
+			round_ends++;
 			if (seen[0] + seen[1] == 0) versus = playing == 3;   // (the match's first round)
 			if (playing != 3) versus = false;
 			if (versus) rounds[p]++;
