@@ -10,6 +10,7 @@ vfnet::Config Online::config(const OnlineSettings &s) const
 {
 	vfnet::Config c;
 	c.delay = s.delay < 0 ? 2 : std::clamp(s.delay, 0, 6);   // (Auto starts at 2, then follows the ping)
+	c.soft_sync = true;   // (main's frame clock slows a little while ahead: no frame held back, no hitch)
 	return c;
 }
 

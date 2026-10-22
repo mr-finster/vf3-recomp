@@ -58,6 +58,10 @@ struct Config
 	double frame_ms = 1000.0 / 57.524160;
 	double interrupt_ms = 1000, disconnect_ms = 8000, handshake_ms = 15000;
 	size_t max_blob = 4u << 20;   // the largest starting blob a guest takes (VF3's: 128 KB)
+	// the host program keeps in time itself, its frames a little slower while stats().lead is over 0 (no frame
+	// held back, which shows as a hitch); the session waits a whole frame only when it's this far ahead
+	bool soft_sync = false;
+	double hard_wait_lead = 2.5;
 };
 
 class Session
@@ -76,6 +80,7 @@ public:
 		int rollback = 0;      // the last rollback's frames
 		int rollback_max = 0;  // the most in the last second
 		int ahead = 0;         // frames this side is ahead of the other (time sync)
+		double lead = 0;       // the same, not rounded: what soft_sync slows for
 		uint64_t rollbacks = 0, resim_frames = 0, stalls = 0, waits = 0;
 	};
 
