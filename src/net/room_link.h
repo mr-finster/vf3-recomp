@@ -6,6 +6,7 @@
 // does. Addresses are "ip:port" text throughout ("[v6]:port" for IPv6), numbers only: names are resolved before.
 #pragma once
 #include "link.h"
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -48,6 +49,11 @@ public:
 	bool locked() const;
 	bool via_relay() const;          // the way found goes through a relay (this side's or the other's)
 	std::string way() const;         // for the log: "direct to 1.2.3.4:5678", "through this side's relay to ..."
+	// For the log when it doesn't connect: what was sent and got each way, and what the relay said (the addresses
+	// through mask)
+	std::string report(const std::function<std::string(const std::string &)> &mask) const;
+	// Sends to the other player's address on this network refused by the system: a Mac's Local Network permission off
+	bool local_blocked() const;
 	uint16_t local_port() const;
 
 private:

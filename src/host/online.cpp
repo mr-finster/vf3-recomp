@@ -426,6 +426,7 @@ void Online::room_poll()
 
 void Online::stop()
 {
+	if (room && ph != Phase::playing && st == Step::connecting) log_line("stopped while connecting: " + room->report(mask));
 	if (session && ph == Phase::playing) ended("You left the match.");
 	if (session && session->state() != vfnet::Session::State::ended) session->quit();
 	close_room();
@@ -451,7 +452,7 @@ void Online::poll(double t)
 			ph = Phase::playing;
 			began_at = now;
 			if (rooms) {
-				log_line(std::string("connected ") + (room->via_relay() ? "through a relay" : "directly"));
+				log_line(std::string("connected ") + (room->via_relay() ? "through a relay" : "directly") + ", " + mask(room->way()) + ": " + room->report(mask));
 				close_room();   // (the code's done its job)
 			}
 			notices.push_back({ Notice::joined, "Playing " + e.text + ": press Start" });
@@ -481,9 +482,13 @@ void Online::poll(double t)
 				      : why == vfnet::Session::End::disconnected ? "Lost the connection to " + who + "."
 				      : why == vfnet::Session::End::desync ? "The match went out of step." : e.text);
 			}
+			if (room && !was_playing) log_line("didn't connect: " + room->report(mask));
 			if (!was_playing && !is_host && why != vfnet::Session::End::quit) {
 				failure = e.text;
-				if (rooms && why == vfnet::Session::End::timeout)
+				if (rooms && room && room->local_blocked())   // (only a Mac's refuses like this)
+					failure = "This Mac blocked the game from the local network: System Settings > Privacy & Security > Local Network, turn on "
+					          "Virtua Fighter 3 Recomp (off and on again if it's on), then try again.";
+				else if (rooms && why == vfnet::Session::End::timeout)
 					failure = "Couldn't connect to " + opponent() + ", directly or through the relay. Try again; if it keeps failing, send both "
 					          "players' log.txt (README: Online play).";
 				// (a local address over the internet: the commonest mistake, worth saying what to do)

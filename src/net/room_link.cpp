@@ -173,6 +173,20 @@ struct RoomLink::Impl
 	bool perm_dirty = false;
 	double lifetime_s = 600;
 	std::map<std::string, uint16_t> pending;   // a request's transaction id: its kind (to ask again on a stale nonce)
+	std::map<std::string, std::string> perm_of;   // a permission request's transaction id: the address it's for
+
+	// for the log, when a connection can't be made: what went each way, and what the relay said
+	struct Count { int sent = 0, failed = 0, got = 0, knocks = 0; int error = 0; };
+	std::map<std::string, Count> counts;   // by way: "d " or "r " and the address
+	struct Said { std::string text, addr, after; bool operator==(const Said &o) const { return text == o.text && addr == o.addr && after == o.after; } };
+	std::vector<Said> said;                 // what the relay said ("the relay refused " 1.2.3.4 ": 403")
+	int strangers = 0;                      // datagrams from no one expected
+	std::vector<std::string> stranger_from; // (the first few's addresses)
+	void note(const std::string &text, const std::string &addr = "", const std::string &after = "")
+	{
+		const Said w{ text, addr, after };
+		if (said.size() < 12 && std::find(said.begin(), said.end(), w) == said.end()) said.push_back(w);
+	}
 
 	// the other player
 	bool host = false, have_peer = false, relay_only = false;
@@ -200,6 +214,23 @@ struct RoomLink::Impl
 		socklen_t len = 0;
 		if (s == NO_SOCKET || !sockaddr_of(to, v6, ss, len)) return;
 		sendto(s, reinterpret_cast<const char *>(p), int(n), 0, reinterpret_cast<const sockaddr *>(&ss), len);
+	}
+	// (the other player's ways: counted, and why a send failed kept)
+	void send_counted(const std::string &to, const uint8_t *p, size_t n)
+	{
+		sockaddr_storage ss;
+		socklen_t len = 0;
+		Count &c = counts["d " + to];
+		c.sent++;
+		if (s == NO_SOCKET || !sockaddr_of(to, v6, ss, len)) { c.failed++; return; }
+		if (sendto(s, reinterpret_cast<const char *>(p), int(n), 0, reinterpret_cast<const sockaddr *>(&ss), len) < 0) {
+			c.failed++;
+#ifdef _WIN32
+			c.error = WSAGetLastError();
+#else
+			c.error = errno;
+#endif
+		}
 	}
 	void send_to(const std::string &to, const std::vector<uint8_t> &b) { send_to(to, b.data(), b.size()); }
 
@@ -241,16 +272,21 @@ struct RoomLink::Impl
 		q.add_u32(stun::A_LIFETIME, lifetime);
 		turn_send(q);
 	}
+	// One request for each of the other player's addresses a relay can reach: a relay refuses a request with any
+	// address it won't relay to (a private network's, as Cloudflare's does), and one refused mustn't take the rest
 	void permit()
 	{
-		stun::Message q;
-		q.type = stun::PERMISSION;
-		int n = 0;
 		for (const std::string &a : peer) {
 			stun::Address x;
-			if (stun_of(a, x)) { x.port = 0; q.add_address(stun::A_PEER, x); n++; }
+			if (private_address(a) || !stun_of(a, x)) continue;
+			x.port = 0;
+			stun::Message q;
+			q.type = stun::PERMISSION;
+			q.add_address(stun::A_PEER, x);
+			turn_send(q);
+			perm_of[tid_key(q.tid)] = a;
+			if (perm_of.size() > 64) perm_of.erase(perm_of.begin());
 		}
-		if (n) turn_send(q);
 	}
 	void turn_reply(const stun::Message &r)
 	{
@@ -259,6 +295,8 @@ struct RoomLink::Impl
 		const uint16_t asked = it->second;
 		pending.erase(it);
 		const int code = r.error_code();
+		std::string perm_for;
+		if (auto p = perm_of.find(tid_key(r.tid)); p != perm_of.end()) { perm_for = p->second; perm_of.erase(p); }
 		if (code == 401 || code == 438) {   // (a login wanted, or a nonce gone stale: again with the new one)
 			const std::string rl = r.get_string(stun::A_REALM), nc = r.get_string(stun::A_NONCE);
 			if (nc.empty()) { if (asked == stun::ALLOCATE) turn = FAILED; return; }
@@ -280,9 +318,11 @@ struct RoomLink::Impl
 			turn = relay.empty() ? FAILED : READY;
 			refresh_at = now_ms() + lifetime_s * 500;
 			perm_dirty = have_peer;
-		} else if (r.type == stun::ALLOCATE_ERR) turn = FAILED;
+		} else if (r.type == stun::ALLOCATE_ERR) { turn = FAILED; note("the relay refused this side: " + std::to_string(code)); }
 		else if (r.type == stun::REFRESH_OK) refresh_at = now_ms() + lifetime_s * 500;
-		else if (r.type == stun::PERMISSION_OK) perm_at = now_ms();
+		else if (r.type == stun::REFRESH_ERR) note("the relay refused to keep it: " + std::to_string(code));
+		else if (r.type == stun::PERMISSION_OK) { perm_at = now_ms(); note("the relay let through ", perm_for); }
+		else if (r.type == stun::PERMISSION_ERR) note("the relay refused ", perm_for, ": " + std::to_string(code));
 	}
 
 	// ---- the ways to the other player ----
@@ -298,7 +338,8 @@ struct RoomLink::Impl
 	}
 	void send_way(const Way &w, const uint8_t *p, size_t n)
 	{
-		if (!w.relay) { send_to(w.to, p, n); return; }
+		if (!w.relay) { send_counted(w.to, p, n); return; }
+		counts["r " + w.to].sent++;
 		stun::Message q;   // (a send indication: through this side's relay)
 		q.type = stun::SEND;
 		stun::random_tid(q.tid);
@@ -535,6 +576,15 @@ bool RoomLink::recv(std::vector<uint8_t> &out)
 			len = d->size();
 			came = { peer.text(), true };
 		}
+		if (len >= 4 && memcmp(data, "VFN", 3) == 0 && m->peer_ip(came.to)) {
+			Impl::Count &c = m->counts[(came.relay ? "r " : "d ") + came.to];
+			if (data[3] == 'Q') c.knocks++;
+			else c.got++;
+		} else {
+			m->strangers++;
+			if (m->stranger_from.size() < 3 && std::find(m->stranger_from.begin(), m->stranger_from.end(), came.to) == m->stranger_from.end())
+				m->stranger_from.push_back((came.relay ? "relayed " : "") + came.to);
+		}
 		if (m->relay_only && !came.relay) continue;   // (only the relay's way: anything straight to this socket, dropped)
 		if (len < 4 || memcmp(data, "VFN", 3) != 0) continue;
 		if (data[3] == 'Q') continue;   // (a knock: it made the hole, nothing more)
@@ -564,6 +614,33 @@ void RoomLink::lock()
 
 bool RoomLink::locked() const { return m->is_locked; }
 bool RoomLink::via_relay() const { return m->is_locked && (m->way.relay || (!m->peer_relay.empty() && m->way.to == m->peer_relay)); }
+
+std::string RoomLink::report(const std::function<std::string(const std::string &)> &mask) const
+{
+	std::string out = "relay " + std::string(m->turn == Impl::READY ? "ready" : m->turn == Impl::FAILED ? "failed" : m->turn == Impl::ASKING ? "still asking" : "none");
+	for (const Impl::Said &w : m->said) out += "; " + w.text + (w.addr.empty() ? "" : mask(w.addr)) + w.after;
+	for (const auto &[k, c] : m->counts) {
+		out += "; " + std::string(k[0] == 'r' ? "through this side's relay to " : "to ") + mask(k.substr(2)) + ": sent " + std::to_string(c.sent);
+		if (c.failed) out += " (" + std::to_string(c.failed) + " failed, error " + std::to_string(c.error) + ")";
+		out += ", got " + std::to_string(c.got) + " and " + std::to_string(c.knocks) + " knocks";
+	}
+	// (what came in on ways this side doesn't send by: the other side's relay to this side's own address)
+	if (m->strangers) {
+		out += "; " + std::to_string(m->strangers) + " from no one expected (";
+		for (size_t i = 0; i < m->stranger_from.size(); i++) out += (i ? ", " : "") + mask(m->stranger_from[i]);
+		out += ")";
+	}
+	return out;
+}
+
+bool RoomLink::local_blocked() const
+{
+#ifdef __APPLE__   // (macOS's Local Network permission, off: sends to the network's addresses refused, "no route to host")
+	for (const auto &[k, c] : m->counts)
+		if (k[0] == 'd' && private_address(k.substr(2)) && c.failed && c.error == EHOSTUNREACH) return true;
+#endif
+	return false;
+}
 
 std::string RoomLink::way() const
 {
