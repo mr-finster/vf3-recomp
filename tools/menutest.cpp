@@ -267,7 +267,11 @@ int main(int argc, char **argv)
 		check(!o.peer_country().empty() || !o.my_country().empty(), ("countries from the lobby (" + o.my_country() + ", " + o.peer_country() + ")").c_str());
 		o2.stop();
 		o.stop();
+		// the Random card: how many play at random (the two just matched, counted for a while), asked again every 30 s
+		poll_for(40000, [&] { return o.players_online(s) > 0; });
 		again();
+		shot("home_online.png", w, h);
+		check(o.players_online(s) >= 2, ("the Random card's count (" + std::to_string(o.players_online(s)) + ")").c_str());
 		key(SDL_SCANCODE_RIGHT);
 		key(SDL_SCANCODE_RETURN);   // (Host)
 		poll_for(15000, [&] { return !o.room_code().empty() || o.phase() == Online::Phase::off; });

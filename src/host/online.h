@@ -14,6 +14,7 @@
 #include "../net/session.h"
 #include "../net/json.h"
 #include <algorithm>
+#include <atomic>
 #include <deque>
 #include <functional>
 #include <memory>
@@ -68,7 +69,6 @@ public:
 	// A random opponent: the nearest of those searching (the lobby's), then a room's match like any other
 	bool find_random(const OnlineSettings &s, std::string &error);
 	bool random_match() const { return random; }
-	int searching_for() const { return st == Step::searching ? int((now - search_since) / 1000) : 0; }   // (seconds)
 	int searching_with() const { return players; }   // (others searching too, as the lobby last said)
 	// The same again: the last try (Try again), or the last match's (Play again)
 	bool try_again(const OnlineSettings &s, std::string &error);
@@ -127,6 +127,9 @@ public:
 	// Who's to press Start: on the match's title screen 1 this player hasn't yet, 2 the other hasn't; after a match
 	// (the loser out of the game, as its RAM has it) 3 this player's out (Start for a rematch), 4 the other is; 0 none
 	int start_wait() const;
+	// How many play at random now (searching, or in a random match lately), as the lobby last said; -1 not known.
+	// Asked again every 30 s while it's called (the Online screen open), never while a match is on or being made
+	int players_online(const OnlineSettings &s);
 	bool slow_local() const { return local_slow; }   // (this match through the relay only for a Mac's Local Network permission)
 	void set_last_match(const LastMatch &m) { last = m; }   // ({}: forgotten, the menu closed after it; tests: one made up)
 	void forget_failure() { failure.clear(); }              // (the menu closed after it)
@@ -154,14 +157,19 @@ private:
 	vf3net::Score score;
 	mutable size_t start_scan[2] = {};   // (start_wait: how far each player's inputs have been looked through)
 	mutable bool start_seen[2] = {};
+	std::shared_ptr<std::atomic<int>> online_count = std::make_shared<std::atomic<int>>(-1);
+	std::shared_ptr<std::atomic<bool>> online_asking = std::make_shared<std::atomic<bool>>(false);
+	double online_asked = -1e18;   // (when, in ms)
+	int random_misses = 0;   // (random opponents in a row not reached)
 	bool both_in = false;   // (both have been in the game at once, as its RAM has it: start_wait's rematches)
+	mutable size_t out_scan[2] = { SIZE_MAX, SIZE_MAX };   // (a player out of the game: their inputs looked through from then)
+	mutable bool out_pressed[2] = {};                     // (and they've pressed Start since: on their way back in)
 	Try tried = Try::none;
 	std::string want_code;           // (host_room's want)
 	double patient_until = 0;
 	std::string patient_for;         // (whose room's waited for)
 	bool random = false;
 	std::string ticket, country_me, country_peer;
-	double search_since = 0;
 	int players = 0;
 	uint64_t logged_rb = 0, logged_resim = 0, logged_stalls = 0, logged_waits = 0, logged_steps = 0;
 	double logged_save = 0, logged_run = 0, logged_resim_ms = 0, logged_hash = 0;

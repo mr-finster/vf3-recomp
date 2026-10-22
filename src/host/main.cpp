@@ -2006,9 +2006,11 @@ int main(int argc, char **argv)
 				for (int dy = 0; dy < 4; dy++)
 					for (int dx = 0; dx < 4; dx++) {
 						const uint8_t *q = static_cast<const uint8_t *>(flag_atlas->pixels) + size_t(y0 + y * 4 + dy) * size_t(flag_atlas->pitch) + size_t(x0 + x * 4 + dx) * 4;
-						for (int c = 0; c < 4; c++) sum[c] += q[c];
+						for (int c = 0; c < 3; c++) sum[c] += q[c] * q[3];   // (by their cover: a flag not a rectangle, Nepal's)
+						sum[3] += q[3];
 					}
-				fl.px[size_t(y) * size_t(fl.w) + size_t(x)] = 0xFF000000u | (sum[2] / 16) << 16 | (sum[1] / 16) << 8 | (sum[0] / 16);
+				const unsigned a = sum[3] / 16, d = sum[3] ? sum[3] : 1;
+				fl.px[size_t(y) * size_t(fl.w) + size_t(x)] = a << 24 | (sum[2] / d) << 16 | (sum[1] / d) << 8 | (sum[0] / d);
 			}
 		return fl;
 	};
@@ -2710,6 +2712,10 @@ int main(int argc, char **argv)
 			online_refresh_t = SDL_GetTicks();
 			static std::string said;
 			if (const std::string now = online.status(); now != said) { said = now; menu.refresh(); }
+		}
+		else if (menu.is_open() && online.phase() == Online::Phase::off && menu.top_name() == "Online" && !menu.capturing()) {
+			static int said = -2;   // (the Online screen: how many play at random, as the lobby says)
+			if (const int n = online.players_online(cfg.online); n != said) { said = n; menu.refresh(); }
 		}
 		online_was = online.phase();
 		if (!menu.capturing()) online_code_was = online.room_code();
