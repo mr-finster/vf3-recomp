@@ -30,6 +30,8 @@ struct Count : vfnet::Game
 	void advance(const uint16_t in[2], bool) override { s = (s ^ in[0] ^ uint64_t(in[1]) << 16) * 0x9E3779B97F4A7C15ull + 1; }
 };
 
+int late_ms = 0;   // (the servers given this long after the link's made: the lobby slow to answer)
+
 struct Side
 {
 	vfnet::RoomLink link;
@@ -37,6 +39,7 @@ struct Side
 	{
 		std::string err;
 		if (!link.open(0, err)) { printf("  open: %s\n", err.c_str()); return false; }
+		if (late_ms) std::this_thread::sleep_for(std::chrono::milliseconds(late_ms));
 		link.use_stun(server);
 		if (turn) link.use_turn(server, user, pass);
 		return true;
@@ -66,6 +69,8 @@ bool run(const char *what, const std::string &server, const std::string &user, c
 	const std::vector<std::string> nowhere = { "10.255.255.1:9" };   // (a private network's: nothing there, and never through a relay)
 	// (the host always has the guest's real addresses, as the lobby gives them: its relay lets in only those; the
 	// guest, in the relay cases, only the host's relay)
+	a.link.allow_loopback(true);   // (everything's on this machine)
+	b.link.allow_loopback(true);
 	a.link.set_peer(real_addresses || !b_turn ? b.link.candidates() : nowhere, b.link.relay_address(), true);
 	b.link.set_peer(real_addresses ? a.link.candidates() : nowhere, a.link.relay_address(), false);
 	Count ga, gb;
@@ -112,6 +117,9 @@ int main(int argc, char **argv)
 	if (!only || only == 2) failed += !run("both relays", server, user, pass, true, true, false, false, true);
 	if (!only || only == 3) failed += !run("the host's relay only", server, user, pass, true, false, false, false, true);
 	if (!only || only == 4) failed += !run("a wrong token", server, user, pass, true, true, true, true, false);
+	late_ms = 7000;
+	if (!only || only == 5) failed += !run("the relay's login 7 s late", server, user, pass, true, true, false, false, true);
+	late_ms = 0;
 	printf(failed ? "%d FAILED\n" : "all passed\n", failed);
 	return failed ? 1 : 0;
 }

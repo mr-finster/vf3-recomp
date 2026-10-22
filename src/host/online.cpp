@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <thread>
 
 namespace {
@@ -26,6 +27,14 @@ std::string mask(const std::string &a)
 	const size_t dot = a.rfind('.'), colon = a.rfind(':');
 	if (dot == std::string::npos || colon == std::string::npos || colon < dot) return a;
 	return a.substr(0, dot + 1) + "x" + a.substr(colon);
+}
+
+// A lobby on this machine (tests): plain http allowed for it, and the other game's addresses its own
+bool lobby_on_this_machine(const std::string &url)
+{
+	for (const char *p : { "http://127.0.0.1", "http://localhost", "http://[::1]" })
+		if (url.rfind(p, 0) == 0 && (url.size() == strlen(p) || url[strlen(p)] == ':' || url[strlen(p)] == '/')) return true;
+	return false;
 }
 
 std::string masked(const std::vector<std::string> &v)
@@ -181,7 +190,9 @@ bool Online::host_room(const OnlineSettings &s, std::string &error)
 	auto_done = false;
 	lobby = s.lobby.empty() ? lobby_default() : s.lobby;
 	if (lobby.empty()) { error = "Room codes aren't set up in this build yet: use Host by address below, on the same network or a VPN."; return false; }
+	if (lobby.rfind("https://", 0) != 0 && !lobby_on_this_machine(lobby)) { error = "The lobby's address (settings.ini's online_lobby) must start with https://."; return false; }
 	room = std::make_unique<vfnet::RoomLink>();
+	room->allow_loopback(lobby_on_this_machine(lobby));   // (two games on one machine: a test)
 	if (!room->open(0, error)) { room.reset(); return false; }
 	room->set_relay_only(s.hide_ip);
 	identity.name = s.name;
@@ -217,7 +228,9 @@ bool Online::join_room(const OnlineSettings &s, const std::string &c, std::strin
 	auto_done = false;
 	lobby = s.lobby.empty() ? lobby_default() : s.lobby;
 	if (lobby.empty()) { error = "Room codes aren't set up in this build yet: use Join by address below."; return false; }
+	if (lobby.rfind("https://", 0) != 0 && !lobby_on_this_machine(lobby)) { error = "The lobby's address (settings.ini's online_lobby) must start with https://."; return false; }
 	room = std::make_unique<vfnet::RoomLink>();
+	room->allow_loopback(lobby_on_this_machine(lobby));   // (two games on one machine: a test)
 	if (!room->open(0, error)) { room.reset(); return false; }
 	room->set_relay_only(s.hide_ip);
 	identity.name = s.name;
@@ -377,8 +390,8 @@ void Online::room_poll()
 		break;
 	case Step::waiting:
 		if (!job && now >= retry_at) {
-			const std::string url = lobby_url("/v1/wait?code=" + code + "&key=" + key);
-			start_job([url](Job &j) { j.reply = vfnet::http::request("GET", url, "", 30000); });
+			const std::string url = lobby_url("/v1/wait"), body = "{\"code\":" + vfnet::json::quote(code) + ",\"key\":" + vfnet::json::quote(key) + "}";
+			start_job([url, body](Job &j) { j.reply = vfnet::http::request("POST", url, body, 30000); });
 		}
 		if (job && job->done) {
 			vfnet::json::Value v;
