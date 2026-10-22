@@ -23,8 +23,8 @@ const ROOM_LIFE_MS = 2 * 3600e3; // and no room lasts longer
 const WAIT_MS = 20000;
 // The relay's logins a day, all players together: what the relay can cost is bounded by its logins (a login works
 // a day), so past this none are given out until the next day (UTC) and the games connect directly or not at all.
-// About two a match: plenty for now; raise it as the players come.
-const TURN_PER_DAY = 4000;
+// About two a match: room for a busy day; raise it as the players come.
+const TURN_PER_DAY = 10000;
 
 const json = (body, status = 200) =>
 	new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
