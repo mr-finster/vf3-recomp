@@ -251,7 +251,7 @@ int main(int argc, char **argv)
 		Online o2(board2);
 		o2.identity = o.identity;
 		OnlineSettings s2 = s;
-		s2.name = "G";
+		s2.name = "AKIRAFAN";
 		if (!o2.find_random(s2, err)) fprintf(stderr, "menutest: the other's random: %s\n", err.c_str());
 		const uint64_t r0 = SDL_GetTicks();
 		while (SDL_GetTicks() - r0 < 15000 && !(o.step_now() == Online::Step::connecting && o2.step_now() == Online::Step::connecting)) {
@@ -263,7 +263,7 @@ int main(int argc, char **argv)
 		shot("random_found.png", w, h);
 		check(o.room_code() == o2.room_code() && !o.room_code().empty() && o.is_hosting() != o2.is_hosting(),
 		      ("two searching are matched: one room, a host and a guest (" + o.room_code() + ", " + o2.room_code() + ")").c_str());
-		check(o.peer() == "G" && o2.peer() == "MRFINSTER", ("each has the other's name (" + o.peer() + ", " + o2.peer() + ")").c_str());
+		check(o.peer() == "AKIRAFAN" && o2.peer() == "MRFINSTER", ("each has the other's name (" + o.peer() + ", " + o2.peer() + ")").c_str());
 		check(!o.peer_country().empty() || !o.my_country().empty(), ("countries from the lobby (" + o.my_country() + ", " + o.peer_country() + ")").c_str());
 		o2.stop();
 		o.stop();
@@ -288,7 +288,7 @@ int main(int argc, char **argv)
 		// the room's code kept by Play again (as after a match)
 		Online::LastMatch m;
 		m.any = m.was_host = m.by_code = true;
-		m.opponent = "G";
+		m.opponent = "AKIRAFAN";
 		m.code = kept.size() == 7 ? kept.substr(0, 3) + kept.substr(4) : "";
 		o.stop();
 		o.set_last_match(m);
@@ -313,7 +313,7 @@ int main(int argc, char **argv)
 		// a guest's Play again: waits for the host's room
 		Online::LastMatch g;
 		g.any = g.by_code = true;
-		g.opponent = "G";
+		g.opponent = "AKIRAFAN";
 		g.code = "ZZZ222";
 		o.forget_failure();
 		o.set_last_match(g);
@@ -330,8 +330,8 @@ int main(int argc, char **argv)
 	Online::LastMatch lm;
 	Online::LastMatch &m = lm;
 	m.any = m.was_host = m.by_code = true;
-	m.why = "G left the match.";
-	m.opponent = "G";
+	m.why = "AKIRAFAN left the match.";
+	m.opponent = "AKIRAFAN";
 	m.code = "FR7W25";
 	m.seconds = 760;
 	m.ping = 19;
@@ -344,7 +344,7 @@ int main(int argc, char **argv)
 	shot("match_over.png", w, h);
 	m.was_host = false;
 	m.lost = m.relay = true;
-	m.why = "G's game stopped answering.";
+	m.why = "AKIRAFAN's game stopped answering.";
 	m.seconds = 195;
 	m.ping = 25;
 	o.set_last_match(m);
@@ -389,17 +389,17 @@ int main(int argc, char **argv)
 	gm.toast("");
 	near.interrupted = true;
 	gm.set_net(near);
-	gm.set_notice("WAITING FOR G", "The connection dropped. Holding the match for 7 s...", "It carries on from right here if it comes back");
+	gm.set_notice("WAITING FOR AKIRAFAN", "The connection dropped. Holding the match for 7 s...", "It carries on from right here if it comes back");
 	shot("interrupted.png", w, h);
 	gm.set_notice("");
 	gm.set_net("", 0);
-	gm.show_versus({ "PLAYER 1 \xC2\xB7 HOST", "MRFINSTER", "PLAYER 2", "G", "Connected directly \xC2\xB7 19 ms", "Both press Start", false, "AU", "JP" });
+	gm.show_versus({ "PLAYER 1 \xC2\xB7 HOST", "MRFINSTER", "PLAYER 2", "AKIRAFAN", "Connected directly \xC2\xB7 19 ms", "Both press Start", false, "AU", "JP" });
 	for (int i = 0; i < 20; i++) { shot("", w, h); SDL_Delay(20); }   // (its fade in)
 	shot("versus.png", w, h);
 	for (int i = 0; i < 20; i++) { shot("", w, h); SDL_Delay(200); }   // (gone after its 3.5 s)
 	gm.set_banner("PRESS", "", "OPTIONS");
 	shot("press_start.png", w, h);
-	gm.set_banner("WAITING FOR G", "to press Start");
+	gm.set_banner("WAITING FOR AKIRAFAN", "to press Start");
 	shot("waiting_start.png", w, h);
 	gm.set_banner("PRESS", "for a rematch", "OPTIONS");
 	shot("rematch.png", w, h);
