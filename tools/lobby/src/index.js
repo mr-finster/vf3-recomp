@@ -6,10 +6,10 @@
 //
 //   POST /v1/host   {game, version, content, name, cands, relay}    -> {code, key, token}
 //   POST /v1/join   {code, game, version, content, name, cands, relay} -> {name, cands, relay, token}  (or {error})
-//   GET  /v1/wait?code=&key=   (the host's: waits up to 20 s for a player) -> {guest: null | {name, cands, relay}}
+//   POST /v1/wait   {code, key}   (the host's: waits up to 20 s for a player) -> {guest: null | {name, cands, relay}}
 //   POST /v1/reopen {code, key}   (the host's, after a player who didn't get going: the same code, open again)
 //   POST /v1/close  {code, key}
-//   POST /v1/turn   {game}  -> {servers: [{host, port, username, credential}], ttl}
+//   POST /v1/turn   {game}  -> {servers: [{host, port, username, credential}], ttl}   (TURN_PER_DAY a day, all told)
 //   GET  /v1/ping   -> {ok, protocol}
 //
 // Errors are {error: "<what>"} with a status: no_room 404, full 409, game / version / rom 412 (with the host's
@@ -21,6 +21,10 @@ const CODE_LENGTH = 6;
 const HOST_GONE_MS = 30000;      // a host not heard from this long has gone (its wait comes every 20 s)
 const ROOM_LIFE_MS = 2 * 3600e3; // and no room lasts longer
 const WAIT_MS = 20000;
+// The relay's logins a day, all players together: what the relay can cost is bounded by its logins (a login works
+// a day), so past this none are given out until the next day (UTC) and the games connect directly or not at all.
+// About two a match: plenty for now; raise it as the players come.
+const TURN_PER_DAY = 4000;
 
 const json = (body, status = 200) =>
 	new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
@@ -31,7 +35,20 @@ function clean(s, max) {
 }
 function addrs(list) {
 	if (!Array.isArray(list)) return [];
-	return list.slice(0, 8).map((a) => clean(a, 64)).filter((a) => /^[0-9a-fA-F:.\[\]]+:\d{1,5}$/.test(a));
+	return list.slice(0, 8).map((a) => clean(a, 64)).filter(addr_ok);
+}
+// "1.2.3.4:5678" or "[v6]:5678", and an address a player's game can have: not this machine's own (loopback), nor
+// none, multicast or broadcast, nor port 0 (what a game would otherwise be made to send to by the other player)
+let loopback_ok = false;   // (testing on one's own computer, TURN_STATIC set: the games' addresses are its own)
+function addr_ok(a) {
+	const m = /^(?:(\d{1,3}(?:\.\d{1,3}){3})|\[([0-9a-fA-F:.]+)\]):(\d{1,5})$/.exec(a);
+	if (!m || +m[3] < 1 || +m[3] > 65535) return false;
+	if (m[1]) {
+		const b = m[1].split('.').map(Number);
+		return b.every((x) => x <= 255) && b[0] !== 0 && (b[0] !== 127 || loopback_ok) && b[0] < 224;
+	}
+	const v6 = m[2].toLowerCase();
+	return v6 !== '::' && v6 !== '::1' && !v6.startsWith('ff') && !v6.startsWith('::ffff:127.') && !v6.startsWith('::ffff:0.');
 }
 function who(b) {
 	return {
@@ -72,23 +89,29 @@ async function body_of(req) {
 	}
 }
 
-// Too many tries from one address: a room code guessed at, the relay's logins farmed
-async function limited(env, req, what, per_minute) {
+// Too many tries from one address (an IPv6 one by its /64, as one home's are): a room code guessed at, the relay's
+// logins farmed, the lobby flooded. Cloudflare's rate limiting (per place, roughly: a limit, not a count).
+function sender(req) {
 	const ip = req.headers.get('cf-connecting-ip') || 'local';
-	const stub = env.LIMITS.get(env.LIMITS.idFromName(ip));
-	const r = await stub.fetch('https://limits/', { method: 'POST', body: JSON.stringify({ what, per_minute }) });
-	return r.status === 429;
+	return ip.includes(':') ? ip.split(':').slice(0, 4).join(':') : ip;
+}
+async function limited(env, req, what) {
+	const r = await env[what].limit({ key: sender(req) });
+	return !r.success;
 }
 
 export default {
 	async fetch(req, env) {
 		const url = new URL(req.url);
 		const path = url.pathname;
+		loopback_ok = !!env.TURN_STATIC;
 		try {
 			if (path === '/v1/ping') return json({ ok: true, protocol: PROTOCOL });
+			if (req.method !== 'POST') return json({ error: 'bad' }, 404);
+			if (await limited(env, req, 'ANY_LIMIT')) return json({ error: 'busy' }, 429);
 
-			if (path === '/v1/host' && req.method === 'POST') {
-				if (await limited(env, req, 'host', 20)) return json({ error: 'busy' }, 429);
+			if (path === '/v1/host') {
+				if (await limited(env, req, 'HOST_LIMIT')) return json({ error: 'busy' }, 429);
 				const b = await body_of(req);
 				if (!b) return json({ error: 'bad' }, 400);
 				const me = who(b);
@@ -101,8 +124,8 @@ export default {
 				return json({ error: 'busy' }, 429);
 			}
 
-			if (path === '/v1/join' && req.method === 'POST') {
-				if (await limited(env, req, 'join', 30)) return json({ error: 'busy' }, 429);
+			if (path === '/v1/join') {
+				if (await limited(env, req, 'JOIN_LIMIT')) return json({ error: 'busy' }, 429);
 				const b = await body_of(req);
 				if (!b) return json({ error: 'bad' }, 400);
 				const code = normal_code(b.code);
@@ -110,13 +133,7 @@ export default {
 				return room(env, code).fetch('https://room/join', { method: 'POST', body: JSON.stringify({ guest: who(b) }) });
 			}
 
-			if (path === '/v1/wait' && req.method === 'GET') {
-				const code = normal_code(url.searchParams.get('code'));
-				if (!code_ok(code)) return json({ error: 'no_room' }, 404);
-				return room(env, code).fetch('https://room/wait', { method: 'POST', body: JSON.stringify({ key: clean(url.searchParams.get('key'), 64) }) });
-			}
-
-			if ((path === '/v1/reopen' || path === '/v1/close') && req.method === 'POST') {
+			if (path === '/v1/wait' || path === '/v1/reopen' || path === '/v1/close') {
 				const b = await body_of(req);
 				if (!b) return json({ error: 'bad' }, 400);
 				const code = normal_code(b.code);
@@ -124,8 +141,10 @@ export default {
 				return room(env, code).fetch('https://room' + path.slice(3), { method: 'POST', body: JSON.stringify({ key: clean(b.key, 64) }) });
 			}
 
-			if (path === '/v1/turn' && req.method === 'POST') {
-				if (await limited(env, req, 'turn', 10)) return json({ error: 'busy' }, 429);
+			if (path === '/v1/turn') {
+				if (await limited(env, req, 'TURN_LIMIT')) return json({ error: 'busy' }, 429);
+				const day = await env.LIMITS.get(env.LIMITS.idFromName('turn')).fetch('https://limits/', { method: 'POST', body: JSON.stringify({ per_day: TURN_PER_DAY }) });
+				if (day.status === 429) return json({ error: 'no_turn' }, 503);
 				return turn(env);
 			}
 
@@ -143,7 +162,7 @@ function room(env, code) {
 // Cloudflare's TURN: a login for a day, from the TURN key (kept as this Worker's secrets)
 async function turn(env) {
 	// (testing on one's own computer: a TURN server of one's own, as a .dev.vars line TURN_STATIC='[{"host":...}]')
-	if (env.TURN_STATIC) return json({ servers: JSON.parse(env.TURN_STATIC), ttl: 86400 });
+	if (env.TURN_STATIC) return json({ servers: JSON.parse(env.TURN_STATIC), ttl: 86400 });   // (never set on the real one)
 	if (!env.TURN_KEY_ID || !env.TURN_KEY_API_TOKEN) return json({ error: 'no_turn' }, 503);
 	const r = await fetch(`https://rtc.live.cloudflare.com/v1/turn/keys/${env.TURN_KEY_ID}/credentials/generate-ice-servers`, {
 		method: 'POST',
@@ -222,7 +241,10 @@ export class Room {
 			if (r.guest) return json({ guest: r.guest });
 			const g = await new Promise((done) => {
 				this.waiters.push(done);
-				setTimeout(() => done(undefined), WAIT_MS);
+				setTimeout(() => {
+					this.waiters = this.waiters.filter((w) => w !== done);
+					done(undefined);
+				}, WAIT_MS);
 			});
 			const now = await this.load();
 			if (!now) return json({ error: 'no_room' }, 404);
@@ -244,19 +266,19 @@ export class Room {
 	}
 }
 
-// Tries per address per minute (in memory: a limit, not a record; a restart forgets it, as it may)
+// The relay's logins given out today (UTC), all players together: kept, so a restart doesn't forget them
 export class Limits {
 	constructor(ctx) {
 		this.ctx = ctx;
-		this.counts = new Map();
 	}
 	async fetch(req) {
-		const { what, per_minute } = await req.json();
-		const minute = Math.floor(Date.now() / 60000);
-		const k = what + ':' + minute;
-		const n = (this.counts.get(k) || 0) + 1;
-		this.counts.set(k, n);
-		for (const key of this.counts.keys()) if (!key.endsWith(':' + minute)) this.counts.delete(key);
-		return new Response(null, { status: n > per_minute ? 429 : 204 });
+		const { per_day } = await req.json();
+		const day = Math.floor(Date.now() / 86400e3);
+		const c = (await this.ctx.storage.get('c')) || { day, n: 0 };
+		if (c.day !== day) { c.day = day; c.n = 0; }
+		if (c.n >= per_day) return new Response(null, { status: 429 });
+		c.n++;
+		await this.ctx.storage.put('c', c);
+		return new Response(null, { status: 204 });
 	}
 }

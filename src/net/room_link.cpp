@@ -145,6 +145,23 @@ bool private_address(const std::string &a)
 	return !ip.empty() && (l == "fc" || l == "fd" || l == "fe");
 }
 
+// An address a player's game can have, as the other side gives it (through the lobby): not this machine's own
+// (loopback: unless testing on one machine), nor none, multicast or broadcast, nor port 0. A game is never made to
+// send to anything else on the other side's say-so.
+bool player_address(const std::string &a, bool loopback_ok)
+{
+	const std::string ip = ip_of(a);
+	const size_t colon = a.rfind(':');
+	if (ip.empty() || colon == std::string::npos || atoi(a.c_str() + colon + 1) <= 0 || atoi(a.c_str() + colon + 1) > 65535) return false;
+	unsigned b[4];
+	if (sscanf(ip.c_str(), "%u.%u.%u.%u", &b[0], &b[1], &b[2], &b[3]) == 4)
+		return b[0] <= 255 && b[1] <= 255 && b[2] <= 255 && b[3] <= 255 && b[0] != 0 && b[0] < 224 && (b[0] != 127 || loopback_ok);
+	std::string l = ip;
+	for (char &c : l) c = char(tolower(c));
+	if (l == "::" || l.rfind("ff", 0) == 0 || l.rfind("::ffff:", 0) == 0) return false;   // (mapped IPv4: given as IPv4, or not at all)
+	return l != "::1" || loopback_ok;
+}
+
 std::string tid_key(const uint8_t tid[12]) { return std::string(reinterpret_cast<const char *>(tid), 12); }
 
 } // namespace
@@ -156,7 +173,7 @@ struct RoomLink::Impl
 #ifdef _WIN32
 	bool wsa = false;
 #endif
-	double started = now_ms();
+	double started = now_ms();   // (gathering's start: when the servers were given)
 
 	// STUN: this side's public address
 	std::string stun_server, pub;
@@ -189,7 +206,7 @@ struct RoomLink::Impl
 	}
 
 	// the other player
-	bool host = false, have_peer = false, relay_only = false;
+	bool host = false, have_peer = false, relay_only = false, loopback_ok = false;
 	std::vector<std::string> peer;   // their addresses, the relay's among them
 	std::string peer_relay;
 	struct Way { std::string to; bool relay = false; bool operator==(const Way &o) const { return to == o.to && relay == o.relay; } };
@@ -299,8 +316,8 @@ struct RoomLink::Impl
 		if (auto p = perm_of.find(tid_key(r.tid)); p != perm_of.end()) { perm_for = p->second; perm_of.erase(p); }
 		if (code == 401 || code == 438) {   // (a login wanted, or a nonce gone stale: again with the new one)
 			const std::string rl = r.get_string(stun::A_REALM), nc = r.get_string(stun::A_NONCE);
-			if (nc.empty()) { if (asked == stun::ALLOCATE) turn = FAILED; return; }
-			if (code == 401 && asked == stun::ALLOCATE && !key.empty() && rl == realm) { turn = FAILED; return; }   // (the login refused)
+			if (nc.empty()) { if (asked == stun::ALLOCATE) { turn = FAILED; note("the relay refused this side: " + std::to_string(code)); } return; }
+			if (code == 401 && asked == stun::ALLOCATE && !key.empty() && rl == realm) { turn = FAILED; note("the relay refused the login"); return; }
 			if (!rl.empty()) realm = rl;
 			nonce = nc;
 			key = stun::long_term_key(user, realm, password);
@@ -366,7 +383,7 @@ struct RoomLink::Impl
 		}
 		if (turn == ASKING && t >= turn_next) {
 			if (turn_tries++ < 8) { allocate(); turn_next = t + 500; }
-			else turn = FAILED;
+			else { turn = FAILED; note("the relay didn't answer"); }
 		}
 		if (turn == READY) {
 			if (t >= refresh_at) { refresh(uint32_t(lifetime_s)); refresh_at = t + 20000; }   // (asked again in 20 s if no answer)
@@ -374,7 +391,7 @@ struct RoomLink::Impl
 		}
 		if (t - started > 4000) {   // (gathering's time is up: what's found is what there is)
 			stun_done = true;
-			if (turn == ASKING && relay.empty() && t - started > 6000) turn = FAILED;
+			if (turn == ASKING && relay.empty() && t - started > 6000) { turn = FAILED; note("the relay didn't answer in time"); }
 		}
 		if (host && have_peer && !is_locked && t < punch_until && t >= punch_next) {
 			static const uint8_t knock[8] = { 'V', 'F', 'N', 'Q', 0, 0, 0, 0 };
@@ -465,6 +482,7 @@ void RoomLink::use_stun(const std::string &server)
 	if (server.empty()) return;
 	m->stun_server = server;
 	m->stun_done = false;
+	m->started = now_ms();   // (gathering's time from now: not from when the link was made, the lobby asked meanwhile)
 	m->stun_tries = 0;
 	m->stun_next = 0;
 }
@@ -476,6 +494,7 @@ void RoomLink::use_turn(const std::string &server, const std::string &user, cons
 	m->user = user;
 	m->password = password;
 	m->turn = Impl::ASKING;
+	m->started = now_ms();
 	m->turn_tries = 0;
 	m->turn_next = 0;
 }
@@ -483,6 +502,7 @@ void RoomLink::use_turn(const std::string &server, const std::string &user, cons
 bool RoomLink::gathered() const { return m->stun_done && m->turn != Impl::ASKING; }
 
 void RoomLink::set_relay_only(bool on) { m->relay_only = on; }
+void RoomLink::allow_loopback(bool on) { m->loopback_ok = on; }
 
 std::vector<std::string> RoomLink::candidates() const
 {
@@ -503,12 +523,14 @@ void RoomLink::set_peer(const std::vector<std::string> &cands, const std::string
 	for (const std::string &a : cands) {
 		sockaddr_storage ss;
 		socklen_t len;
-		if (sockaddr_of(a, m->v6, ss, len) && std::find(m->peer.begin(), m->peer.end(), a) == m->peer.end()) m->peer.push_back(a);
+		if (m->peer.size() < 8 && player_address(a, m->loopback_ok) && sockaddr_of(a, m->v6, ss, len) && std::find(m->peer.begin(), m->peer.end(), a) == m->peer.end())
+			m->peer.push_back(a);
 	}
 	sockaddr_storage ss;
 	socklen_t len;
 	m->peer_relay.clear();
-	if (!relay.empty() && sockaddr_of(relay, m->v6, ss, len)) { m->peer.push_back(relay); m->peer_relay = relay; }
+	if (!relay.empty() && player_address(relay, m->loopback_ok) && sockaddr_of(relay, m->v6, ss, len) &&
+	    std::find(m->peer.begin(), m->peer.end(), relay) == m->peer.end()) { m->peer.push_back(relay); m->peer_relay = relay; }
 	m->host = host;
 	m->have_peer = !m->peer.empty();
 	m->is_locked = false;

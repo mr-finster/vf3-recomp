@@ -58,6 +58,26 @@ TURN_STATIC=[{"host":"127.0.0.1","port":3478,"username":"test","credential":"sec
 
 and the games started with `VF_LOBBY=http://127.0.0.1:8787`.
 
+## What stops abuse
+
+- **Rate limits** per address (an IPv6 one by its /64), in `wrangler.toml`: 120 requests a minute in all, 20 rooms
+  opened, 20 joins, 10 relay logins. Enough for a LAN party or a phone network's shared address; a flood, or a
+  room code guessed at (31^6, about 900 million codes), is stopped.
+- **The relay's logins are capped**: `TURN_PER_DAY` in `src/index.js` (4,000 a day, about 2,000 matches). Past it
+  no more are given out that day: matches still connect directly, only the relay's matches wait for tomorrow. The
+  relay is the one thing that costs by use, so this is what bounds the bill; raise it as players come.
+- **A billing alert** (do this once): Cloudflare dashboard > **Notifications** > **Add**, pick the usage-based
+  billing alert, and set an amount you'd want to hear about (say $5). Cloudflare has no hard spending cap for the
+  relay; the cap above and this alert are what there is.
+- **The secrets** (`TURN_KEY_ID`, `TURN_KEY_API_TOKEN`) never leave the Worker: players get only day-long relay
+  logins. If the token ever leaks, regenerate it in the dashboard (Realtime > TURN Server) and put it again.
+- **What the games are told**: only another player's addresses (checked: nothing that points a game at its own
+  machine, broadcast or multicast), name and version, and only to someone with the room's code. The room's host
+  key (who may wait, reopen, close) and the match's token are random and new for each room.
+- **No game data comes through here**, and nothing is logged by the Worker.
+
+After changing anything here, `npx wrangler deploy` again.
+
 ## What it keeps
 
 A room: the host's name, game, version and addresses, for as long as the host's game keeps asking (it's gone 30
