@@ -252,7 +252,7 @@ void Session::poll(double t)
 				else if (began) { Out r(READY, token); r.u64(nonce); send_packet(r.b); last_hello = now; }
 				else { Out a(BLOB_ACK, token); a.u32(chunks_acked); a.u64(nonce); send_packet(a.b); last_hello = now; }
 			} else if (!their_name.empty() && !began) {
-				if (proven) { if (now - blob_moved >= 300) { send_blob(); blob_moved = now; } }   // (the window again only once acks stop: not every 100 ms)
+				if (proven) { if (now - blob_moved >= std::max(300.0, 2 * stats_.rtt_ms)) { send_blob(); blob_moved = now; } }   // (the window again only once acks stop: not every 100 ms)
 				else if (welcomes < MAX_WELCOMES && now - last_hello >= 200) send_welcome();   // (unanswered: soon given up)
 			}
 		}
@@ -523,7 +523,13 @@ void Session::check_hashes(bool work)
 		}
 	} else if (work && hashing.on && cur - hashing.frame > R)
 		hashing.on = false;   // (it stalled out of the ring: not checked)
-	while (work && hashing.on) {
+	// (the parts left spread over the steps the slot has left: not three at once on the last one, a hitch)
+	int budget = 1;
+	if (work && hashing.on) {
+		const int steps_left = std::max(1, int(R) - 1 - int(cur - hashing.frame));
+		budget = (HASH_PARTS - hashing.part + steps_left - 1) / steps_left;
+	}
+	while (work && hashing.on && budget-- > 0) {
 		const auto t0 = Clock::now();
 		const std::vector<uint8_t> &st = ring[hashing.frame % R];
 		const size_t skip = std::min(st.size(), game.hash_skip()), n = st.size() - skip;
@@ -535,7 +541,6 @@ void Session::check_hashes(bool work)
 			my_hash[hashing.frame] = hashing.h;
 			while (my_hash.size() > 64) my_hash.erase(my_hash.begin());
 		}
-		if (cur - hashing.frame < R - 1) break;   // (the rest next steps: its slot's kept a step more at least)
 	}
 	for (auto it = their_hash.begin(); it != their_hash.end();) {
 		auto m = my_hash.find(it->first);

@@ -199,8 +199,8 @@ struct RoomLink::Impl
 	int turn_tries = 0;
 	std::string alloc_tid;            // the latest ALLOCATE asked: its id, and its bytes (sent again as they are)
 	std::vector<uint8_t> alloc_bytes;
-	bool alloc_keyed = false;
-	double turn_first = 0;             // (when the first ALLOCATE went: the relay's time to answer counts from it)          // (with the login: a 401 to it is the login refused)
+	bool alloc_keyed = false;          // (with the login: a 401 to it is the login refused)
+	double turn_first = 0;             // (when the first ALLOCATE went: the relay's time to answer counts from it)
 	double turn_next = 0, refresh_at = 0, perm_at = 0;
 	bool perm_dirty = false;
 	double lifetime_s = 600;
@@ -348,7 +348,7 @@ struct RoomLink::Impl
 			if (!rl.empty()) realm = rl;
 			nonce = nc;
 			key = stun::long_term_key(user, realm, password);
-			if (asked == stun::ALLOCATE) allocate();
+			if (asked == stun::ALLOCATE) { turn_tries = std::min(turn_tries, 4); allocate(); }   // (the login's own tries)
 			else if (asked == stun::REFRESH) refresh(uint32_t(lifetime_s));
 			else if (asked == stun::PERMISSION && !perm_for.empty()) permit_one(perm_for);   // (that one again: not all of them)
 			return;
@@ -416,7 +416,7 @@ struct RoomLink::Impl
 			if (turn_tries == 0) turn_first = t;
 			if (turn_tries++ < 8) {
 				if (alloc_bytes.empty()) allocate();
-				else { send_to(turn_server, alloc_bytes); turn_next = t + 500; }   // (the same request again)
+				else { pending[alloc_tid] = stun::ALLOCATE; send_to(turn_server, alloc_bytes); turn_next = t + 500; }   // (the same request again, still asked)
 			}
 			else { turn = FAILED; note("the relay didn't answer"); }
 		}
