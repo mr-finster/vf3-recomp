@@ -116,12 +116,13 @@ int main(int argc, char **argv)
 	struct R { double rtt, jit; int target, floor, want; };
 	const R rules[] = {
 		{ 10, 1, 6, 1, 1 },     // a LAN: the least
-		{ 60, 4, 6, 1, 2 },     // same country: as before (half the round trip in frames)
-		{ 130, 8, 6, 1, 4 },    // across a continent: as before, 4
-		{ 210, 10, 6, 1, 4 },   // still 4: the rollback covers the rest
+		{ 60, 4, 6, 1, 2 },     // same country: half the round trip in frames, rounded
+		{ 80, 10, 6, 1, 2 },    // a phone's 5G, the same city: 2 (the rollback takes a frame or two)
+		{ 130, 8, 6, 1, 3 },    // across a continent: 3 at most from the ping alone
+		{ 210, 10, 6, 1, 3 },   // still 3: the rollback covers the rest
 		{ 410, 10, 6, 1, 7 },   // the other side of the world: more, so no slowdown
 		{ 710, 15, 6, 1, 15 },  // as far as there is: the most
-		{ 130, 8, 4, 2, 4 },    // a slow machine: shorter rollbacks
+		{ 130, 8, 4, 2, 3 },    // a slow machine: shorter rollbacks
 		{ 310, 8, 4, 2, 6 },
 		{ 20, 2, 4, 2, 2 },     // a slow machine on a LAN: 2 at least
 	};

@@ -218,6 +218,7 @@ div { display: block; }
 .mini .n { font-size: 44dp; line-height: 48dp; font-weight: 700; font-style: italic; color: #ffffff; }
 .mini .n.me { color: #f2d14b; }
 .mini .vs {
+	box-sizing: border-box;   /* (58 across with its border: the line its height inside it, VS in the middle) */
 	width: 58dp;
 	height: 58dp;
 	border-radius: 29dp;
@@ -225,7 +226,7 @@ div { display: block; }
 	padding-right: 3dp;
 	text-align: center;
 	font-size: 28dp;
-	line-height: 50dp;
+	line-height: 50dp;   /* (52 inside the border; Barlow's capitals sit a dp low in their line) */
 	font-weight: 700;
 	font-style: italic;
 	color: #ffffff;

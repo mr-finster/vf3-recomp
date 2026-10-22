@@ -209,8 +209,8 @@ private:
 	uint16_t remote_input(uint32_t f) const;
 };
 
-// Auto's input delay for a connection, as Fightcade picks one: from the round trip. Half of it in frames at least
-// (1 to 4: how it feels), and as many more as keep the frames guessed (the one-way trip and its jitter, less the
+// Auto's input delay for a connection, as Fightcade picks one: from the round trip. Half of it in frames, rounded
+// (1 to 3: how it feels; the rollback takes the rest, a frame or two, as it's there for), and as many more as keep the frames guessed (the one-way trip and its jitter, less the
 // delay) within target_rollback, so the game is never held back for the other side's inputs and runs at its full
 // speed at any ping: what a far opponent costs is input delay, not frames. floor: this machine's least.
 int auto_delay(double rtt_ms, double jitter_ms, double frame_ms, int target_rollback, int floor);
@@ -231,7 +231,7 @@ public:
 	std::string why;
 private:
 	bool started = false;
-	double checked_at = 0, lower_since = -1, higher_since = -1, floor_until = 0;
+	double checked_at = 0, lower_since = -1, higher_since = -1, floor_until = 0, started_at = 0;
 	uint64_t stalls_at = 0;
 	int floor = 0;    // (a delay the holding back called for: kept a while)
 	int target = -1;  // (raising to: a frame at a time)
