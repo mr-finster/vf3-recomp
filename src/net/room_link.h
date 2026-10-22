@@ -38,6 +38,8 @@ public:
 	// Through this side's relay only: its own addresses never given out nor sent from, so the other player sees
 	// only the relay's ("hide my IP"). Before gathering.
 	void set_relay_only(bool on);
+	// The other player's addresses may be this machine's own (127.0.0.1): two games on one machine, for tests only
+	void allow_loopback(bool on);
 	void clear_peer();                              // (a host waiting again: the last player's gone)
 
 	// Housekeeping, every frame or so (retries, the relay kept alive, hole punching); recv does it too
