@@ -1902,6 +1902,8 @@ int main(int argc, char **argv)
 	game.sound.gain = LEVEL * cfg.volume / 100.0;
 	game.sound.set_volumes(cfg.music / 100.0f, cfg.effects / 100.0f);
 	const int frame_bytes = int(SOUND_RATE / FRAME_HZ) * 4;
+	constexpr double MATCH_QUEUED = 5.0;   // (a match's: two frames more, for the frames the session holds back)
+	float sound_ratio = 1.0f;              // (a match's: the sound played a little slower or faster, SDL's frequency ratio)
 	constexpr double QUEUED = 3.0;   // (3.5 when the sound was made in the frame's own time: it's a frame later now; 2.5 kept it near
 	                                 // the frame and a half that runs an extra frame, two frames in a pass)
 
@@ -2752,7 +2754,18 @@ int main(int argc, char **argv)
 			double rate = FRAME_HZ;
 			int low = 0;
 			bool sound_full = false;
-			if (audio) {
+			if (audio && online.playing()) {
+				// A match: its frames come when the session lets them (a frame held back to keep in time, a wait for
+				// the other side), so the sound can't be kept fed by running frames sooner, as alone: that ran this
+				// side ahead, and the queue still ran dry at every wait (the music dropped out). Instead a deeper
+				// queue, and the sound itself played up to 4% slower or faster to keep it there.
+				const int q = SDL_GetAudioStreamQueued(audio);
+				if (q > frame_bytes * int(FRAME_HZ * 0.3)) sound_full = true;
+				queue_avg += (q - queue_avg) * std::min(1.0, dt / 0.25);
+				const float ratio = float(std::clamp(1 + (queue_avg / frame_bytes - MATCH_QUEUED) * 0.015, 0.96, 1.04));
+				if (std::fabs(ratio - sound_ratio) > 0.002f) { sound_ratio = ratio; SDL_SetAudioStreamFrequencyRatio(audio, ratio); }
+			} else if (audio) {
+				if (sound_ratio != 1.0f) { sound_ratio = 1.0f; SDL_SetAudioStreamFrequencyRatio(audio, 1.0f); }
 				const int q = SDL_GetAudioStreamQueued(audio);
 				if (q > frame_bytes * int(FRAME_HZ * 0.3)) sound_full = true;
 				queue_avg += (q - queue_avg) * std::min(1.0, dt / 0.5);
