@@ -206,10 +206,12 @@ lobby. The flags are the countries Cloudflare places each player's connection in
 
 - A cable beats Wi-Fi. **Steam Deck:** turn off Wi-Fi power management (Settings > System > Developer Mode on, then
   Settings > Developer > Enable Wi-Fi power management off): it holds packets back in bursts.
-- **Input delay** (Online > Settings): Auto picks from the ping and how fast your machine runs. Higher means fewer
-  corrections, lower means a quicker response; 2 is a good start over the internet.
-- **Connection display:** On shows the other player, the ping and the rollback at the top (the dot green, yellow or
-  red); Detailed adds the input delay, jitter and frame timings. Under about 100 ms ping plays well.
+- **Input delay** (Online > Settings): Auto picks from the ping and how fast your machine runs, and keeps the game
+  at full speed against a far opponent with more delay instead (up to 15 frames); it lowers it again between rounds
+  once the connection's better. Or set 0 to 10 yourself: higher means fewer corrections, lower a quicker response.
+- **Connection display:** On shows the other player, the ping, the input delay and the rollback at the top (the dot
+  green, yellow or red); Detailed adds the jitter and frame timings. Under about 100 ms ping plays well; past ~250 ms
+  the delay rises to keep the game at its full speed.
 
 **Good to know**
 

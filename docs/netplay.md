@@ -47,8 +47,16 @@ From a survey of other projects' online play (Oct 2026; many sources secondhand,
   with ping, challenges, spectators, replays) is what players will compare us with. VF5 Final Showdown's
   delay-based online was disliked; VF5 R.E.V.O.'s rollback (2025) was well received, but forcing both players to
   the lower of their two delays was not.
-- **Input delay**: 2 frames by default, 0 to 6 by choice, and an Auto from the ping (ceil(RTT / 2 / 17.4 ms),
-  Supermodel Dojo's rule), at most 4. Each side keeps its own; never forced down to the other's.
+- **Input delay**: Auto by default, or 0 to 10 frames by choice. Each side keeps its own; never forced down to the
+  other's. Auto (`vfnet::auto_delay` and `vfnet::AutoDelay`, tested by `delaytest`) is half the round trip in frames
+  (1 to 4, Supermodel Dojo's rule: how it feels), and more where the ping needs it: enough that what's guessed (the
+  one-way trip and its jitter, less the delay) stays within 6 of the 7 frames rollback can go back (4 on a slow
+  machine), up to 15. So the game runs at its full 57.5 frames a second at any ping (a 670 ms round trip at 15); a
+  far opponent costs input delay, as on Fightcade, not a slowed game. Through a match: the first as the ping's
+  known (the character select), up a frame at a time every 6 frames once the ping's wanted more for half a second
+  (or frames have been held back for the other side), and down only between rounds (the ~2 s the game shows who
+  won, no one in control), once a lower one's done for 10 s with a tenth more ping to spare. The connection line
+  shows it (ping, delay, rollback) and log.txt says each change and why.
 - **Rollback**: up to 7 frames; beyond that the game waits rather than guessing further. Rollback runs only when
   a guess was wrong (the soak test's every-frame mode is the stress case).
 - **The cost**: up to 8 frames run in one frame's 17.4 ms, with the picture, on a Steam Deck. So a frame's run
@@ -137,7 +145,7 @@ look-alikes (no O/0, I/1), so they can be read out over voice chat and entered q
 | Join a room | Type the code, A to join. |
 | Lobby | The players online: name, ping (colour-coded, a wifi mark), playing or free. A on a name challenges; your own row says if you're free to be challenged. |
 | Watch | Matches being played now; A to watch one. |
-| Input delay | Auto (shows what it picked) or 0 to 6 frames. Says what it means: "fewer frames: more rollback". |
+| Input delay | Auto (shows what it picked) or 0 to 10 frames. Says what it means: "fewer frames: more rollback". |
 | Connection display | On / Off: the ping and rollback in a match. |
 | Server | Advanced: the lobby server's address. |
 
