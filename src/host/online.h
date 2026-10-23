@@ -95,7 +95,7 @@ public:
 	bool via_relay() const { return room && room->via_relay(); }
 	std::string status() const;   // a line for the menu: what's happening now
 	// The connection display in a match: the other player, the ping, the input delay, the rollback, direct or
-	// through the relay, and how good (level 0 good, 1 fair, 2 poor); detailed, the jitter, the rollbacks' average,
+	// through the relay, and how good (level 0 good, 1 fair, 2 poor: by what the player feels, see connection); detailed, the jitter, the rollbacks' average,
 	// how far ahead this side is and what a frame's step costs here too. False: not in a match.
 	bool connection(game_menu::net_cells &c, bool detailed) const;
 	// the other player's name, as the HUD can show it (only its letters: whatever else the other side sent, dropped)
@@ -176,6 +176,8 @@ private:
 	bool both_in = false;   // (both have been in the game at once, as its RAM has it: start_wait's rematches)
 	mutable size_t out_scan[2] = { SIZE_MAX, SIZE_MAX };   // (a player out of the game: their inputs looked through from then)
 	mutable bool out_pressed[2] = {};                     // (and they've pressed Start since: on their way back in)
+	mutable uint64_t stalls_mark = 0;                     // (connection: the frames held back, counted a second at a time)
+	mutable double stalls_mark_at = -1, stalls_per_s = 0;
 	Try tried = Try::none;
 	std::string want_code;           // (host_room's want)
 	std::string kept_code, kept_key;  // (the last room this side hosted: its code and key, for a Play again's)
