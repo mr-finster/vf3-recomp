@@ -1,7 +1,7 @@
 // delaytest: Auto's input delay (vfnet::auto_delay, vfnet::AutoDelay) against simulated connections: the rule's values
 // at each ping; two sessions at every ping from a LAN's to the other side of the world, each driven by AutoDelay,
 // held to the game's full speed (57.5 frames a second) with no desync; a ping that jumps mid-match (raised at once)
-// and comes back (lowered only between rounds); and a slow machine's (shorter rollbacks, more delay).
+// and comes back (mid-fight a frame at a time); and a slow machine's (shorter rollbacks, more delay).
 //   delaytest [-v]
 #include "../src/net/link.h"
 #include "../src/net/session.h"
@@ -39,7 +39,7 @@ struct Run
 	std::vector<std::pair<double, int>> changes;   // (when, to) side A's delay changes
 	std::vector<std::pair<uint32_t, int>> change_frames;   // (at which frame, by how much)
 	std::vector<double> lowered_at;                // (when a lowering happened: between rounds?)
-	bool lowered_outside_rounds = false;
+	bool lowered_outside_rounds = false;   // (mid-fight by more than a frame at once)
 	uint64_t b_resim = 0, b_frames = 0;   // (side B's frames run again, and frames, in all)
 	uint64_t a_stalls = 0, a_waits = 0;   // (side A stopped dead for B's inputs; held back a frame to keep in time)
 };
@@ -102,7 +102,7 @@ Run run(double secs, std::function<vfnet::SimWire::Params(double)> wire_at, doub
 					r.change_frames.push_back({ x.frame(), n - was });
 					if (verbose) printf("    %.1f s: delay %d -> %d (%s)\n", t / 1000, was, n, d.why.c_str());
 					// (the first, at the character select, may be below the session's starting 2: not a lowering mid-fight)
-					if (n < was && r.changes.size() > 1) { r.lowered_at.push_back(t / 1000); if (!br) r.lowered_outside_rounds = true; }
+					if (n < was && r.changes.size() > 1) { r.lowered_at.push_back(t / 1000); if (!br && was - n > 1) r.lowered_outside_rounds = true; }
 				}
 			}
 		}
@@ -203,9 +203,31 @@ int main(int argc, char **argv)
 		for (auto &c : r.changes) if (c.first >= 20 && c.first < 60 && c.second >= 6) { raised_at = c.first; break; }
 		check(raised_at > 0 && raised_at < 26, "raised for the far ping within 6 s (at " + std::to_string(raised_at) + " s, to " + std::to_string(r.delay_max) + ")");
 		check(r.fps >= FULL * 0.985, "full speed once raised: " + std::to_string(r.fps) + " frames a second");
-		check(!r.lowered_at.empty() && r.lowered_at.back() >= 70, "lowered again once the ping's back (at " + (r.lowered_at.empty() ? std::string("-") : std::to_string(r.lowered_at.back())) + " s)");
-		check(!r.lowered_outside_rounds, "lowered only between rounds");
+		check(!r.lowered_at.empty() && r.lowered_at.front() >= 61 && r.lowered_at.back() < 80, "lowered again once the ping's back (from " + (r.lowered_at.empty() ? std::string("-") : std::to_string(r.lowered_at.front())) + " s)");
+		check(!r.lowered_outside_rounds, "lowered mid-fight only a frame at a time");
 		check(r.delay_end <= 2, "back to a near ping's delay (" + std::to_string(r.delay_end) + ")");
+	}
+
+	printf("a burst on a phone network (a second and a half of 200 ms, jumping): rollback's, not a delay kept\n");
+	{
+		auto wire = [](double s) { return s >= 30 && s < 31.5 ? vfnet::SimWire::Params{ 200.0, 150, 0.05 } : vfnet::SimWire::Params{ 25.0, 6, 0.01 }; };
+		const Run r = run(50, wire, 35, 48);
+		check(!r.ended, "no desync, no end");
+		int most = 0;
+		for (auto &c : r.changes) if (c.first >= 29) most = std::max(most, c.second);
+		check(most <= 3, "the delay not raised far for it (" + std::to_string(most) + ")");
+		check(r.delay_end <= 2, "and at a near ping's after (" + std::to_string(r.delay_end) + ")");
+	}
+
+	printf("a ping that rises and stays (a phone network's worse spell): raised, then lowered mid-round once it's back\n");
+	{
+		auto wire = [](double s) { return vfnet::SimWire::Params{ s >= 20 && s < 30 ? 180.0 : 25.0, 10, 0.01 }; };
+		const Run r = run(45, wire, 36, 44);
+		int most = 0;
+		for (auto &c : r.changes) if (c.first >= 20 && c.first < 30) most = std::max(most, c.second);
+		check(most >= 3, "raised for it (to " + std::to_string(most) + ")");
+		check(!r.lowered_at.empty() && r.lowered_at.front() >= 30 && r.lowered_at.front() < 36, "lowered within 6 s of it ending (at " + (r.lowered_at.empty() ? std::string("-") : std::to_string(r.lowered_at.front())) + " s)");
+		check(r.delay_end <= 2, "back down (" + std::to_string(r.delay_end) + ")");
 	}
 
 	printf("raised a frame at a time (no input held several frames longer at once)\n");
