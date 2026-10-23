@@ -40,11 +40,12 @@ struct Run
 	std::vector<std::pair<uint32_t, int>> change_frames;   // (at which frame, by how much)
 	std::vector<double> lowered_at;                // (when a lowering happened: between rounds?)
 	bool lowered_outside_rounds = false;
+	uint64_t b_resim = 0, b_frames = 0;   // (side B's frames run again, and frames, in all)
 };
 
 // Two sessions over a wire for `secs`, both on AutoDelay; `wire_at` changes the wire as time goes; rounds end every
 // 20 s (the 90 frames after: between rounds); fps measured over [from_s, to_s)
-Run run(double secs, std::function<vfnet::SimWire::Params(double)> wire_at, double from_s, double to_s, bool slow = false, double b_fps = 0)
+Run run(double secs, std::function<vfnet::SimWire::Params(double)> wire_at, double from_s, double to_s, bool slow = false, double b_fps = 0, int room_b = -1)
 {
 	vfnet::SimWire w(wire_at(0), wire_at(0));
 	Toy ga, gb;
@@ -78,6 +79,8 @@ Run run(double secs, std::function<vfnet::SimWire::Params(double)> wire_at, doub
 		// each side tries a frame every frame time, as the game does (a held-back one: again a moment later)
 		if (t >= na) { if (a.step(uint16_t(a.frame() / 7 % 5))) na += c.frame_ms; else na += 1; }
 		if (t >= nb) { if (b.step(uint16_t(b.frame() / 11 % 3))) nb += b_fps > 0 ? 1000.0 / b_fps : c.frame_ms; else nb += 1; }
+		a.set_room(da.rollback_room(a.stats()));
+		b.set_room(room_b >= 0 ? room_b : db.rollback_room(b.stats()));
 		for (int s = 0; s < 2; s++) {
 			vfnet::Session &x = s ? b : a;
 			vfnet::AutoDelay &d = s ? db : da;
@@ -102,6 +105,8 @@ Run run(double secs, std::function<vfnet::SimWire::Params(double)> wire_at, doub
 		}
 	}
 	r.fps = have_to && to_s > from_s ? (f_to - f_from) / (to_s - from_s) : 0;
+	r.b_resim = b.stats().resim_frames;
+	r.b_frames = b.frame();
 	r.delay_end = a.delay();
 	return r;
 }
@@ -134,31 +139,37 @@ int main(int argc, char **argv)
 		                         std::to_string(x.target) + ": delay " + std::to_string(got) + " (" + std::to_string(x.want) + " wanted)");
 	}
 
-	printf("what a frame costs here: rollback kept to what fits in a step (no late frame, no choppy picture)\n");
+	printf("what a frame costs: each side's rollbacks fit its frames (its room), the other side's delay covering the rest\n");
 	{
-		struct M { const char *what; double save, run, resim_each; bool slow; double rtt; int room, want; };
-		// (from real logs: an M4 Max's step 3.9 ms, a frame run again ~2.5; a Steam Deck's 11 and ~7)
-		const M ms[] = {
-			{ "a fast Mac, 80 ms", 0.34, 3.5, 2.5, false, 80, 4, 1 },
-			{ "a fast Mac, 200 ms", 0.34, 3.5, 2.5, false, 200, 4, 3 },
-			{ "a Steam Deck on 5G, 80 ms", 1.0, 10.0, 7.0, true, 80, 2, 2 },
-			{ "a Steam Deck, 130 ms", 1.0, 10.0, 7.0, true, 130, 2, 3 },
-			{ "a Steam Deck on a LAN", 1.0, 10.0, 7.0, true, 8, 2, 1 },
-		};
+		// (from real logs, in a fight: an M4 Max's step 5.7 ms, a frame run again 4.9; a Steam Deck's 14.6 and 11.7)
+		struct M { const char *what; double step, each; int room; };
+		const M ms[] = { { "a fast Mac", 5.7, 4.9, 2 }, { "a Mac in a light scene", 3.9, 2.5, 4 }, { "a Steam Deck in a fight", 14.6, 11.7, 0 },
+		                 { "a Steam Deck in a menu", 6.0, 4.5, 2 } };
 		for (const M &m : ms) {
 			vfnet::Session::Stats st;
 			st.steps = 1000;
-			st.save_ms = m.save * 1000;
-			st.run_ms = m.run * 1000;
-			st.resim_frames = 500;
-			st.resim_ms = m.resim_each * 500;
-			st.rtt_ms = m.rtt;
-			st.jitter_ms = 8;
+			st.step_recent_ms = m.step;
+			st.resim_recent_ms = m.each;
 			vfnet::AutoDelay d;
-			d.slow = m.slow;
-			const int room = d.rollback_room(st), want = d.want(st);
-			check(room == m.room && want == m.want, std::string(m.what) + ": rollback up to " + std::to_string(room) + " (" + std::to_string(m.room) +
-			                                            " wanted), delay " + std::to_string(want) + " (" + std::to_string(m.want) + " wanted)");
+			const int room = d.rollback_room(st);
+			check(room == m.room, std::string(m.what) + ": can run again " + std::to_string(room) + " frames in a step (" + std::to_string(m.room) + " wanted)");
+		}
+		struct W { const char *what; double rtt; int peer_room, want; };
+		const W ws[] = {
+			{ "a Mac against a Deck in a fight, 45 ms", 45, 0, 2 },   // (the Deck can't take any back: the Mac covers the trip)
+			{ "the Deck against that Mac, 45 ms", 45, 2, 1 },         // (the Mac takes back 2: the Deck plays at 1)
+			{ "two fast machines, 80 ms", 80, 2, 1 },
+			{ "two fast machines on a LAN", 8, 2, 0 },
+			{ "a Mac against a Deck, 130 ms", 130, 0, 5 },
+		};
+		for (const W &w : ws) {
+			vfnet::Session::Stats st;
+			st.rtt_ms = w.rtt;
+			st.jitter_ms = 8;
+			st.peer_room = w.peer_room;
+			vfnet::AutoDelay d;
+			const int want = d.want(st);
+			check(want == w.want, std::string(w.what) + ": delay " + std::to_string(want) + " (" + std::to_string(w.want) + " wanted)");
 		}
 	}
 
@@ -221,6 +232,15 @@ int main(int argc, char **argv)
 		auto wire = [](double s) { return vfnet::SimWire::Params{ 60, 8, s >= 20 && s < 25 ? 0.3 : 0.01 }; };
 		const Run r = run(50, wire, 30, 48);
 		check(!r.ended && r.fps >= FULL * 0.985, "no end, full speed after: " + std::to_string(r.fps) + ", delay " + std::to_string(r.delay_end));
+	}
+
+	printf("against a machine that can't run a frame again in time (a Steam Deck in a fight): this side covers the trip\n");
+	{
+		const Run r = run(40, [](double) { return vfnet::SimWire::Params{ 25, 6, 0.0 }; }, 15, 38, false, 0, 0);
+		char b[200];
+		snprintf(b, sizeof b, "45 ms or so: delay %d here, the Deck's frames run again %.1f%% of its frames, %.2f frames a second", r.delay_end,
+		         r.b_frames ? 100.0 * double(r.b_resim) / double(r.b_frames) : 0.0, r.fps);
+		check(!r.ended && r.delay_end >= 2 && r.b_frames && double(r.b_resim) / double(r.b_frames) < 0.02 && r.fps >= FULL * 0.985, b);
 	}
 
 	printf("a slow machine (a Steam Deck's frame): shorter rollbacks, a little more delay\n");
