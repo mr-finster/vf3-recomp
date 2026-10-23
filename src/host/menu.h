@@ -108,6 +108,7 @@ private:
 	std::string m_fps, m_net = "-", m_notice = "\n\n";   // (m_net: the connection's RML and class; m_notice: its title and lines, "\n\n" none)
 	void show_net(const std::string &rml, const char *cls);
 	uint64_t m_toast_until = 0;   // (SDL_GetTicks)
+	double m_toast_wait = 0;      // (a notice's seconds, counted from the first picture drawn with the menu closed)
 	uint64_t m_vs_from = 0, m_vs_until = 0;   // the versus screen's (SDL_GetTicks)
 	void draw_versus(int w, int h);       // its two sides, under its names
 	void draw_spinner();                  // a notice's spinner, over its card
