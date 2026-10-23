@@ -1310,6 +1310,7 @@ int main(int argc, char **argv)
 		}
 		game.tiles_on = true;
 		if (!scripted) vf3net::set_versus_count(board, vf3net::random_versus_count());   // (vf3net::VERSUS_COUNT: the first match between two players' stage)
+		else if (const char *vc = getenv("VF3_VERSUS_COUNT")) vf3net::set_versus_count(board, uint32_t(atoi(vc)));   // (tests: that stage)
 		fprintf(stderr, "boot: %llu frames in %.2f s, unseen\n", (unsigned long long)game_frame,
 				std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
 	};
@@ -3168,6 +3169,7 @@ int main(int argc, char **argv)
 			game.publish();
 			game_frame++;
 			if (game_frame == BOOT_FRAMES && !scripted && !skip_boot()) vf3net::set_versus_count(board, vf3net::random_versus_count());   // (the boot seen: as after an unseen one)
+			if (game_frame == BOOT_FRAMES && scripted) if (const char *vc = getenv("VF3_VERSUS_COUNT")) vf3net::set_versus_count(board, uint32_t(atoi(vc)));   // (tests: that stage)
 			pace.frames++;
 			pace.emu_ms += double(SDL_GetTicksNS() - te) / 1e6;
 			t9.frames++;

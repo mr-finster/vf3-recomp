@@ -7,6 +7,7 @@
 #include "tilegen.h"
 #include "../machine/model3.h"
 #include <condition_variable>
+#include <cstdlib>
 #include <cstring>
 #include <functional>
 #include <mutex>
@@ -36,6 +37,13 @@ public:
 		std::unique_lock<std::mutex> lk(m);
 		if (pushed >= H) return;   // (a frame with more lines than the screen's: never)
 		std::memcpy(regs[pushed], board.tile_regs, sizeof regs[0]);
+		// The layers' order against the 3D and their depths (register 0x20) as the frame began, for all its lines: VF3
+		// changes it only between scenes, and a change landing part way down a frame split it (a round's wipe, the stage's
+		// sky layer put over the 3D while the next is made ready, taken off a frame early above the line it changed at:
+		// a frame's flash of the sky where the game had parked it, pink on the sunset stage)
+		static const bool per_line = getenv("VF3_LAYERS_PER_LINE") != nullptr;   // (tests: as it was, line by line)
+		if (y == 0) layers_order = board.tile_regs[0x20 / 4];
+		else if (!per_line) regs[pushed][0x20 / 4] = layers_order;
 		ys[pushed] = int(y);
 		pushed++;
 		const bool wake = (pushed & 15) == 0 || y == unsigned(H) - 1;   // (a wake every 16 lines, not every line)
@@ -75,6 +83,7 @@ private:
 	uint32_t regs[H][64];
 	int ys[H] = {};
 	int pushed = 0, done = 0;
+	uint32_t layers_order = 0;   // (register 0x20 at the frame's first line)
 	bool quit = false, running = false;   // (running: the job after, being done)
 	std::function<void()> after;
 	void work()
