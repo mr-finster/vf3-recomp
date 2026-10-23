@@ -703,5 +703,38 @@ void game_menu::render(bool fps)
 	m->gfx->BeginOverlay();
 	m->ctx->Render();
 	m->gfx->EndFrame();
+	if (m_notice != "\n\n") draw_spinner();
 	SDL_SetRenderLogicalPresentation(m->ren, lw, lh, mode);
+}
+
+// A notice's spinner: a ring's three quarters going round (a turn a second), drawn here with soft edges where its
+// box is laid out (a box's rounded border, a quarter of it see-through, was lumpy and stood still)
+void game_menu::draw_spinner()
+{
+	Rml::Element *n = m->overlay ? m->overlay->GetElementById("notice") : nullptr;
+	Rml::Element *e = n ? n->QuerySelector(".spin") : nullptr;
+	if (!e) return;
+	const Rml::Vector2f at = e->GetAbsoluteOffset(Rml::BoxArea::Border), size = e->GetBox().GetSize(Rml::BoxArea::Border);
+	const float dp = m->ctx->GetDensityIndependentPixelRatio(), cx = at.x + size.x / 2, cy = at.y + size.y / 2;
+	const float r_out = std::min(size.x, size.y) / 2, r_in = r_out - 5 * dp, f = 0.75f;
+	const float start = float(SDL_GetTicks() % 1000) / 1000.0f * 6.2831853f, sweep = 6.2831853f * 0.75f;
+	constexpr int N = 96;
+	// the arc as rows of vertices across it, from the inside out: transparent, full, full, transparent (a pixel's
+	// feather either side), its ends faded over a few degrees
+	const float radii[4] = { r_in - f, r_in + f, r_out - f, r_out + f }, alpha[4] = { 0, 1, 1, 0 };
+	std::vector<SDL_Vertex> v;
+	std::vector<int> idx;
+	v.reserve((N + 1) * 4);
+	for (int i = 0; i <= N; i++) {
+		const float u = float(i) / N, a = start + sweep * u, end = std::min(1.0f, std::min(u, 1 - u) * 20);
+		for (int k = 0; k < 4; k++)
+			v.push_back({ { cx + radii[k] * std::cos(a), cy + radii[k] * std::sin(a) }, { 0xf2 / 255.0f, 0xd1 / 255.0f, 0x4b / 255.0f, alpha[k] * end }, {} });
+	}
+	for (int i = 0; i < N; i++)
+		for (int k = 0; k < 3; k++) {
+			const int a = i * 4 + k, b = a + 4;
+			idx.insert(idx.end(), { a, b, b + 1, a, b + 1, a + 1 });
+		}
+	SDL_SetRenderDrawBlendMode(m->ren, SDL_BLENDMODE_BLEND);
+	SDL_RenderGeometry(m->ren, nullptr, v.data(), int(v.size()), idx.data(), int(idx.size()));
 }

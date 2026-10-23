@@ -418,6 +418,8 @@ int main(int argc, char **argv)
 	gm.set_net(near);
 	gm.set_notice("WAITING FOR AKIRAFAN", "The connection dropped. Holding the match for 7 s...", "It carries on from right here if it comes back");
 	shot("interrupted.png", w, h);
+	SDL_Delay(250);
+	shot("interrupted_later.png", w, h);   // (its spinner a quarter turn on)
 	gm.set_notice("");
 	gm.set_net("", 0);
 	gm.show_versus({ "PLAYER 1 \xC2\xB7 HOST", "MRFINSTER", "PLAYER 2", "AKIRAFAN", "Connected directly \xC2\xB7 19 ms", "Both press Start", false, "AU", "JP" });
