@@ -48,16 +48,18 @@ From a survey of other projects' online play (Oct 2026; many sources secondhand,
   delay-based online was disliked; VF5 R.E.V.O.'s rollback (2025) was well received, but forcing both players to
   the lower of their two delays was not.
 - **Input delay**: Auto by default, or 0 to 10 frames by choice. Each side keeps its own; never forced down to the
-  other's. Auto (`vfnet::auto_delay` and `vfnet::AutoDelay`, tested by `delaytest`) is as little as keeps the game
-  at its full speed: none within a frame's round trip (a LAN), else 1 (a slow machine, a Steam Deck, a frame more),
-  the rollback hiding the rest. More only where the frames guessed (the one-way trip and its jitter, less the delay)
-  would pass what this machine can run again in one step and still make the frame (measured as it plays, 2 to 6 of
-  the 7 rollback can go back), up to 15: so a far opponent costs input delay, as on Fightcade, never a slowed or
-  choppy game (a 670 ms round trip at 15). Through a match: the first as the ping's known (the character select), up
-  a frame at a time every 6 frames once the ping's wanted more for half a second (or frames have been held back for
-  the other side, past the match's first 15 s), and down only between rounds (the ~2 s the game shows who won, no
-  one in control), once a lower one's done for 10 s with a tenth more ping to spare. The connection line shows it
-  (ping, delay, rollback) and log.txt says each change and why.
+  other's. A side's delay is for the other's sake: its inputs reaching the other side in time are what spare the
+  other side a rollback. So each side measures what it can afford (`AutoDelay::rollback_room`: the frames it can run
+  again in one step and still make its frame, from its recent steps' and re-run frames' cost, 0 to 6) and tells the
+  other side in every input packet; Auto (`vfnet::auto_delay`, `vfnet::AutoDelay`, tested by `delaytest`) is then as
+  little as covers the trip beyond the other side's room: none within a frame's round trip (a LAN), else 1, more
+  where the one-way trip and its jitter would pass what the other side can take back. A Steam Deck in a fight (a
+  frame ~12 ms of its 17) says 0: its opponent's inputs then reach it in time, it rolls back nothing and never
+  stutters, while the Deck itself plays at 1 against a fast machine. Up to 15, so a far opponent costs input delay,
+  never a slowed or choppy game. Through a match: the first as the ping's known (the character select), up a frame
+  at a time every 6 frames once wanted for half a second (or frames held back for the other side, past the first 15
+  s), down only between rounds, after 10 s with a tenth more ping to spare. log.txt says each change and why, and
+  every 10 s both sides' rooms.
 - **Rollback**: up to 7 frames; beyond that the game waits rather than guessing further. Rollback runs only when
   a guess was wrong (the soak test's every-frame mode is the stress case).
 - **The cost**: up to 8 frames run in one frame's 17.4 ms, with the picture, on a Steam Deck. So a frame's run

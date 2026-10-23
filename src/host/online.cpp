@@ -963,8 +963,10 @@ void Online::poll(double t)
 		if (logged_at > 0 && stt.steps > logged_steps) {   // (where a frame's time went: what's slow on a slow machine)
 			const double n = double(stt.steps - logged_steps);
 			fprintf(stderr, "online: a frame's step %.2f ms on average, %.1f the worst: its save %.2f, its frame %.2f, frames run again %.2f, "
-			        "the desync check %.2f\n", (stt.save_ms - logged_save + stt.run_ms - logged_run + stt.resim_ms - logged_resim_ms + stt.hash_ms - logged_hash) / n,
-			        stt.step_max_ms, (stt.save_ms - logged_save) / n, (stt.run_ms - logged_run) / n, (stt.resim_ms - logged_resim_ms) / n, (stt.hash_ms - logged_hash) / n);
+			        "the desync check %.2f; of late a step %.2f, a frame run again %.2f: %d frames can be run again here, %d there\n",
+			        (stt.save_ms - logged_save + stt.run_ms - logged_run + stt.resim_ms - logged_resim_ms + stt.hash_ms - logged_hash) / n,
+			        stt.step_max_ms, (stt.save_ms - logged_save) / n, (stt.run_ms - logged_run) / n, (stt.resim_ms - logged_resim_ms) / n, (stt.hash_ms - logged_hash) / n,
+			        stt.step_recent_ms, stt.resim_recent_ms, adelay.rollback_room(stt), stt.peer_room);
 		}
 		session->clear_step_max();
 		logged_steps = stt.steps;
@@ -981,6 +983,7 @@ void Online::poll(double t)
 	// Auto's input delay (vfnet::AutoDelay): from the ping, enough that the game runs at full speed at any ping, up
 	// at once when it must, down between rounds; where a frame costs this machine much of its time (a Steam Deck's
 	// 11 ms of 17), shorter rollbacks and a frame's delay more, each frame run again costing it as much again
+	if (session && ph == Phase::playing) session->set_room(adelay.rollback_room(session->stats()));   // (told the other side, Auto or not)
 	if (session && ph == Phase::playing && auto_delay) {
 		const auto &stt = session->stats();
 		const double step_ms = stt.steps ? (stt.save_ms + stt.run_ms) / double(stt.steps) : 0.0;

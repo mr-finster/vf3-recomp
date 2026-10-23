@@ -209,10 +209,11 @@ lobby. The flags are the countries Cloudflare places each player's connection in
 
 - A cable beats Wi-Fi. **Steam Deck:** turn off Wi-Fi power management (Settings > System > Developer Mode on, then
   Settings > Developer > Enable Wi-Fi power management off): it holds packets back in bursts.
-- **Input delay** (Online > Settings): Auto uses as little as it can (none on a LAN, 1 frame almost anywhere else, a
-  Steam Deck one more), never more rollback than your machine runs without a hitch, and keeps the game at full speed
-  against a far opponent with more delay instead (up to 15 frames); it lowers it again between rounds once the
-  connection's better. Or set 0 to 10 yourself: higher means fewer corrections, lower a quicker response.
+- **Input delay** (Online > Settings): Auto uses as little as it can (none on a LAN, 1 frame almost anywhere else)
+  and accounts for slower machines: each side tells the other how much rollback it can run without a hitch (a Steam
+  Deck in a fight: none), and the other side's delay covers the rest, so neither side stutters. It keeps the game at
+  full speed against a far opponent with more delay instead (up to 15 frames), and lowers it again between rounds.
+  Or set 0 to 10 yourself: higher means fewer corrections, lower a quicker response.
 - **Connection display:** On shows the other player, the ping, the input delay, the rollback and DIRECT or RELAY at
   the bottom of the screen (the game's own bars and time are at the top), each in a cell of its own that doesn't move
   as the numbers change (the dot green, yellow or red); Detailed adds a row: the jitter, the average rollback, how far
