@@ -209,10 +209,10 @@ private:
 	uint16_t remote_input(uint32_t f) const;
 };
 
-// Auto's input delay for a connection, as Fightcade picks one: from the round trip. Half of it in frames, rounded
-// (1 to 3: how it feels; the rollback takes the rest, a frame or two, as it's there for), and as many more as keep the frames guessed (the one-way trip and its jitter, less the
-// delay) within target_rollback, so the game is never held back for the other side's inputs and runs at its full
-// speed at any ping: what a far opponent costs is input delay, not frames. floor: this machine's least.
+// Auto's input delay for a connection: as little as keeps the game at its full speed. The frames guessed (the
+// one-way trip and its jitter, less the delay) kept within target_rollback, so the game is never held back for the
+// other side's inputs at any ping, and never less than floor: the rollback hides the rest, as it's there for, and
+// a far opponent costs input delay, not frames.
 int auto_delay(double rtt_ms, double jitter_ms, double frame_ms, int target_rollback, int floor);
 
 // Auto's delay through a match: the first as soon as the ping's known (the character select); up once the ping's
@@ -226,6 +226,7 @@ public:
 	bool slow = false;   // this machine: a frame's step past 7 ms (a Steam Deck: each frame run again costs it dear)
 	double frame_ms = 1000.0 / 57.524160;
 	int want(const Session::Stats &s) const;
+	int rollback_room(const Session::Stats &s) const;   // the frames a rollback may run again here without a late step
 	// Each frame: the delay to change to now, or -1; why it changed in `why`
 	int update(const Session &session, double now_ms, bool between_rounds);
 	std::string why;
