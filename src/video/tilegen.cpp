@@ -987,8 +987,13 @@ void TileGen::line(const m3::Model3 &board, unsigned y, const uint32_t *line_reg
 								int moved[128], moved_n[128], touched[64];
 								std::fill(std::begin(moved), std::end(moved), -1);
 								std::fill(std::begin(moved_n), std::end(moved_n), 0);
-								for (int my = 0; my < b.h && !rf.found; my++)
-									for (int mx = 0; mx < b.w && !rf.found; mx++) {
+								// (near where the row was found last frame first: the camera moves it a tile or two at most, and a
+								// screen whose rows each move their own way, as the desert's when the camera tilts, had every row
+								// looked for through all the map every frame, 30 ms a frame on a fast machine. All of it only
+								// when that fails, and for a row it failed for lately, once in 8 frames)
+								RowHint &hint = row_hint[row & 63];
+								if (hint.desc != b.desc) hint = RowHint{ b.desc };
+								auto try_at = [&](int mx, int my) {
 										int exact = 0, bad = 0, nt = 0;
 										const uint16_t *mrow = &b.map[size_t(my) * size_t(b.w)];
 										for (int c = 0; c <= last && bad * 4 <= n && (exact + (n - c)) * 2 >= n; c++) {
@@ -1007,7 +1012,20 @@ void TileGen::line(const m3::Model3 &board, unsigned y, const uint32_t *line_reg
 											for (int i = 0; i < nt; i++) rf.moved.push_back({ touched[i], moved[touched[i]] });
 										}
 										for (int i = 0; i < nt; i++) { moved[touched[i]] = -1; moved_n[touched[i]] = 0; }
+								};
+								if (hint.x >= 0)
+									for (int dy = -3; dy <= 3 && !rf.found; dy++) {
+										const int my = hint.y + dy;
+										if (my < 0 || my >= b.h) continue;
+										for (int dx = -8; dx <= 8 && !rf.found; dx++) try_at(((hint.x + dx) % b.w + b.w) % b.w, my);
 									}
+								const bool full_lately = hint.full_failed_at != ~0ull && board.frame >= hint.full_failed_at && board.frame - hint.full_failed_at < 8;
+								static const bool all_rows = getenv("VF3_NO_TILE_SKIP") != nullptr;
+								if (!full_lately || all_rows)
+									for (int my = 0; my < b.h && !rf.found; my++)
+										for (int mx = 0; mx < b.w && !rf.found; mx++) try_at(mx, my);
+								if (rf.found) { hint.x = rf.x; hint.y = rf.y; hint.full_failed_at = ~0ull; }
+								else if (!full_lately) hint.full_failed_at = board.frame;
 							}
 							if (!rf.found && !failed_lately) {
 								if (row_failed.size() > 4096) row_failed.clear();
