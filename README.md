@@ -228,7 +228,8 @@ lobby. The flags are the countries Cloudflare places each player's connection in
   little ping (more on the same network), so it's off unless you want it.
 - Not yet: spectating, replays, rematch without reconnecting.
 
-**Reporting a problem:** please include **both players'** `log.txt` (the game's data folder: Windows `%APPDATA%\Virtua
+**Reporting a problem:** please include **both players'** `log.txt` (and `log.1.txt` if the game's been opened again
+since: the last 3 runs' logs are kept as `log.1.txt` to `log.3.txt`; the game's data folder: Windows `%APPDATA%\Virtua
 Fighter 3 Recomp`, Mac `~/Library/Application Support/Virtua Fighter 3 Recomp`, Steam Deck / Linux the game's own
 folder or `~/.local/share/Virtua Fighter 3 Recomp`), what each is playing on, Wi-Fi or cable, and the ping shown.
 

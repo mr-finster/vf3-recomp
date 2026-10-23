@@ -1109,6 +1109,14 @@ int main(int argc, char **argv)
 	if (data.empty()) data = "vf3_data";
 	if (!isatty(fileno(stderr))) {
 		std::filesystem::create_directories(data, ec);
+		// the last runs' logs kept (log.1.txt the one before, to log.3.txt): a match's report survives the game being
+		// opened again before its log is sent
+		for (int i = 3; i >= 1; i--) {
+			const std::filesystem::path from = data + (i == 1 ? std::string("/log.txt") : "/log." + std::to_string(i - 1) + ".txt"),
+			                            to = data + "/log." + std::to_string(i) + ".txt";
+			std::filesystem::remove(to, ec);
+			std::filesystem::rename(from, to, ec);
+		}
 		if (freopen((data + "/log.txt").c_str(), "w", stderr)) setvbuf(stderr, nullptr, _IONBF, 0);
 	}
 	sysinfo::tune();
