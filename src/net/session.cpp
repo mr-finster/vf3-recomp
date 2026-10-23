@@ -658,15 +658,30 @@ void Session::quit()
 
 int auto_delay(double rtt_ms, double jitter_ms, double frame_ms, int target_rollback, int floor)
 {
-	const int feel = std::clamp(int(std::lround(rtt_ms / 2 / frame_ms)), 1, 3);
 	const int cover = int(std::ceil((rtt_ms / 2 + jitter_ms) / frame_ms)) - target_rollback;
-	return std::clamp(std::max({ feel, cover, floor }), 0, MAX_DELAY);
+	return std::clamp(std::max(cover, floor), 0, MAX_DELAY);
+}
+
+int AutoDelay::rollback_room(const Session::Stats &s) const
+{
+	// The frames a rollback may run again in one step and the step still fit in a frame, with 3 ms to spare: what a
+	// frame run again costs here, measured (till there are enough: the slow machine's 4 or 6), so a far opponent's
+	// guesses never make a step late (a frame the picture misses: choppy) on this machine
+	const int guess = slow ? 4 : 6;
+	if (s.steps < 300) return guess;
+	const double base = (s.save_ms + s.run_ms + s.hash_ms) / double(s.steps);
+	const double per = s.resim_frames >= 30 ? s.resim_ms / double(s.resim_frames) : s.run_ms / double(s.steps);
+	if (per <= 0.05) return 6;
+	return std::clamp(int((frame_ms - 3.0 - base) / per), 2, 6);
 }
 
 int AutoDelay::want(const Session::Stats &s) const
 {
-	// (a rollback of 6 of the 7 the session can go back: one spare for a late packet; 4 on a slow machine)
-	return auto_delay(s.rtt_ms, s.jitter_ms, frame_ms, slow ? 4 : 6, slow ? 2 : 1);
+	// As little as there can be: none at all within a frame's round trip (a LAN), else 1, the rollback taking the
+	// rest; more only where the frames guessed would pass what this machine can run again in a step (6 at most of
+	// the 7 the session can go back: one spare for a late packet). A slow machine (a Steam Deck) a frame more.
+	const bool near = s.rtt_ms < frame_ms;
+	return auto_delay(s.rtt_ms, s.jitter_ms, frame_ms, rollback_room(s), (near ? 0 : 1) + (slow ? 1 : 0));
 }
 
 int AutoDelay::update(const Session &session, double now, bool between_rounds)

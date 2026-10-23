@@ -1094,8 +1094,9 @@ menu_item delay_row(Online &o, OnlineSettings &s, std::function<void()> changed)
 {
 	return { "Input delay",
 		"The frames between pressing a button and it happening, on your side only. Fewer: the game answers sooner, "
-		"and the other player's moves can jump a little more (rollback). Auto picks from the ping and this machine's speed, "
-		"and keeps the game at full speed against a far opponent with more delay (up to 15); it only ever lowers it between rounds.",
+		"and the other player's moves can jump a little more (rollback). Auto uses as little as it can (none on a LAN, 1 almost "
+		"anywhere else), never more rollback than this machine runs without a hitch, and keeps the game at full speed against a "
+		"far opponent with more delay (up to 15); it only ever lowers it between rounds.",
 		[&o, &s] {
 			if (s.delay >= 0) return std::to_string(s.delay) + (s.delay == 1 ? " frame" : " frames");
 			return o.playing() ? "Auto (" + std::to_string(o.delay_now()) + ")" : std::string("Auto");
