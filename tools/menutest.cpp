@@ -423,6 +423,10 @@ int main(int argc, char **argv)
 	gm.show_versus({ "PLAYER 1 \xC2\xB7 HOST", "MRFINSTER", "PLAYER 2", "AKIRAFAN", "Connected directly \xC2\xB7 19 ms", "Both press Start", false, "AU", "JP" });
 	for (int i = 0; i < 20; i++) { shot("", w, h); SDL_Delay(20); }   // (its fade in)
 	shot("versus.png", w, h);
+	// (the longest names, 10 wide letters each, with flags: each kept to its side of the badge)
+	gm.show_versus({ "PLAYER 1 \xC2\xB7 HOST", "WWWWWWWWWW", "PLAYER 2", "AAAAAAAAAA", "Connected through a relay \xC2\xB7 61 ms", "Both press Start", true, "AU", "JP" });
+	for (int i = 0; i < 20; i++) { shot("", w, h); SDL_Delay(20); }
+	shot("versus_long.png", w, h);
 	for (int i = 0; i < 20; i++) { shot("", w, h); SDL_Delay(200); }   // (gone after its 3.5 s)
 	gm.set_banner("PRESS", "", "OPTIONS");
 	shot("press_start.png", w, h);
