@@ -788,6 +788,10 @@ struct Game
 	bool sound_busy = false, sound_quit = false, sound_job_on = false;
 	std::vector<uint8_t> sound_midi;
 	std::vector<int16_t> sound_out;
+	// The sound a frame makes, in seconds: a frame's own, but in a match as much as keeps the queue level (the frames
+	// come when the session lets them, a little slower or faster than the sound's own time): the music then keeps its
+	// own time and pitch whatever the frames do, as the sound board hears only the game's bytes, never sends any
+	std::atomic<double> sound_seconds{ 1.0 / FRAME_HZ };
 	void sound_wait()
 	{
 		std::unique_lock<std::mutex> lk(sound_m);
@@ -804,7 +808,7 @@ struct Game
 				lk.unlock();
 				for (uint8_t b : sound_midi) sound.midi_in(b);
 				sound_out.clear();
-				sound.run(1.0 / FRAME_HZ, sound_out);
+				sound.run(sound_seconds.load(std::memory_order_relaxed), sound_out);
 				if (!sound_job_on) sound_out.clear();
 				lk.lock();
 				sound_busy = false;
@@ -1959,7 +1963,6 @@ int main(int argc, char **argv)
 	game.sound.set_volumes(cfg.music / 100.0f, cfg.effects / 100.0f);
 	const int frame_bytes = int(SOUND_RATE / FRAME_HZ) * 4;
 	constexpr double MATCH_QUEUED = 6.0;   // (a match's: three frames more, for the frames the session holds back)
-	float sound_ratio = 1.0f;              // (a match's: the sound played a little slower or faster, SDL's frequency ratio)
 	constexpr double QUEUED = 3.0;   // (3.5 when the sound was made in the frame's own time: it's a frame later now; 2.5 kept it near
 	                                 // the frame and a half that runs an extra frame, two frames in a pass)
 
@@ -2949,12 +2952,14 @@ int main(int argc, char **argv)
 				const int q = SDL_GetAudioStreamQueued(audio);
 				if (q > frame_bytes * int(FRAME_HZ * 0.3)) sound_full = true;
 				queue_avg += (q - queue_avg) * std::min(1.0, dt / 2.0);
-				// (gently: the queue swings a few frames as frames come, and the ratio followed it, a pitch heard moving)
-				// (and as much slower as the frames are, kept level with a slower other side: Online::slow_down)
-				const float ratio = float((1 - online.slow_down()) * std::clamp(1 + (queue_avg / frame_bytes - MATCH_QUEUED) * 0.003, 0.99, 1.01));
-				if (std::fabs(ratio - sound_ratio) > 0.001f) { sound_ratio = ratio; SDL_SetAudioStreamFrequencyRatio(audio, ratio); }
+				// The queue kept level by how much sound each frame makes, never by its speed: the pitch and the music's
+				// tempo stay the game's own, the frames slower (Online::slow_down) or held back or not. As much more as
+				// the frames are slower, and a little more or less as the queue's under or over (gently: it swings a
+				// few frames as frames come)
+				const double fill = std::clamp(1 + (MATCH_QUEUED - queue_avg / frame_bytes) * 0.02, 0.97, 1.25);
+				game.sound_seconds = fill / (FRAME_HZ * (1 - online.slow_down()));
 			} else if (audio) {
-				if (sound_ratio != 1.0f) { sound_ratio = 1.0f; SDL_SetAudioStreamFrequencyRatio(audio, 1.0f); }
+				game.sound_seconds = 1.0 / FRAME_HZ;
 				const int q = SDL_GetAudioStreamQueued(audio);
 				if (q > frame_bytes * int(FRAME_HZ * 0.3)) sound_full = true;
 				queue_avg += (q - queue_avg) * std::min(1.0, dt / 0.5);

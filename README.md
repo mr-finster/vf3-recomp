@@ -212,7 +212,8 @@ lobby. The flags are the countries Cloudflare places each player's connection in
 - **Input delay** (Online > Settings): Auto uses as little as it can (none on a LAN, 1 frame almost anywhere else)
   and accounts for slower machines: each side tells the other how much rollback it can run without a hitch (a Steam
   Deck in a fight: none), and the other side's delay covers the rest, so neither side stutters. It keeps the game at
-  full speed against a far opponent with more delay instead (up to 15 frames), and lowers it again between rounds.
+  full speed against a far opponent with more delay instead (up to 15 frames). A short burst of ping is left to rollback; a delay raised for a
+  longer spell comes back down a frame a second once it's over.
   Or set 0 to 10 yourself: higher means fewer corrections, lower a quicker response.
 - **Connection display:** On shows the other player, the ping, the input delay, the rollback and DIRECT or RELAY at
   the bottom of the screen (the game's own bars and time are at the top), each in a cell of its own that doesn't move
