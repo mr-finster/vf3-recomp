@@ -89,7 +89,8 @@ Run run(double secs, std::function<vfnet::SimWire::Params(double)> wire_at, doub
 					r.changes.push_back({ t / 1000, n });
 					r.change_frames.push_back({ x.frame(), n - was });
 					if (verbose) printf("    %.1f s: delay %d -> %d (%s)\n", t / 1000, was, n, d.why.c_str());
-					if (n < was) { r.lowered_at.push_back(t / 1000); if (!br) r.lowered_outside_rounds = true; }
+					// (the first, at the character select, may be below the session's starting 2: not a lowering mid-fight)
+					if (n < was && r.changes.size() > 1) { r.lowered_at.push_back(t / 1000); if (!br) r.lowered_outside_rounds = true; }
 				}
 			}
 		}
@@ -115,21 +116,50 @@ int main(int argc, char **argv)
 	printf("the rule (vfnet::auto_delay)\n");
 	struct R { double rtt, jit; int target, floor, want; };
 	const R rules[] = {
-		{ 10, 1, 6, 1, 1 },     // a LAN: the least
-		{ 60, 4, 6, 1, 2 },     // same country: half the round trip in frames, rounded
-		{ 80, 10, 6, 1, 2 },    // a phone's 5G, the same city: 2 (the rollback takes a frame or two)
-		{ 130, 8, 6, 1, 3 },    // across a continent: 3 at most from the ping alone
-		{ 210, 10, 6, 1, 3 },   // still 3: the rollback covers the rest
+		{ 10, 1, 6, 0, 0 },     // a LAN (floor 0 within a frame's round trip): none
+		{ 60, 4, 6, 1, 1 },     // same country: 1, the rollback the rest
+		{ 80, 10, 6, 1, 1 },    // a phone's 5G, the same city: 1
+		{ 130, 8, 6, 1, 1 },    // across a continent: still 1
+		{ 210, 10, 6, 1, 1 },   // 1 still: up to 6 frames guessed
+		{ 250, 10, 6, 1, 2 },   // past that, what keeps the guesses within 6
 		{ 410, 10, 6, 1, 7 },   // the other side of the world: more, so no slowdown
 		{ 710, 15, 6, 1, 15 },  // as far as there is: the most
-		{ 130, 8, 4, 2, 3 },    // a slow machine: shorter rollbacks
+		{ 80, 10, 4, 2, 2 },    // a slow machine (a Steam Deck) on 5G: 2
 		{ 310, 8, 4, 2, 6 },
-		{ 20, 2, 4, 2, 2 },     // a slow machine on a LAN: 2 at least
+		{ 10, 1, 4, 1, 1 },     // a slow machine on a LAN: 1
 	};
 	for (const R &x : rules) {
 		const int got = vfnet::auto_delay(x.rtt, x.jit, FRAME, x.target, x.floor);
 		check(got == x.want, "round trip " + std::to_string(int(x.rtt)) + " ms, jitter " + std::to_string(int(x.jit)) + ", rollback " +
 		                         std::to_string(x.target) + ": delay " + std::to_string(got) + " (" + std::to_string(x.want) + " wanted)");
+	}
+
+	printf("what a frame costs here: rollback kept to what fits in a step (no late frame, no choppy picture)\n");
+	{
+		struct M { const char *what; double save, run, resim_each; bool slow; double rtt; int room, want; };
+		// (from real logs: an M4 Max's step 3.9 ms, a frame run again ~2.5; a Steam Deck's 11 and ~7)
+		const M ms[] = {
+			{ "a fast Mac, 80 ms", 0.34, 3.5, 2.5, false, 80, 4, 1 },
+			{ "a fast Mac, 200 ms", 0.34, 3.5, 2.5, false, 200, 4, 3 },
+			{ "a Steam Deck on 5G, 80 ms", 1.0, 10.0, 7.0, true, 80, 2, 2 },
+			{ "a Steam Deck, 130 ms", 1.0, 10.0, 7.0, true, 130, 2, 3 },
+			{ "a Steam Deck on a LAN", 1.0, 10.0, 7.0, true, 8, 2, 1 },
+		};
+		for (const M &m : ms) {
+			vfnet::Session::Stats st;
+			st.steps = 1000;
+			st.save_ms = m.save * 1000;
+			st.run_ms = m.run * 1000;
+			st.resim_frames = 500;
+			st.resim_ms = m.resim_each * 500;
+			st.rtt_ms = m.rtt;
+			st.jitter_ms = 8;
+			vfnet::AutoDelay d;
+			d.slow = m.slow;
+			const int room = d.rollback_room(st), want = d.want(st);
+			check(room == m.room && want == m.want, std::string(m.what) + ": rollback up to " + std::to_string(room) + " (" + std::to_string(m.room) +
+			                                            " wanted), delay " + std::to_string(want) + " (" + std::to_string(m.want) + " wanted)");
+		}
 	}
 
 	printf("full speed at every ping (AutoDelay, 1%% lost, jitter)\n");
@@ -153,7 +183,7 @@ int main(int argc, char **argv)
 		check(r.fps >= FULL * 0.985, "full speed once raised: " + std::to_string(r.fps) + " frames a second");
 		check(!r.lowered_at.empty() && r.lowered_at.back() >= 70, "lowered again once the ping's back (at " + (r.lowered_at.empty() ? std::string("-") : std::to_string(r.lowered_at.back())) + " s)");
 		check(!r.lowered_outside_rounds, "lowered only between rounds");
-		check(r.delay_end <= 3, "back to a near ping's delay (" + std::to_string(r.delay_end) + ")");
+		check(r.delay_end <= 2, "back to a near ping's delay (" + std::to_string(r.delay_end) + ")");
 	}
 
 	printf("raised a frame at a time (no input held several frames longer at once)\n");

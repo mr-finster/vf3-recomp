@@ -19,10 +19,12 @@ namespace {
 SDL_Renderer *ren = nullptr;
 game_menu *menu = nullptr;
 std::string out;
+SDL_Texture *backdrop = nullptr;   // MENUTEST_BACKDROP: a picture of the game instead of the stand-in
 
 // a stand-in for the game's picture: a dark stage, two energy bars and a timer, so the notices are seen over something
 void draw_game(int w, int h)
 {
+	if (backdrop) { SDL_RenderTexture(ren, backdrop, nullptr, nullptr); return; }
 	for (int y = 0; y < h; y += 4) {
 		const float t = float(y) / float(h);
 		SDL_SetRenderDrawColor(ren, Uint8(30 + 40 * t), Uint8(40 + 30 * t), Uint8(70 - 20 * t), 255);
@@ -112,6 +114,25 @@ int main(int argc, char **argv)
 	menu = &gm;
 	if (!gm.init(win, ren, "assets")) { fprintf(stderr, "menutest: the menu's files aren't in ./assets\n"); return 1; }
 	gm.set_footer("v0.1.3-alpha   Oct 21 2026");
+	// MENUTEST_BACKDROP=game.bmp MENUTEST_NET="NAME,ping,delay,rollback,relay(0/1),level": only the connection display,
+	// over that picture of the game (as the game draws it, on MENUTEST_RENDERER's renderer), to net_over.png
+	if (const char *bd = getenv("MENUTEST_BACKDROP"); bd && *bd) {
+		SDL_Surface *img = SDL_LoadBMP(bd);
+		backdrop = img ? SDL_CreateTextureFromSurface(ren, img) : nullptr;
+		if (img) SDL_DestroySurface(img);
+		if (!backdrop) { fprintf(stderr, "menutest: %s: %s\n", bd, SDL_GetError()); return 1; }
+		game_menu::net_cells c;
+		char name[32] = "";
+		int relay = 0;
+		if (const char *n = getenv("MENUTEST_NET"))
+			sscanf(n, "%31[^,],%d,%d,%d,%d,%d", name, &c.ping, &c.delay, &c.rollback, &relay, &c.level);
+		c.name = name;
+		c.relay = relay != 0;
+		gm.set_net(c);
+		shot("", w, h);
+		shot("net_over.png", w, h);
+		return 0;
+	}
 
 	static m3::Model3 board;   // (no ROM: the pages only read the settings and the match's state)
 	board.backup.assign(0x20000, 0);
