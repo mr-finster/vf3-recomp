@@ -1083,7 +1083,19 @@ bool Online::connection(game_menu::net_cells &c, bool detailed) const
 	c.ping = int(stt.rtt_ms + 0.5);
 	c.delay = session->delay();
 	c.rollback = stt.rollback_max;
-	c.level = c.interrupted ? 2 : c.ping < 60 && c.rollback <= 2 ? 0 : c.ping < 120 && c.rollback <= 4 ? 1 : 2;
+	// How good, by what the player feels rather than by the ping: Auto's input delay and rollback hide a long way
+	// (a 310 ms match at delay 7 with rollbacks of up to 7 frames played well), so it's the delay, the rollbacks' size
+	// and frames held back for the other side (the game slowing: a few a second unseen) that count. Good up to 7 frames'
+	// delay and rollback and 3 frames held a second; fair up to 10 and 10; poor past that, or the connection dropped.
+	const double now = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count();
+	if (stalls_mark_at < 0 || stt.stalls < stalls_mark) { stalls_mark = stt.stalls; stalls_mark_at = now; stalls_per_s = 0; }
+	else if (now - stalls_mark_at >= 1000) {
+		stalls_per_s = double(stt.stalls - stalls_mark) * 1000 / (now - stalls_mark_at);
+		stalls_mark = stt.stalls;
+		stalls_mark_at = now;
+	}
+	const int worst = std::max(c.delay, c.rollback);
+	c.level = c.interrupted || worst > 10 || stalls_per_s > 10 ? 2 : worst > 7 || stalls_per_s > 3 ? 1 : 0;
 	if ((c.detailed = detailed)) {
 		c.jitter = stt.jitter_ms;
 		c.rb_avg = stt.rollbacks ? double(stt.resim_frames) / double(stt.rollbacks) : 0.0;
