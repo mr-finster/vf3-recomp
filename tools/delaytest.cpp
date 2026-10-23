@@ -287,6 +287,20 @@ int main(int argc, char **argv)
 		check(!r.ended && r.a_stalls * 4 <= old_r.a_stalls + 4, b);
 	}
 
+	printf("far, against an opponent whose frames come unevenly (Korea from Australia): the delay settles, no see-saw\n");
+	{
+		// (frames held back the delay can't fix: raised for them, they kept on as often, and it went 3, 4, 3, 4 every
+		// 10 s for 40 minutes, 433 changes)
+		auto wire = [](double) { return vfnet::SimWire::Params{ 114, 8, 0.005 }; };
+		const Run r = run(180, wire, 30, 175, false, 57.0, -1, 0.02, 0.06, true);
+		int later = 0;
+		for (auto &c : r.changes) later += c.first >= 30;
+		char b[200];
+		snprintf(b, sizeof b, "%d delay changes after the first 30 s (to %d), %llu frames held back, %.2f frames a second", later, r.delay_end,
+		         (unsigned long long)r.a_waits, r.fps);
+		check(!r.ended && later <= 6, b);
+	}
+
 	printf("a slow machine (a Steam Deck's frame): shorter rollbacks, a little more delay\n");
 	{
 		const Run r = run(40, [](double) { return vfnet::SimWire::Params{ 120, 8, 0.01 }; }, 15, 35, true);

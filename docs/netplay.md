@@ -59,7 +59,8 @@ From a survey of other projects' online play (Oct 2026; many sources secondhand,
   never a slowed or choppy game. Through a match: the first as the ping's known (the character select), up a frame
   at a time every 6 frames once wanted for 2 s on end, to the least wanted in them (a burst, a phone network's
   second of 200 ms, is rollback's: it no longer raises the delay for the rest of the round), or frames held back for
-  the other side two 3 s on end (past the first 15 s); down once a lower one's been enough for 3 s with a tenth more
+  the other side two 3 s on end (past the first 15 s; a raise that doesn't hold back fewer let go, and no more for
+  them for 2 minutes, then the match: they weren't the delay's to fix); down once a lower one's been enough for 3 s with a tenth more
   ping to spare, a frame a second mid-round, the whole way between rounds. log.txt says each change and why, and
   every 10 s both sides' rooms.
 - **Keeping in time**: the side ahead of the other runs its frames a little slower until they're level

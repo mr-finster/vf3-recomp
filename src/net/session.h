@@ -240,7 +240,11 @@ private:
 	bool started = false;
 	double checked_at = 0, lower_since = -1, higher_since = -1, floor_until = 0, started_at = 0, lowered_at = -1e9;
 	int higher_least = 0;
-	bool held_before = false;   // (the last 3 s held frames back too)   // (the least the ping's wanted while it's wanted more)
+	bool held_before = false;
+	bool judging = false;   // (a raise for frames held back being judged: did it hold back fewer?)
+	int judged = 0, stalls_useless = 0;
+	uint64_t held_at_raise = 0, held_after = 0;
+	double stalls_off_until = 0;   // (no raise for frames held back till then: they weren't the delay's)   // (the last 3 s held frames back too)   // (the least the ping's wanted while it's wanted more)
 	uint64_t stalls_at = 0;
 	int floor = 0;    // (a delay the holding back called for: kept a while)
 	int floor_ping = 0;   // (what the ping wanted then)
