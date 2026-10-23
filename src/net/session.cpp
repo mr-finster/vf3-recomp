@@ -701,7 +701,7 @@ int AutoDelay::update(const Session &session, double now, bool between_rounds)
 	const uint32_t f = session.frame();
 	if (f <= 120 || s.rtt_ms <= 0) return -1;   // (the ping not known well yet)
 	const int ping_wants = want(s);
-	if (ping_wants < floor_ping) floor_until = 0;   // (the held-back frames' floor let go once the ping's better than then)
+	if (ping_wants <= floor_ping - 2) floor_until = 0;   // (the held-back frames' floor let go once the ping's clearly better than then)
 	const int cur = session.delay(), keep = now < floor_until ? floor : 0, w = std::max(ping_wants, keep);
 	char b[160];
 	if (!started) {   // (the first: at once, the character select's)
@@ -732,11 +732,27 @@ int AutoDelay::update(const Session &session, double now, bool between_rounds)
 		// (not in a match's first 15 s: the two sides settling in, the Start presses, aren't the connection; and two
 		// 3 s on end: a burst's held frames are over by the next, a connection that holds frames back keeps on)
 		const bool bad = held >= 10;
-		if (now - started_at >= 15000 && bad && held_before && cur < std::min(MAX_DELAY, ping_wants + 2) && target <= cur) {
+		// (a raise for them judged over the next 6 s: frames held back as often a frame later aren't the delay's to
+		// fix, as the other side's frames coming unevenly; then let go, and none raised so for 2 minutes, after a
+		// second such for the match: a delay going up and down a frame every 10 s, a frame's input wrong each time,
+		// is worse than the frames held back)
+		if (judging) {
+			held_after += held;
+			if (++judged >= 2) {
+				judging = false;
+				if (held_after * 10 >= held_at_raise * 2 * 7) {
+					floor_until = 0;
+					stalls_off_until = ++stalls_useless >= 2 ? 1e300 : now + 120000;
+				}
+			}
+		}
+		if (now - started_at >= 15000 && now >= stalls_off_until && !judging && bad && held_before && cur < std::min(MAX_DELAY, ping_wants + 2) &&
+		    target <= cur) {
 			target = cur + 1;
 			floor = target;
 			floor_until = now + 15000;
 			floor_ping = ping_wants;
+			judging = true, judged = 0, held_after = 0, held_at_raise = held;
 			snprintf(b, sizeof b, "%llu frames held back in 3 s", (unsigned long long)held);
 			why = b;
 		}
