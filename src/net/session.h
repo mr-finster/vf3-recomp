@@ -238,9 +238,12 @@ public:
 	std::string why;
 private:
 	bool started = false;
-	double checked_at = 0, lower_since = -1, higher_since = -1, floor_until = 0, started_at = 0;
+	double checked_at = 0, lower_since = -1, higher_since = -1, floor_until = 0, started_at = 0, lowered_at = -1e9;
+	int higher_least = 0;
+	bool held_before = false;   // (the last 3 s held frames back too)   // (the least the ping's wanted while it's wanted more)
 	uint64_t stalls_at = 0;
 	int floor = 0;    // (a delay the holding back called for: kept a while)
+	int floor_ping = 0;   // (what the ping wanted then)
 	int target = -1;  // (raising to: a frame at a time)
 	uint32_t stepped_at = 0;
 };

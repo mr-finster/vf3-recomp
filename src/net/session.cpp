@@ -700,7 +700,9 @@ int AutoDelay::update(const Session &session, double now, bool between_rounds)
 	const Session::Stats &s = session.stats();
 	const uint32_t f = session.frame();
 	if (f <= 120 || s.rtt_ms <= 0) return -1;   // (the ping not known well yet)
-	const int cur = session.delay(), keep = now < floor_until ? floor : 0, w = std::max(want(s), keep);
+	const int ping_wants = want(s);
+	if (ping_wants < floor_ping) floor_until = 0;   // (the held-back frames' floor let go once the ping's better than then)
+	const int cur = session.delay(), keep = now < floor_until ? floor : 0, w = std::max(ping_wants, keep);
 	char b[160];
 	if (!started) {   // (the first: at once, the character select's)
 		started = true;
@@ -710,13 +712,16 @@ int AutoDelay::update(const Session &session, double now, bool between_rounds)
 		why = b;
 		return w;
 	}
-	// up: the ping's wanted more for half a second, or frames held back in the last 3 s
+	// up: the ping's wanted more for 2 s on end, to the least it wanted in them (a burst, a phone network's second
+	// of 200 ms, is rollback's to cover, not a delay kept the rest of the round: only a ping that stays up raises it)
 	if (w > cur) {
-		if (higher_since < 0) higher_since = now;
-		if (now - higher_since >= 500 && w > target) {
-			target = w;
-			snprintf(b, sizeof b, "ping %.0f ms, jitter %.0f ms", s.rtt_ms, s.jitter_ms);
+		if (higher_since < 0) higher_since = now, higher_least = w;
+		higher_least = std::min(higher_least, w);
+		if (now - higher_since >= 2000 && higher_least > target && higher_least > cur) {
+			target = higher_least;
+			snprintf(b, sizeof b, "ping %.0f ms, jitter %.0f ms, for 2 s", s.rtt_ms, s.jitter_ms);
 			why = b;
+			higher_since = now, higher_least = w;   // (a ping still climbing: the next 2 s from here, for more)
 		}
 	} else
 		higher_since = -1;
@@ -724,14 +729,18 @@ int AutoDelay::update(const Session &session, double now, bool between_rounds)
 		const uint64_t held = s.stalls - stalls_at;
 		stalls_at = s.stalls;
 		checked_at = now;
-		// (not in a match's first 15 s: the two sides settling in, the Start presses, aren't the connection)
-		if (now - started_at >= 15000 && held >= 10 && cur < std::min(MAX_DELAY, want(s) + 2) && target <= cur) {
+		// (not in a match's first 15 s: the two sides settling in, the Start presses, aren't the connection; and two
+		// 3 s on end: a burst's held frames are over by the next, a connection that holds frames back keeps on)
+		const bool bad = held >= 10;
+		if (now - started_at >= 15000 && bad && held_before && cur < std::min(MAX_DELAY, ping_wants + 2) && target <= cur) {
 			target = cur + 1;
 			floor = target;
-			floor_until = now + 30000;
+			floor_until = now + 15000;
+			floor_ping = ping_wants;
 			snprintf(b, sizeof b, "%llu frames held back in 3 s", (unsigned long long)held);
 			why = b;
 		}
+		held_before = bad;
 	}
 	if (target > cur) {   // (a frame at a time, every 6)
 		lower_since = -1;
@@ -739,17 +748,19 @@ int AutoDelay::update(const Session &session, double now, bool between_rounds)
 		return -1;
 	}
 	target = -1;
-	// down: between rounds only, a lower one enough (with a tenth more ping) for 10 s
+	// down: a lower one enough (with a tenth more ping) for 3 s: then a frame at a time, a second apart, mid-round
+	// too (a frame's input dropped each, barely felt; a delay kept high the rest of a round after a burst is), and
+	// between rounds the whole way at once
 	Session::Stats margin = s;
 	margin.rtt_ms *= 1.1;
 	const int lower = std::max(want(margin), keep);
 	if (lower < cur) {
 		if (lower_since < 0) lower_since = now;
-		if (between_rounds && now - lower_since >= 10000) {
-			lower_since = -1;
-			snprintf(b, sizeof b, "ping %.0f ms, jitter %.0f ms, between rounds", s.rtt_ms, s.jitter_ms);
+		if (now - lower_since >= 3000 && (between_rounds || now - lowered_at >= 1000)) {
+			lowered_at = now;
+			snprintf(b, sizeof b, "ping %.0f ms, jitter %.0f ms%s", s.rtt_ms, s.jitter_ms, between_rounds ? ", between rounds" : "");
 			why = b;
-			return lower;
+			return between_rounds ? lower : cur - 1;
 		}
 	} else
 		lower_since = -1;

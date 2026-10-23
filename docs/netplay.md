@@ -57,11 +57,15 @@ From a survey of other projects' online play (Oct 2026; many sources secondhand,
   frame ~12 ms of its 17) says 0: its opponent's inputs then reach it in time, it rolls back nothing and never
   stutters, while the Deck itself plays at 1 against a fast machine. Up to 15, so a far opponent costs input delay,
   never a slowed or choppy game. Through a match: the first as the ping's known (the character select), up a frame
-  at a time every 6 frames once wanted for half a second (or frames held back for the other side, past the first 15
-  s), down only between rounds, after 10 s with a tenth more ping to spare. log.txt says each change and why, and
+  at a time every 6 frames once wanted for 2 s on end, to the least wanted in them (a burst, a phone network's
+  second of 200 ms, is rollback's: it no longer raises the delay for the rest of the round), or frames held back for
+  the other side two 3 s on end (past the first 15 s); down once a lower one's been enough for 3 s with a tenth more
+  ping to spare, a frame a second mid-round, the whole way between rounds. log.txt says each change and why, and
   every 10 s both sides' rooms.
 - **Keeping in time**: the side ahead of the other runs its frames a little slower until they're level
-  (`Online::slow_down`: 2% a frame ahead, up to 6%, its sound slowed with it so it never runs dry), so a slower
+  (`Online::slow_down`: 2% a frame ahead, up to 6%). The sound never slows with it: each frame makes as much
+  sound as keeps the queue level (the sound board only hears the game's bytes, so it can run to the real clock), so
+  the music and voices keep their own pitch and tempo, so a slower
   machine (a Steam Deck a few percent short of full speed) is followed smoothly; only past that does a side hold a
   frame back, and it stops dead for the other's inputs only at the rollback's end (`delaytest`: against a 55.6-fps
   opponent with 30 ms hitches, 0 of those, where a 2% limit had 2,351).
