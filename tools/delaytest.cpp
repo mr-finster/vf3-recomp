@@ -41,11 +41,13 @@ struct Run
 	std::vector<double> lowered_at;                // (when a lowering happened: between rounds?)
 	bool lowered_outside_rounds = false;
 	uint64_t b_resim = 0, b_frames = 0;   // (side B's frames run again, and frames, in all)
+	uint64_t a_stalls = 0, a_waits = 0;   // (side A stopped dead for B's inputs; held back a frame to keep in time)
 };
 
 // Two sessions over a wire for `secs`, both on AutoDelay; `wire_at` changes the wire as time goes; rounds end every
 // 20 s (the 90 frames after: between rounds); fps measured over [from_s, to_s)
-Run run(double secs, std::function<vfnet::SimWire::Params(double)> wire_at, double from_s, double to_s, bool slow = false, double b_fps = 0, int room_b = -1)
+Run run(double secs, std::function<vfnet::SimWire::Params(double)> wire_at, double from_s, double to_s, bool slow = false, double b_fps = 0, int room_b = -1,
+        double soft_gain = 0, double soft_max = 0, bool b_spiky = false)
 {
 	vfnet::SimWire w(wire_at(0), wire_at(0));
 	Toy ga, gb;
@@ -77,8 +79,15 @@ Run run(double secs, std::function<vfnet::SimWire::Params(double)> wire_at, doub
 			if (!have_to && rel >= to_s) { f_to = a.frame(); have_to = true; }
 		}
 		// each side tries a frame every frame time, as the game does (a held-back one: again a moment later)
-		if (t >= na) { if (a.step(uint16_t(a.frame() / 7 % 5))) na += c.frame_ms; else na += 1; }
-		if (t >= nb) { if (b.step(uint16_t(b.frame() / 11 % 3))) nb += b_fps > 0 ? 1000.0 / b_fps : c.frame_ms; else nb += 1; }
+		// (side A keeps in time as the game does, its frames a little slower while it's ahead: Online::slow_down)
+		const double slow_a = soft_gain > 0 ? std::clamp(a.stats().lead * soft_gain, 0.0, soft_max) : 0.0;
+		if (t >= na) { if (a.step(uint16_t(a.frame() / 7 % 5))) na += c.frame_ms / (1 - slow_a); else na += 1; }
+		if (t >= nb) {
+			if (b.step(uint16_t(b.frame() / 11 % 3))) {
+				nb += b_fps > 0 ? 1000.0 / b_fps : c.frame_ms;
+				if (b_spiky && b.frame() % 53 == 0) nb += 30;   // (a slow machine's frame now and then: 30 ms late)
+			} else nb += 1;
+		}
 		a.set_room(da.rollback_room(a.stats()));
 		b.set_room(room_b >= 0 ? room_b : db.rollback_room(b.stats()));
 		for (int s = 0; s < 2; s++) {
@@ -106,6 +115,8 @@ Run run(double secs, std::function<vfnet::SimWire::Params(double)> wire_at, doub
 	}
 	r.fps = have_to && to_s > from_s ? (f_to - f_from) / (to_s - from_s) : 0;
 	r.b_resim = b.stats().resim_frames;
+	r.a_stalls = a.stats().stalls;
+	r.a_waits = a.stats().waits;
 	r.b_frames = b.frame();
 	r.delay_end = a.delay();
 	return r;
@@ -241,6 +252,17 @@ int main(int argc, char **argv)
 		snprintf(b, sizeof b, "45 ms or so: delay %d here, the Deck's frames run again %.1f%% of its frames, %.2f frames a second", r.delay_end,
 		         r.b_frames ? 100.0 * double(r.b_resim) / double(r.b_frames) : 0.0, r.fps);
 		check(!r.ended && r.delay_end >= 2 && r.b_frames && double(r.b_resim) / double(r.b_frames) < 0.02 && r.fps >= FULL * 0.985, b);
+	}
+
+	printf("a slower, uneven opponent (a Steam Deck at 55.6 frames a second, 30 ms late now and then): kept level smoothly\n");
+	{
+		auto wire = [](double) { return vfnet::SimWire::Params{ 22, 6, 0.0 }; };
+		const Run old_r = run(60, wire, 15, 55, false, 55.6, -1, 0.01, 0.02, true);
+		const Run r = run(60, wire, 15, 55, false, 55.6, -1, 0.02, 0.06, true);
+		char b[240];
+		snprintf(b, sizeof b, "this side stopped dead %llu times (at the 2%% most it kept in time before: %llu), %llu frames held back; %.2f frames a second",
+		         (unsigned long long)r.a_stalls, (unsigned long long)old_r.a_stalls, (unsigned long long)r.a_waits, r.fps);
+		check(!r.ended && r.a_stalls * 4 <= old_r.a_stalls + 4, b);
 	}
 
 	printf("a slow machine (a Steam Deck's frame): shorter rollbacks, a little more delay\n");

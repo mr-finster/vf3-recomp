@@ -60,6 +60,15 @@ From a survey of other projects' online play (Oct 2026; many sources secondhand,
   at a time every 6 frames once wanted for half a second (or frames held back for the other side, past the first 15
   s), down only between rounds, after 10 s with a tenth more ping to spare. log.txt says each change and why, and
   every 10 s both sides' rooms.
+- **Keeping in time**: the side ahead of the other runs its frames a little slower until they're level
+  (`Online::slow_down`: 2% a frame ahead, up to 6%, its sound slowed with it so it never runs dry), so a slower
+  machine (a Steam Deck a few percent short of full speed) is followed smoothly; only past that does a side hold a
+  frame back, and it stops dead for the other's inputs only at the rollback's end (`delaytest`: against a 55.6-fps
+  opponent with 30 ms hitches, 0 of those, where a 2% limit had 2,351).
+- **The tile generator's lines** are drawn on a thread of their own as the game reaches each (`video::TileWorker`:
+  the line's registers copied, the line drawn a moment later), and the 2D layers put together there while the
+  frame's 3D is built: about half a fight frame's time (2.8 of 5.5 ms here, more on a Steam Deck) off the game's own
+  thread. They're only seen, never read by the game, so a match's frames are the same either way.
 - **Rollback**: up to 7 frames; beyond that the game waits rather than guessing further. Rollback runs only when
   a guess was wrong (the soak test's every-frame mode is the stress case).
 - **The cost**: up to 8 frames run in one frame's 17.4 ms, with the picture, on a Steam Deck. So a frame's run
