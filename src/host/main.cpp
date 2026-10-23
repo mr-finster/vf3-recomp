@@ -3044,7 +3044,7 @@ int main(int argc, char **argv)
 			pass_avg += (dt - pass_avg) * 0.05;
 			const double per = pass_avg * screen_hz, whole = std::round(per);
 			const bool unseen_now = !hidden && (SDL_GetWindowFlags(win) & (SDL_WINDOW_MINIMIZED | SDL_WINDOW_OCCLUDED));
-			if (!no_even && cfg.smooth && !hidden && !unseen_now && screen_hz <= (gov.smooth_off ? 60 : 120) * 1.05 &&
+			if (!no_even && cfg.smooth && !hidden && !unseen_now && vsync_on && (!gov.smooth_off || screen_hz <= 60 * 1.05) &&
 				whole >= 1 && std::fabs(per - whole) < 0.12) {
 				const double unit = 1.0 / screen_hz, step = std::max(1.0, std::round(dt * screen_hz)) * unit;
 				even_real += dt;
@@ -3248,15 +3248,17 @@ int main(int argc, char **argv)
 			screen_hz_t = bt;
 			const SDL_DisplayMode *dm = SDL_GetCurrentDisplayMode(SDL_GetDisplayForWindow(win));
 			const double hz_now = dm && dm->refresh_rate > 0 ? dm->refresh_rate : 60.0;
-			if (hz_now != screen_hz || first_look) fprintf(stderr, "screen: %.2f Hz%s\n", hz_now, !hidden && hz_now <= 126 ? " (a picture each refresh)" : "");
+			if (hz_now != screen_hz || first_look) fprintf(stderr, "screen: %.2f Hz%s\n", hz_now, !hidden ? " (a picture each refresh, with vsync)" : "");
 			screen_hz = hz_now;
 			int vs = 0;
 			const bool vs_now = SDL_GetRenderVSync(ren, &vs) && vs != 0;
 			if (vs_now != vsync_on || first_look) fprintf(stderr, "vsync: %s\n", vs_now ? "on" : "off (pictures by the budget, not a picture each refresh)");
 			vsync_on = vs_now;
 		}
-		// (hidden, or vsync off: nothing paces the passes to the screen, a picture each pass was ~500 a second; as VF1's)
-		const bool every_refresh = !hidden && vsync_on && screen_hz <= (gov.smooth_off ? 60 : 120) * 1.05;
+		// (hidden, or vsync off: nothing paces the passes to the screen, a picture each pass was ~500 a second; as VF1's.
+		// A faster screen than 120 Hz a picture each refresh too, as VF1's and VF2's: held to 120 a second, a 144 or 165 Hz
+		// screen's pictures came 1 and 2 refreshes apart by turns, an uneven judder)
+		const bool every_refresh = !hidden && vsync_on && (!gov.smooth_off || screen_hz <= 60 * 1.05);
 		// (tests: VF3_TEST_NO_PICTURES, two games at once on a small machine, the frames' cost alone: a picture only now
 		// and then)
 		static const bool no_pictures = getenv("VF3_TEST_NO_PICTURES") != nullptr;
