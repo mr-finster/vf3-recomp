@@ -2,6 +2,10 @@
 name = "vf-lobby"
 main = "src/index.js"
 compatibility_date = "2026-10-01"
+# The game reaches the lobby at its workers.dev address (vf-lobby.<account>.workers.dev): kept on. Preview URLs (one
+# for each version uploaded, an older version's rules among them) aren't used: off, here so a deploy keeps them off.
+workers_dev = true
+preview_urls = false
 
 [[durable_objects.bindings]]
 name = "ROOMS"
