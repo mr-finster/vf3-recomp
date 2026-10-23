@@ -25,6 +25,8 @@
 
 namespace video {
 
+const uint32_t *TileGen::regs_of(const m3::Model3 &board) const { return regs_now ? regs_now : board.tile_regs; }
+
 void TileGen::clear()
 {
 	std::fill(below.begin(), below.end(), 0);
@@ -180,7 +182,7 @@ void TileGen::place_seen(const m3::Model3 &board)
 {
 	const uint32_t *vram = reinterpret_cast<const uint32_t *>(board.tile_ram.data());
 	const uint32_t *pal = vram + 0x40000;
-	const uint32_t *regs = board.tile_regs;
+	const uint32_t *regs = regs_of(board);
 	for (int layer = 0; layer < 4; layer++) {
 		Seen &m = seen[layer];
 		if (!(regs[0x60 / 4 + layer] & 0x80000000u) || ((regs[0x20 / 4] >> (8 + layer)) & 1) || m.at_x.empty()) continue;
@@ -322,7 +324,7 @@ uint32_t TileGen::backdrop_entry(const m3::Model3 &board, int x, int y, bool tab
 std::string TileGen::audit(const m3::Model3 &board) const
 {
 	const uint32_t *vram = reinterpret_cast<const uint32_t *>(board.tile_ram.data());
-	const uint32_t *regs = board.tile_regs;
+	const uint32_t *regs = regs_of(board);
 	char buf[256];
 	const bool on = regs[0x60 / 4 + 3] & 0x80000000u;
 	const int stage = int16_t(board.peek16(board.cpu.s.r[13] - 0x1E0C));
@@ -373,7 +375,7 @@ void TileGen::find_backdrop(const m3::Model3 &board, bool full)
 	b.ok = false;
 	b.known = false;
 	const uint32_t *vram = reinterpret_cast<const uint32_t *>(board.tile_ram.data());
-	const uint32_t *regs = board.tile_regs;
+	const uint32_t *regs = regs_of(board);
 	if (!(regs[0x60 / 4 + 3] & 0x80000000u)) return;
 	const int stage = int16_t(board.peek16(board.cpu.s.r[13] - 0x1E0C));
 	if (stage < 0 || stage > 255) return;
@@ -543,7 +545,7 @@ void TileGen::find_backdrop(const m3::Model3 &board, bool full)
 void TileGen::learn(const m3::Model3 &board)
 {
 	const uint32_t *vram = reinterpret_cast<const uint32_t *>(board.tile_ram.data());
-	const uint32_t *regs = board.tile_regs;
+	const uint32_t *regs = regs_of(board);
 	const int n = W / 8 + 1;   // the map's columns on screen (from the one at its left edge)
 	for (int layer = 0; layer < 4; layer++) {
 		Pano &P = pano[layer];
@@ -591,8 +593,10 @@ void TileGen::learn(const m3::Model3 &board)
 
 static const uint32_t *vram_words(const m3::Model3 &board) { return reinterpret_cast<const uint32_t *>(board.tile_ram.data()); }
 
-void TileGen::line(const m3::Model3 &board, unsigned y)
+void TileGen::line(const m3::Model3 &board, unsigned y, const uint32_t *line_regs)
 {
+	regs_now = line_regs;   // (the registers as they were at this line: a worker drawing it a moment later)
+	struct Done { const uint32_t *&r; ~Done() { r = nullptr; } } done{ regs_now };
 	if (y >= unsigned(H))
 		return;
 	if (y == 0) {
@@ -618,7 +622,7 @@ void TileGen::line(const m3::Model3 &board, unsigned y)
 	}
 	const uint32_t *vram = reinterpret_cast<const uint32_t *>(board.tile_ram.data());
 	const uint32_t *pal = vram + 0x40000;
-	const uint32_t *regs = board.tile_regs;
+	const uint32_t *regs = regs_of(board);
 	// B/B' first, then A/A' over it
 	for (int pair = 1; pair >= 0; pair--) {
 		const int prim = pair * 2;
