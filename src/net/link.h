@@ -23,6 +23,29 @@ struct Link
 	virtual ~Link() = default;
 };
 
+// Tests: another link's datagrams sent late, as over a worse network, from VF3_NET_LAG="one-way ms,jitter ms,loss
+// fraction[,a burst every s,its one-way ms,its length s]" (a phone network's spells of high ping); none without it.
+// Only what this side sends: both sides set it for a round trip of twice the one-way.
+class LagLink : public Link
+{
+public:
+	static std::unique_ptr<LagLink> from_env(Link &inner);   // (nullptr: VF3_NET_LAG not set)
+	LagLink(Link &inner, double ms, double jitter, double loss, double burst_every, double burst_ms, double burst_len);
+	void send(const uint8_t *p, size_t n) override;
+	bool recv(std::vector<uint8_t> &out) override;
+	void lock() override { inner.lock(); }
+	std::string describe() const;
+private:
+	Link &inner;
+	double ms, jitter, loss, burst_every, burst_ms, burst_len, t0;
+	uint32_t rng = 12345;
+	struct Held { double at; std::vector<uint8_t> data; };
+	std::vector<Held> held;
+	double now() const;
+	double rand01();
+	void flush();
+};
+
 // A UDP socket. A host binds a port and takes as its peer the address the session locks on (a good hello's: not
 // just the first sender, who could be anyone's forged packet); a guest is given the host's address. Non-blocking.
 std::string lan_address();   // this machine's address on its network, as others there would reach it ("" if none)

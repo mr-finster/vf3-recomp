@@ -156,7 +156,7 @@ bool Online::open_host(std::string &error)
 	if (!link->bind(uint16_t(port), error)) { link.reset(); return false; }
 	if (adapter.settle) adapter.settle();
 	identity.name = started_with.name;
-	session = std::make_unique<vfnet::Session>(*link, adapter, identity, config(started_with), true, vf3net::start_blob(board));
+	session = std::make_unique<vfnet::Session>(lagged(*link), adapter, identity, config(started_with), true, vf3net::start_blob(board));
 	session->trace = log_line;
 	ph = Phase::hosting;
 	return true;
@@ -262,7 +262,7 @@ bool Online::join(const OnlineSettings &s, std::string &error)
 	link = std::make_unique<vfnet::UdpLink>();
 	if (!link->connect(host, uint16_t(p), error)) { link.reset(); return false; }
 	identity.name = s.name;
-	session = std::make_unique<vfnet::Session>(*link, adapter, identity, config(s), false);
+	session = std::make_unique<vfnet::Session>(lagged(*link), adapter, identity, config(s), false);
 	session->trace = log_line;
 	joining_to = host + (p != 7700 ? ":" + std::to_string(p) : "");
 	ph = Phase::joining;
@@ -517,12 +517,21 @@ std::string Online::me_json(const std::string &extra) const
 	       ",\"relay\":" + vfnet::json::quote(room ? room->relay_address() : "") + extra + "}";
 }
 
+vfnet::Link &Online::lagged(vfnet::Link &l)
+{
+	session.reset();   // (the session before, on the old lag link, gone first)
+	lag = vfnet::LagLink::from_env(l);   // (tests: VF3_NET_LAG)
+	if (!lag) return l;
+	log_line(lag->describe());
+	return *lag;
+}
+
 void Online::room_session(bool host)
 {
 	if (adapter.settle) adapter.settle();
 	vfnet::Config c = config(started_with);
 	c.token = room_token;
-	session = std::make_unique<vfnet::Session>(*room, adapter, identity, c, host, host ? vf3net::start_blob(board) : std::vector<uint8_t>());
+	session = std::make_unique<vfnet::Session>(lagged(*room), adapter, identity, c, host, host ? vf3net::start_blob(board) : std::vector<uint8_t>());
 	session->trace = log_line;
 }
 

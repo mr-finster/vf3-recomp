@@ -1,3 +1,7 @@
+#include <cstdlib>
+#include <cstdio>
+#include <cmath>
+#include <chrono>
 #include "link.h"
 #include <algorithm>
 #include <cstring>
@@ -298,6 +302,72 @@ bool SimWire::pop(int dir, std::vector<uint8_t> &out)
 	out = std::move(qu.front().data);
 	qu.pop_front();
 	return true;
+}
+
+} // namespace vfnet
+
+namespace vfnet {
+
+std::unique_ptr<LagLink> LagLink::from_env(Link &inner)
+{
+	const char *e = getenv("VF3_NET_LAG");
+	if (!e || !*e) return nullptr;
+	double v[6] = { 0, 0, 0, 0, 0, 0 };
+	sscanf(e, "%lf,%lf,%lf,%lf,%lf,%lf", &v[0], &v[1], &v[2], &v[3], &v[4], &v[5]);
+	return std::make_unique<LagLink>(inner, v[0], v[1], v[2], v[3], v[4], v[5]);
+}
+
+LagLink::LagLink(Link &in, double m, double j, double l, double be, double bm, double bl)
+	: inner(in), ms(m), jitter(j), loss(l), burst_every(be), burst_ms(bm), burst_len(bl)
+{
+	t0 = now();
+}
+
+std::string LagLink::describe() const
+{
+	char b[160];
+	snprintf(b, sizeof b, "(test) packets sent %.0f ms late, jitter %.0f, %.0f%% lost; every %.0f s %.0f ms for %.1f s", ms, jitter, loss * 100, burst_every, burst_ms, burst_len);
+	return b;
+}
+
+double LagLink::now() const
+{
+	return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+double LagLink::rand01()
+{
+	rng = rng * 1664525u + 1013904223u;
+	return double(rng >> 8) / double(1u << 24);
+}
+
+void LagLink::send(const uint8_t *p, size_t n)
+{
+	flush();
+	if (rand01() < loss) return;
+	const double t = now();
+	double d = ms + jitter * rand01();
+	if (burst_every > 0 && std::fmod((t - t0) / 1000, burst_every) >= burst_every - burst_len) d = burst_ms + jitter * rand01();
+	held.push_back({ t + d, std::vector<uint8_t>(p, p + n) });
+	flush();
+}
+
+bool LagLink::recv(std::vector<uint8_t> &out)
+{
+	flush();
+	return inner.recv(out);
+}
+
+void LagLink::flush()
+{
+	const double t = now();
+	for (size_t i = 0; i < held.size();) {
+		if (held[i].at <= t) {
+			inner.send(held[i].data.data(), held[i].data.size());
+			held.erase(held.begin() + long(i));
+		} else
+			i++;
+	}
 }
 
 } // namespace vfnet

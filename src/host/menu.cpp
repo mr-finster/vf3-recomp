@@ -178,15 +178,24 @@ void game_menu::show_versus(const versus &v, double seconds)
 	if (!m->overlay) return;
 	Rml::Element *e = m->overlay->GetElementById("vs");
 	if (!e) return;
-	// (each name's flag out from the middle: player 1's on its left, player 2's on its right)
+	// (each player's flag above their label, at its outer edge)
 	auto fl = [](const std::string &c) {
 		return flags::index_of(c) < 0 ? std::string() : "<img class=\"vflag\" sprite=\"flag-" + std::string{ char(c[0] | 0x20), char(c[1] | 0x20) } + "\"/>";
 	};
-	e->SetInnerRML("<div class=\"pl left\">" + escape(v.left_label) + "</div><div class=\"nm left\">" + fl(v.left_country) + escape(v.left) + "</div>"
-	               "<div class=\"pl right\">" + escape(v.right_label) + "</div><div class=\"nm right\">" + escape(v.right) + fl(v.right_country) + "</div>"
+	e->SetInnerRML("<div class=\"fl left\">" + fl(v.left_country) + "</div><div class=\"pl left\">" + escape(v.left_label) + "</div><div class=\"nm left\">" + escape(v.left) + "</div>"
+	               "<div class=\"fl right\">" + fl(v.right_country) + "</div><div class=\"pl right\">" + escape(v.right_label) + "</div><div class=\"nm right\">" + escape(v.right) + "</div>"
 	               "<div class=\"badge\"><div>VS</div></div>"
 	               "<div class=\"bar\"><div class=\"line" + std::string(v.relay ? " relay" : "") + "\"><span class=\"dot\"></span>" + escape(v.line) + "</div>"
 	               "<div class=\"sub\">" + escape(v.sub) + "</div></div>");
+	// (a long name, 10 letters wide ones, made smaller to fit its side: from the edge's 72dp to the badge, 20dp short
+	// of it)
+	m->overlay->UpdateDocument();
+	const float dp = m->ctx->GetDensityIndependentPixelRatio(), room = float(m->ctx->GetDimensions().x) / 2 - (72 + 70 + 20) * dp;
+	for (int i = 0; i < e->GetNumChildren(); i++) {
+		Rml::Element *n = e->GetChild(i);
+		const float w = n->IsClassSet("nm") ? n->GetOffsetWidth() : 0;
+		if (w > room) n->SetProperty("font-size", std::to_string(92 * dp * std::max(0.3f, room / w)) + "px");
+	}
 	e->SetProperty("visibility", "visible");
 	m_vs_from = SDL_GetTicks();
 	m_vs_until = m_vs_from + uint64_t(seconds * 1000);
@@ -213,6 +222,37 @@ void game_menu::draw_versus(int w, int h)
 	quad({ mid + lean, 0 }, { W, 0 }, { W, top_h }, { mid - lean, top_h }, 0x3445a0, 0x3b4fb0, 0x24306b, 0x1a2250);
 	quad({ 0, top_h }, { W, top_h }, { W, H }, { 0, H }, 0x0b1026, 0x0b1026, 0x0b1026, 0x0b1026);
 	quad({ 0, top_h }, { W, top_h }, { W, top_h + 3 * dp }, { 0, top_h + 3 * dp }, 0xffffff, 0xffffff, 0xffffff, 0xffffff);
+	// the badge VS sits on: a navy disc in a white ring, drawn here with soft edges (a pixel's feather out of each
+	// edge: smooth at any size, where a rounded box's corners were jagged and its halves left a seam through it)
+	{
+		const float cx = mid, cy = 280 * dp, r_in = 65 * dp, r_out = 70 * dp, f = 0.75f;
+		constexpr int N = 160;
+		const uint32_t navy = 0x0b1026, white = 0xffffff;
+		// the rings, from the middle out: (radius, colour, alpha)
+		struct Ring { float r; uint32_t c; float a; };
+		const Ring rings[] = { { 0, navy, 1 }, { r_in - f, navy, 1 }, { r_in + f, white, 1 }, { r_out - f, white, 1 }, { r_out + f, white, 0 } };
+		constexpr int R = sizeof rings / sizeof rings[0];
+		std::vector<SDL_Vertex> v;
+		std::vector<int> idx;
+		v.reserve(1 + (R - 1) * N);
+		v.push_back({ { cx, cy }, col(navy), {} });
+		for (int k = 1; k < R; k++)
+			for (int i = 0; i < N; i++) {
+				const float t = float(i) * 6.2831853f / N;
+				SDL_FColor c = col(rings[k].c);
+				c.a *= rings[k].a;
+				v.push_back({ { cx + rings[k].r * std::cos(t), cy + rings[k].r * std::sin(t) }, c, {} });
+			}
+		for (int i = 0; i < N; i++) idx.insert(idx.end(), { 0, 1 + i, 1 + (i + 1) % N });
+		for (int k = 1; k + 1 < R; k++) {
+			const int a0 = 1 + (k - 1) * N, b0 = 1 + k * N;
+			for (int i = 0; i < N; i++) {
+				const int j = (i + 1) % N;
+				idx.insert(idx.end(), { a0 + i, b0 + i, b0 + j, a0 + i, b0 + j, a0 + j });
+			}
+		}
+		SDL_RenderGeometry(m->ren, nullptr, v.data(), int(v.size()), idx.data(), int(idx.size()));
+	}
 	if (Rml::Element *e = m->overlay ? m->overlay->GetElementById("vs") : nullptr) e->SetProperty("opacity", std::to_string(a));
 }
 

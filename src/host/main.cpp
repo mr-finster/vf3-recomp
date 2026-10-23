@@ -788,27 +788,85 @@ struct Game
 	bool sound_busy = false, sound_quit = false, sound_job_on = false;
 	std::vector<uint8_t> sound_midi;
 	std::vector<int16_t> sound_out;
-	// The sound a frame makes, in seconds: a frame's own, but in a match as much as keeps the queue level (the frames
-	// come when the session lets them, a little slower or faster than the sound's own time): the music then keeps its
-	// own time and pitch whatever the frames do, as the sound board hears only the game's bytes, never sends any
-	std::atomic<double> sound_seconds{ 1.0 / FRAME_HZ };
+	// A netplay match's sound: the sound board run to the real clock instead, on its thread, the queue kept topped up
+	// (free_target bytes) whatever the frames do. Its frames come when the session lets them: one held back for the
+	// other side, a slow frame on a Steam Deck (a character select's 2D), and the sound made a frame at a time ran
+	// dry (choppy). The sound board only hears the game's bytes, never sends any back: they're queued here as the
+	// frames make them and played as it reaches them, the music and the voices in their own time and pitch.
+	SDL_AudioStream *free_stream = nullptr;
+	std::vector<uint8_t> free_midi;   // (a frame's bytes, taken)
+	int free_target = 0;
+	std::atomic<int> sound_dry{ 0 };   // (the queue found empty: a drop heard; the log's pace line)
 	void sound_wait()
 	{
 		std::unique_lock<std::mutex> lk(sound_m);
 		sound_cv.wait(lk, [this] { return !sound_busy; });
+	}
+	// A change to the sound board, between its runs (a match's sound thread makes none meanwhile)
+	template <class F> void sound_do(F f)
+	{
+		std::unique_lock<std::mutex> lk(sound_m);
+		sound_cv.wait(lk, [this] { return !sound_busy; });
+		f();
+	}
+	// The match's sound to the real clock (a stream), or back to a frame's at a time (nullptr)
+	void set_sound_free(SDL_AudioStream *stream, int target_bytes)
+	{
+		if (stream == free_stream) return;
+		if (emu_thread.joinable()) job_wait();   // (no frame half done meanwhile)
+		if (!sound_thread.joinable()) sound_start();
+		sound_wait();
+		{
+			std::lock_guard<std::mutex> lk(sound_m);
+			if (stream && !sound_out.empty())   // (the last frame's own, made meanwhile: played first)
+				SDL_PutAudioStreamData(stream, sound_out.data(), int(sound_out.size() * sizeof(int16_t)));
+			if (stream) sound_out.clear();
+			sound_midi.clear();
+			free_stream = stream;
+			free_target = target_bytes;
+		}
+		sound_cv.notify_all();
 	}
 	void sound_start()
 	{
 		sound_thread = std::thread([this] {
 			fast_thread();
 			std::unique_lock<std::mutex> lk(sound_m);
+			std::vector<uint8_t> midi;
+			std::vector<int16_t> out;
+			bool fed = false;   // (this match's sound begun)
 			for (;;) {
-				sound_cv.wait(lk, [this] { return sound_busy || sound_quit; });
+				if (!free_stream) fed = false;
+				if (free_stream) {
+					// (a look every 4 ms: a frame's sound, 17 ms, made whenever the queue's under its mark)
+					sound_cv.wait_for(lk, std::chrono::milliseconds(4));
+					if (sound_quit) return;
+					if (free_stream && fed && SDL_GetAudioStreamQueued(free_stream) == 0) sound_dry++;   // (not before its first)
+					for (int n = 0; free_stream && n < 4 && SDL_GetAudioStreamQueued(free_stream) < free_target; n++) {
+						SDL_AudioStream *to = free_stream;
+						midi.swap(sound_midi);
+						sound_midi.clear();
+						sound_busy = true;   // (reset_host waits for it)
+						lk.unlock();
+						for (uint8_t b : midi) sound.midi_in(b);
+						midi.clear();
+						out.clear();
+						sound.run(1.0 / FRAME_HZ, out);
+						SDL_PutAudioStreamData(to, out.data(), int(out.size() * sizeof(int16_t)));
+						fed = true;
+						lk.lock();
+						sound_busy = false;
+						sound_cv.notify_all();
+					}
+					continue;
+				}
+				sound_cv.wait(lk, [this] { return sound_busy || sound_quit || free_stream; });
 				if (sound_quit) return;
+				if (free_stream) continue;
 				lk.unlock();
 				for (uint8_t b : sound_midi) sound.midi_in(b);
 				sound_out.clear();
-				sound.run(sound_seconds.load(std::memory_order_relaxed), sound_out);
+				sound.run(1.0 / FRAME_HZ, sound_out);
 				if (!sound_job_on) sound_out.clear();
 				lk.lock();
 				sound_busy = false;
@@ -839,9 +897,13 @@ struct Game
 	void reset_host()
 	{
 		if (emu_thread.joinable()) job_wait();
-		sound_wait();
-		sound_out.clear();
-		sound.reset();
+		{
+			std::unique_lock<std::mutex> lk(sound_m);   // (held: a match's sound thread makes none meanwhile)
+			sound_cv.wait(lk, [this] { return !sound_busy; });
+			sound_out.clear();
+			sound_midi.clear();
+			sound.reset();
+		}
 		builder.clear_cache();
 		have_prev = false;
 		scene[0] = scene[1] = video::Scene();
@@ -877,22 +939,34 @@ struct Game
 		part_ms[0] += ms_since(t);
 		t = SDL_GetTicksNS();
 		if (!sound_thread.joinable()) sound_start();
-		sound_wait();   // (the frame before's sound, made meanwhile)
-		part_ms[1] += ms_since(t);
-		part_n++;
-		audio.insert(audio.end(), sound_out.begin(), sound_out.end());
-		sound_out.clear();
-		{
-			std::lock_guard<std::mutex> lk(sound_m);
-			if (take_midi) take_midi(sound_midi);   // (a match: a frame run again sends only what it hadn't)
+		if (free_stream) {   // (a match's: the frame's bytes queued for the sound board, which runs on its own)
+			free_midi.clear();
+			if (take_midi) take_midi(free_midi);
 			else {
-				sound_midi.assign(board.midi.begin(), board.midi.end());
+				free_midi.assign(board.midi.begin(), board.midi.end());
 				board.midi.clear();
 			}
-			sound_job_on = sound_on;
-			sound_busy = true;
+			std::lock_guard<std::mutex> lk(sound_m);
+			sound_midi.insert(sound_midi.end(), free_midi.begin(), free_midi.end());
+			part_n++;
+		} else {
+			sound_wait();   // (the frame before's sound, made meanwhile)
+			part_ms[1] += ms_since(t);
+			part_n++;
+			audio.insert(audio.end(), sound_out.begin(), sound_out.end());
+			sound_out.clear();
+			{
+				std::lock_guard<std::mutex> lk(sound_m);
+				if (take_midi) take_midi(sound_midi);   // (a match: a frame run again sends only what it hadn't)
+				else {
+					sound_midi.assign(board.midi.begin(), board.midi.end());
+					board.midi.clear();
+				}
+				sound_job_on = sound_on;
+				sound_busy = true;
+			}
+			sound_cv.notify_all();
 		}
-		sound_cv.notify_all();
 		frame++;
 		if (!picture) { tile_worker.finish(); have_prev = false; sky.reset(); return; }
 		newest ^= 1;
@@ -1962,7 +2036,7 @@ int main(int argc, char **argv)
 	game.sound.gain = LEVEL * cfg.volume / 100.0;
 	game.sound.set_volumes(cfg.music / 100.0f, cfg.effects / 100.0f);
 	const int frame_bytes = int(SOUND_RATE / FRAME_HZ) * 4;
-	constexpr double MATCH_QUEUED = 6.0;   // (a match's: three frames more, for the frames the session holds back)
+	constexpr double MATCH_QUEUED = 4.0;   // (a match's: the sound thread keeps it there, to the real clock)
 	constexpr double QUEUED = 3.0;   // (3.5 when the sound was made in the frame's own time: it's a frame later now; 2.5 kept it near
 	                                 // the frame and a half that runs an extra frame, two frames in a pass)
 
@@ -2202,22 +2276,19 @@ int main(int argc, char **argv)
 			[&] { return std::to_string(cfg.volume) + "%"; },
 			[&](int d) {
 				cfg.volume = std::clamp(cfg.volume + 10 * d, 0, 100); cfg_dirty = true;
-				game.sound_wait();
-				game.sound.gain = LEVEL * cfg.volume / 100.0;
+				game.sound_do([&] { game.sound.gain = LEVEL * cfg.volume / 100.0; });
 			} });
 		p.items.push_back({ "Music", "The music's volume, within the overall volume.",
 			[&] { return std::to_string(cfg.music) + "%"; },
 			[&](int d) {
 				cfg.music = std::clamp(cfg.music + 10 * d, 0, 100); cfg_dirty = true;
-				game.sound_wait();
-				game.sound.set_volumes(cfg.music / 100.0f, cfg.effects / 100.0f);
+				game.sound_do([&] { game.sound.set_volumes(cfg.music / 100.0f, cfg.effects / 100.0f); });
 			} });
 		p.items.push_back({ "Effects and voices", "Hits, voices and the announcer, within the overall volume.",
 			[&] { return std::to_string(cfg.effects) + "%"; },
 			[&](int d) {
 				cfg.effects = std::clamp(cfg.effects + 10 * d, 0, 100); cfg_dirty = true;
-				game.sound_wait();
-				game.sound.set_volumes(cfg.music / 100.0f, cfg.effects / 100.0f);
+				game.sound_do([&] { game.sound.set_volumes(cfg.music / 100.0f, cfg.effects / 100.0f); });
 			} });
 		p.items.push_back(back_item());
 		return p;
@@ -2569,12 +2640,28 @@ int main(int argc, char **argv)
 	online.adapter.settle = [&] { if (game.emu_thread.joinable()) game.job_wait(); };
 	online.adapter.program_changed = [&] { game.program_changed(); };
 	online.adapter.booting = [] { SDL_PumpEvents(); };   // (the boot's 2 s: the system doesn't take the game for hung)
+	// (tests: VF3_TEST_FRAME_MS="ms[,every s,its ms]" makes each frame of a match cost that much at least, a Steam
+	// Deck's, now and then more, its character select's; a frame run again 40% of it)
+	static const std::array<double, 3> test_ms = [] {
+		double v[3] = { 0, 0, 0 };
+		if (const char *e = getenv("VF3_TEST_FRAME_MS")) sscanf(e, "%lf,%lf,%lf", &v[0], &v[1], &v[2]);
+		return std::array<double, 3>{ v[0], v[1], v[2] };
+	}();
 	online.adapter.run = [&](bool resim) {
-		if (!resim) { game.run_frame(true, true); return; }
-		const bool tiles = game.tiles_on;   // (a frame run again after a rollback: the board alone, no picture or sound)
-		game.tiles_on = false;
-		board.run_frame();
-		game.tiles_on = tiles;
+		const uint64_t t0 = SDL_GetTicksNS();
+		if (!resim) game.run_frame(true, true);
+		else {
+			const bool tiles = game.tiles_on;   // (a frame run again after a rollback: the board alone, no picture or sound)
+			game.tiles_on = false;
+			board.run_frame();
+			game.tiles_on = tiles;
+		}
+		if (test_ms[0] > 0) {
+			double ms = test_ms[0];
+			if (test_ms[1] > 0 && std::fmod(double(t0) / 1e9, test_ms[1]) < 2.0) ms = test_ms[2];   // (2 s of it)
+			if (resim) ms *= 0.4;
+			while (double(SDL_GetTicksNS() - t0) / 1e6 < ms) {}
+		}
 	};
 	online.adapter.on_begin = [&] {
 		if (!nvram_away) {   // (this player's own, given back after the match)
@@ -2793,6 +2880,10 @@ int main(int argc, char **argv)
 
 	while (running) {
 		pass++;
+		// A match: the sound board runs to the real clock on its thread, keeping the queue topped up itself
+		// (Game::set_sound_free): the frames come when the session lets them, and neither their waits nor a slow
+		// frame touch the sound
+		game.set_sound_free(audio && online.playing() ? audio : nullptr, int(frame_bytes * MATCH_QUEUED));
 		const uint64_t pass_t0 = SDL_GetTicksNS();
 		int pass_kind = 0;   // (the pace line's: 0 a picture only, 1 a frame's first half, 2 its second, 3 a whole frame)
 		take_match_job();
@@ -2944,22 +3035,9 @@ int main(int argc, char **argv)
 			double rate = FRAME_HZ;
 			int low = 0;
 			bool sound_full = false;
-			if (audio && online.playing()) {
-				// A match: its frames come when the session lets them (a frame held back to keep in time, a wait for
-				// the other side), so the sound can't be kept fed by running frames sooner, as alone: that ran this
-				// side ahead, and the queue still ran dry at every wait (the music dropped out). Instead a deeper
-				// queue, and the sound itself played up to 1% slower or faster to keep it there.
-				const int q = SDL_GetAudioStreamQueued(audio);
-				if (q > frame_bytes * int(FRAME_HZ * 0.3)) sound_full = true;
-				queue_avg += (q - queue_avg) * std::min(1.0, dt / 2.0);
-				// The queue kept level by how much sound each frame makes, never by its speed: the pitch and the music's
-				// tempo stay the game's own, the frames slower (Online::slow_down) or held back or not. As much more as
-				// the frames are slower, and a little more or less as the queue's under or over (gently: it swings a
-				// few frames as frames come)
-				const double fill = std::clamp(1 + (MATCH_QUEUED - queue_avg / frame_bytes) * 0.02, 0.97, 1.25);
-				game.sound_seconds = fill / (FRAME_HZ * (1 - online.slow_down()));
-			} else if (audio) {
-				game.sound_seconds = 1.0 / FRAME_HZ;
+			// (a match's sound: its own thread's, to the real clock, set_sound_free above; alone: a frame's at a
+			// time, the frames kept in step with the queue)
+			if (audio && !online.playing()) {
 				const int q = SDL_GetAudioStreamQueued(audio);
 				if (q > frame_bytes * int(FRAME_HZ * 0.3)) sound_full = true;
 				queue_avg += (q - queue_avg) * std::min(1.0, dt / 0.5);
@@ -3156,7 +3234,11 @@ int main(int argc, char **argv)
 		}
 		// (hidden, or vsync off: nothing paces the passes to the screen, a picture each pass was ~500 a second; as VF1's)
 		const bool every_refresh = !hidden && vsync_on && screen_hz <= (gov.smooth_off ? 60 : 120) * 1.05;
-		const bool draw = rec.on || new_frame || (smooth && !stopped && !unseen && (smooth_budget >= 1 || every_refresh)) || !first_shown;
+		// (tests: VF3_TEST_NO_PICTURES, two games at once on a small machine, the frames' cost alone: a picture only now
+		// and then)
+		static const bool no_pictures = getenv("VF3_TEST_NO_PICTURES") != nullptr;
+		const bool draw = no_pictures ? first_shown ? (pass % 120 == 0) : true
+		                              : rec.on || new_frame || (smooth && !stopped && !unseen && (smooth_budget >= 1 || every_refresh)) || !first_shown;
 		if (draw) {
 			smooth_budget = std::max(0.0, smooth_budget - 1);
 			t9.pictures++;
@@ -3342,6 +3424,7 @@ int main(int argc, char **argv)
 					pace.frames / s, pace.pictures / all_s, stopped_note, (unsigned long long)between_n, (unsigned long long)cut_n, pace.frames ? pace.emu_ms / pace.frames : 0.0,
 					pace.draw_ms / pics, g3_shown ? "the GPU's set-up" : "the CPU's 3D", g3_shown ? pace.gpu_ms / pics : (pace.draw_ms - pace.upload_ms) / pics,
 					pace.upload_ms / pics, scale, tex_w, tex_h, gov.smooth_off ? ", smooth motion held to 60 a second" : "", audio ? SDL_GetAudioStreamQueued(audio) : -1);
+			if (game.free_stream) fprintf(stderr, "  a match's sound, to the real clock: ran dry %d times\n", game.sound_dry.exchange(0));
 			if (const std::string pl = sysinfo::placement(); !pl.empty()) fprintf(stderr, "  %s\n", pl.c_str());
 			if (g3_shown && pics > 0)
 				fprintf(stderr, "  a picture's 3D: the in-between %.2f ms, the triangles prepared %.2f ms, the GPU's renderer %.2f ms (its set-up %.2f, the rest waiting on the GPU)\n",
@@ -3393,6 +3476,7 @@ int main(int argc, char **argv)
 	save_nvram(true);
 	rec_stop();
 	if (cfg_dirty && quit_after < 0) cfg.save(settings_path);
+	game.set_sound_free(nullptr, 0);   // (the sound thread off the stream first)
 	if (audio) SDL_DestroyAudioStream(audio);
 	for (auto &p : pads) if (p) SDL_CloseGamepad(p);
 	menu_owner.reset();

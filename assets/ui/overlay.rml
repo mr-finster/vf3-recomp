@@ -155,9 +155,8 @@
 		#vs { position: absolute; left: 0; right: 0; top: 0; bottom: 0; }
 		#vs .pl { position: absolute; top: 210dp; font-size: 24dp; font-weight: 600; letter-spacing: 4dp; line-height: 24dp; }
 		#vs .nm { position: absolute; top: 230dp; font-size: 92dp; font-weight: 700; font-style: italic; line-height: 92dp; white-space: nowrap; }
-		#vs .vflag { width: 64dp; height: 48dp; margin: 0 18dp; border: 2dp #ffffff; vertical-align: middle; }
-		#vs .nm.left .vflag { margin-left: 0; }
-		#vs .nm.right .vflag { margin-right: 0; }
+		#vs .fl { position: absolute; top: 148dp; height: 52dp; }
+		#vs .vflag { width: 64dp; height: 48dp; border: 2dp #ffffff; }
 		#vs .left { left: 72dp; color: #0b1026; }
 		#vs .right { right: 72dp; text-align: right; }
 		#vs .pl.right { color: #c3cbf0; }
@@ -165,10 +164,7 @@
 		#vs .badge {
 			position: absolute;
 			left: 50%; top: 210dp;
-			width: 140dp; height: 140dp; margin-left: -70dp;
-			border-radius: 70dp;
-			border: 5dp #ffffff;
-			background-color: #0b1026;
+			width: 140dp; height: 140dp; margin-left: -70dp;   /* (its disc and ring drawn under it: game_menu::draw_versus) */
 		}
 		#vs .badge div {
 			position: absolute; left: 0; right: 0; top: 0; bottom: 0;
