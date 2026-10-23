@@ -107,7 +107,7 @@ private:
 	uint64_t full_failed_sum = 0;   // (the backdrop looked for in the whole map in vain: the screen's rows, the map and banks then)
 	static uint64_t banks_sum(const Backdrop &b);
 	std::unordered_map<uint64_t, uint64_t> row_failed;   // (a row's tiles, the map and banks: looked for in vain, and the frame)
-	struct RowFound { uint64_t frame = ~0ull; int row = -1; uint64_t sum = 0; bool found = false; int x = 0, y = 0; std::vector<std::pair<int, int>> moved; } row_found;   // (a row looked for alone in the map: the other side's the same)
+	struct RowFound { uint64_t frame = ~0ull; int row = -1; uint64_t sum = 0; bool found = false, all = true; int x = 0, y = 0; std::vector<std::pair<int, int>> moved; } row_found;   // (a row looked for alone in the map: the other side's the same)
 	// (each screen row's last place found alone, looked at first next frame, and when it was last looked for in all the
 	// map in vain: by the map, its desc)
 	struct RowHint { uint64_t desc = 0; int x = -1, y = 0; uint64_t full_failed_at = ~0ull; } row_hint[64];

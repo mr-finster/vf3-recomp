@@ -613,6 +613,7 @@ bool Session::step(uint16_t input)
 	// too far ahead of what's come: wait
 	if (cur >= remote.size() + uint32_t(cfg.max_rollback)) {
 		stats_.stalls++;
+		if (cur != last_stalled) { stats_.stalled_frames++; last_stalled = cur; }
 		return false;
 	}
 
