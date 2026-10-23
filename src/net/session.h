@@ -91,6 +91,9 @@ public:
 		double lead = 0;       // the same, not rounded: what soft_sync slows for
 		// what this side's steps cost, ms in all (for a log: where a slow machine's time goes)
 		double save_ms = 0, run_ms = 0, resim_ms = 0, hash_ms = 0, step_max_ms = 0;
+		// the same, of late (the fight's, not the menus'): a step's save and frame, and each frame a rollback runs again
+		double step_recent_ms = 0, resim_recent_ms = 0;
+		int peer_room = -1;    // the frames the other side can run again in a step and still make its frame (-1: not said yet)
 		uint64_t steps = 0;
 		uint64_t rollbacks = 0, resim_frames = 0, stalls = 0, waits = 0;
 	};
@@ -126,6 +129,9 @@ public:
 	const std::vector<uint16_t> &inputs(int player) const { return player == local_player() ? local : remote; }
 	const std::vector<uint8_t> &blob() const { return start_blob; }
 	void set_local_flags(uint8_t f) { my_flags = f; }   // e.g. 1: in the menu (shown to the other player)
+	// The frames this side can run again in one step and still make its frame (told the other side: its input delay
+	// covers what this side can't, so a rollback here never makes a frame late; AutoDelay::rollback_room)
+	void set_room(int frames) { my_room = uint8_t(std::clamp(frames, 0, 30)); }
 	std::function<void(const std::string &)> trace;   // the handshake's steps, in words (for a log)
 	uint8_t remote_flags() const { return their_flags; }
 
@@ -184,7 +190,7 @@ private:
 	double their_t_at = 0;
 	bool have_their_t = false;
 
-	uint8_t my_flags = 0, their_flags = 0;
+	uint8_t my_flags = 0, their_flags = 0, my_room = 255;   // (255: not known yet)
 
 	// The session's token: the guest's, chosen at random and sent in its hello; every packet after carries it and
 	// one without it is dropped (a third party who can't see the packets can't put one in)

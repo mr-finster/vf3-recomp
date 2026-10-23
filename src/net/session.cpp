@@ -210,6 +210,7 @@ void Session::send_inputs()
 	o.u32(first);
 	o.u8(uint8_t(n));
 	for (uint32_t i = 0; i < n; i++) o.u16(local[first + i]);
+	o.u8(my_room);
 	send_packet(o.b);
 }
 
@@ -453,6 +454,7 @@ void Session::handle(const std::vector<uint8_t> &p)
 		if (!in.need(size_t(n) * 2)) return;
 		std::vector<uint16_t> v(n);
 		for (uint32_t i = 0; i < n; i++) v[i] = in.u16();
+		if (in.need(1)) { const uint8_t room = in.u8(); stats_.peer_room = room == 255 ? -1 : int(room); }
 		their_ack = std::max(their_ack, std::min<uint32_t>(ack, uint32_t(local.size())));
 		if (frame >= their_frame) { their_frame = frame; their_frame_at = now; their_adv = adv; }
 		their_flags = flags;
@@ -590,8 +592,13 @@ bool Session::step(uint16_t input)
 			else if (g != from) ring_frame[g % R] = UINT32_MAX;   // (what's there is another frame's now)
 			run_frame(g, true);
 		}
-		stats_.resim_ms += ms_since(t0);
+		const double resim = ms_since(t0);
+		stats_.resim_ms += resim;
 		const int n = int(cur - from);
+		if (n > 0) {
+			const double each = resim / n;
+			stats_.resim_recent_ms = stats_.resim_recent_ms > 0 ? stats_.resim_recent_ms * 0.9 + each * 0.1 : each;
+		}
 		stats_.rollback = n;
 		stats_.rollbacks++;
 		stats_.resim_frames += uint64_t(n);
@@ -643,6 +650,10 @@ bool Session::step(uint16_t input)
 	const auto t1 = Clock::now();
 	run_frame(cur, false);
 	stats_.run_ms += ms_since(t1);
+	{
+		const double step = ms_since(t0);   // (this step's save and frame: of late, over the last ~50)
+		stats_.step_recent_ms = stats_.step_recent_ms > 0 ? stats_.step_recent_ms * 0.98 + step * 0.02 : step;
+	}
 	stats_.steps++;
 	stats_.step_max_ms = std::max(stats_.step_max_ms, ms_since(t_step));
 	cur++;
@@ -664,24 +675,24 @@ int auto_delay(double rtt_ms, double jitter_ms, double frame_ms, int target_roll
 
 int AutoDelay::rollback_room(const Session::Stats &s) const
 {
-	// The frames a rollback may run again in one step and the step still fit in a frame, with 3 ms to spare: what a
-	// frame run again costs here, measured (till there are enough: the slow machine's 4 or 6), so a far opponent's
-	// guesses never make a step late (a frame the picture misses: choppy) on this machine
-	const int guess = slow ? 4 : 6;
-	if (s.steps < 300) return guess;
-	const double base = (s.save_ms + s.run_ms + s.hash_ms) / double(s.steps);
-	const double per = s.resim_frames >= 30 ? s.resim_ms / double(s.resim_frames) : s.run_ms / double(s.steps);
-	if (per <= 0.05) return 6;
-	return std::clamp(int((frame_ms - 3.0 - base) / per), 2, 6);
+	// The frames a rollback may run again in one step here and the step still make its frame (1.5 ms to spare): a
+	// step's cost and a frame run again's, of late (a fight's, not the menus'). Told the other side, whose delay then
+	// covers the rest: a rollback here never makes a frame late (choppy), however slow this machine.
+	if (s.steps < 120 || s.step_recent_ms <= 0) return slow ? 2 : 6;   // (till it's measured)
+	const double each = s.resim_recent_ms > 0 ? s.resim_recent_ms : s.step_recent_ms * 0.8;   // (a frame run again: no picture)
+	if (each <= 0.05) return 6;
+	return std::clamp(int(std::floor((frame_ms - 1.5 - s.step_recent_ms) / each)), 0, 6);
 }
 
 int AutoDelay::want(const Session::Stats &s) const
 {
-	// As little as there can be: none at all within a frame's round trip (a LAN), else 1, the rollback taking the
-	// rest; more only where the frames guessed would pass what this machine can run again in a step (6 at most of
-	// the 7 the session can go back: one spare for a late packet). A slow machine (a Steam Deck) a frame more.
+	// As little as there can be: none within a frame's round trip (a LAN), else 1; more only where this side's
+	// inputs would reach the other side later than it can take back: its room (the frames it can run again in a
+	// step, as it says), so its rollbacks always fit its frames. (This side's own rollbacks are the other side's
+	// delay's to cover: each side's delay is for the other's sake.)
 	const bool near = s.rtt_ms < frame_ms;
-	return auto_delay(s.rtt_ms, s.jitter_ms, frame_ms, rollback_room(s), (near ? 0 : 1) + (slow ? 1 : 0));
+	const int room = s.peer_room >= 0 ? std::min(s.peer_room, 6) : 2;   // (till it's said: a little)
+	return auto_delay(s.rtt_ms, s.jitter_ms, frame_ms, room, near ? 0 : 1);
 }
 
 int AutoDelay::update(const Session &session, double now, bool between_rounds)
