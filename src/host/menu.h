@@ -110,6 +110,7 @@ private:
 	uint64_t m_toast_until = 0;   // (SDL_GetTicks)
 	uint64_t m_vs_from = 0, m_vs_until = 0;   // the versus screen's (SDL_GetTicks)
 	void draw_versus(int w, int h);       // its two sides, under its names
+	void draw_spinner();                  // a notice's spinner, over its card
 	std::vector<menu_page> m_stack;
 	std::vector<int> m_sel_stack;
 	int m_sel = 0;

@@ -103,12 +103,9 @@
 			background-color: #0b1026;
 			text-align: center;
 		}
-		#notice .spin {
+		#notice .spin {   /* (only its place: the ring is drawn over it, game_menu::draw_spinner) */
 			margin: 0 auto;
-			width: 56dp; height: 56dp;
-			border-radius: 28dp;
-			border: 5dp #f2d14b;
-			border-top-color: #f2d14b00;
+			width: 66dp; height: 66dp;
 		}
 		#notice .title {
 			margin-top: 18dp;
