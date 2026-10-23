@@ -17,5 +17,6 @@ IMG=registry.gitlab.steamos.cloud/steamrt/sniper/sdk:latest
 tools/release/licenses.sh build/deck/LICENSES.txt
 VF3_VERSION=${VF3_VERSION:-$(git describe --tags --always 2>/dev/null || echo dev)}   # (VF3_VERSION=v0.1.0 for a release)
 VF3_DATE=$(git log -1 --format=%cd --date=format:'%b %-d %Y' 2>/dev/null)
-docker run --rm --platform linux/amd64 -e VF3_VERSION="$VF3_VERSION" -e VF3_DATE="$VF3_DATE" -e DECK_FAST="$DECK_FAST" -e VF_LOBBY_URL="$VF_LOBBY_URL" \
+VF3_COMMIT=$(git rev-parse --short HEAD 2>/dev/null)
+docker run --rm --platform linux/amd64 -e VF3_VERSION="$VF3_VERSION" -e VF3_DATE="$VF3_DATE" -e VF3_COMMIT="$VF3_COMMIT" -e DECK_FAST="$DECK_FAST" -e VF_LOBBY_URL="$VF_LOBBY_URL" \
 	-v "$PWD":/src -w /src "$IMG" bash tools/deck/inside.sh

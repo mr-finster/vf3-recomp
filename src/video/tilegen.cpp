@@ -1024,10 +1024,13 @@ void TileGen::line(const m3::Model3 &board, unsigned y, const uint32_t *line_reg
 								if (!full_lately || all_rows)
 									for (int my = 0; my < b.h && !rf.found; my++)
 										for (int mx = 0; mx < b.w && !rf.found; mx++) try_at(mx, my);
+								rf.all = !full_lately || all_rows;
 								if (rf.found) { hint.x = rf.x; hint.y = rf.y; hint.full_failed_at = ~0ull; }
 								else if (!full_lately) hint.full_failed_at = board.frame;
 							}
-							if (!rf.found && !failed_lately) {
+							// (remembered as not found only when all the map was looked through: while the 8 frames' gate
+							// held it to the hint's neighbourhood, a place further off wasn't looked at)
+							if (!rf.found && !failed_lately && rf.all) {
 								if (row_failed.size() > 4096) row_failed.clear();
 								row_failed[row_key] = board.frame;
 							}

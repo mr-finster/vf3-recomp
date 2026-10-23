@@ -1088,10 +1088,11 @@ bool Online::connection(game_menu::net_cells &c, bool detailed) const
 	// and frames held back for the other side (the game slowing: a few a second unseen) that count. Good up to 7 frames'
 	// delay and rollback and 3 frames held a second; fair up to 10 and 10; poor past that, or the connection dropped.
 	const double now = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count();
-	if (stalls_mark_at < 0 || stt.stalls < stalls_mark) { stalls_mark = stt.stalls; stalls_mark_at = now; stalls_per_s = 0; }
+	// (frames held back, each counted once: the tries a frame takes are one a pass, so 1 at 60 Hz and 4 at 240)
+	if (stalls_mark_at < 0 || stt.stalled_frames < stalls_mark) { stalls_mark = stt.stalled_frames; stalls_mark_at = now; stalls_per_s = 0; }
 	else if (now - stalls_mark_at >= 1000) {
-		stalls_per_s = double(stt.stalls - stalls_mark) * 1000 / (now - stalls_mark_at);
-		stalls_mark = stt.stalls;
+		stalls_per_s = double(stt.stalled_frames - stalls_mark) * 1000 / (now - stalls_mark_at);
+		stalls_mark = stt.stalled_frames;
 		stalls_mark_at = now;
 	}
 	const int worst = std::max(c.delay, c.rollback);
