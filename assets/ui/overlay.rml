@@ -163,8 +163,8 @@
 		#vs .nm.right { color: #ffffff; }
 		#vs .badge {
 			position: absolute;
-			left: 50%; top: 210dp;
-			width: 140dp; height: 140dp; margin-left: -70dp;   /* (its disc and ring drawn under it: game_menu::draw_versus) */
+			left: 50%; top: 215dp;
+			width: 140dp; height: 140dp; margin-left: -65dp;   /* (its disc and ring drawn under it, round 280dp down: game_menu::draw_versus; the VS 5dp right and down of the box's middle, as it sat inside the ring's 5dp border, measured: menutest versus.png) */
 		}
 		#vs .badge div {
 			position: absolute; left: 0; right: 0; top: 0; bottom: 0;
