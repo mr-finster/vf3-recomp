@@ -470,6 +470,7 @@ struct settings
 	int music = 100, effects = 100;   // within the volume
 	int arcade_coin = -2;   // the arcade way's coin setting, while the PC way's FREE PLAY replaces it (-1 none to give back, -2 none kept yet)
 	std::string roms_folder;
+	static constexpr const char *BUILD = VF3_VERSION " " VF3_DATE;   // (what gpu3d_failed was learnt by)
 	std::string gpu3d_failed;   // SDL_GPU's drivers whose 3D failed here ("direct3d12 vulkan"): the next start tries the next
 	bool fullscreen = false, arcade = false, show_fps = false, smooth = true;
 	bool timings = false;    // F9: the timings in the title bar
@@ -513,6 +514,8 @@ struct settings
 		num("online_connection", online.show_connection, 0, 2);
 		flag("online_hide_ip", online.hide_ip);
 		if (auto it = kv.find("gpu_3d_failed"); it != kv.end()) gpu3d_failed = it->second;
+		std::string failed_build;
+		if (auto it = kv.find("gpu_3d_failed_build"); it != kv.end()) failed_build = it->second;
 		flag("fullscreen", fullscreen);
 		flag("arcade_mode", arcade);
 		flag("frame_timings", timings);
@@ -547,6 +550,15 @@ struct settings
 			gpu3d_failed.clear();
 			upgraded = true;
 		}
+		// A GPU failure remembered by another build (another version, or the same rebuilt) forgotten, so each new build
+		// tries the GPU again: a driver updated since, or a fix here. (Remembered for ever, one bad start had kept a
+		// Windows player's 3D on the CPU at every start after, its cost growing with the scale: slow above 1x.)
+		if (!gpu3d_failed.empty() && failed_build != BUILD) {
+			fprintf(stderr, "settings: the GPU's failures remembered by %s forgotten (%s): this build tries the GPU again\n",
+			        failed_build.empty() ? "an older build" : failed_build.c_str(), gpu3d_failed.c_str());
+			gpu3d_failed.clear();
+			upgraded = true;
+		}
 		if (version < VERSION && !kv.empty()) upgraded = true;
 		version = VERSION;
 	}
@@ -570,7 +582,7 @@ struct settings
 				"smooth_motion = %d\nrenderer_3d = %d\nbackground_filter = %d\n", scale, aspect, int(fullscreen), volume, int(arcade), int(show_fps),
 				int(smooth), renderer3d, int(smooth_bg));
 		if (!roms_folder.empty()) fprintf(f, "roms_folder = %s\n", roms_folder.c_str());
-		if (!gpu3d_failed.empty()) fprintf(f, "gpu_3d_failed = %s\n", gpu3d_failed.c_str());
+		if (!gpu3d_failed.empty()) fprintf(f, "gpu_3d_failed = %s\ngpu_3d_failed_build = %s\n", gpu3d_failed.c_str(), BUILD);
 		fprintf(f, "crt_colours = %d\nsharp_textures = %d\n", crt_colours, int(sharp_textures));
 		if (graphics) fprintf(f, "graphics = %d\n", graphics);
 		fprintf(f, "screen_filter = %d\nantialiasing = %d\nmusic_volume = %d\neffects_volume = %d\narcade_coins = %d\nframe_timings = %d\n", filter, aa, music, effects, arcade_coin, int(timings));
@@ -1355,11 +1367,20 @@ int main(int argc, char **argv)
 		// AMD driver arcade cabinets use, crashes there: not tried at all.)
 		const std::string marker = data + "/gpu-start.crashed";
 		const bool known_bad = sysinfo::gpu_names().find("CRT Emudriver") != std::string::npos;
-		const bool crashed = known_bad || SDL_GetPathInfo(marker.c_str(), nullptr);
+		// (the marker holds the build that left it: another build's, a driver or a fix since, the GPU tried again)
+		std::string marker_build;
+		bool marker_there = false;
+		if (SDL_GetPathInfo(marker.c_str(), nullptr)) {
+			marker_there = true;
+			size_t n = 0;
+			if (void *d = SDL_LoadFile(marker.c_str(), &n)) { marker_build.assign(static_cast<const char *>(d), n); SDL_free(d); }
+		}
+		const bool crashed = known_bad || (marker_there && marker_build == settings::BUILD);
 		if (known_bad) fprintf(stderr, "SDL's gpu renderer: not tried with CRT Emudriver (its start crashes there): SDL's usual renderer, the CPU's 3D\n");
-		else if (crashed) fprintf(stderr, "SDL's gpu renderer: the last start closed while starting it (%s): SDL's usual renderer, the CPU's 3D\n", marker.c_str());
+		else if (crashed) fprintf(stderr, "SDL's gpu renderer: the last start closed while starting it (%s): SDL's usual renderer, the CPU's 3D (a new build tries it again)\n", marker.c_str());
+		else if (marker_there) fprintf(stderr, "SDL's gpu renderer: %s closed while starting it: this build tries it again\n", marker_build.empty() ? "an older build" : marker_build.c_str());
 		if (!crashed) {
-			if (SDL_IOStream *io = SDL_IOFromFile(marker.c_str(), "w")) SDL_CloseIO(io);
+			if (SDL_IOStream *io = SDL_IOFromFile(marker.c_str(), "w")) { SDL_WriteIO(io, settings::BUILD, strlen(settings::BUILD)); SDL_CloseIO(io); }
 			// (a driver whose 3D failed its check here before is passed over: Direct3D 12's for Vulkan, SDL's other on
 			// Windows: some older cards draw nothing on one and are fine on the other. SDL_GPU_DRIVER chooses over this.)
 			// (as VF1's and VF2's: Vulkan first on Windows for every card, Direct3D 12 if Vulkan won't start or draws no
