@@ -95,6 +95,7 @@
 #include "../rec/ppc_rec.h"
 #include "../sound/soundboard.h"
 #include "../video/tilegen.h"
+#include "../video/tile_worker.h"
 #include "../video/sky_lead.h"
 #include "../video/r3d_scene.h"
 #include "../video/r3d_raster.h"
@@ -723,6 +724,9 @@ struct Game
 	bool recompiled = false;
 	SoundBoard sound;
 	video::TileGen tiles;
+	// the tile lines drawn on a thread of their own as the game reaches each (their registers copied): half a
+	// fight frame's time on the game's own thread before (2.8 of 5.5 ms; a Steam Deck's ~4-5 of 11)
+	video::TileWorker tile_worker{ tiles, board };
 	video::SceneBuilder builder;
 	// the last two frames' scenes (smooth motion goes between them) and their 2D layers
 	video::Scene scene[2];
@@ -756,8 +760,7 @@ struct Game
 		sound.attach(&board.sound_rom, &board.samples);
 		board.on_line = [this](unsigned y) {
 			if (!tiles_on) return;
-			if (y == 0) tiles.clear();
-			tiles.line(board, y);
+			tile_worker.line(y);
 		};
 		return true;
 	}
@@ -887,19 +890,23 @@ struct Game
 		}
 		sound_cv.notify_all();
 		frame++;
-		if (!picture) { have_prev = false; sky.reset(); return; }
+		if (!picture) { tile_worker.finish(); have_prev = false; sky.reset(); return; }
 		newest ^= 1;
+		// the 2D layers put together on the tile worker (its last lines first) while the 3D's scene is built here
+		tile_worker.then([this] {
+			tiles.aligned(below, above);
+			if (!hud_names[0].empty() || !hud_names[1].empty()) {   // (a netplay match's)
+				const video::HudFlag *fl[2] = { &hud_flags[0], &hud_flags[1] };
+				video::hud_names(board, above, hud_names, fl);
+			}
+			tiles.aligned_wide(below_wide);
+		});
 		t = SDL_GetTicksNS();
 		builder.build(board, scene[newest]);
 		part_ms[2] += ms_since(t);
 		have_prev = frame > 1;
 		t = SDL_GetTicksNS();
-		tiles.aligned(below, above);
-		if (!hud_names[0].empty() || !hud_names[1].empty()) {   // (a netplay match's)
-			const video::HudFlag *fl[2] = { &hud_flags[0], &hud_flags[1] };
-			video::hud_names(board, above, hud_names, fl);
-		}
-		tiles.aligned_wide(below_wide);
+		tile_worker.finish();   // (the frame's layers its own, put together)
 		part_ms[3] += ms_since(t);
 		t = SDL_GetTicksNS();
 		bg_moved = video::TileGen::scrolled(prev_scroll, tiles.scroll, prev_below, below, bg_dx, bg_dy) && have_prev;
@@ -2935,7 +2942,8 @@ int main(int argc, char **argv)
 				if (q > frame_bytes * int(FRAME_HZ * 0.3)) sound_full = true;
 				queue_avg += (q - queue_avg) * std::min(1.0, dt / 2.0);
 				// (gently: the queue swings a few frames as frames come, and the ratio followed it, a pitch heard moving)
-				const float ratio = float(std::clamp(1 + (queue_avg / frame_bytes - MATCH_QUEUED) * 0.003, 0.99, 1.01));
+				// (and as much slower as the frames are, kept level with a slower other side: Online::slow_down)
+				const float ratio = float((1 - online.slow_down()) * std::clamp(1 + (queue_avg / frame_bytes - MATCH_QUEUED) * 0.003, 0.99, 1.01));
 				if (std::fabs(ratio - sound_ratio) > 0.001f) { sound_ratio = ratio; SDL_SetAudioStreamFrequencyRatio(audio, ratio); }
 			} else if (audio) {
 				if (sound_ratio != 1.0f) { sound_ratio = 1.0f; SDL_SetAudioStreamFrequencyRatio(audio, 1.0f); }

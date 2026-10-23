@@ -107,7 +107,11 @@ public:
 	int ping() const { return session ? int(session->stats().rtt_ms + 0.5) : 0; }
 	// In a match: how much slower to run the frames to keep in time with the other side (0, or up to 0.02: 2%)
 	// (gently: much more and the sound's queue ran dry, and its catching up ran frames in a burst)
-	double slow_down() const { return playing() && session ? std::clamp(session->stats().lead * 0.01, 0.0, 0.02) : 0.0; }
+	// How much slower this side's frames run to stay level with the other side's, ahead of it (lead in frames): 2% a
+	// frame ahead, up to 6%, so a slower machine (a Steam Deck a few percent short of full speed) is kept up with
+	// smoothly; at 2% at most this side ran into the rollback's end and stopped dead, again and again (a stutter, and
+	// the sound ran dry). The sound slows with it (main.cpp), not dropping out.
+	double slow_down() const { return playing() && session ? std::clamp(session->stats().lead * 0.02, 0.0, 0.06) : 0.0; }
 	const LastMatch &last_match() const { return last; }
 	// Why the last try didn't get going ("" if it did, or none yet): shown on the page it was made from
 	const std::string &join_failure() const { return failure; }

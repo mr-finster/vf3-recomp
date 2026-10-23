@@ -42,7 +42,9 @@ public:
 	// (tests: the backdrop's state this frame, a line: its map found, how it agrees with the layer on screen, and the
 	// sides' tiles (as far as 21:9 shows them) from banks of tiles not loaded: whose place another bank on screen has)
 	std::string audit(const m3::Model3 &board) const;
-	void line(const m3::Model3 &board, unsigned y);
+	// line_regs: the tile generator's 64 registers as they were when the line began (a worker thread drawing the line
+	// while the game runs on: only the registers change line by line); null, the board's now
+	void line(const m3::Model3 &board, unsigned y, const uint32_t *line_regs = nullptr);
 	// The two layers as they line up with the 3D: 2 pixels left and up of where they're drawn (as Supermodel
 	// places them, its 3D drawn as ours is)
 	void aligned(std::vector<uint32_t> &below_out, std::vector<uint32_t> &above_out) const;
@@ -51,6 +53,8 @@ public:
 	void compose(const uint32_t *pic3d, uint32_t *out) const;
 
 private:
+	const uint32_t *regs_now = nullptr;   // (line's line_regs while it draws)
+	const uint32_t *regs_of(const m3::Model3 &board) const;
 	// a layer's panorama: its rows as runs of patterns (first, length), learned where the map shows one wrap
 	struct Pano { std::map<int, int> rows; int len = 0; };   // (len: the rows' usual length, the map's rows apart)
 	Pano pano[4];
