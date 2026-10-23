@@ -63,16 +63,28 @@ From a survey of other projects' online play (Oct 2026; many sources secondhand,
   ping to spare, a frame a second mid-round, the whole way between rounds. log.txt says each change and why, and
   every 10 s both sides' rooms.
 - **Keeping in time**: the side ahead of the other runs its frames a little slower until they're level
-  (`Online::slow_down`: 2% a frame ahead, up to 6%). The sound never slows with it: each frame makes as much
-  sound as keeps the queue level (the sound board only hears the game's bytes, so it can run to the real clock), so
-  the music and voices keep their own pitch and tempo, so a slower
+  (`Online::slow_down`: 2% a frame ahead, up to 6%). So a slower
   machine (a Steam Deck a few percent short of full speed) is followed smoothly; only past that does a side hold a
   frame back, and it stops dead for the other's inputs only at the rollback's end (`delaytest`: against a 55.6-fps
   opponent with 30 ms hitches, 0 of those, where a 2% limit had 2,351).
+- **The sound in a match runs to the real clock** (`Game::set_sound_free`): the sound board runs on its own thread
+  and keeps 4 frames of sound queued whatever the frames do, the game's frames only handing it their bytes. A frame
+  held back for the other side, a slow one (a Steam Deck's character select), or the game a few percent slower to
+  keep in time: none of it reaches the sound, which never drops out or changes pitch (the sound board only hears
+  the game, never answers it, so it isn't part of what the two sides must agree on). log.txt's pace line says how
+  many times the queue ran dry.
+- **Tests on a worse network and a slower machine, with the real game:** `VF3_NET_LAG="one-way ms,jitter,loss[,a
+  burst every s,its ms,its length s]"` sends this side's packets late; `VF3_TEST_FRAME_MS="ms[,every s,its ms]"`
+  makes each frame cost that much (a Deck's 9, its character select's 13).
 - **The tile generator's lines** are drawn on a thread of their own as the game reaches each (`video::TileWorker`:
   the line's registers copied, the line drawn a moment later), and the 2D layers put together there while the
   frame's 3D is built: about half a fight frame's time (2.8 of 5.5 ms here, more on a Steam Deck) off the game's own
   thread. They're only seen, never read by the game, so a match's frames are the same either way.
+- **The widescreen sides' searches** (the stage's map looked for behind a screen of its own, the character select's)
+  aren't made again while all they read is as when they found nothing: they'd find nothing again. They were made
+  every 16 frames in one go, and up to 60 times a frame for its rows: 2.5 ms a frame, in bursts of 20 ms or so (a
+  Deck's hitch at the select, several a second), now about 0.3. The picture is the same (VF3_NO_TILE_SKIP makes
+  every search, to compare).
 - **Rollback**: up to 7 frames; beyond that the game waits rather than guessing further. Rollback runs only when
   a guess was wrong (the soak test's every-frame mode is the stress case).
 - **The cost**: up to 8 frames run in one frame's 17.4 ms, with the picture, on a Steam Deck. So a frame's run

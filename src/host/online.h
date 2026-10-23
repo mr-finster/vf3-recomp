@@ -146,7 +146,9 @@ public:
 private:
 	m3::Model3 &board;
 	std::unique_ptr<vfnet::UdpLink> link;
+	vfnet::Link &lagged(vfnet::Link &l);
 	std::unique_ptr<vfnet::RoomLink> room;
+	std::unique_ptr<vfnet::LagLink> lag;   // (tests' worse network: VF3_NET_LAG)
 	std::unique_ptr<vfnet::Session> session;
 	Phase ph = Phase::off;
 	Step st = Step::none;

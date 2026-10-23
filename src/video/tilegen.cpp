@@ -368,6 +368,51 @@ std::string TileGen::audit(const m3::Model3 &board) const
 	return buf;
 }
 
+// The backdrop's banks, the table's and those seen on screen, in a sum (the searches' inputs beside the tiles)
+uint64_t TileGen::banks_sum(const Backdrop &b)
+{
+	uint64_t h = 1469598103934665603ull;
+	for (int i = 0; i < 128; i++) h = (h ^ uint64_t(uint16_t(b.bank[i])) ^ uint64_t(uint32_t(b.seen[i])) << 16) * 1099511628211ull;
+	return h;
+}
+
+// All find_backdrop reads, and the backdrop as it stands, in a sum: the same sum, the same search, the same answer
+uint64_t TileGen::backdrop_inputs(const m3::Model3 &board, bool full) const
+{
+	const Backdrop &b = backdrop;
+	const uint32_t *vram = reinterpret_cast<const uint32_t *>(board.tile_ram.data());
+	const uint32_t *regs = regs_of(board);
+	uint64_t h = 1469598103934665603ull;
+	auto add = [&](uint64_t v) { h = (h ^ v) * 1099511628211ull; };
+	add(full); add(full_failed_sum); add(board.frame);
+	for (int i = 0; i < 64; i++) add(regs[i]);
+	add(vram[(0xF6000 + 3 * 0x400) / 4]);   // (the layer's first line's own scroll)
+	const uint32_t *names = vram + (0xF8000 + 3 * 0x2000) / 4;
+	for (int i = 0; i < 64 * 32; i++) add(names[i]);
+	const int stage = int16_t(board.peek16(board.cpu.s.r[13] - 0x1E0C));
+	add(uint64_t(uint32_t(stage)));
+	if (stage >= 0 && stage <= 255) add(board.peek32(0xFFB30004 + 4 * uint32_t(stage)));
+	for (int i = 0; i < 128; i++) add(board.peek16(0x161614 + 2 * uint32_t(i)));
+	add(board.peek32(0x1617B4 + 4)); add(board.peek32(0x1617B4 + 8));
+	add(b.ok); add(b.known); add(b.desc); add(uint64_t(b.w) << 32 | uint32_t(b.h)); add(uint64_t(uint32_t(b.x0)) << 32 | uint32_t(b.y0));
+	add(uint64_t(uint32_t(b.game_x)) << 32 | uint32_t(b.game_y)); add(uint64_t(uint32_t(b.prev_x)) << 32 | uint32_t(b.prev_y)); add(b.game_frame);
+	add(b.map.size()); add(banks_sum(b));
+	return h;
+}
+
+// find_backdrop for a row of the frame that isn't the backdrop's place (again and again on a screen of its own, the
+// select's: 60 times a frame), not looked for again while all it reads is as when it last found nothing and changed
+// nothing (it would find nothing again)
+void TileGen::refind_backdrop(const m3::Model3 &board, bool full)
+{
+	static const bool no_skip = getenv("VF3_NO_TILE_SKIP") != nullptr;   // (tests: every search made, the picture compared)
+	if (no_skip) { find_backdrop(board, full); return; }
+	const uint64_t before = backdrop_inputs(board, full);
+	if (before == refind_failed) return;
+	find_backdrop(board, full);
+	refind_failed = !backdrop.ok && backdrop_inputs(board, full) == before ? before : 0;
+}
+
 void TileGen::find_backdrop(const m3::Model3 &board, bool full)
 {
 	Backdrop &b = backdrop;
@@ -481,12 +526,14 @@ void TileGen::find_backdrop(const m3::Model3 &board, bool full)
 			if (agrees(b.x0 + dx, b.y0 + dy)) { b.x0 = ((b.x0 + dx) % w + w) % w; b.y0 += dy; b.ok = true; see(); return; }
 	// (all of it: the one nearest the last place of those that agree)
 	if (!full) return;
-	// (looked through in vain lately with the same rows on screen, the same map: not again for 16 frames; a screen of
-	// its own with the stage's map loaded, as the select's, had the whole map looked through every frame)
-	uint64_t screen_sum = desc;
+	// (looked through in vain with the same rows on screen, the same map and banks: not again, for it finds nothing
+	// again; a screen of its own with the stage's map loaded, as the select's, had the whole map looked through every
+	// 16 frames, a frame's hitch each time on a slow machine. What it compares is all in the sum: the rows' tiles it
+	// looks at, the map, and the banks' places, the table's and the screen's)
+	uint64_t screen_sum = desc ^ banks_sum(b);
 	for (int r : rows)
 		for (int c = s; c < s + 56; c += 3) screen_sum = screen_sum * 1000003u + (name_at(names, r, c) & 0x3FFF) + uint64_t(r) * 7;
-	if (screen_sum == full_failed_sum && board.frame - full_failed_frame < 16) return;
+	if (screen_sum == full_failed_sum && !getenv("VF3_NO_TILE_SKIP")) return;
 	int best = INT32_MAX, bx = 0, by = 0;
 	for (int y0 = -64; y0 <= h; y0++)
 		for (int x0 = 0; x0 < w; x0++)
@@ -495,7 +542,7 @@ void TileGen::find_backdrop(const m3::Model3 &board, bool full)
 				if (dist < best) { best = dist; bx = x0; by = y0; }
 			}
 	if (best < INT32_MAX) { b.x0 = bx; b.y0 = by; b.ok = true; see(); return; }
-	if (screen_sum != full_failed_sum || board.frame - full_failed_frame >= 16) { full_failed_sum = screen_sum; full_failed_frame = board.frame; }
+	full_failed_sum = screen_sum;
 	// (none exactly: the game's place with banks it has just moved, each bank in one place)
 	{
 		const int cand[2][2] = { { int(int32_t(board.peek32(0x1617B4 + 4))) >> 3, int(int32_t(board.peek32(0x1617B4 + 8))) >> 3 }, { b.prev_x, b.prev_y } };
@@ -905,7 +952,7 @@ void TileGen::line(const m3::Model3 &board, unsigned y, const uint32_t *line_reg
 					// scenes, are looked for alone below)
 					const bool full = refind_frame != board.frame;
 					refind_frame = board.frame;
-					find_backdrop(board, full);
+					refind_backdrop(board, full);
 					sky_refinds++;
 					from_map = backdrop.ok && !row_bad();
 					row_x0 = backdrop.x0; row_y = backdrop.y0 + row;
@@ -929,8 +976,10 @@ void TileGen::line(const m3::Model3 &board, unsigned y, const uint32_t *line_reg
 							RowFound &rf = row_found;
 							// (a row not found stays not found for 16 frames while the same: a screen of its own, as the
 							// select's, looked through the whole map for each of its rows every frame)
-							auto failed = row_failed.find(sum ^ b.desc);
-							const bool failed_lately = failed != row_failed.end() && board.frame - failed->second < 16;
+							// (and, as for the whole screen's, not again while its tiles, the map and the banks are the same:
+							// it finds nothing again)
+							const uint64_t row_key = sum ^ b.desc ^ banks_sum(b) * 31;
+							const bool failed_lately = row_failed.count(row_key) != 0 && !getenv("VF3_NO_TILE_SKIP");
 							if (failed_lately) { rf.frame = board.frame; rf.row = row; rf.sum = sum; rf.found = false; rf.moved.clear(); }
 							if (rf.frame != board.frame || rf.row != row || rf.sum != sum) {
 								rf.frame = board.frame; rf.row = row; rf.sum = sum; rf.found = false; rf.moved.clear();
@@ -962,7 +1011,7 @@ void TileGen::line(const m3::Model3 &board, unsigned y, const uint32_t *line_reg
 							}
 							if (!rf.found && !failed_lately) {
 								if (row_failed.size() > 4096) row_failed.clear();
-								row_failed[sum ^ b.desc] = board.frame;
+								row_failed[row_key] = board.frame;
 							}
 							if (rf.found) {
 								from_map = true; row_x0 = rf.x - s; row_y = rf.y;
