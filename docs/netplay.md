@@ -191,7 +191,9 @@ their own Player 1 controls, whichever side they're on, so nobody has to rebind 
 connection's details, Input delay (from the next match), Leave the match (asks first). The opponent sees "in the
 menu" by your name. The connection display is small and out of the way at the bottom of the screen (the game's own bars and time are at the top): the ping, the
 input delay, the rollback frames and DIRECT / RELAY in fixed cells (a mono font, so nothing shifts as they change),
-green / yellow / red.
+green / yellow / red by what the player feels, not the ping: green up to 7 frames of input delay and rollback with the
+game at full speed (a 310 ms match at delay 7 plays well), yellow up to 10 or a few frames a second held back for the
+other side, red past that or with the connection dropped.
 
 **When something goes wrong**, it says what happened and what to do, in words, never a code:
 - "Connection interrupted" with a count down over the game, which waits; then "Your opponent left" and back to the
