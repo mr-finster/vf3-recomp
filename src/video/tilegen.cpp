@@ -1013,12 +1013,16 @@ void TileGen::line(const m3::Model3 &board, unsigned y, const uint32_t *line_reg
 										}
 										for (int i = 0; i < nt; i++) { moved[touched[i]] = -1; moved_n[touched[i]] = 0; }
 								};
+								// (nearest first, the last place itself before any other: a repeating sky or dunes agree in places
+								// a few tiles apart, and the nearest is the row's)
 								if (hint.x >= 0)
-									for (int dy = -3; dy <= 3 && !rf.found; dy++) {
-										const int my = hint.y + dy;
-										if (my < 0 || my >= b.h) continue;
-										for (int dx = -8; dx <= 8 && !rf.found; dx++) try_at(((hint.x + dx) % b.w + b.w) % b.w, my);
-									}
+									for (int d = 0; d <= 8 + 3 && !rf.found; d++)
+										for (int dy = -3; dy <= 3 && !rf.found; dy++) {
+											const int my = hint.y + dy, ax = d - std::abs(dy);
+											if (ax < 0 || ax > 8 || my < 0 || my >= b.h) continue;
+											try_at(((hint.x + ax) % b.w + b.w) % b.w, my);
+											if (ax && !rf.found) try_at(((hint.x - ax) % b.w + b.w) % b.w, my);
+										}
 								const bool full_lately = hint.full_failed_at != ~0ull && board.frame >= hint.full_failed_at && board.frame - hint.full_failed_at < 8;
 								static const bool all_rows = getenv("VF3_NO_TILE_SKIP") != nullptr;
 								if (!full_lately || all_rows)
