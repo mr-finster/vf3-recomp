@@ -1364,11 +1364,13 @@ int main(int argc, char **argv)
 	bool cpu_why_new = false;
 	// (why: what happened, in a player's words; then what to do. None with a renderer chosen by hand, SDL_RENDER_DRIVER)
 #ifdef __APPLE__
-	static const char *UPDATE = "Update macOS, then choose GPU in Display > 3D renderer to try it again.";
+	static const char *UPDATE = "Update macOS, then choose Auto in Display > 3D renderer to try it again.";
 #else
-	static const char *UPDATE = "Update the graphics driver, then choose GPU in Display > 3D renderer to try it again.";
+	static const char *UPDATE = "Update the graphics driver, then choose Auto in Display > 3D renderer to try it again.";
 #endif
-	static const char *RETRY = "Choose GPU in Display > 3D renderer to try it again from the next start.";
+	// (Auto, not GPU: any choice there clears what was remembered, and the GPU chosen by hand is checked more loosely,
+	// a GPU drawing wrongly kept)
+	static const char *RETRY = "Choose Auto in Display > 3D renderer to try it again from the next start.";
 	auto on_cpu_because = [&](const std::string &why, const char *what_to_do) {
 		if (cpu_why.empty() && !getenv("SDL_RENDER_DRIVER")) { cpu_why = why + "." + (*what_to_do ? std::string(" ") + what_to_do : ""); cpu_why_new = true; }
 	};
@@ -1397,7 +1399,7 @@ int main(int argc, char **argv)
 		}
 		else if (marker_there) fprintf(stderr, "SDL's gpu renderer: %s closed while starting it: this build tries it again\n", marker_build.empty() ? "an older build" : marker_build.c_str());
 		if (!crashed) {
-			if (SDL_IOStream *io = SDL_IOFromFile(marker.c_str(), "w")) { SDL_WriteIO(io, settings::BUILD, strlen(settings::BUILD)); SDL_CloseIO(io); }
+			save_blob(marker, settings::BUILD, strlen(settings::BUILD));   // (flushed to the disk: a crash that takes the machine down keeps it)
 			// (a driver whose 3D failed its check here before is passed over: Direct3D 12's for Vulkan, SDL's other on
 			// Windows: some older cards draw nothing on one and are fine on the other. SDL_GPU_DRIVER chooses over this.)
 			// (as VF1's and VF2's: Vulkan first on Windows for every card, Direct3D 12 if Vulkan won't start or draws no
@@ -1537,7 +1539,7 @@ int main(int argc, char **argv)
 		if (gd && failed_before(SDL_GetGPUDeviceDriver(gd))) {
 			g3.failed = true;
 			fprintf(stderr, "the 3D on the GPU: failed on %s here before (the CPU's 3D; choosing a 3D renderer in the menu tries again)\n", SDL_GetGPUDeviceDriver(gd));
-			on_cpu_because("the GPU drew the 3D wrongly here", RETRY);
+			on_cpu_because("the GPU drew the 3D wrongly here", UPDATE);
 		} else if (gd) {
 			const char *name = SDL_GetStringProperty(SDL_GetGPUDeviceProperties(gd), SDL_PROP_GPU_DEVICE_NAME_STRING, nullptr);
 			fprintf(stderr, "SDL_GPU: %s, %s\n", SDL_GetGPUDeviceDriver(gd), name ? name : "?");
@@ -1569,7 +1571,7 @@ int main(int argc, char **argv)
 		fprintf(stderr, "the 3D on the GPU: %s: on the CPU from now on%s\n", why.c_str(), remember ? "" : " (this run)");
 		// (its start's check or its textures: kept for this build, the menu tries again; a failure in play, a sleep or a
 		// GPU reset: for this run only)
-		if (remember) on_cpu_because(why.find("aren't the CPU's") != std::string::npos ? "the GPU drew the 3D wrongly here" : "the GPU's 3D failed here", RETRY);
+		if (remember) on_cpu_because(why.find("aren't the CPU's") != std::string::npos ? "the GPU drew the 3D wrongly here" : "the GPU's 3D failed here", UPDATE);
 		else on_cpu_because("the GPU's 3D stopped (after a sleep, or the graphics driver restarting)", "The next start tries the GPU again.");
 		g3.on = false;
 		g3.failed = true;
@@ -2291,7 +2293,7 @@ int main(int argc, char **argv)
 			[&] { return std::string(cfg.sharp_textures ? "Sharp" : "Arcade"); },
 			[&](int) { cfg.sharp_textures = !cfg.sharp_textures; video::Raster::arcade_lod = !cfg.sharp_textures; cfg_dirty = true; } });
 		p.items.push_back({ "Smooth motion",
-			"On: a picture for each refresh of your screen, placed between the arcade's 57.5 frames a second, a frame behind them. Off: only the arcade's own frames, as on the cabinet (uneven on most screens).",
+			"On: a picture for each refresh of your screen (up to 120 a second), placed between the arcade's 57.5 frames a second, a frame behind them. Off: only the arcade's own frames, as on the cabinet (uneven on most screens).",
 			[&] { return on_off(cfg.smooth) + (cfg.smooth && gov.smooth_off ? " (60 a second for now: the computer is busy)" : ""); },
 			[&](int) { cfg.smooth = !cfg.smooth; cfg_dirty = true; gov_fresh(); } });
 		p.items.push_back({ "Screen filter",
@@ -2848,7 +2850,9 @@ int main(int argc, char **argv)
 		}
 		said_wait = wait;
 		// (the 3D on the CPU with the setting not CPU: why, on screen once, as soon as the menu can say it)
-		if (cpu_why_new && !online.playing()) {   // (not over an online match: after it)
+		// (not over online play: after it; one up or waiting as a match is joined is taken down and said again after)
+		if (online.phase() != Online::Phase::off && !cpu_why.empty() && menu.toast_showing()) { menu.toast(""); cpu_why_new = true; }
+		if (cpu_why_new && online.phase() == Online::Phase::off) {
 			cpu_why_new = false;
 			menu.toast("The 3D is on the CPU (slower): " + cpu_why, 12);
 		}
@@ -3074,7 +3078,7 @@ int main(int argc, char **argv)
 			pass_avg += (dt - pass_avg) * 0.05;
 			const double per = pass_avg * screen_hz, whole = std::round(per);
 			const bool unseen_now = !hidden && (SDL_GetWindowFlags(win) & (SDL_WINDOW_MINIMIZED | SDL_WINDOW_OCCLUDED));
-			if (!no_even && cfg.smooth && !hidden && !unseen_now && vsync_on && (!gov.smooth_off || screen_hz <= 60 * 1.05) &&
+			if (!no_even && cfg.smooth && !hidden && !unseen_now && screen_hz <= (gov.smooth_off ? 60 : 120) * 1.05 &&
 				whole >= 1 && std::fabs(per - whole) < 0.12) {
 				const double unit = 1.0 / screen_hz, step = std::max(1.0, std::round(dt * screen_hz)) * unit;
 				even_real += dt;
@@ -3278,29 +3282,21 @@ int main(int argc, char **argv)
 			screen_hz_t = bt;
 			const SDL_DisplayMode *dm = SDL_GetCurrentDisplayMode(SDL_GetDisplayForWindow(win));
 			const double hz_now = dm && dm->refresh_rate > 0 ? dm->refresh_rate : 60.0;
-			if (hz_now != screen_hz || first_look) fprintf(stderr, "screen: %.2f Hz%s\n", hz_now, !hidden ? " (a picture each refresh, with vsync)" : "");
+			if (hz_now != screen_hz || first_look) fprintf(stderr, "screen: %.2f Hz%s\n", hz_now, !hidden && hz_now <= 126 ? " (a picture each refresh)" : "");
 			screen_hz = hz_now;
 			int vs = 0;
 			const bool vs_now = SDL_GetRenderVSync(ren, &vs) && vs != 0;
 			if (vs_now != vsync_on || first_look) fprintf(stderr, "vsync: %s\n", vs_now ? "on" : "off (pictures by the budget, not a picture each refresh)");
 			vsync_on = vs_now;
 		}
-		// (hidden, or vsync off: nothing paces the passes to the screen, a picture each pass was ~500 a second; as VF1's.
-		// A faster screen than 120 Hz a picture each refresh too, as VF1's and VF2's: held to 120 a second, a 144 or 165 Hz
-		// screen's pictures came 1 and 2 refreshes apart by turns, an uneven judder)
-		// A screen over 180 Hz (240, 360): a picture every 2nd or 3rd refresh, about 120 a second as before, still even
-		// (each one a whole number of refreshes after the last); every refresh there was 2-3 times the pictures' work.
-		static uint64_t last_pic_ns = 0;
-		const int refreshes_apart = screen_hz > 180 ? std::max(1, int(std::lround(screen_hz / 120.0))) : 1;
-		const bool by_refresh = !hidden && vsync_on && (!gov.smooth_off || screen_hz <= 60 * 1.05);   // (the screen's the pace, not the budget)
-		const bool every_refresh = by_refresh && (refreshes_apart == 1 || double(bt - last_pic_ns) >= (refreshes_apart - 0.5) * 1e9 / screen_hz);
+		// (hidden, or vsync off: nothing paces the passes to the screen, a picture each pass was ~500 a second; as VF1's)
+		const bool every_refresh = !hidden && vsync_on && screen_hz <= (gov.smooth_off ? 60 : 120) * 1.05;
 		// (tests: VF3_TEST_NO_PICTURES, two games at once on a small machine, the frames' cost alone: a picture only now
 		// and then)
 		static const bool no_pictures = getenv("VF3_TEST_NO_PICTURES") != nullptr;
 		const bool draw = no_pictures ? first_shown ? (pass % 120 == 0) : true
-		                              : rec.on || new_frame || (smooth && !stopped && !unseen && ((!by_refresh && smooth_budget >= 1) || every_refresh)) || !first_shown;
+		                              : rec.on || new_frame || (smooth && !stopped && !unseen && (smooth_budget >= 1 || every_refresh)) || !first_shown;
 		if (draw) {
-			last_pic_ns = bt;
 			smooth_budget = std::max(0.0, smooth_budget - 1);
 			t9.pictures++;
 			const uint64_t td = SDL_GetTicksNS();

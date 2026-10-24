@@ -613,7 +613,7 @@ bool Session::step(uint16_t input)
 	// too far ahead of what's come: wait
 	if (cur >= remote.size() + uint32_t(cfg.max_rollback)) {
 		stats_.stalls++;
-		if (cur != last_stalled) { stats_.stalled_frames++; last_stalled = cur; }
+		if (cur != last_stalled) { last_stalled = cur; stalled_since = t_step; }
 		return false;
 	}
 
@@ -657,6 +657,10 @@ bool Session::step(uint16_t input)
 	}
 	stats_.steps++;
 	stats_.step_max_ms = std::max(stats_.step_max_ms, ms_since(t_step));
+	if (last_stalled == cur) {   // (it was held back: for how long)
+		stats_.stalled_ms += std::chrono::duration<double, std::milli>(t_step - stalled_since).count();
+		last_stalled = ~0u;
+	}
 	cur++;
 	return true;
 }
