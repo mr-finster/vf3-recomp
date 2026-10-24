@@ -176,6 +176,11 @@ private:
 	bool both_in = false;   // (both have been in the game at once, as its RAM has it: start_wait's rematches)
 	mutable size_t out_scan[2] = { SIZE_MAX, SIZE_MAX };   // (a player out of the game: their inputs looked through from then)
 	mutable bool out_pressed[2] = {};                     // (and they've pressed Start since: on their way back in)
+	// (the frame each went out of the game as the RAM had it then, before the reading's held: out_scan from there, a
+	// Start pressed in the moments before the held reading caught up counted; and who was in, the frame before)
+	size_t out_from[2] = { SIZE_MAX, SIZE_MAX };
+	mutable size_t out_held_at[2] = {};   // (and the frame the held reading had them out: the log's)
+	uint8_t in_before = 0;
 	mutable double stalls_mark = 0;                     // (connection: the frames held back, counted a second at a time)
 	mutable double stalls_mark_at = -1, stalls_per_s = 0;
 	Try tried = Try::none;
