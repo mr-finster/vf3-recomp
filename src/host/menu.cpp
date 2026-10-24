@@ -309,6 +309,12 @@ bool game_menu::init(SDL_Window *win, SDL_Renderer *ren, const std::string &asse
 
 void game_menu::open(menu_page root)
 {
+	// (a notice up: the rest of its time kept for when the menu closes, not run out unseen behind it)
+	if (m_toast_until) {
+		const uint64_t now = SDL_GetTicks();
+		if (m_toast_until > now) { m_toast_wait = double(m_toast_until - now) / 1000.0; m_toast_until = 0; }
+		else toast("");
+	}
 	if (!ready()) return;
 	m_stack = { std::move(root) };
 	m_sel_stack.clear();

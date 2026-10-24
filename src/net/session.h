@@ -13,6 +13,7 @@
 // max_rollback frames: past that it waits). The two sides keep in time (the one ahead waits a frame now and then),
 // compare a hash of their state every checksum_every frames, and say when the other's gone quiet or gone.
 #pragma once
+#include <chrono>
 #include "link.h"
 #include <algorithm>
 #include <cstdint>
@@ -96,7 +97,7 @@ public:
 		int peer_room = -1;    // the frames the other side can run again in a step and still make its frame (-1: not said yet)
 		uint64_t steps = 0;
 		uint64_t rollbacks = 0, resim_frames = 0, stalls = 0, waits = 0;
-		uint64_t stalled_frames = 0;   // frames held back for the other side, each once (stalls: each try, a pass's)
+		double stalled_ms = 0;   // time frames were held back for the other side (stalls counts each try, a pass's: refresh-rate bound)
 	};
 
 	// host: the starting blob is this side's; guest: it comes from the host
@@ -167,7 +168,8 @@ private:
 
 	// the rollback
 	uint32_t cur = 0;                      // the next frame to run
-	uint32_t last_stalled = ~0u;           // (the last frame held back for the other side: stalled_frames)
+	uint32_t last_stalled = ~0u;           // (the frame being held back for the other side, and since when: stalled_ms)
+	std::chrono::steady_clock::time_point stalled_since{};
 	std::vector<uint16_t> local, remote;   // per frame: this side's inputs (delay frames ahead), the other's as come
 	std::vector<uint16_t> guessed;         // per frame: the other side's input it ran with
 	uint32_t rollback_from = UINT32_MAX;   // the first frame whose guess was wrong
