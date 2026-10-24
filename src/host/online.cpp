@@ -1090,10 +1090,12 @@ bool Online::connection(game_menu::net_cells &c, bool detailed) const
 	const double now = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count();
 	// (the time frames were held back, a second at a time: counting the tries was one a pass, so 4 at 240 Hz for one
 	// frame, and counting frames made a 400 ms hold one)
-	if (stalls_mark_at < 0 || stt.stalled_ms < stalls_mark) { stalls_mark = stt.stalled_ms; stalls_mark_at = now; stalls_per_s = 0; }
+	// (and the hold going on now, so the colour turns during a long one, not after it)
+	const double stalled = session->stalled_now_ms();
+	if (stalls_mark_at < 0 || stalled < stalls_mark) { stalls_mark = stalled; stalls_mark_at = now; stalls_per_s = 0; }
 	else if (now - stalls_mark_at >= 1000) {
-		stalls_per_s = (stt.stalled_ms - stalls_mark) / (now - stalls_mark_at) * 1000 / (1000.0 / 57.5);   // (in frames' time a second)
-		stalls_mark = stt.stalled_ms;
+		stalls_per_s = (stalled - stalls_mark) / (now - stalls_mark_at) * 1000 / (1000.0 / 57.5);   // (in frames' time a second)
+		stalls_mark = stalled;
 		stalls_mark_at = now;
 	}
 	const int worst = std::max(c.delay, c.rollback);
