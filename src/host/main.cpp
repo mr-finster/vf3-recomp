@@ -405,6 +405,17 @@ bool save_blob(const std::string &path, const void *src, size_t n)
 	return replace_file(path, tmp);
 }
 
+// The GPU's start marker: written in place and flushed (no swap: a rename's not on the disk until the folder is, and
+// a crash that takes the machine down in the driver would lose it).
+bool write_marker(const std::string &path, const char *text)
+{
+	FILE *f = fopen(path.c_str(), "wb");
+	if (!f) return false;
+	const size_t n = strlen(text);
+	const bool ok = fwrite(text, 1, n, f) == n && flush_to_disk(f);
+	return fclose(f) == 0 && ok;
+}
+
 // Saves written off the game's thread (as VF1's and VF2's): each flushed to the disk took tens of milliseconds on a
 // hard disk, a hitch every few seconds while the arcade's bookkeeping kept changing the backup RAM in play. put copies
 // the bytes and returns; the writer thread writes the newest copy of each file; finish writes what's left and stops
@@ -550,7 +561,7 @@ struct settings
 			gpu3d_failed.clear();
 			upgraded = true;
 		}
-		// A GPU failure remembered by another build (another version, or the same rebuilt) forgotten, so each new build
+		// A GPU failure remembered by another build (another version or commit) forgotten, so each new build
 		// tries the GPU again: a driver updated since, or a fix here. (Remembered for ever, one bad start had kept a
 		// Windows player's 3D on the CPU at every start after, its cost growing with the scale: slow above 1x.)
 		if (!gpu3d_failed.empty() && failed_build != BUILD) {
@@ -1399,7 +1410,7 @@ int main(int argc, char **argv)
 		}
 		else if (marker_there) fprintf(stderr, "SDL's gpu renderer: %s closed while starting it: this build tries it again\n", marker_build.empty() ? "an older build" : marker_build.c_str());
 		if (!crashed) {
-			save_blob(marker, settings::BUILD, strlen(settings::BUILD));   // (flushed to the disk: a crash that takes the machine down keeps it)
+			write_marker(marker, settings::BUILD);   // (flushed to the disk: a crash that takes the machine down keeps it)
 			// (a driver whose 3D failed its check here before is passed over: Direct3D 12's for Vulkan, SDL's other on
 			// Windows: some older cards draw nothing on one and are fine on the other. SDL_GPU_DRIVER chooses over this.)
 			// (as VF1's and VF2's: Vulkan first on Windows for every card, Direct3D 12 if Vulkan won't start or draws no

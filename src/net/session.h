@@ -126,6 +126,12 @@ public:
 	uint32_t frame() const { return cur; }           // the next frame to run
 	uint32_t confirmed() const;                      // frames run with both inputs real
 	const Stats &stats() const { return stats_; }
+	// stalled_ms with the hold going on now (the frame being held back, so far): what's held back as it happens
+	double stalled_now_ms() const
+	{
+		if (last_stalled == ~0u) return stats_.stalled_ms;
+		return stats_.stalled_ms + std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - stalled_since).count();
+	}
 	void clear_step_max() { stats_.step_max_ms = 0; }   // (a log's: the worst step since it last said)
 	// Every frame's inputs so far, both players' (a replay: the blob and these)
 	const std::vector<uint16_t> &inputs(int player) const { return player == local_player() ? local : remote; }
