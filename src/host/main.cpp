@@ -1375,13 +1375,13 @@ int main(int argc, char **argv)
 	bool cpu_why_new = false;
 	// (why: what happened, in a player's words; then what to do. None with a renderer chosen by hand, SDL_RENDER_DRIVER)
 #ifdef __APPLE__
-	static const char *UPDATE = "Update macOS, then choose Auto in Display > 3D renderer to try it again.";
+	static const char *UPDATE = "Update macOS, then change Display > 3D renderer and back to Auto to try it again from the next start.";
 #else
-	static const char *UPDATE = "Update the graphics driver, then choose Auto in Display > 3D renderer to try it again.";
+	static const char *UPDATE = "Update the graphics driver, then change Display > 3D renderer and back to Auto to try it again from the next start.";
 #endif
 	// (Auto, not GPU: any choice there clears what was remembered, and the GPU chosen by hand is checked more loosely,
 	// a GPU drawing wrongly kept)
-	static const char *RETRY = "Choose Auto in Display > 3D renderer to try it again from the next start.";
+	static const char *RETRY = "Change Display > 3D renderer and back to Auto to try it again from the next start.";
 	auto on_cpu_because = [&](const std::string &why, const char *what_to_do) {
 		if (cpu_why.empty() && !getenv("SDL_RENDER_DRIVER")) { cpu_why = why + "." + (*what_to_do ? std::string(" ") + what_to_do : ""); cpu_why_new = true; }
 	};
@@ -1580,21 +1580,26 @@ int main(int argc, char **argv)
 	// one bad moment put the 3D on the CPU at every start after, until the player changed it back
 	auto g3_fail = [&](const std::string &why, bool remember = true) {
 		fprintf(stderr, "the 3D on the GPU: %s: on the CPU from now on%s\n", why.c_str(), remember ? "" : " (this run)");
-		// (its start's check or its textures: kept for this build, the menu tries again; a failure in play, a sleep or a
-		// GPU reset: for this run only)
-		if (remember) on_cpu_because(why.find("aren't the CPU's") != std::string::npos ? "the GPU drew the 3D wrongly here" : "the GPU's 3D failed here", UPDATE);
-		else on_cpu_because("the GPU's 3D stopped (after a sleep, or the graphics driver restarting)", "The next start tries the GPU again.");
 		g3.on = false;
 		g3.failed = true;
-		if (!remember) return;
+		// (its start's check or its textures: kept for this build, the menu tries again; a failure in play, a sleep or a
+		// GPU reset: for this run only)
+		if (!remember) { on_cpu_because("the GPU's 3D stopped (after a sleep, or the graphics driver restarting)", "The next start tries the GPU again."); return; }
 		// the driver it failed on, kept: the next start tries SDL's other (Direct3D 12, then Vulkan)
+		bool other_next = false;   // (Windows: the other driver not tried yet, so the next start tries it by itself)
 		const char *rn = SDL_GetRendererName(ren);
 		if (SDL_GPUDevice *gd = rn && !strcmp(rn, "gpu") ? SDL_GetGPURendererDevice(ren) : nullptr)
 			if (const char *drv = SDL_GetGPUDeviceDriver(gd); drv && !failed_before(drv)) {
 				cfg.gpu3d_failed += (cfg.gpu3d_failed.empty() ? "" : " ") + std::string(drv);
 				cfg_dirty = true;
 				if (!strcmp(drv, "direct3d12") && !failed_before("vulkan")) fprintf(stderr, "the 3D on the GPU: the next start tries Vulkan\n");
+#ifdef _WIN32
+				const char *other = !strcmp(drv, "vulkan") ? "direct3d12" : !strcmp(drv, "direct3d12") ? "vulkan" : nullptr;
+				other_next = other && !failed_before(other) && !getenv("SDL_GPU_DRIVER");
+#endif
 			}
+		on_cpu_because(why.find("aren't the CPU's") != std::string::npos ? "the GPU drew the 3D wrongly here" : "the GPU's 3D failed here",
+		               other_next ? "The next start tries the GPU on Windows' other graphics driver." : UPDATE);
 	};
 	static video::Scene between;
 	SDL_Texture *tex3d = nullptr, *tex_below = nullptr, *tex_above = nullptr;
@@ -2319,7 +2324,10 @@ int main(int argc, char **argv)
 		p.items.push_back({ "Graphics driver",
 			"Auto starts on Vulkan, and goes to Direct3D 12 by itself if Vulkan won't start or draws wrongly. Direct3D 12 starts on Direct3D 12 instead. Applies from the next start.",
 			[&] { return std::string(cfg.graphics ? "Direct3D 12" : "Auto (Vulkan first)"); },
-			[&](int) { cfg.graphics = !cfg.graphics; cfg_dirty = true; } });
+			[&](int) {
+				cfg.graphics = !cfg.graphics; cfg_dirty = true;
+				SDL_RemovePath((data + "/gpu-start.crashed").c_str());   // (another driver: a crashed start tried again with it)
+			} });
 #endif
 		p.items.push_back({ "Show FPS", "Shows the frame rate in the top right corner.",
 			[&] { return on_off(cfg.show_fps); },
