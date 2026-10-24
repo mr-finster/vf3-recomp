@@ -678,15 +678,22 @@ int auto_delay(double rtt_ms, double jitter_ms, double frame_ms, int target_roll
 	return std::clamp(std::max(cover, floor), 0, MAX_DELAY);
 }
 
+// The most a rollback is planned to take back: max_rollback (7) less 4 frames for what the ping misses (its
+// jitter packet to packet, the frame each input waits to be sent, the two clocks' part-frame offset). Planned at 6,
+// a 180 ms match (reno's, 24 Oct, an American) rolled back to 7 and held frames back 4-8 a second all match,
+// choppy and yellow, at delay 1; delay 3 held back under 2 a second. Told the other side too (rollback_room), so an
+// older build there takes its delay from it as well.
+static constexpr int ROOM_MAX = 3;
+
 int AutoDelay::rollback_room(const Session::Stats &s) const
 {
 	// The frames a rollback may run again in one step here and the step still make its frame (1.5 ms to spare): a
 	// step's cost and a frame run again's, of late (a fight's, not the menus'). Told the other side, whose delay then
 	// covers the rest: a rollback here never makes a frame late (choppy), however slow this machine.
-	if (s.steps < 120 || s.step_recent_ms <= 0) return slow ? 2 : 6;   // (till it's measured)
+	if (s.steps < 120 || s.step_recent_ms <= 0) return slow ? 2 : ROOM_MAX;   // (till it's measured)
 	const double each = s.resim_recent_ms > 0 ? s.resim_recent_ms : s.step_recent_ms * 0.8;   // (a frame run again: no picture)
-	if (each <= 0.05) return 6;
-	return std::clamp(int(std::floor((frame_ms - 1.5 - s.step_recent_ms) / each)), 0, 6);
+	if (each <= 0.05) return ROOM_MAX;
+	return std::clamp(int(std::floor((frame_ms - 1.5 - s.step_recent_ms) / each)), 0, ROOM_MAX);
 }
 
 int AutoDelay::want(const Session::Stats &s) const
@@ -696,7 +703,7 @@ int AutoDelay::want(const Session::Stats &s) const
 	// step, as it says), so its rollbacks always fit its frames. (This side's own rollbacks are the other side's
 	// delay's to cover: each side's delay is for the other's sake.)
 	const bool near = s.rtt_ms < frame_ms;
-	const int room = s.peer_room >= 0 ? std::min(s.peer_room, 6) : 2;   // (till it's said: a little)
+	const int room = s.peer_room >= 0 ? std::min(s.peer_room, ROOM_MAX) : 2;   // (till it's said: a little; an older build says up to 6)
 	return auto_delay(s.rtt_ms, s.jitter_ms, frame_ms, room, near ? 0 : 1);
 }
 

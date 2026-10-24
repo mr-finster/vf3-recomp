@@ -154,7 +154,7 @@ int main(int argc, char **argv)
 	{
 		// (from real logs, in a fight: an M4 Max's step 5.7 ms, a frame run again 4.9; a Steam Deck's 14.6 and 11.7)
 		struct M { const char *what; double step, each; int room; };
-		const M ms[] = { { "a fast Mac", 5.7, 4.9, 2 }, { "a Mac in a light scene", 3.9, 2.5, 4 }, { "a Steam Deck in a fight", 14.6, 11.7, 0 },
+		const M ms[] = { { "a fast Mac", 5.7, 4.9, 2 }, { "a Mac in a light scene", 3.9, 2.5, 3 }, { "a Steam Deck in a fight", 14.6, 11.7, 0 },
 		                 { "a Steam Deck in a menu", 6.0, 4.5, 2 } };
 		for (const M &m : ms) {
 			vfnet::Session::Stats st;
