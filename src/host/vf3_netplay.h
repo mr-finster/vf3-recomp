@@ -44,6 +44,7 @@ struct Score
 	int matches[2] = {}, rounds[2] = {};   // between the two players: matches won, and rounds won in them
 	void frame(const m3::Model3 &board);
 	int players() const { return playing; }
+	uint8_t players_now() const { return now[2]; }   // (as the RAM has it this frame, not yet held: when one went out)
 	int round_ends = 0;   // (each round's end, any players': a moment no one's in control, ~2 s while the game shows who won)   // (who's in the game, as held: bit 0 player 1, bit 1 player 2)
 	static constexpr uint32_t ROUNDS_P1 = 0x10601a, ROUNDS_P2 = 0x10601b, PLAYING = 0x106029;
 private:

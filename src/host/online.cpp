@@ -441,9 +441,19 @@ int Online::start_wait() const
 	for (int p = 0; p < 2; p++) {
 		const std::vector<uint16_t> &inputs = session->inputs(p);
 		if (in >> p & 1) { out_scan[p] = SIZE_MAX; out_pressed[p] = false; out[p] = false; continue; }
-		if (out_scan[p] == SIZE_MAX) out_scan[p] = inputs.size();   // (from now: a Start held through the match's end isn't one)
+		// (from the frame the RAM had them out, the held reading seconds later at a match's end, its round counts
+		// changing then too: a Start pressed meanwhile took them to the character select, and was missed, so the
+		// banner asked again there. A press, not a Start held through the match's end: up from not pressed.)
+		if (out_scan[p] == SIZE_MAX) {
+			out_scan[p] = std::min(out_from[p], inputs.size());
+			out_held_at[p] = inputs.size();
+			fprintf(stderr, "online: player %d out of the game at frame %zu (seen at %zu)\n", p + 1, out_scan[p], out_held_at[p]);
+		}
 		for (; out_scan[p] < inputs.size() && !out_pressed[p]; out_scan[p]++)
-			if (inputs[out_scan[p]] & vf3net::START_BUTTON) out_pressed[p] = true;
+			if ((inputs[out_scan[p]] & vf3net::START_BUTTON) && (out_scan[p] == 0 || !(inputs[out_scan[p] - 1] & vf3net::START_BUTTON))) {
+				out_pressed[p] = true;
+				fprintf(stderr, "online: player %d pressed Start at frame %zu%s\n", p + 1, out_scan[p], out_scan[p] < out_held_at[p] ? " (before the reading caught up: missed before)" : "");
+			}
 		out[p] = !out_pressed[p];
 	}
 	return out[me] ? 3 : out[me ^ 1] ? 4 : 0;
@@ -894,6 +904,8 @@ void Online::poll(double t)
 			random_misses = 0;
 			out_scan[0] = out_scan[1] = SIZE_MAX;
 			out_pressed[0] = out_pressed[1] = false;
+			out_from[0] = out_from[1] = SIZE_MAX;
+			in_before = 0;
 			start_scan[0] = start_scan[1] = 0;
 			start_seen[0] = start_seen[1] = false;
 			note.clear();
@@ -1016,6 +1028,10 @@ bool Online::step(uint16_t input)
 	if (!(ph == Phase::playing && session && session->step(input))) return false;
 	score.frame(board);   // (the score between the two, from the game's RAM: vf3net::Score)
 	if (score.players() == 3) both_in = true;
+	const uint8_t in_now = score.players_now();
+	for (int p = 0; p < 2; p++)
+		if ((in_before >> p & 1) && !(in_now >> p & 1)) out_from[p] = session->inputs(local_player()).size() - 1;   // (this frame's)
+	in_before = in_now;
 	return true;
 }
 
@@ -1092,7 +1108,9 @@ bool Online::connection(game_menu::net_cells &c, bool detailed) const
 	// frame, and counting frames made a 400 ms hold one)
 	// (and the hold going on now, so the colour turns during a long one, not after it)
 	const double stalled = session->stalled_now_ms();
-	if (stalls_mark_at < 0 || stalled < stalls_mark) { stalls_mark = stalled; stalls_mark_at = now; stalls_per_s = 0; }
+	// (a new count when it wasn't looked at for a while, the versus screen or between matches: a hold in a match's first
+	// second otherwise spread over all that time)
+	if (stalls_mark_at < 0 || stalled < stalls_mark || now - stalls_mark_at > 3000) { stalls_mark = stalled; stalls_mark_at = now; stalls_per_s = 0; }
 	else if (now - stalls_mark_at >= 1000) {
 		stalls_per_s = (stalled - stalls_mark) / (now - stalls_mark_at) * 1000 / (1000.0 / 57.5);   // (in frames' time a second)
 		stalls_mark = stalled;
