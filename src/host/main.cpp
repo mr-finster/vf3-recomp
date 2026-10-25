@@ -1223,7 +1223,7 @@ int main(int argc, char **argv)
 	sysinfo::tune();
 	fast_thread();
 	const std::string system = sysinfo::describe();
-	fprintf(stderr, "Virtua Fighter 3 Recomp %s (%s) on %s\n", VF3_VERSION, VF3_DATE, system.c_str());
+	fprintf(stderr, "Virtua Fighter 3 Recomp %s (%s, online %s) on %s\n", VF3_VERSION, VF3_DATE, vf3net::NET_VERSION, system.c_str());
 	// a Steam Deck, with Steam (its SteamDeck variable) or not (its APU: the LCD model's 0405, the OLED's 0932)
 	const bool deck = getenv("SteamDeck") || system.find("Custom APU 0405") != std::string::npos || system.find("Custom APU 0932") != std::string::npos;
 	if (deck && !getenv("SteamDeck")) fprintf(stderr, "a Steam Deck (its APU), started without Steam\n");
@@ -2592,7 +2592,7 @@ int main(int argc, char **argv)
 	auto online_page = [&] {
 		if (!online_ready) {   // (the ROM's hash for the handshake, once)
 			if (game.emu_thread.joinable()) game.job_wait();
-			online.identity = { "vf3", VF3_VERSION, vf3net::content_hash(board), "" };
+			online.identity = { "vf3", vf3net::NET_VERSION, vf3net::content_hash(board), "" };   // (the online version, not the release's)
 			online_ready = true;
 		}
 		return online_menu::page(online, cfg.online, menu, [&] { cfg_dirty = true; });
