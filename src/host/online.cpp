@@ -1015,10 +1015,11 @@ void Online::poll(double t)
 		const auto &stt = session->stats();
 		if (logged_at > 0)
 			fprintf(stderr, "online: frame %u, ping %.0f ms, delay %d, %llu rollbacks (%.1f frames on average, %d the most in the last second), "
-			        "%llu stalls for the other side, %llu waits to keep in time, %.1f frames ahead%s\n", session->frame(), stt.rtt_ms, session->delay(),
+			        "%llu stalls for the other side, %llu waits to keep in time, %.1f frames ahead%s%s\n", session->frame(), stt.rtt_ms, session->delay_now(),
 			        (unsigned long long)(stt.rollbacks - logged_rb), stt.rollbacks > logged_rb ? double(stt.resim_frames - logged_resim) / double(stt.rollbacks - logged_rb) : 0.0,
 			        stt.rollback_max, (unsigned long long)(stt.stalls - logged_stalls), (unsigned long long)(stt.waits - logged_waits), double(stt.ahead),
-			        via_relay() ? ", through a relay" : "");
+			        via_relay() ? ", through a relay" : "",
+			        stt.lockstep_holds ? (", " + std::to_string(stt.lockstep_holds) + " waits for the other side's input in the select, all match").c_str() : "");
 		if (logged_at > 0 && stt.steps > logged_steps) {   // (where a frame's time went: what's slow on a slow machine)
 			const double n = double(stt.steps - logged_steps);
 			fprintf(stderr, "online: a frame's step %.2f ms on average, %.1f the worst: its save %.2f, its frame %.2f, frames run again %.2f, "
@@ -1063,6 +1064,13 @@ void Online::poll(double t)
 
 bool Online::step(uint16_t input)
 {
+	if (ph == Phase::playing && session) {   // (the character select in lockstep: a guess put right shows there, a face flashing)
+		const bool sel = vf3net::in_select(board);
+		if (sel != session->in_lockstep()) {
+			session->set_lockstep(sel);
+			log_line(sel ? "the character select: in lockstep, input delay " + std::to_string(session->delay_now()) : "the character select over: rollback again, input delay " + std::to_string(session->delay()));
+		}
+	}
 	if (!(ph == Phase::playing && session && session->step(input))) return false;
 	score.frame(board);   // (the score between the two, from the game's RAM: vf3net::Score)
 	if (score.players() == 3) both_in = true;
