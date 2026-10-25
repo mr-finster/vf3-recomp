@@ -1097,7 +1097,9 @@ std::string Online::status() const
 		switch (st) {
 		case Step::getting_ready: return "Getting ready...";
 		case Step::opening: return "Opening a room...";
-		case Step::waiting: return "Send it to your opponent: they choose Join and type it";
+		case Step::waiting:   // (a random match's host waits too: for the opponent the lobby found, no code to send)
+			if (random) return "Connecting to " + (who.empty() ? std::string("your opponent") : who) + "...";
+			return "Send it to your opponent: they choose Join and type it";
 		case Step::searching:
 			return players > 1 ? "Looking for an opponent near you (" + std::to_string(players - 1) + " more searching)..." : "Looking for an opponent near you...";
 		case Step::finding:
