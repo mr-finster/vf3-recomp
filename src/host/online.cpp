@@ -944,6 +944,8 @@ void Online::poll(double t)
 			out_pressed[0] = out_pressed[1] = false;
 			out_from[0] = out_from[1] = SIZE_MAX;
 			in_before = 0;
+			select_off_from = UINT32_MAX;
+			select_was = -1;
 			start_scan[0] = start_scan[1] = 0;
 			start_seen[0] = start_seen[1] = false;
 			note.clear();
@@ -1065,10 +1067,21 @@ void Online::poll(double t)
 bool Online::step(uint16_t input)
 {
 	if (ph == Phase::playing && session) {   // (the character select in lockstep: a guess put right shows there, a face flashing)
+		// (over only once the select's byte has been off SELECT_LINGER frames: it drops for ~50 mid-select at times,
+		// as the faces load, and each way out and back moved the input delay under the player's cursor)
 		const bool sel = vf3net::in_select(board);
-		if (sel != session->in_lockstep()) {
-			session->set_lockstep(sel);
-			log_line(sel ? "the character select: in lockstep, input delay " + std::to_string(session->delay_now()) : "the character select over: rollback again, input delay " + std::to_string(session->delay()));
+		const uint32_t f = session->frame();
+		if (int(board.ram[vf3net::SCENE_BYTE ^ 3]) != select_was) {
+			select_was = board.ram[vf3net::SCENE_BYTE ^ 3];
+			if (session->in_lockstep() || sel) log_line("the select's byte " + std::to_string(select_was) + " at frame " + std::to_string(f));
+		}
+		if (sel) select_off_from = UINT32_MAX;
+		else if (select_off_from == UINT32_MAX) select_off_from = f;
+		const bool want = sel || (session->in_lockstep() && f - select_off_from < SELECT_LINGER);
+		if (want != session->in_lockstep()) {
+			session->set_lockstep(want);
+			log_line((want ? "the character select: in lockstep, input delay " + std::to_string(session->delay_now()) : "the character select over: rollback again, input delay " + std::to_string(session->delay())) +
+			         " (frame " + std::to_string(f) + ", " + std::to_string(session->confirmed()) + " confirmed)");
 		}
 	}
 	if (!(ph == Phase::playing && session && session->step(input))) return false;
