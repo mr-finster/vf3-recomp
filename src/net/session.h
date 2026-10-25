@@ -28,6 +28,7 @@ namespace vfnet {
 constexpr int MAX_DELAY = 15;   // input delay's most, frames (Auto's at a very far opponent: ~260 ms)
 
 constexpr int MAX_NAME = 10;   // a player's name, in letters
+constexpr int MAX_EXTRA = 32;  // a game's extra in the hello (Identity::extra)
 
 uint64_t hash64(const uint8_t *p, size_t n);   // (the default state hash: the same on every platform)
 
@@ -43,6 +44,9 @@ struct Game
 	// The bytes at a state's start the desync check leaves out (the game's own bookkeeping, not the same on both
 	// sides); the rest is hashed in a few parts, one a frame (a whole state at once was a frame's worst cost)
 	virtual size_t hash_skip() const { return 0; }
+	// The other side's extra (Identity::extra), before begin on both sides: a game's choices that change how its
+	// match starts (VF1's: each player's fighter). Empty from a side that sends none
+	virtual void peer_extra(const std::string &) {}
 	virtual ~Game() = default;
 };
 
@@ -53,6 +57,7 @@ struct Identity
 	std::string build;         // the version (git describe): both sides' must be the same
 	uint64_t content = 0;      // a hash of the ROM's contents
 	std::string name;          // the player's, up to MAX_NAME letters
+	std::string extra;         // the game's own, up to MAX_EXTRA printable letters (VF1: the player's fighter), or none
 };
 
 struct Config
@@ -133,6 +138,7 @@ public:
 	bool next_event(Event &e);
 	int local_player() const { return host ? 0 : 1; }
 	const std::string &opponent_name() const { return their_name; }
+	const std::string &opponent_extra() const { return their_extra; }   // (their Identity::extra, as it came)
 	uint32_t frame() const { return cur; }           // the next frame to run
 	uint32_t confirmed() const;                      // frames run with both inputs real
 	const Stats &stats() const { return stats_; }
@@ -165,7 +171,7 @@ private:
 	State st = State::handshake;
 	End why = End::none;
 	std::deque<Event> events;
-	std::string their_name;
+	std::string their_name, their_extra;
 	Stats stats_;
 	double now = 0, started = 0, last_heard = 0, last_sent = 0, last_hello = 0;
 	bool quiet = false, began = false, restart_clock = false;
