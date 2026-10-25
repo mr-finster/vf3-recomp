@@ -108,6 +108,7 @@ Session::Session(Link &link, Game &game, const Identity &me_, const Config &cfg_
 	: link(link), game(game), me(me_), cfg(cfg_), host(host)
 {
 	me.name = clean_name(me.name);
+	me.extra = printable(me.extra, size_t(MAX_EXTRA));
 	cfg.delay = std::clamp(cfg.delay, 0, MAX_DELAY);
 	cfg.max_rollback = std::clamp(cfg.max_rollback, 1, 30);
 	cfg.checksum_every = std::max(cfg.checksum_every, 1);
@@ -158,6 +159,7 @@ void Session::send_hello()
 	o.u64(me.content);
 	o.str(me.name);
 	o.u8(uint8_t(cfg.delay));
+	if (!me.extra.empty()) o.str(me.extra);   // (after the rest: a build that sends none, or reads none, is as before)
 	send_packet(o.b);
 	last_hello = now;
 }
@@ -169,6 +171,7 @@ void Session::send_welcome()
 	w.u32(blob_size);
 	w.u32(chunk_count);
 	w.u64(nonce);
+	if (!me.extra.empty()) w.str(me.extra);
 	send_packet(w.b);
 	welcomes++;
 	last_hello = now;
@@ -310,6 +313,7 @@ void Session::handle(const std::vector<uint8_t> &p)
 		const std::string name = clean_name(in.str());
 		in.u8();
 		if (!in.ok) return;
+		const std::string extra = in.p < in.e ? printable(in.str(), size_t(MAX_EXTRA)) : std::string();
 		std::string mine;
 		uint8_t reason = 0;
 		if (proto != PROTOCOL || build != me.build)
@@ -333,7 +337,8 @@ void Session::handle(const std::vector<uint8_t> &p)
 			link.lock();
 			started = now;   // (the handshake's time from the first hello)
 			their_name = name.empty() ? "PLAYER 2" : name;
-			if (trace) trace("a player's hello: " + their_name + "; sending the settings");
+			their_extra = in.ok ? extra : std::string();
+			if (trace) trace("a player's hello: " + their_name + (their_extra.empty() ? "" : " (" + their_extra + ")") + "; sending the settings");
 		}
 		// (again for a hello again, its welcome lost; not more often than the resends, nor once it's answered)
 		if (!proven && welcomes < MAX_WELCOMES && (welcomes == 0 || now - last_hello >= 100)) send_welcome();
@@ -345,6 +350,8 @@ void Session::handle(const std::vector<uint8_t> &p)
 		const uint32_t size = in.u32(), count = in.u32();
 		const uint64_t n_ = in.u64();
 		if (!in.ok || size > cfg.max_blob || count != (size_t(size) + CHUNK - 1) / CHUNK) return;
+		std::string extra = in.p < in.e ? printable(in.str(), size_t(MAX_EXTRA)) : std::string();
+		their_extra = in.ok ? extra : std::string();
 		nonce = n_;
 		link.lock();   // (the way the host's welcome came by, with this side's token: only that one from now)
 		their_name = name.empty() ? "PLAYER 1" : name;
@@ -355,6 +362,7 @@ void Session::handle(const std::vector<uint8_t> &p)
 		chunk_have.assign(count, false);
 		if (count == 0) {
 			began = true;
+			game.peer_extra(their_extra);
 			if (!game.begin(start_blob)) { guest_failed(); return; }
 			restart_clock = true;   // (its own boot took seconds: the handshake's time from now, for the host's)
 			Out r(READY, token);
@@ -395,6 +403,7 @@ void Session::handle(const std::vector<uint8_t> &p)
 		if (chunks_acked == chunk_count) {
 			if (trace) trace("the host's settings all here: starting the game");
 			began = true;
+			game.peer_extra(their_extra);
 			if (!game.begin(start_blob)) { guest_failed(); return; }
 			restart_clock = true;   // (its own boot took seconds: the handshake's time from now, for the host's)
 			Out r(READY, token);
@@ -430,6 +439,7 @@ void Session::handle(const std::vector<uint8_t> &p)
 		if (!began) {
 			if (trace) trace("the player's game is ready: starting this one");
 			began = true;
+			game.peer_extra(their_extra);
 			if (!game.begin(start_blob)) { finish(End::rejected, "The game couldn't start."); return; }
 		}
 		start_running();
