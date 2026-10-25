@@ -367,7 +367,8 @@ dialog .x:hover{background:rgba(255,255,255,.2)}
           <li>It's an <b>alpha</b>: if something looks or plays differently from the arcade, say so in <a href="https://github.com/mr-finster/vf3-recomp/issues" target="_blank" rel="noopener">GitHub Issues</a>, with the <code>log.txt</code> from the game's data folder.</li>
           <li>Shun's stage water is the game's own low-resolution 2D art, so it's soft up close.</li>
           <li>Direct3D 12 hasn't been tried on real Windows hardware yet. If it draws wrong, the game switches to Vulkan, or the CPU.</li>
-          <li>No Team Battle (<code>vf3tb</code>) and no online play yet.</li>
+          <li>Online play is <b>experimental</b>: both players need the same <code>vf3.zip</code>, and a build from v0.1.7-online-preview on. Report anything odd with both players' <code>log.txt</code>.</li>
+          <li>No Team Battle (<code>vf3tb</code>) yet.</li>
           <li>The Mac and Windows builds are <b>unsigned</b>: see Install for the one-time click-through.</li>
           <li>8BitDo pads on a Mac: use <b>Switch (S) mode</b>.</li>
         </ul>
@@ -376,6 +377,12 @@ dialog .x:hover{background:rgba(255,255,255,.2)}
       <div class="pop" role="dialog" aria-label="Changelog">
         <p><b>%VERSION%</b> &middot; %DATE%</p>
         <ul>
+          <li><b>Online play</b> (experimental): rollback netcode, a random opponent in one click (the nearest first) or a friend by a 6-letter room code, nothing to set up. Your name and flag under your energy bar, Auto input delay, the sound on its own clock, a connection display. Menu &gt; Online; the README says how.</li>
+          <li>Faster: the tile layers drawn on a thread of their own, and Wolf's desert in widescreen no longer slows down (30 ms a frame as its camera tilted).</li>
+          <li><b>Never slow on a working GPU.</b> Every start tries the GPU again (one bad start used to keep the 3D on the CPU for good), a graphics driver that closes the game on Vulkan goes to Direct3D 12 by itself on Windows, and if the 3D ever does run on the CPU the game says why on screen.</li>
+          <li><b>Windows laptops</b> with two graphics chips run the game on the faster one.</li>
+          <li><b>Linux on ARM</b> (a Raspberry Pi 5, an ARM laptop): a download of its own on the GitHub release page, <code>VirtuaFighter3Recomp-linux-arm64.tar.gz</code>.</li>
+          <li>No more one-frame sky flash between rounds; a picture each refresh on screens faster than 120 Hz; the last 3 runs' <code>log.txt</code> kept.</li>
           <li>No more stutter every few seconds on a hard disk: the game's saves are written in the background, and its bookkeeping once a minute instead of every 3 seconds.</li>
         </ul>
         <details><summary>v0.1.5-alpha</summary><ul>
