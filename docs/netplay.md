@@ -95,11 +95,11 @@ From a survey of other projects' online play (Oct 2026; many sources secondhand,
   the match. The connection indicator shows real numbers (ping, rollback frames), not bars.
 - **The game's rate is fixed**: 57.524 Hz on both sides whatever the screen, smooth motion or frame limit;
   fast-forward and pause are off, and the menu never stops the game.
-- **The handshake** compares the online version (`vf3net::NET_VERSION`: changed only with what a match depends on, the
-  game's code, the adapter or the protocol, so a release that changes only the picture or the menus still plays the
-  one before), a hash of the ROM's contents (not its file name) and the settings that
+- **The handshake** compares the online version (`vf3net::online_version`: a release's is `NET_VERSION`, changed only
+  with what a match depends on, the game's code, the adapter, the match's settings or the protocol, so a release that
+  changes only the picture or the menus still plays the one before; a build between releases its own), a hash of the ROM's contents (not its file name) and the settings that
   change the game (the host's EEPROM and backup RAM go in the starting state), and says plainly what doesn't match.
-- **Desyncs**: a state hash every 30 frames; on a difference the match ends with "desync", the states are saved
+- **Desyncs**: a state hash every 120 frames (2 s); on a difference the match ends with "desync", the states are saved
   for a report, and a rematch is offered. Never a hang or a crash.
 - **Disconnects**: "connection interrupted" after 1 s, the match given up after about 8 s.
 - **Joining**: room codes, and a lobby with a ping column and challenge / accept; UDP hole punching first, the

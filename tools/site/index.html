@@ -88,6 +88,20 @@ main{--s:1; position:relative; z-index:1; width:100%; min-width:0; margin-block:
 .get.alt{background:transparent; color:var(--ink); box-shadow:inset 0 0 0 1.5px var(--line)}
 .get.alt:hover{box-shadow:inset 0 0 0 1.5px var(--ink); background:transparent}
 .get .os{width:1.05em; height:1.05em; fill:currentColor; flex:none; margin-top:-.1em}
+/* the downloads: one button, its platforms in a list under it (the visitor's own first) */
+.dlw .get{border:0; cursor:pointer; font-family:inherit}
+.get .ico{width:1.1em; height:1.1em; stroke-width:2.4}
+.dlw.open .get{background:var(--teal-soft)}
+.pop.dl{text-align:left}
+@media (min-width:641px){ .cta .info::before{bottom:auto; top:100%} .cta .pop.dl{bottom:auto; top:calc(100% + 10px); width:min(330px, calc(100vw - 32px))} }
+.pop.dl ul li{padding:0; margin:0}
+.pop.dl ul li::before{display:none}
+.pop.dl li a{display:flex; align-items:center; gap:.6rem; padding:.6rem 0; font-weight:600; font-size:.92rem; color:var(--ink); text-decoration:none; border-bottom:1px solid rgba(255,255,255,.07)}
+.pop.dl li:last-child a{border-bottom:0}
+.pop.dl li a:hover,.pop.dl li.here a{color:var(--teal)}
+.pop.dl li a .os{width:1.05em; height:1.05em; fill:currentColor; flex:none}
+.pop.dl li a small{margin-left:auto; padding-left:.6rem; font-weight:500; font-size:.74rem; color:var(--dim); text-align:right}
+.pop.dl p{margin-top:.6rem; font-size:.78rem}
 .ico{flex:none; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round}
 
 .more{position:relative; margin-top:1.4rem; display:flex; align-items:baseline; justify-content:center; flex-wrap:wrap; gap:.15rem 1rem;
@@ -295,9 +309,16 @@ dialog .x:hover{background:rgba(255,255,255,.2)}
   <p class="ver">Recomp %VERSION% &middot; %DATE%</p>
 
   <div class="cta" id="cta">
-    <a class="get alt" data-os="win" href="%WIN_URL%"><svg class="os" viewBox="0 0 24 24" aria-hidden="true"><path d="M0 3.449 9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801"/></svg>Windows</a>
-    <a class="get alt" data-os="mac" href="%MAC_URL%"><svg class="os" viewBox="0 0 24 24" aria-hidden="true"><path d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701"/></svg>Mac</a>
-    <a class="get alt" data-os="deck" href="%DECK_URL%"><svg class="os" viewBox="0 0 24 24" aria-hidden="true"><path d="M11.979 0C5.678 0 .511 4.86.022 11.037l6.432 2.658c.545-.371 1.203-.59 1.912-.59.063 0 .125.004.188.006l2.861-4.142V8.91c0-2.495 2.028-4.524 4.524-4.524 2.494 0 4.524 2.031 4.524 4.527s-2.03 4.525-4.524 4.525h-.105l-4.076 2.911c0 .052.004.105.004.159 0 1.875-1.515 3.396-3.39 3.396-1.635 0-3.016-1.173-3.331-2.727L.436 15.27C1.862 20.307 6.486 24 11.979 24c6.627 0 11.999-5.373 11.999-12S18.605 0 11.979 0zM7.54 18.21l-1.473-.61c.262.543.714.999 1.314 1.25 1.297.539 2.793-.076 3.332-1.375.263-.63.264-1.319.005-1.949s-.75-1.121-1.377-1.383c-.624-.26-1.29-.249-1.878-.03l1.523.63c.956.4 1.409 1.5 1.009 2.455-.397.957-1.497 1.41-2.454 1.012H7.54zm11.415-9.303c0-1.662-1.353-3.015-3.015-3.015-1.665 0-3.015 1.353-3.015 3.015 0 1.665 1.35 3.015 3.015 3.015 1.663 0 3.015-1.35 3.015-3.015zm-5.273-.005c0-1.252 1.013-2.266 2.265-2.266 1.249 0 2.266 1.014 2.266 2.266 0 1.251-1.017 2.265-2.266 2.265-1.253 0-2.265-1.014-2.265-2.265z"/></svg>Linux / Steam Deck</a>
+    <span class="info dlw"><button class="get" aria-expanded="false"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M6.5 9.5 12 15l5.5-5.5M4 15v5h16v-5"/></svg>Download</button>
+      <div class="pop dl" role="dialog" aria-label="Download">
+        <ul>
+          <li data-os="win"><a href="%WIN_URL%"><svg class="os" viewBox="0 0 24 24" aria-hidden="true"><path d="M0 3.449 9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801"/></svg>Windows <small>10 and 11, 64-bit</small></a></li>
+          <li data-os="mac"><a href="%MAC_URL%"><svg class="os" viewBox="0 0 24 24" aria-hidden="true"><path d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701"/></svg>macOS <small>Apple Silicon and Intel</small></a></li>
+          <li data-os="deck"><a href="%DECK_URL%"><svg class="os" viewBox="0 0 24 24" aria-hidden="true"><path d="M11.979 0C5.678 0 .511 4.86.022 11.037l6.432 2.658c.545-.371 1.203-.59 1.912-.59.063 0 .125.004.188.006l2.861-4.142V8.91c0-2.495 2.028-4.524 4.524-4.524 2.494 0 4.524 2.031 4.524 4.527s-2.03 4.525-4.524 4.525h-.105l-4.076 2.911c0 .052.004.105.004.159 0 1.875-1.515 3.396-3.39 3.396-1.635 0-3.016-1.173-3.331-2.727L.436 15.27C1.862 20.307 6.486 24 11.979 24c6.627 0 11.999-5.373 11.999-12S18.605 0 11.979 0zM7.54 18.21l-1.473-.61c.262.543.714.999 1.314 1.25 1.297.539 2.793-.076 3.332-1.375.263-.63.264-1.319.005-1.949s-.75-1.121-1.377-1.383c-.624-.26-1.29-.249-1.878-.03l1.523.63c.956.4 1.409 1.5 1.009 2.455-.397.957-1.497 1.41-2.454 1.012H7.54zm11.415-9.303c0-1.662-1.353-3.015-3.015-3.015-1.665 0-3.015 1.353-3.015 3.015 0 1.665 1.35 3.015 3.015 3.015 1.663 0 3.015-1.35 3.015-3.015zm-5.273-.005c0-1.252 1.013-2.266 2.265-2.266 1.249 0 2.266 1.014 2.266 2.266 0 1.251-1.017 2.265-2.266 2.265-1.253 0-2.265-1.014-2.265-2.265z"/></svg>Linux / Steam Deck <small>x86-64</small></a></li>
+          <li data-os="arm"><a href="https://github.com/mr-finster/vf3-recomp/releases/latest/download/VirtuaFighter3Recomp-linux-arm64.tar.gz"><svg class="os" viewBox="0 0 24 24" aria-hidden="true"><path fill-rule="evenodd" d="M8 2h8v2h3a1 1 0 0 1 1 1v3h2v2h-2v4h2v2h-2v3a1 1 0 0 1-1 1h-3v2H8v-2H5a1 1 0 0 1-1-1v-3H2v-2h2v-4H2V8h2V5a1 1 0 0 1 1-1h3V2zm-1 5v10h10V7H7zm2 2h6v6H9V9z"/></svg>Linux on ARM <small>a Raspberry Pi 5, ARM64</small></a></li>
+        </ul>
+        <p>Needs your own <code>vf3.zip</code>. <a href="https://github.com/mr-finster/vf3-recomp/releases/latest" target="_blank" rel="noopener">Release notes</a></p>
+      </div></span>
   </div>
 
   <nav class="more" aria-label="More about it">
@@ -379,10 +400,10 @@ dialog .x:hover{background:rgba(255,255,255,.2)}
         <ul>
           <li><b>Online play</b> (experimental): rollback netcode, a random opponent in one click (the nearest first) or a friend by a 6-letter room code, nothing to set up. Your name and flag under your energy bar, Auto input delay, the sound on its own clock, a connection display. Menu &gt; Online; the README says how.</li>
           <li>Faster: the tile layers drawn on a thread of their own, and Wolf's desert in widescreen no longer slows down (30 ms a frame as its camera tilted).</li>
-          <li><b>Never slow on a working GPU.</b> Every start tries the GPU again (one bad start used to keep the 3D on the CPU for good), a graphics driver that closes the game on Vulkan goes to Direct3D 12 by itself on Windows, and if the 3D ever does run on the CPU the game says why on screen.</li>
-          <li><b>Windows laptops</b> with two graphics chips run the game on the faster one.</li>
-          <li><b>Linux on ARM</b> (a Raspberry Pi 5, an ARM laptop): a download of its own on the GitHub release page, <code>VirtuaFighter3Recomp-linux-arm64.tar.gz</code>.</li>
-          <li>No more one-frame sky flash between rounds; a picture each refresh on screens faster than 120 Hz; the last 3 runs' <code>log.txt</code> kept.</li>
+          <li><b>Never slow on a working GPU.</b> One failed check or slow start no longer keeps the 3D on the CPU for good (each new build tries the GPU again), a graphics driver that closes the game on Vulkan goes to Direct3D 12 by itself on Windows, and if the 3D does run on the CPU the game says why on screen, with how to try the GPU again.</li>
+          <li><b>Windows laptops</b> with two graphics chips: the game asks for the faster one (NVIDIA's and AMD's drivers look for it).</li>
+          <li><b>Linux on ARM</b> (a Raspberry Pi 5, an ARM laptop): Download &gt; Linux on ARM (<code>VirtuaFighter3Recomp-linux-arm64.tar.gz</code>).</li>
+          <li>No more one-frame sky flash between rounds; the last 3 runs' <code>log.txt</code> kept.</li>
           <li>No more stutter every few seconds on a hard disk: the game's saves are written in the background, and its bookkeeping once a minute instead of every 3 seconds.</li>
         </ul>
         <details><summary>v0.1.5-alpha</summary><ul>
@@ -468,10 +489,18 @@ document.getElementById('slot').addEventListener('click', () => clip.play().catc
   }
 }
 
+{ const ua = navigator.userAgent, p = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || '';
+  const os = /Win/.test(p + ua) ? 'win' : /Mac|iPhone|iPad/.test(p + ua) ? 'mac' : /aarch64|arm/i.test(p + ua) ? 'arm' : /Linux|X11/.test(p + ua) ? 'deck' : '';
+  const li = os && document.querySelector('.pop.dl li[data-os="' + os + '"]');
+  if (li) { li.classList.add('here'); li.parentNode.prepend(li); }
+  const cta = document.getElementById('cta'), w = cta.querySelector('.dlw');
+  const up = () => { cta.style.zIndex = w.classList.contains('open') || w.matches(':hover') ? '7' : ''; };
+  w.addEventListener('mouseenter', up); w.addEventListener('mouseleave', up);
+  new MutationObserver(up).observe(w, { attributes: true, attributeFilter: ['class'] }); }
 document.querySelectorAll('.info').forEach(info => {
-  const btn = info.querySelector('.lnk'), pop = info.querySelector('.pop'); if (!pop) return;
+  const btn = info.querySelector('.lnk, .get'), pop = info.querySelector('.pop'); if (!pop) return;
   btn.addEventListener('click', e => { e.stopPropagation(); const open = !info.classList.contains('open');
-    document.querySelectorAll('.info.open').forEach(o => { o.classList.remove('open'); o.querySelector('.lnk').setAttribute('aria-expanded', 'false'); });
+    document.querySelectorAll('.info.open').forEach(o => { o.classList.remove('open'); o.querySelector('.lnk, .get').setAttribute('aria-expanded', 'false'); });
     info.classList.toggle('open', open); btn.setAttribute('aria-expanded', open); });
   pop.addEventListener('click', e => e.stopPropagation());
 });

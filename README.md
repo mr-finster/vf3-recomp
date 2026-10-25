@@ -77,6 +77,7 @@ as Supermodel's New3D documents it, where the reference build used OpenGL's).
 | macOS 11+ (Apple silicon and Intel) | `VirtuaFighter3Recomp-mac.zip` |
 | Windows 10 or 11 (64-bit) | `VirtuaFighter3Recomp-windows.zip` |
 | Linux / Steam Deck (x86-64) | `VirtuaFighter3Recomp-deck.tar.gz` |
+| Linux on ARM (ARM64: a Raspberry Pi 5; Ubuntu 22.04, Debian 12, Raspberry Pi OS bookworm or newer), unpacked and run as the x86-64 Linux one | `VirtuaFighter3Recomp-linux-arm64.tar.gz` |
 
 **Mac and Windows**
 
@@ -166,8 +167,9 @@ scale, choose a lower one (F5).
 ## Online play (experimental)
 
 Rollback netplay, as modern fighting games have it: your own inputs show at once (after the input delay), and the
-game quietly corrects the moment your opponent's arrive. Both players need **the same online version** (every build
-from v0.1.7-online-preview on plays the others, until a release changes the game; its notes will say) and **the same
+game quietly corrects the moment your opponent's arrive. Both players need **the same online version** (every release
+from v0.1.7-online-preview on plays the others, until one changes the game: its notes will say; a build of your own
+between releases plays only the same build) and **the same
 `vf3.zip`**; it tells you if not. Matches always play the PC way, free play, with the
 host's arcade settings (rounds, difficulty, energy). The stage is the game's own next one, as on an arcade cabinet
 that's been on all day: a random one for the first match, the game's order after it. Each player uses their own
