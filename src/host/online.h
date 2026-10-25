@@ -208,6 +208,8 @@ private:
 	uint64_t room_token = 0;
 	double step_at = 0, retry_at = 0;
 	int wait_errors = 0;
+	std::string relay_server, relay_user, relay_pass;   // (the relay's login, for asking again: Hide my IP's)
+	int relay_asks = 0;
 	std::string lobby_url(const std::string &path) const { return lobby + path; }
 	std::string me_json(const std::string &extra) const;   // this side, as the lobby takes it
 	void start_job(std::function<void(Job &)> work);
