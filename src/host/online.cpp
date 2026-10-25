@@ -645,6 +645,7 @@ void Online::room_poll()
 	case Step::getting_ready:
 		if (job && job->done) {
 			if (!job->stun.empty()) room->use_stun(job->stun);
+			relay_server = job->turn; relay_user = job->user; relay_pass = job->password; relay_asks = 0;
 			if (!job->turn.empty()) room->use_turn(job->turn, job->user, job->password);
 			else log_line(job->reply.status == 0 ? "no relay: the online service wasn't reached (" + job->reply.error + ")"
 			                                    : "no relay: the online service gave none (" + std::to_string(job->reply.status) + ")");
@@ -653,6 +654,14 @@ void Online::room_poll()
 			job.reset();
 		}
 		if (!job && room->gathered() && started_with.hide_ip && room->relay_address().empty()) {
+			// (the relay asked again, twice, before Hide my IP gives up: one answer lost on the way, and the match
+			// failed for it; reno's, 25 Oct: the next try went through the relay)
+			if (!relay_server.empty() && relay_asks < 2) {
+				relay_asks++;
+				log_line("the relay didn't answer: asking it again (" + std::to_string(relay_asks) + " of 2)");
+				room->use_turn(relay_server, relay_user, relay_pass);
+				return;
+			}
 			room_failed("Hide my IP address is on, but the relay couldn't be reached: try again, or turn it off (Online > Settings).");
 			return;
 		}
