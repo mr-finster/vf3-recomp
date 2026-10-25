@@ -110,6 +110,12 @@
 #include <SDL3/SDL.h>
 #ifdef _WIN32
 #include <SDL3/SDL_main.h>   // WinMain, and argv as UTF-8
+// A laptop with two graphics chips (NVIDIA Optimus, AMD switchable graphics): the game on the faster one, not the one
+// in the processor, whatever Windows would pick. The drivers look for these two in the program's exports.
+extern "C" {
+__declspec(dllexport) unsigned long NvOptimusEnablement = 1;
+__declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
+}
 #endif
 #include <algorithm>
 #include <utility>
