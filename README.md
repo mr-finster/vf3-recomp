@@ -15,7 +15,7 @@ pictures a second and the 3D on the GPU.</b></p>
 <p align="center">
   <a href="https://vf3-recomp.pages.dev/">Play</a> ·
   <a href="https://github.com/mr-finster/vf3-recomp/releases/latest">Download</a> ·
-  <a href="https://youtu.be/ZdoFNnHOANA">Trailer</a> ·
+  <a href="https://youtu.be/hqvoalzgnNU">Trailer</a> ·
   <a href="#status">Status</a> ·
   <a href="#controls">Controls</a> ·
   <a href="https://github.com/mr-finster/vf3-recomp/issues">Report a bug</a>
@@ -26,7 +26,7 @@ pictures a second and the 3D on the GPU.</b></p>
 </p>
 
 <p align="center">
-  <a href="https://youtu.be/ZdoFNnHOANA"><img src="https://img.youtube.com/vi/ZdoFNnHOANA/hqdefault.jpg" alt="Watch the trailer" width="560"></a>
+  <a href="https://youtu.be/hqvoalzgnNU"><img src="https://img.youtube.com/vi/hqvoalzgnNU/hqdefault.jpg" alt="Watch the trailer" width="560"></a>
   <br><sub>Trailer (click to watch on YouTube)</sub>
 </p>
 
