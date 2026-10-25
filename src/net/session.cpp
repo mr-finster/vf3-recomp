@@ -571,7 +571,8 @@ bool Session::step(uint16_t input)
 {
 	if (st != State::running) return false;
 	const auto t_step = Clock::now();
-	while (local.size() <= size_t(cur) + size_t(cfg.delay)) local.push_back(input);   // (once a frame; more if the delay grew)
+	if (lockstep) lock_delay = std::max(lock_delay, lockstep_delay());
+	while (local.size() <= size_t(cur) + size_t(delay_now())) local.push_back(input);   // (once a frame; more if the delay grew)
 	send_inputs();
 
 	// the other side's inputs that came since: back to the first wrong guess, and every frame since again
@@ -610,6 +611,11 @@ bool Session::step(uint16_t input)
 	check_hashes(true);
 	if (st != State::running) return false;
 
+	// lockstep: this frame's input from the other side, or wait
+	if (lockstep && cur >= remote.size()) {
+		stats_.lockstep_holds++;
+		return false;
+	}
 	// too far ahead of what's come: wait
 	if (cur >= remote.size() + uint32_t(cfg.max_rollback)) {
 		stats_.stalls++;
@@ -663,6 +669,17 @@ bool Session::step(uint16_t input)
 	}
 	cur++;
 	return true;
+}
+
+void Session::set_lockstep(bool on)
+{
+	if (on && !lockstep) lock_delay = lockstep_delay();
+	lockstep = on;
+}
+
+int Session::lockstep_delay() const
+{
+	return std::clamp(int(std::ceil((stats_.rtt_ms / 2 + stats_.jitter_ms) / cfg.frame_ms)) + 1, 0, MAX_DELAY);
 }
 
 void Session::quit()

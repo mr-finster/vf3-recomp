@@ -48,6 +48,12 @@ uint64_t content_hash(m3::Model3 &board);
 // The host's starting blob: its backup RAM and EEPROM, and where the stages' list starts (random_versus_count)
 std::vector<uint8_t> start_blob(const m3::Model3 &board);
 constexpr uint16_t START_BUTTON = 256;   // (the input word's Start: pack's)
+// The character select on screen: a byte of RAM 5 from the first frame after Start to the VS screen, and never
+// elsewhere (0 at the boot, the title and the attract, 4 at the VS screens and fights, 7 between a 1P run's
+// fights; found by probing every byte of RAM over two 9,000-frame runs, a 1P and a 2P). A match plays it in
+// lockstep (vfnet::Session::set_lockstep): no frame on a guess, so a face never flashes as a guess is put right.
+constexpr size_t SCENE_BYTE = 0xe4046;
+inline bool in_select(const m3::Model3 &board) { return board.ram.size() > SCENE_BYTE && board.ram[SCENE_BYTE ^ 3] == 5; }
 
 // The score between the two players, read from the game's own RAM after each frame (as Fightcade's detectors do,
 // tools/vf3detect.cpp found where): each player's rounds won in the match on now (0x10601a, 0x10601b: both back

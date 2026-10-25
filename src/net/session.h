@@ -98,6 +98,7 @@ public:
 		uint64_t steps = 0;
 		uint64_t rollbacks = 0, resim_frames = 0, stalls = 0, waits = 0;
 		double stalled_ms = 0;   // time frames were held back for the other side (stalls counts each try, a pass's: refresh-rate bound)
+		uint64_t lockstep_holds = 0;   // tries a frame waited for the other side's input in lockstep (not stalls: not the delay's to fix)
 	};
 
 	// host: the starting blob is this side's; guest: it comes from the host
@@ -114,6 +115,15 @@ public:
 	// shorter keeps the inputs already sent and takes new ones once the frames reach them
 	void set_delay(int frames) { cfg.delay = std::clamp(frames, 0, MAX_DELAY); }
 	int delay() const { return cfg.delay; }
+	// Lockstep (a game's menus where a guess shows: VF3's character select): no frame run on a guess, the other side's
+	// inputs waited for instead, so a guess put right a few frames later never shows (a face flashing as the other
+	// player's cursor moved). This side's inputs then go further ahead (lockstep_delay: the trip one way and its jitter,
+	// a frame over, if more than delay), so the other side, if it's in lockstep too, doesn't wait for them; one that
+	// isn't (an older version) still plays: it guesses as ever, and waits to keep in time. Each side's own choice: the
+	// inputs are the same either way.
+	void set_lockstep(bool on);
+	bool in_lockstep() const { return lockstep; }
+	int delay_now() const { return lockstep ? std::max(cfg.delay, lock_delay) : cfg.delay; }   // (the delay the inputs go with)
 
 	State state() const { return st; }
 	bool game_started() const { return began; }   // (in the handshake: the game's start is running or done)
@@ -174,6 +184,9 @@ private:
 
 	// the rollback
 	uint32_t cur = 0;                      // the next frame to run
+	bool lockstep = false;
+	int lock_delay = 0;                    // (lockstep's delay: kept to the most the trip has wanted in it)
+	int lockstep_delay() const;            // (what the trip wants now)
 	uint32_t last_stalled = ~0u;           // (the frame being held back for the other side, and since when: stalled_ms)
 	std::chrono::steady_clock::time_point stalled_since{};
 	std::vector<uint16_t> local, remote;   // per frame: this side's inputs (delay frames ahead), the other's as come

@@ -24,6 +24,7 @@ struct Toy : vfnet::Game
 	std::vector<uint64_t> after;   // per frame: the hash after it, the last time it ran
 	uint32_t corrupt_at = UINT32_MAX;   // (a desync's test: this frame's result spoilt, as a nondeterministic game would)
 	uint64_t frames_run = 0, resims = 0;
+	std::vector<uint8_t> runs;   // per frame: the times it ran
 	std::vector<uint8_t> began_with;
 
 	bool begin(const std::vector<uint8_t> &blob) override
@@ -50,6 +51,8 @@ struct Toy : vfnet::Game
 		}
 		if (s.frame == corrupt_at) s.mix ^= 1;
 		if (after.size() <= s.frame) after.resize(size_t(s.frame) + 1);
+		if (runs.size() <= s.frame) runs.resize(size_t(s.frame) + 1);
+		runs[s.frame]++;
 		s.frame++;
 		after[s.frame - 1] = hash_now();
 		frames_run++;
@@ -85,6 +88,7 @@ struct Case
 	uint32_t corrupt_b = UINT32_MAX;
 	uint32_t redelay_at = UINT32_MAX;   // (at this frame the host's delay becomes redelay_a, the guest's redelay_b)
 	int redelay_a = 0, redelay_b = 0;
+	uint32_t lockstep_from = UINT32_MAX, lockstep_to = 0;   // (both sides in lockstep for these frames: none run twice)
 	size_t blob = 1000;
 	// what should happen
 	vfnet::Session::End expect_a = vfnet::Session::End::none, expect_b = vfnet::Session::End::none;
@@ -118,6 +122,8 @@ bool run(const Case &c)
 		b.poll(t);
 		if (a.frame() == c.redelay_at && a.delay() != c.redelay_a) a.set_delay(c.redelay_a);
 		if (b.frame() == c.redelay_at && b.delay() != c.redelay_b) b.set_delay(c.redelay_b);
+		a.set_lockstep(a.frame() >= c.lockstep_from && a.frame() < c.lockstep_to);
+		b.set_lockstep(b.frame() >= c.lockstep_from && b.frame() < c.lockstep_to);
 		if (t >= next_a) { a.step(pa.next()); next_a += fa_ms; }
 		if (t >= next_b) { b.step(pb.next()); next_b += fb_ms; }
 		vfnet::Session::Event e;
@@ -159,7 +165,14 @@ bool run(const Case &c)
 			else if (gb.after[f] != straight.after[f]) fail("the guest's state differs from a straight run after frame " + std::to_string(f));
 		}
 	}
+	// lockstep: no frame in it run on a guess (each once), and the game not held back much for it (the delay covers
+	// the trip: a hold a frame now and then for the jitter)
+	for (uint32_t f = c.lockstep_from + 2; f < c.lockstep_to && f < c.frames && ok; f++)
+		if ((f < ga.runs.size() && ga.runs[f] != 1) || (f < gb.runs.size() && gb.runs[f] != 1)) fail("frame " + std::to_string(f) + " ran more than once in lockstep");
+	if (c.lockstep_from != UINT32_MAX && a.stats().lockstep_holds + b.stats().lockstep_holds > uint64_t(c.lockstep_to - c.lockstep_from) * 2)
+		fail("held back too often in lockstep: " + std::to_string(a.stats().lockstep_holds) + "/" + std::to_string(b.stats().lockstep_holds));
 	const auto &sa = a.stats(), &sb = b.stats();
+	if (c.lockstep_from != UINT32_MAX) printf("       (lockstep: held back %llu/%llu times)\n", (unsigned long long)sa.lockstep_holds, (unsigned long long)sb.lockstep_holds);
 	printf("  %-4s %-38s frames %5u/%5u  rtt %5.1f ms  rollbacks %4llu/%4llu (avg %.1f, %.1f frames)  stalls %llu/%llu  waits %llu/%llu  lost %llu/%llu\n",
 	       ok ? "ok" : "FAIL", c.name.c_str(), a.frame(), b.frame(), sa.rtt_ms,
 	       (unsigned long long)sa.rollbacks, (unsigned long long)sb.rollbacks,
@@ -193,6 +206,16 @@ int main(int argc, char **argv)
 		Case c{ "delays changed mid-match (2 to 5, 3 to 0)", P{ 30, 4, 0.01 }, P{ 30, 4, 0.01 } };
 		c.delay_b = 3;
 		c.redelay_at = 1200; c.redelay_a = 5; c.redelay_b = 0;
+		cases.push_back(c);
+	}
+	{
+		Case c{ "lockstep for frames 600-1600 (40 ms, jitter 8)", P{ 40, 8, 0.01 }, P{ 40, 8, 0.01 } };
+		c.lockstep_from = 600; c.lockstep_to = 1600;
+		cases.push_back(c);
+	}
+	{
+		Case c{ "lockstep, far (150 ms each way)", P{ 150, 5, 0 }, P{ 150, 5, 0 } };
+		c.lockstep_from = 600; c.lockstep_to = 1600;
 		cases.push_back(c);
 	}
 	{

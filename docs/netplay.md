@@ -88,6 +88,12 @@ From a survey of other projects' online play (Oct 2026; many sources secondhand,
   every search, to compare).
 - **Rollback**: up to 7 frames; beyond that the game waits rather than guessing further. Rollback runs only when
   a guess was wrong (the soak test's every-frame mode is the stress case).
+- **The character select in lockstep** (`Session::set_lockstep`, `vf3net::in_select`): there a guess put right
+  shows (the other player's face flashing as their cursor moved: a few frames of the face they'd left, then the
+  new one), so no frame there runs on a guess. Each side waits for the other's inputs, and sends its own further
+  ahead to match: the trip one way and its jitter, a frame over (delay 4 at 60 ms, the cursor a little later). An
+  older version on the other side still plays: it guesses as before, and this side waits for it. `nettest`'s
+  lockstep cases: no frame in it run twice, a handful of waits in 1,000 frames.
 - **The cost**: up to 8 frames run in one frame's 17.4 ms, with the picture, on a Steam Deck. So a frame's run
   with no picture about 1.5 ms at most, and a save well under 1 ms. A full 27 MB copy (about 4 ms) is too slow:
   saves must copy only what changed.
