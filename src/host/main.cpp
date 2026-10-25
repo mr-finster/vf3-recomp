@@ -2933,9 +2933,9 @@ int main(int argc, char **argv)
 		else menu.set_notice("");
 		std::string line;
 		if (cfg.online.show_connection && online.waiting() && !online.starting())   // (playing alone meanwhile: still waiting, and where)
-			line = online.phase() == Online::Phase::hosting && online.by_code()
+			line = online.phase() == Online::Phase::hosting && online.by_code() && !online.is_random()   // (a random match's host: no room to say)
 				? "Hosting   " + (online.room_code().empty() ? std::string("a room") : "room " + online.room_code()) + "   " + online.status()
-				: online.phase() == Online::Phase::hosting
+				: online.phase() == Online::Phase::hosting && !online.by_code()
 				? "Hosting   " + (online.local_address().empty() ? std::string("no network") : online.local_address()) + "   " + online.status()
 				: online.status();
 		// (in a match: its figures, said 4 times a second, not laid out again each frame; the versus screen says who

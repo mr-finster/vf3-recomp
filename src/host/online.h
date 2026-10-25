@@ -85,6 +85,7 @@ public:
 	Phase phase() const { return ph; }
 	Step step_now() const { return st; }
 	bool by_code() const { return rooms; }
+	bool is_random() const { return random; }   // (a random opponent's match, not a code's)
 	bool is_hosting() const { return is_host; }
 	std::string room_code() const;   // "ABC-DEF" ("" until the lobby's given one)
 	bool playing() const { return ph == Phase::playing; }
