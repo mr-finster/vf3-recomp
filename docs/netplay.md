@@ -92,7 +92,8 @@ From a survey of other projects' online play (Oct 2026; many sources secondhand,
   shows (the other player's face flashing as their cursor moved: a few frames of the face they'd left, then the
   new one), so no frame there runs on a guess. Each side waits for the other's inputs, and sends its own further
   ahead to match: the trip one way and its jitter, a frame over (delay 4 at 60 ms, the cursor a little later). An
-  older version on the other side still plays: it guesses as before, and this side waits for it. `nettest`'s
+  older version on the other side still plays: it guesses as before, and this side waits for it. The select's byte dips
+  for 30-50 frames mid-select at times (the faces loading): lockstep ends only once it's been off 2 s. `nettest`'s
   lockstep cases: no frame in it run twice, a handful of waits in 1,000 frames.
 - **The cost**: up to 8 frames run in one frame's 17.4 ms, with the picture, on a Steam Deck. So a frame's run
   with no picture about 1.5 ms at most, and a save well under 1 ms. A full 27 MB copy (about 4 ms) is too slow:
