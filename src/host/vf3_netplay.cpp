@@ -1,5 +1,6 @@
 #include "vf3_netplay.h"
 #include <algorithm>
+#include <cctype>
 #include <cstring>
 #include <random>
 
@@ -28,6 +29,30 @@ void unpack(uint16_t b, int p, m3::Controls &c)
 	c.punch[p] = b & PUNCH; c.kick[p] = b & KICK; c.guard[p] = b & GUARD; c.escape[p] = b & ESCAPE;
 	c.start[p] = b & START; c.coin[p] = b & COIN;
 	c.test[p] = c.service[p] = false;
+}
+
+std::string online_version(const std::string &b)
+{
+	// a release's name: v, three numbers, and maybe a word after them (-alpha, -online-preview), not git describe's
+	// -<commits>-g<commit> (a build between releases)
+	size_t i = 0;
+	auto number = [&] { const size_t at = i; while (i < b.size() && isdigit((unsigned char)b[i])) i++; return i > at; };
+	bool release = !b.empty() && b[i++] == 'v' && number() && i < b.size() && b[i++] == '.' && number() && i < b.size() && b[i++] == '.' && number();
+	if (release && i < b.size()) {
+		release = b[i] == '-' && i + 1 < b.size() && islower((unsigned char)b[i + 1]);
+		for (size_t k = i + 1; release && k < b.size(); k++)
+			release = islower((unsigned char)b[k]) || isdigit((unsigned char)b[k]) || b[k] == '-';
+		// (a name's last parts "-<n>-g<hex>": git describe's between releases)
+		const size_t g = b.rfind("-g");
+		if (release && g != std::string::npos && g > i && g + 2 < b.size()) {
+			size_t d = b.rfind('-', g - 1);
+			const std::string n = b.substr(d + 1, g - d - 1), h = b.substr(g + 2);
+			const bool num = !n.empty() && n.find_first_not_of("0123456789") == std::string::npos;
+			const bool hex = h.find_first_not_of("0123456789abcdef") == std::string::npos;
+			if (num && hex) release = false;
+		}
+	}
+	return release ? NET_VERSION : b;
 }
 
 uint64_t content_hash(m3::Model3 &b)

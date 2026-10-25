@@ -8,19 +8,25 @@
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <string>
 #include <vector>
 
 namespace vf3net {
 
 // The online version: what the handshake and the lobby compare (vfnet::Identity::build), not the release's. Two builds
 // with the same one must run a match identically, so it changes only with what a match depends on: the game's code
-// (the board, the recompiler, their compiler flags), this adapter (the start, the inputs, the settings it forces) or
-// src/net's protocol. A release that changes only the picture, the menus, the GPU or the packaging keeps it, and its
-// players still play everyone on the release before. It stays the online preview's tag for now: v0.1.8 runs the same
-// game as the preview's hotfix 3 (220c2e7), whose builds send exactly this. (A wrong one ends a match as a desync:
-// vf3soak --hashes against the last release's file says whether the game changed. A new one is named after the
-// release that brings it, so a refusal's "your opponent has v0.1.9" reads right.)
+// (the board, the recompiler, their compiler flags), this adapter (the start, the inputs, the settings it forces), the
+// match's settings (online.cpp's config(): the desync check's frames and the rest) or src/net's protocol. A release
+// that changes only the picture, the menus, the GPU or the packaging keeps it, and its players still play everyone on
+// the release before. It stays the online preview's tag for now: v0.1.8 runs the same game as the preview's hotfix 3
+// (220c2e7), whose builds send exactly this. (A wrong one ends a match as a desync: vf3soak --hashes against the last
+// release's file says whether the game changed. A new one is named after the release that brings it.)
 inline constexpr const char *NET_VERSION = "v0.1.7-online-preview";
+// The online version a build plays as: NET_VERSION for a release (its version a release's name, as the release kit
+// builds it, or a build at a tag: "v0.1.8-alpha"), else the build's own version (git describe's "v0.1.8-alpha-3-gabc1234"
+// between releases, a bare commit, "dev"), so a test build, which may carry a change to the game, never meets the
+// release's players: only the same build
+std::string online_version(const std::string &build);
 
 constexpr int BOOT_FRAMES = 960;   // the boot, unseen, up to the SEGA logo (as the PC way's, main.cpp)
 constexpr size_t STAGE_SELECT = 0x1E017;   // the arcade's VS stage select in its backup RAM: 0 on, 1 off (found by changing it)
