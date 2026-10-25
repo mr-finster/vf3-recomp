@@ -447,20 +447,19 @@ int Online::start_wait() const
 		// (from the frame the RAM had them out, the held reading seconds later at a match's end, its round counts
 		// changing then too: a Start pressed meanwhile took them to the character select, and was missed, so the
 		// banner asked again there. A press, not a Start held through the match's end: up from not pressed.)
-		// (and a Start pressed just before they went out and still down then counts too: mashed through the KO, the
-		// game took it as they went out, and it was missed: reno's log, a Korean opponent back in a second after
-		// losing, twice, with no press seen)
+		// (and a Start pressed in the 3 s before they went out counts too: from the KO on, a Start takes the loser out
+		// 2 frames later, straight to New Challenger and the character select (checked on the ROM), so a quick tap's
+		// up again by the time they're out (and out_from can be the input delay later still). Missed before: reno's
+		// log, a Korean opponent back in a second after losing, twice, with no press seen; reno mashing Start after
+		// a loss, the banner up over his own way back in)
 		if (out_scan[p] == SIZE_MAX) {
 			const size_t from = std::min(out_from[p], inputs.size());
 			out_scan[p] = from;
-			if (from < inputs.size() && (inputs[from] & vf3net::START_BUTTON)) {
-				size_t j = from;
-				while (j > 0 && from - j < 30 && (inputs[j - 1] & vf3net::START_BUTTON)) j--;
-				if (j == 0 || !(inputs[j - 1] & vf3net::START_BUTTON)) {
+			for (size_t j = from; j > 0 && from - j < 172 && !out_pressed[p]; j--)   // (the last press first)
+				if ((inputs[j - 1] & vf3net::START_BUTTON) && (j == 1 || !(inputs[j - 2] & vf3net::START_BUTTON))) {
 					out_pressed[p] = true;
-					fprintf(stderr, "online: player %d pressed Start at frame %zu, still down as they went out at %zu\n", p + 1, j, from);
+					fprintf(stderr, "online: player %d pressed Start at frame %zu, %zu frames before they went out at %zu\n", p + 1, j - 1, from - (j - 1), from);
 				}
-			}
 			out_held_at[p] = inputs.size();
 			fprintf(stderr, "online: player %d out of the game at frame %zu (seen at %zu)\n", p + 1, out_scan[p], out_held_at[p]);
 		}
