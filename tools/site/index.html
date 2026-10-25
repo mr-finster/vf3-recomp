@@ -398,6 +398,9 @@ dialog .x:hover{background:rgba(255,255,255,.2)}
       <div class="pop" role="dialog" aria-label="Changelog">
         <p><b>%VERSION%</b> &middot; %DATE%</p>
         <ul>
+          <li><b>Online:</b> the rematch prompt goes as soon as the loser presses Start, a quick tap through the KO too (it stayed up over New Challenger and the character select). Plays v0.1.8-alpha and the online preview.</li>
+        </ul>
+        <details><summary>v0.1.8-alpha</summary><ul>
           <li><b>Online play</b> (experimental): rollback netcode, a random opponent in one click (the nearest first) or a friend by a 6-letter room code, nothing to set up. Your name and flag under your energy bar, Auto input delay, the sound on its own clock, a connection display. Menu &gt; Online; the README says how.</li>
           <li>Faster: the tile layers drawn on a thread of their own, and Wolf's desert in widescreen no longer slows down (30 ms a frame as its camera tilted).</li>
           <li><b>Never slow on a working GPU.</b> One failed check or slow start no longer keeps the 3D on the CPU for good (each new build tries the GPU again), a graphics driver that closes the game on Vulkan goes to Direct3D 12 by itself on Windows, and if the 3D does run on the CPU the game says why on screen, with how to try the GPU again.</li>
@@ -405,7 +408,7 @@ dialog .x:hover{background:rgba(255,255,255,.2)}
           <li><b>Linux on ARM</b> (a Raspberry Pi 5, an ARM laptop): Download &gt; Linux on ARM (<code>VirtuaFighter3Recomp-linux-arm64.tar.gz</code>).</li>
           <li>No more one-frame sky flash between rounds; the last 3 runs' <code>log.txt</code> kept.</li>
           <li>No more stutter every few seconds on a hard disk: the game's saves are written in the background, and its bookkeeping once a minute instead of every 3 seconds.</li>
-        </ul>
+        </ul></details>
         <details><summary>v0.1.5-alpha</summary><ul>
           <li>Windows: the GPU renderer starts on Vulkan for every graphics card (it was AMD only), where Direct3D 12 could be far slower on NVIDIA cards. Direct3D 12 is still used by itself if Vulkan fails, and Display &gt; Graphics driver chooses it.</li>
         </ul></details>
