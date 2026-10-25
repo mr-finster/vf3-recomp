@@ -3087,7 +3087,8 @@ int main(int argc, char **argv)
 		}
 		sync_menu_sound();
 		if ((menu_was_open && !menu.is_open()) || std::exchange(menu_closed_elsewhere, false)) {
-			if (online.phase() == Online::Phase::off) { online.set_last_match({}); online.forget_failure(); }   // (MATCH OVER, COULDN'T CONNECT: just after, not for ever)
+			// (not a match just left from the menu: Leave closes it before end_match has shown MATCH OVER, which it then didn't)
+			if (online.phase() == Online::Phase::off && !match_on) { online.set_last_match({}); online.forget_failure(); }   // (MATCH OVER, COULDN'T CONNECT: just after, not for ever)
 			if (cfg_dirty && quit_after < 0 && cfg.save(settings_path)) cfg_dirty = false;
 			if (!arcade_before.empty()) {
 				const bool changed = arcade_before != arcade_bytes();

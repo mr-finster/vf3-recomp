@@ -441,11 +441,26 @@ int Online::start_wait() const
 	for (int p = 0; p < 2; p++) {
 		const std::vector<uint16_t> &inputs = session->inputs(p);
 		if (in >> p & 1) { out_scan[p] = SIZE_MAX; out_pressed[p] = false; out[p] = false; continue; }
+		// (back in as the RAM has it this frame: the held reading's half a second behind, and the banner stayed over
+		// the challenger's own way back in)
+		if (score.players_now() >> p & 1) { out[p] = false; continue; }
 		// (from the frame the RAM had them out, the held reading seconds later at a match's end, its round counts
 		// changing then too: a Start pressed meanwhile took them to the character select, and was missed, so the
 		// banner asked again there. A press, not a Start held through the match's end: up from not pressed.)
+		// (and a Start pressed just before they went out and still down then counts too: mashed through the KO, the
+		// game took it as they went out, and it was missed: reno's log, a Korean opponent back in a second after
+		// losing, twice, with no press seen)
 		if (out_scan[p] == SIZE_MAX) {
-			out_scan[p] = std::min(out_from[p], inputs.size());
+			const size_t from = std::min(out_from[p], inputs.size());
+			out_scan[p] = from;
+			if (from < inputs.size() && (inputs[from] & vf3net::START_BUTTON)) {
+				size_t j = from;
+				while (j > 0 && from - j < 30 && (inputs[j - 1] & vf3net::START_BUTTON)) j--;
+				if (j == 0 || !(inputs[j - 1] & vf3net::START_BUTTON)) {
+					out_pressed[p] = true;
+					fprintf(stderr, "online: player %d pressed Start at frame %zu, still down as they went out at %zu\n", p + 1, j, from);
+				}
+			}
 			out_held_at[p] = inputs.size();
 			fprintf(stderr, "online: player %d out of the game at frame %zu (seen at %zu)\n", p + 1, out_scan[p], out_held_at[p]);
 		}
