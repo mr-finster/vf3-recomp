@@ -103,6 +103,7 @@
 #include "png.h"
 #include "input_script.h"
 #include "menu.h"
+#include "crt_colours.h"
 #include "controls.h"
 #include "sysinfo.h"
 #include "d3d11_map.h"
@@ -495,7 +496,8 @@ struct settings
 	bool sharp_textures = true;   // the 3D's textures' mipmap levels for the picture's size (false: the arcade's, video::Raster::arcade_lod)
 	int filter = 0;          // the screen filter: 0 off, 1 scanlines, 2 CRT
 	OnlineSettings online;   // the Online page's
-	int crt_colours = 0;     // an arcade monitor's colours: 0 off, 1-5 as Supermodel's (CRT_COLOURS)
+	int crt_colours = 0;     // an arcade monitor's colours: 0 off, 1-5 as Supermodel's (crt::PRESETS)
+	int brightness = 100, gamma = 100;   // the player's brightness and gamma (%: crt_colours.h)
 	int graphics = 0;        // Windows: the GPU renderer's driver, 0 Auto (Vulkan first, Direct3D 12 if it fails), 1 Direct3D 12 first
 	int aa = 1;              // antialiasing: the 3D drawn aa times larger each way and averaged (1 off)
 	player_controls ctl[2] = { player_controls::defaults(0), player_controls::defaults(1) };
@@ -542,7 +544,9 @@ struct settings
 		flag("background_filter", smooth_bg);   // (VF1's and VF2's name)
 		flag("sharp_textures", sharp_textures);
 		num("screen_filter", filter, 0, 2);
-		num("crt_colours", crt_colours, 0, 5);
+		num("crt_colours", crt_colours, 0, crt::N_PRESETS - 1);
+		num("brightness", brightness, crt::BRIGHT_MIN, crt::BRIGHT_MAX);
+		num("gamma", gamma, crt::GAMMA_MIN, crt::GAMMA_MAX);
 		num("graphics", graphics, 0, 1);
 		num("antialiasing", aa, 0, 3);
 		if (aa == 0) aa = 1;   // (VF2's Low, edges smoothed after drawing: not in this game's renderer)
@@ -600,7 +604,7 @@ struct settings
 				int(smooth), renderer3d, int(smooth_bg));
 		if (!roms_folder.empty()) fprintf(f, "roms_folder = %s\n", roms_folder.c_str());
 		if (!gpu3d_failed.empty()) fprintf(f, "gpu_3d_failed = %s\ngpu_3d_failed_build = %s\n", gpu3d_failed.c_str(), BUILD);
-		fprintf(f, "crt_colours = %d\nsharp_textures = %d\n", crt_colours, int(sharp_textures));
+		fprintf(f, "crt_colours = %d\nbrightness = %d\ngamma = %d\nsharp_textures = %d\n", crt_colours, brightness, gamma, int(sharp_textures));
 		if (graphics) fprintf(f, "graphics = %d\n", graphics);
 		fprintf(f, "screen_filter = %d\nantialiasing = %d\nmusic_volume = %d\neffects_volume = %d\narcade_coins = %d\nframe_timings = %d\n", filter, aa, music, effects, arcade_coin, int(timings));
 		fprintf(f, "online_name = %s\nonline_delay = %d\nonline_connection = %d\nonline_port = %d\n", online.name.c_str(), online.delay,
@@ -2010,47 +2014,16 @@ int main(int argc, char **argv)
 		}
 		SDL_RenderTexture(ren, glass, nullptr, &r);   // over the picture, under the menu
 	};
-	// CRT colours (as Supermodel's CRT colours, issue #2): the picture as an arcade monitor showed its colours, its
-	// phosphors' and its white's (a Japanese cabinet's 9300 K: bluer whites, deeper reds) on today's sRGB screen. The
-	// picture is put together in a texture, then drawn into the window through r3d.hlsl's FS_COLOUR: the monitor's
-	// gamma (or sRGB's curve) to linear light, the matrix (Dan Mons' colour_matrix_adaptations, as Supermodel's), and
-	// sRGB's curve out. On SDL's GPU renderer only (its custom render state): not on SDL's other renderers.
-	struct crt_colours { const char *name; float gamma; float m[9]; };   // (gamma 0: sRGB's curve)
-	static const crt_colours CRT_COLOURS[] = {
-		{ "Off", 0, {} },
-		{ "Sega arcade (ARI, 9300 K)", 2.5f, { 1.3272128f, -0.3802109f, -0.1003608f, -0.0241849f, 0.9544506f, 0.0807359f, -0.0239586f, -0.0409736f, 1.4076564f } },
-		{ "Sony PVM-20M2U (9300 K)", 2.25f, { 0.9241392f, -0.0690701f, -0.0084279f, 0.0231962f, 0.9729222f, 0.0148832f, -0.0054876f, 0.0098221f, 1.3383897f } },
-		{ "BT.601 NTSC (9300 K, Japan)", 0, { 0.7822491f, 0.0506169f, 0.0137752f, 0.0147969f, 0.9741745f, 0.0220302f, -0.0013501f, -0.0044077f, 1.3484820f } },
-		{ "BT.601 NTSC (6500 K, US)", 0, { 0.9395421f, 0.0501814f, 0.0102766f, 0.0177722f, 0.9657929f, 0.0164349f, -0.0016216f, -0.0043697f, 1.0059913f } },
-		{ "BT.601 PAL (6500 K, Europe, Australia)", 0, { 1.0440432f, -0.0440432f, 0, 0, 1, 0, 0, 0.0117934f, 0.9882066f } },
-	};
-	const int N_CRT_COLOURS = int(sizeof CRT_COLOURS / sizeof CRT_COLOURS[0]);
-	SDL_GPURenderState *crt_state = nullptr;
-	SDL_GPUShader *crt_shader = nullptr;
+	// CRT colours, brightness and gamma (crt_colours.h, the same in all three games; as Supermodel's CRT colours,
+	// issue #2): the picture is put together in a texture, then drawn into the window through r3d.hlsl's FS_COLOUR. On
+	// SDL's GPU renderer only (its custom render state): not on SDL's other renderers.
+	crt::Colours crt_paint;
 	SDL_Texture *crt_tex = nullptr;
-	int crt_tex_w = 0, crt_tex_h = 0, crt_set = -1;
-	bool crt_failed = false;
-	// the texture to put the picture together in, the CRT colours on (null: straight into the window)
+	int crt_tex_w = 0, crt_tex_h = 0;
+	auto crt_on = [&] { return cfg.crt_colours || cfg.brightness != 100 || cfg.gamma != 100; };
+	// the texture to put the picture together in, the colours on (null: straight into the window)
 	auto crt_target = [&]() -> SDL_Texture * {
-		if (!cfg.crt_colours || crt_failed) return nullptr;
-		if (!crt_state) {
-			SDL_GPUDevice *gd = SDL_GetGPURendererDevice(ren);
-			if (gd) crt_shader = colour_shader(gd);
-			SDL_GPURenderStateCreateInfo ci = {};
-			ci.fragment_shader = crt_shader;
-			if (crt_shader) crt_state = SDL_CreateGPURenderState(ren, &ci);
-			if (!crt_state) {
-				fprintf(stderr, "CRT colours: not on this renderer (%s)\n", gd ? SDL_GetError() : "SDL's GPU renderer only");
-				crt_failed = true;
-				return nullptr;
-			}
-		}
-		if (crt_set != cfg.crt_colours) {
-			const crt_colours &c = CRT_COLOURS[cfg.crt_colours];
-			const float u[12] = { c.m[0], c.m[1], c.m[2], c.gamma, c.m[3], c.m[4], c.m[5], 0, c.m[6], c.m[7], c.m[8], 0 };
-			SDL_SetGPURenderStateFragmentUniforms(crt_state, 0, u, sizeof u);
-			crt_set = cfg.crt_colours;
-		}
+		if (!crt_on() || crt_paint.failed()) return nullptr;
 		int pw = 0, ph = 0;
 		SDL_GetRenderOutputSize(ren, &pw, &ph);
 		if (pw < 1 || ph < 1) return nullptr;
@@ -2091,9 +2064,7 @@ int main(int argc, char **argv)
 		SDL_RenderTexture(ren, tex_above, nullptr, &mid);
 		if (crt) {
 			SDL_SetRenderTarget(ren, nullptr);
-			SDL_SetGPURenderState(ren, crt_state);
-			SDL_RenderTexture(ren, crt, nullptr, nullptr);
-			SDL_SetGPURenderState(ren, nullptr);
+			crt_paint.draw(ren, crt, nullptr, cfg.crt_colours, cfg.brightness, cfg.gamma);
 		}
 		if (filter) draw_filter(all);
 	};
@@ -2361,8 +2332,16 @@ int main(int argc, char **argv)
 			[&](int d) { cfg.filter = wrap(cfg.filter + d, 3); cfg_dirty = true; } });
 		p.items.push_back({ "CRT colours",
 			"The colours as an arcade monitor showed them, as Supermodel's CRT colours. Sega arcade is a Japanese cabinet's: bluer whites and richer colours. The others are a Sony studio monitor and the TV standards of Japan, the US and Europe. Off: the game's colours as they are.",
-			[&] { return std::string(CRT_COLOURS[cfg.crt_colours].name) + (cfg.crt_colours && crt_failed ? " (not with this renderer)" : ""); },
-			[&](int d) { cfg.crt_colours = wrap(cfg.crt_colours + d, N_CRT_COLOURS); cfg_dirty = true; } });
+			[&] { return std::string(crt::PRESETS[cfg.crt_colours].name) + (crt_on() && crt_paint.failed() ? " (not with this renderer)" : ""); },
+			[&](int d) { cfg.crt_colours = wrap(cfg.crt_colours + d, crt::N_PRESETS); cfg_dirty = true; } });
+		p.items.push_back({ "Brightness",
+			"The picture's brightness, for your screen: 100% is the game's own. Brighter lifts the whole picture (the brightest parts stay white).",
+			[&] { return std::to_string(cfg.brightness) + "%" + (crt_on() && crt_paint.failed() ? " (not with this renderer)" : ""); },
+			[&](int d) { cfg.brightness = std::clamp(cfg.brightness + 5 * d, crt::BRIGHT_MIN, crt::BRIGHT_MAX); cfg_dirty = true; } });
+		p.items.push_back({ "Gamma",
+			"The middle tones, for your screen: 100% is the game's own. Higher brings the dark parts up without washing out the blacks or the whites; lower makes them deeper.",
+			[&] { return std::to_string(cfg.gamma) + "%" + (crt_on() && crt_paint.failed() ? " (not with this renderer)" : ""); },
+			[&](int d) { cfg.gamma = std::clamp(cfg.gamma + 5 * d, crt::GAMMA_MIN, crt::GAMMA_MAX); cfg_dirty = true; } });
 #ifdef _WIN32
 		p.items.push_back({ "Graphics driver",
 			"Auto starts on Vulkan, and goes to Direct3D 12 by itself if Vulkan won't start or draws wrongly. Direct3D 12 starts on Direct3D 12 instead. Applies from the next start.",
@@ -2726,6 +2705,7 @@ int main(int argc, char **argv)
 	// render targets): every texture let go of and made again, the menu's too, and the newest frame drawn again, as
 	// VF1's and VF2's. The device lost for good: the game closes (the log says so).
 	auto textures_lost = [&](bool device) {
+		if (device) crt_paint.lost();
 		fprintf(stderr, "the renderer's %s reset: its textures made again\n", device ? "device" : "targets");
 		if (tex3d) { SDL_DestroyTexture(tex3d); tex3d = nullptr; tex_w = tex_h = 0; }
 		if (g3.tex) { SDL_DestroyTexture(g3.tex); g3.tex = nullptr; g3.w = g3.h = 0; }
@@ -3611,8 +3591,7 @@ int main(int argc, char **argv)
 	SDL_DestroyTexture(tex3d);
 	if (glass) SDL_DestroyTexture(glass);
 	if (crt_tex) SDL_DestroyTexture(crt_tex);
-	if (crt_state) SDL_DestroyGPURenderState(crt_state);
-	if (crt_shader) SDL_ReleaseGPUShader(SDL_GetGPURendererDevice(ren), crt_shader);
+	crt_paint.release();
 	SDL_DestroyTexture(tex_below);
 	SDL_DestroyTexture(tex_above);
 	SDL_DestroyRenderer(ren);
