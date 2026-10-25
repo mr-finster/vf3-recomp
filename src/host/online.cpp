@@ -722,6 +722,7 @@ void Online::room_poll()
 				const vfnet::json::Value &g = v["guest"];
 				if (g.kind == vfnet::json::Value::object) {
 					peer_name = g["name"].str();
+					country_peer = country(g["country"].str());   // (the guest's flag: the lobby sends it, as it does the host's to the guest)
 					room->set_peer(g["cands"].strings(), g["relay"].str(), true);
 					st = Step::connecting;
 					step_at = now;
