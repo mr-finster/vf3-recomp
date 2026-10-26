@@ -131,6 +131,10 @@ public:
 	// Who's to press Start: on the match's title screen 1 this player hasn't yet, 2 the other hasn't; after a match
 	// (the loser out of the game, as its RAM has it) 3 this player's out (Start for a rematch), 4 the other is; 0 none
 	int start_wait() const;
+	// who's in the game, as the score holds it (bit 0 player 1, bit 1 player 2): a side the CPU has (a player out, or
+	// one who never pressed Start) shows the game's own name on the HUD, not the player's
+	// (in at once, as the RAM has them this frame; out once that holds)
+	int players_in_game() const { return session && ph == Phase::playing ? score.players() | score.players_now() : 0; }
 	// How many play at random now (searching, or in a random match lately), as the lobby last said; -1 not known.
 	// Asked again every 30 s while it's called (the Online screen open), never while a match is on or being made
 	int players_online(const OnlineSettings &s);
