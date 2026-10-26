@@ -67,7 +67,7 @@ public:
 	void set_notice(const std::string &title, const std::string &sub = "", const std::string &small = "");
 	// A match found: the two players side by side, VS between, for a few seconds over the game's start (a line
 	// under them: how it's connected, and what to do)
-	struct versus { std::string left_label, left, right_label, right, line, sub; bool relay = false; std::string left_country, right_country; };
+	struct versus { std::string left_label, left, right_label, right, line, sub; bool relay = false; std::string left_country, right_country, left_fighter = {}, right_fighter = {}; };
 	void show_versus(const versus &v, double seconds = 3.5);
 	bool versus_showing() const { return m_vs_until > SDL_GetTicks(); }
 	bool toast_showing() const { return m_toast_until || m_toast_wait > 0; }   // (up, or waiting for the menu to close)
