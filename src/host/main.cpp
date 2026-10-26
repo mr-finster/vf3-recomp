@@ -1790,6 +1790,7 @@ int main(int argc, char **argv)
 		return true;
 	};
 	double picture_fixed_ms = 0;   // the last picture's in-between and triangles prepared (the governor's)
+	double picture_avg_ms = 0;     // the pictures' time, averaged: a slow machine's passes run the frames it takes (below)
 	auto draw_picture = [&](double t, bool new_2d) {
 		ensure_3d();
 		const double fixed_before = pace.interp_ms + pace.prep_ms;
@@ -3191,7 +3192,12 @@ int main(int argc, char **argv)
 			due = std::max(due, low);
 			if (due > 0) frame_clock = std::max(frame_clock, double(frames_run + due));
 			due = std::max(due, 0);
-			if (!ff && due > 2 && due > low) { frame_clock -= due - std::max(2, low); due = std::max(2, low); }
+			// (at most two frames a pass, the clock slipping the rest, unless pictures take over a frame's time: a
+			// machine drawing the 3D on its CPU (no GPU renderer, an HD 4600) ran the game at 48-52 frames a second of
+			// 57.5 with a picture every 40 ms; there a pass runs the frames due, up to 4 (6 past two frames' time), so
+			// the game keeps its speed with fewer pictures: 57.4 frames a second here at 40 ms, 18 pictures)
+			const int burst = picture_avg_ms > 2000.0 / FRAME_HZ ? 6 : picture_avg_ms > 1000.0 / FRAME_HZ ? 4 : 2;
+			if (!ff && due > burst && due > low) { frame_clock -= due - std::max(burst, low); due = std::max(burst, low); }
 			if (ff) { due = 8; frame_clock = double(frames_run + due); }
 			else if (sound_full) { due = 0; frame_clock = std::min(frame_clock, double(frames_run) + 1); }
 			frames_run += due;
@@ -3392,6 +3398,7 @@ int main(int argc, char **argv)
 			const double ms = double(SDL_GetTicksNS() - td) / 1e6;
 			pace.draw_ms += ms;
 			t9.draw_ms += ms;
+			if (!stopped) picture_avg_ms += (std::min(ms, 200.0) - picture_avg_ms) * 0.1;
 			pace.pictures++;
 			new_frame = false;
 			// the governor
