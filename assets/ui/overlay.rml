@@ -152,6 +152,9 @@
 		#vs { position: absolute; left: 0; right: 0; top: 0; bottom: 0; }
 		#vs .pl { position: absolute; top: 210dp; font-size: 24dp; font-weight: 600; letter-spacing: 4dp; line-height: 24dp; }
 		#vs .nm { position: absolute; top: 230dp; font-size: 92dp; font-weight: 700; font-style: italic; line-height: 92dp; white-space: nowrap; }
+		#vs .ft { position: absolute; top: 334dp; font-size: 34dp; font-weight: 700; font-style: italic; letter-spacing: 3dp; line-height: 34dp; white-space: nowrap; }
+		#vs .ft.left { color: #3a2a08; }
+		#vs .ft.right { color: #c3cbf0; }
 		#vs .fl { position: absolute; top: 148dp; height: 52dp; }
 		#vs .vflag { width: 64dp; height: 48dp; border: 2dp #ffffff; }
 		#vs .left { left: 72dp; color: #0b1026; }

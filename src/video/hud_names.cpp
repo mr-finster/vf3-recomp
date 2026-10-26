@@ -156,8 +156,9 @@ void draw(std::vector<uint32_t> &px, int x0, int y0, const std::string &s)
 
 } // namespace
 
-bool hud_names(const m3::Model3 &board, std::vector<uint32_t> &above, const std::string names[2], const HudFlag *flags[2])
+bool hud_names(const m3::Model3 &board, std::vector<uint32_t> &above, const std::string names[2], const HudFlag *flags[2], int flag_at[2][2])
 {
+	if (flag_at) for (int p = 0; p < 2; p++) flag_at[p][0] = flag_at[p][1] = -1;
 	if (board.tile_ram.size() < 0x100000 || above.size() < size_t(W) * H) return false;
 	// layer A (0): on, and not scrolled (the HUD's own place)
 	const uint32_t reg = board.tile_regs[0x60 / 4];
@@ -192,7 +193,8 @@ bool hud_names(const m3::Model3 &board, std::vector<uint32_t> &above, const std:
 		if (fl) {
 			// in a black edge, as the letters are, its middle on the letters' middle
 			const int fx = p ? x + tw + gap : x, fy = TEXT_Y + (GH - fl->h) / 2;
-			for (int y = -1; y <= fl->h; y++)
+			if (flag_at) { flag_at[p][0] = fx; flag_at[p][1] = TEXT_Y; }
+			for (int y = -1; y <= fl->h && fl->px.size() >= size_t(fl->w) * size_t(fl->h); y++)   // (none: the host's to draw)
 				for (int X = -1; X <= fl->w; X++) {
 					const int ax = fx + X, ay = fy + y;
 					if (ax < 0 || ax >= W || ay < 0 || ay >= H) continue;

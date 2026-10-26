@@ -15,11 +15,15 @@ namespace m3 { class Model3; }
 
 namespace video {
 
-// A country's flag, small, as the HUD's pixels (0xAABBGGRR): beside a name, out from the middle (player 1's to the
-// left of the name, player 2's to the right), where it fits short of the round markers
+// A country's flag beside a name, out from the middle (player 1's to the left of the name, player 2's to the right),
+// where it fits short of the round markers: its size in the HUD's pixels, and those pixels (0xAABBGGRR), or none: its
+// place left for the host to draw it there, sharper, in its black edge (flag_at)
 struct HudFlag { int w = 0, h = 0; std::vector<uint32_t> px; };
 
-// above: the layers above the 3D as TileGen::aligned gives them (W x H). False if the HUD wasn't there.
-bool hud_names(const m3::Model3 &board, std::vector<uint32_t> &above, const std::string names[2], const HudFlag *flags[2] = nullptr);
+// above: the layers above the 3D as TileGen::aligned gives them (W x H). False if the HUD wasn't there. flag_at: each
+// player's flag's place, its left and the letters' top (the flag in the middle of their rows), in above's pixels; -1
+// for none drawn
+bool hud_names(const m3::Model3 &board, std::vector<uint32_t> &above, const std::string names[2], const HudFlag *flags[2] = nullptr,
+               int flag_at[2][2] = nullptr);
 
 } // namespace video

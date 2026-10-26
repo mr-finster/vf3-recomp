@@ -183,8 +183,10 @@ void game_menu::show_versus(const versus &v, double seconds)
 	auto fl = [](const std::string &c) {
 		return flags::index_of(c) < 0 ? std::string() : "<img class=\"vflag\" sprite=\"flag-" + std::string{ char(c[0] | 0x20), char(c[1] | 0x20) } + "\"/>";
 	};
-	e->SetInnerRML("<div class=\"fl left\">" + fl(v.left_country) + "</div><div class=\"pl left\">" + escape(v.left_label) + "</div><div class=\"nm left\">" + escape(v.left) + "</div>"
-	               "<div class=\"fl right\">" + fl(v.right_country) + "</div><div class=\"pl right\">" + escape(v.right_label) + "</div><div class=\"nm right\">" + escape(v.right) + "</div>"
+	// (each player's fighter, in a game with a choice of them: under the name, smaller)
+	auto ft = [](const char *side, const std::string &f) { return f.empty() ? std::string() : "<div class=\"ft " + std::string(side) + "\">" + escape(f) + "</div>"; };
+	e->SetInnerRML("<div class=\"fl left\">" + fl(v.left_country) + "</div><div class=\"pl left\">" + escape(v.left_label) + "</div><div class=\"nm left\">" + escape(v.left) + "</div>" + ft("left", v.left_fighter) +
+	               "<div class=\"fl right\">" + fl(v.right_country) + "</div><div class=\"pl right\">" + escape(v.right_label) + "</div><div class=\"nm right\">" + escape(v.right) + "</div>" + ft("right", v.right_fighter) +
 	               "<div class=\"badge\"><div>VS</div></div>"
 	               "<div class=\"bar\"><div class=\"line" + std::string(v.relay ? " relay" : "") + "\"><span class=\"dot\"></span>" + escape(v.line) + "</div>"
 	               "<div class=\"sub\">" + escape(v.sub) + "</div></div>");

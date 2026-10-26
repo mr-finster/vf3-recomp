@@ -422,7 +422,7 @@ int main(int argc, char **argv)
 	shot("interrupted_later.png", w, h);   // (its spinner a quarter turn on)
 	gm.set_notice("");
 	gm.set_net("", 0);
-	gm.show_versus({ "PLAYER 1 \xC2\xB7 HOST", "MRFINSTER", "PLAYER 2", "AKIRAFAN", "Connected directly \xC2\xB7 19 ms", "Both press Start", false, "AU", "JP" });
+	gm.show_versus({ "PLAYER 1 \xC2\xB7 HOST", "MRFINSTER", "PLAYER 2", "AKIRAFAN", "Connected directly \xC2\xB7 19 ms", "Both press Start", false, "AU", "JP", "RANDOM", "SECRET: SIBA" });
 	for (int i = 0; i < 20; i++) { shot("", w, h); SDL_Delay(20); }   // (its fade in)
 	shot("versus.png", w, h);
 	// (the longest names, 10 wide letters each, with flags: each kept to its side of the badge)

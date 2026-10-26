@@ -945,6 +945,7 @@ struct Game
 	std::function<void(std::vector<uint8_t> &)> take_midi;   // (a netplay match's: the adapter's)
 	std::string hud_names[2];   // (a netplay match's: the players' names under the energy bars)
 	video::HudFlag hud_flags[2];   // (and their countries' flags, beside them: none if not known)
+	int hud_flag_at[2][2] = { { -1, -1 }, { -1, -1 } };   // (where hud_names left each flag's place: the host draws it)
 	// One frame: the board, the sound board, the frame's scene and 2D layers. In two halves for smooth motion
 	// (start_frame, finish_frame): the first half run a picture before the frame is due, so no picture's time holds
 	// a whole frame (at 120 a second a picture has 8.3 ms, a frame took 7-10 on an M4 Max: every other picture missed
@@ -1008,8 +1009,10 @@ struct Game
 			tiles.aligned(below, above);
 			if (!hud_names[0].empty() || !hud_names[1].empty()) {   // (a netplay match's)
 				const video::HudFlag *fl[2] = { &hud_flags[0], &hud_flags[1] };
-				video::hud_names(board, above, hud_names, fl);
-			}
+				if (!video::hud_names(board, above, hud_names, fl, hud_flag_at))
+					for (auto &a : hud_flag_at) a[0] = a[1] = -1;
+			} else
+				for (auto &a : hud_flag_at) a[0] = a[1] = -1;
 			tiles.aligned_wide(below_wide);
 		});
 		t = SDL_GetTicksNS();
@@ -1045,6 +1048,7 @@ struct Game
 		float bg_dx = 0, bg_dy = 0;
 		std::vector<uint32_t> below = std::vector<uint32_t>(video::W * video::H), above = std::vector<uint32_t>(video::W * video::H);
 		std::vector<uint32_t> below_wide = std::vector<uint32_t>(video::WW * video::H);
+		int hud_flag_at[2][2] = { { -1, -1 }, { -1, -1 } };
 		video::SkyLead sky;
 		std::vector<uint16_t> tex;
 		std::vector<m3::Model3::TexUpload> uploads;   // (the areas changed since a renderer last took them)
@@ -1062,6 +1066,7 @@ struct Game
 		view.bg_dy = bg_dy;
 		view.below = below;
 		view.above = above;
+		memcpy(view.hud_flag_at, hud_flag_at, sizeof hud_flag_at);
 		view.below_wide = below_wide;
 		view.sky = sky;
 		// the texture RAM: the rows written since the last (all of it the first time, or after many)
@@ -2037,6 +2042,53 @@ int main(int argc, char **argv)
 		}
 		return crt_tex;
 	};
+	// Online play's flags on the HUD, beside each player's name (video::hud_names leaves their place): the countries'
+	// flags (assets/ui/flags.png, 48 x 36 each, as they are) drawn over the 2D there, 12 x 9 of the HUD's pixels in
+	// the middle of the letters' rows, in a black edge as the letters are, on the window's own pixels (sharp at any
+	// size); as VF1's and VF2's
+	SDL_Surface *flag_atlas = nullptr;
+	SDL_Texture *flag_tex[2] = { nullptr, nullptr };
+	std::string hud_country[2], flag_made[2];   // (each player's, as the lobby has it: "" none; and the one each texture holds)
+	auto hud_flag = [&](int p) -> SDL_Texture * {
+		const int i = flags::index_of(hud_country[p]);
+		if (i < 0) return nullptr;
+		if (flag_tex[p] && flag_made[p] == hud_country[p]) return flag_tex[p];
+		if (!flag_atlas)
+			if (SDL_Surface *f = SDL_LoadSurface((find_assets() + "/ui/flags.png").c_str())) {
+				flag_atlas = SDL_ConvertSurface(f, SDL_PIXELFORMAT_ABGR8888);
+				SDL_DestroySurface(f);
+			}
+		if (!flag_atlas) return nullptr;
+		const int x0 = i % flags::COLS * flags::CELL_W + 1, y0 = i / flags::COLS * flags::CELL_H + 1;
+		if (x0 + flags::W > flag_atlas->w || y0 + flags::H > flag_atlas->h) return nullptr;
+		if (flag_tex[p]) SDL_DestroyTexture(flag_tex[p]);
+		flag_tex[p] = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STATIC, flags::W, flags::H);
+		if (!flag_tex[p]) return nullptr;
+		SDL_UpdateTexture(flag_tex[p], nullptr, static_cast<const uint8_t *>(flag_atlas->pixels) + size_t(y0) * size_t(flag_atlas->pitch) + size_t(x0) * 4, flag_atlas->pitch);
+		SDL_SetTextureScaleMode(flag_tex[p], SDL_SCALEMODE_LINEAR);
+		SDL_SetTextureBlendMode(flag_tex[p], SDL_BLENDMODE_BLEND);
+		flag_made[p] = hud_country[p];
+		return flag_tex[p];
+	};
+	// (mid: the 4:3 picture's place in the target's pixels)
+	auto draw_hud_flags = [&](const SDL_FRect &mid) {
+		const float kx = mid.w / float(video::W), ky = mid.h / float(video::H);
+		auto snap_x = [&](float v) { return std::round(mid.x + v * kx); };
+		auto snap_y = [&](float v) { return std::round(mid.y + v * ky); };
+		for (int p = 0; p < 2; p++) {
+			const int x = game.view.hud_flag_at[p][0], y = game.view.hud_flag_at[p][1];
+			if (x < 0) continue;
+			SDL_Texture *t = hud_flag(p);
+			if (!t) continue;
+			const float fy = float(y) + 0.5f;   // (9 high in the letters' 10)
+			const float l = snap_x(float(x)), r = snap_x(float(x) + 12), top = snap_y(fy), bottom = snap_y(fy + 9);
+			const float el = snap_x(float(x) - 1), er = snap_x(float(x) + 13), et = snap_y(fy - 1), eb = snap_y(fy + 10);
+			const SDL_FRect edge{ el, et, er - el, eb - et }, dst{ l, top, r - l, bottom - top };
+			SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
+			SDL_RenderFillRect(ren, &edge);
+			SDL_RenderTexture(ren, t, nullptr, &dst);
+		}
+	};
 	auto compose = [&](bool filter = true) {
 		SDL_Texture *crt = crt_target();
 		if (crt) SDL_SetRenderTarget(ren, crt);
@@ -2062,6 +2114,7 @@ int main(int argc, char **argv)
 				if (bar.w > 0) SDL_RenderFillRect(ren, &bar);
 			}
 		SDL_RenderTexture(ren, tex_above, nullptr, &mid);
+		draw_hud_flags(mid);
 		if (crt) {
 			SDL_SetRenderTarget(ren, nullptr);
 			crt_paint.draw(ren, crt, nullptr, cfg.crt_colours, cfg.brightness, cfg.gamma);
@@ -2147,35 +2200,6 @@ int main(int argc, char **argv)
 	// ---- the menu ----
 	auto menu_owner = std::make_unique<game_menu>();   // (let go before the renderer it draws with)
 	game_menu &menu = *menu_owner;
-	// the countries' flags (assets/ui/flags.png), for the HUD's: each a 12 x 9 of its 48 x 36, a box of 4 x 4 for a pixel
-	SDL_Surface *flag_atlas = nullptr;
-	if (SDL_Surface *f = SDL_LoadSurface((find_assets() + "/ui/flags.png").c_str())) {
-		flag_atlas = SDL_ConvertSurface(f, SDL_PIXELFORMAT_ABGR8888);
-		SDL_DestroySurface(f);
-	}
-	auto hud_flag = [&](const std::string &country) {
-		video::HudFlag fl;
-		const int i = flags::index_of(country);
-		if (!flag_atlas || i < 0) return fl;
-		const int x0 = i % flags::COLS * flags::CELL_W + 1, y0 = i / flags::COLS * flags::CELL_H + 1;
-		if (x0 + flags::W > flag_atlas->w || y0 + flags::H > flag_atlas->h) return fl;
-		fl.w = flags::W / 4;
-		fl.h = flags::H / 4;
-		fl.px.resize(size_t(fl.w) * size_t(fl.h));
-		for (int y = 0; y < fl.h; y++)
-			for (int x = 0; x < fl.w; x++) {
-				unsigned sum[4] = {};
-				for (int dy = 0; dy < 4; dy++)
-					for (int dx = 0; dx < 4; dx++) {
-						const uint8_t *q = static_cast<const uint8_t *>(flag_atlas->pixels) + size_t(y0 + y * 4 + dy) * size_t(flag_atlas->pitch) + size_t(x0 + x * 4 + dx) * 4;
-						for (int c = 0; c < 3; c++) sum[c] += q[c] * q[3];   // (by their cover: a flag not a rectangle, Nepal's)
-						sum[3] += q[3];
-					}
-				const unsigned a = sum[3] / 16, d = sum[3] ? sum[3] : 1;
-				fl.px[size_t(y) * size_t(fl.w) + size_t(x)] = a << 24 | (sum[2] / d) << 16 | (sum[1] / d) << 8 | (sum[0] / d);
-			}
-		return fl;
-	};
 	if (!menu.init(win, ren, find_assets()))
 		fprintf(stderr, "no menu: its files (assets/ui) weren't found\n");
 	menu.set_footer(std::string("Virtua Fighter 3 Recomp ") + VF3_VERSION + (*VF3_DATE ? std::string(" \u00b7 ") + VF3_DATE : std::string()));
@@ -2705,7 +2729,10 @@ int main(int argc, char **argv)
 	// render targets): every texture let go of and made again, the menu's too, and the newest frame drawn again, as
 	// VF1's and VF2's. The device lost for good: the game closes (the log says so).
 	auto textures_lost = [&](bool device) {
-		if (device) crt_paint.lost();
+		if (device) {
+			crt_paint.lost();
+			for (auto &t : flag_tex) if (t) { SDL_DestroyTexture(t); t = nullptr; }   // (made again when next drawn)
+		}
 		fprintf(stderr, "the renderer's %s reset: its textures made again\n", device ? "device" : "targets");
 		if (tex3d) { SDL_DestroyTexture(tex3d); tex3d = nullptr; tex_w = tex_h = 0; }
 		if (g3.tex) { SDL_DestroyTexture(g3.tex); g3.tex = nullptr; g3.w = g3.h = 0; }
@@ -2792,6 +2819,8 @@ int main(int argc, char **argv)
 		game.take_midi = nullptr;
 		game.hud_names[0].clear();
 		game.hud_flags[0] = game.hud_flags[1] = {};
+		hud_country[0].clear();
+		hud_country[1].clear();
 		game.hud_names[1].clear();
 		game.tiles_on = true;
 		menu.set_notice("");
@@ -2858,8 +2887,10 @@ int main(int argc, char **argv)
 				game_frame = vf3net::BOOT_FRAMES;
 				game.hud_names[online.local_player()] = online.identity.name;   // (the name the other side was sent)
 				game.hud_names[online.local_player() ^ 1] = online.opponent();
-				game.hud_flags[online.local_player()] = hud_flag(online.my_country());
-				game.hud_flags[online.local_player() ^ 1] = hud_flag(online.peer_country());
+				hud_country[online.local_player()] = online.my_country();
+				hud_country[online.local_player() ^ 1] = online.peer_country();
+				for (int p = 0; p < 2; p++)   // (their places only: the host draws them, draw_hud_flags)
+					game.hud_flags[p] = flags::index_of(hud_country[p]) >= 0 ? video::HudFlag{ flags::W / 4, flags::H / 4, {} } : video::HudFlag{};
 				arcade_before.clear();   // (the board's arcade settings are the host's now: no restart for them)
 				if (menu.is_open()) { menu.close(); menu_closed_elsewhere = true; }
 				clock_reset = true;
