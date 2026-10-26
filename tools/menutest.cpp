@@ -436,7 +436,16 @@ int main(int argc, char **argv)
 	shot("waiting_start.png", w, h);
 	gm.set_banner("PRESS", "for a rematch", "OPTIONS");
 	shot("rematch.png", w, h);
+	gm.set_banner("PRESS", "for a rematch", "+");   // (a pad's Start as the Deck names it: one sign, in the middle of its box)
+	shot("rematch_plus.png", w, h);
 	gm.set_banner("");
+	{   // (the connection bar in a match: each cell's words in the middle of its box)
+		game_menu::net_cells c;
+		c.name = "MRFINSTER"; c.ping = 25; c.delay = 1; c.rollback = 0; c.relay = true;
+		gm.set_net(c);
+		shot("net_cells.png", w, h);
+		gm.set_net("", 0);
+	}
 	if (fails) { fprintf(stderr, "menutest: %d failed\n", fails); return 1; }
 	printf("all passed\n");
 	return 0;

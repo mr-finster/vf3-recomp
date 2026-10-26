@@ -49,7 +49,7 @@
 			position: relative;
 			box-sizing: border-box;
 			height: 21dp;
-			line-height: 21dp;
+			line-height: 19dp;   /* (inside its 1dp border: the words in the box's middle) */
 			margin: 0 2.5dp;
 			border-radius: 5dp;
 			border: 1dp #2a3466;
@@ -148,6 +148,8 @@
 			font-weight: 600;
 			font-size: 30dp;
 		}
+		#banner .button .k { display: inline-block; position: relative; top: -2dp; }   /* (capitals: up to the box's middle, measured: menutest rematch.png) */
+		#banner .button .k.sign { top: -2.6dp; }   /* (a sign, "+": 0.09 em, measured: rematch_plus.png) */
 		/* a match found: the two players, VS between (the two sides drawn under this by the menu: game_menu::draw_versus) */
 		#vs { position: absolute; left: 0; right: 0; top: 0; bottom: 0; }
 		#vs .pl { position: absolute; top: 210dp; font-size: 24dp; font-weight: 600; letter-spacing: 4dp; line-height: 24dp; }
