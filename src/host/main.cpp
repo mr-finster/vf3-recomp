@@ -945,6 +945,7 @@ struct Game
 	std::function<void(std::vector<uint8_t> &)> take_midi;   // (a netplay match's: the adapter's)
 	std::string hud_names[2];   // (a netplay match's: the players' names under the energy bars)
 	video::HudFlag hud_flags[2];   // (and their countries' flags, beside them: none if not known)
+	std::atomic<int> hud_in{ 3 };   // (who's in the game, as the score holds it: each name shown only while they are; the host's)
 	int hud_flag_at[2][2] = { { -1, -1 }, { -1, -1 } };   // (where hud_names left each flag's place: the host draws it)
 	// One frame: the board, the sound board, the frame's scene and 2D layers. In two halves for smooth motion
 	// (start_frame, finish_frame): the first half run a picture before the frame is due, so no picture's time holds
@@ -1007,9 +1008,11 @@ struct Game
 		// the 2D layers put together on the tile worker (its last lines first) while the 3D's scene is built here
 		tile_worker.then([this] {
 			tiles.aligned(below, above);
-			if (!hud_names[0].empty() || !hud_names[1].empty()) {   // (a netplay match's)
+			const int in = hud_in;   // (a side the CPU has: the game's own name there)
+			const std::string shown[2] = { in & 1 ? hud_names[0] : std::string(), in & 2 ? hud_names[1] : std::string() };
+			if (!shown[0].empty() || !shown[1].empty()) {   // (a netplay match's)
 				const video::HudFlag *fl[2] = { &hud_flags[0], &hud_flags[1] };
-				if (!video::hud_names(board, above, hud_names, fl, hud_flag_at))
+				if (!video::hud_names(board, above, shown, fl, hud_flag_at))
 					for (auto &a : hud_flag_at) a[0] = a[1] = -1;
 			} else
 				for (auto &a : hud_flag_at) a[0] = a[1] = -1;
@@ -2907,6 +2910,7 @@ int main(int argc, char **argv)
 			// (nothing else said over the game: the Online screen says what came of it, when it's next opened)
 			fprintf(stderr, "online: %s\n", Online::log_masked(n.text).c_str());
 		}
+		game.hud_in = match_on ? online.players_in_game() : 3;   // (each player's name and flag on the HUD only while they're in the game)
 		if ((match_on && !online.playing()) || (nvram_away && !online.playing() && !online.starting())) end_match();   // (ended, left, or never got going)
 		// (quiet a second is often only both games restarting their boards at the match's start: said after two, and
 		// never over the versus screen; and Connection back only after it was said)
