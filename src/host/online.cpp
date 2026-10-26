@@ -1071,8 +1071,8 @@ bool Online::step(uint16_t input)
 		// as the faces load, and each way out and back moved the input delay under the player's cursor)
 		const bool sel = vf3net::in_select(board);
 		const uint32_t f = session->frame();
-		if (int(board.ram[vf3net::SCENE_BYTE ^ 3]) != select_was) {
-			select_was = board.ram[vf3net::SCENE_BYTE ^ 3];
+		if (vf3net::scene_byte(board) != select_was) {
+			select_was = vf3net::scene_byte(board);
 			if (session->in_lockstep() || sel) log_line("the select's byte " + std::to_string(select_was) + " at frame " + std::to_string(f));
 		}
 		if (sel) select_off_from = UINT32_MAX;

@@ -53,7 +53,8 @@ constexpr uint16_t START_BUTTON = 256;   // (the input word's Start: pack's)
 // fights; found by probing every byte of RAM over two 9,000-frame runs, a 1P and a 2P). A match plays it in
 // lockstep (vfnet::Session::set_lockstep): no frame on a guess, so a face never flashes as a guess is put right.
 constexpr size_t SCENE_BYTE = 0xe4046;
-inline bool in_select(const m3::Model3 &board) { return board.ram.size() > SCENE_BYTE && board.ram[SCENE_BYTE ^ 3] == 5; }
+inline int scene_byte(const m3::Model3 &board) { return board.ram.size() > SCENE_BYTE ? board.ram[SCENE_BYTE ^ 3] : -1; }
+inline bool in_select(const m3::Model3 &board) { return scene_byte(board) == 5; }
 
 // The score between the two players, read from the game's own RAM after each frame (as Fightcade's detectors do,
 // tools/vf3detect.cpp found where): each player's rounds won in the match on now (0x10601a, 0x10601b: both back
