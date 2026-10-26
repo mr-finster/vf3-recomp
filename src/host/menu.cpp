@@ -162,9 +162,12 @@ void game_menu::set_banner(const std::string &title, const std::string &sub, con
 	const std::string key = title + "\n" + sub + "\n" + button;
 	if (!m->overlay || key == m_banner) return;
 	m_banner = key;
+	// (the key's name in the middle of its box: Barlow sets capitals below a line's middle, and a sign like the
+	// Deck's "+" 0.09 em, so each is lifted by its own: overlay.rml's .k and .k.sign)
+	const bool sign = button.size() == 1 && !isalnum(uint8_t(button[0]));
 	if (Rml::Element *e = m->overlay->GetElementById("banner")) {
 		e->SetInnerRML(title.empty() ? "" : "<div class=\"in\"><div class=\"title\">" + escape(title) +
-		               (button.empty() ? "" : "<span class=\"button\">" + escape(button) + "</span>") + "</div>" +
+		               (button.empty() ? "" : "<span class=\"button\"><span class=\"k" + std::string(sign ? " sign" : "") + "\">" + escape(button) + "</span></span>") + "</div>" +
 		               (sub.empty() ? "" : "<div class=\"sub\">" + escape(sub) + "</div>") + "</div>");
 		e->SetProperty("visibility", title.empty() ? "hidden" : "visible");
 	}
