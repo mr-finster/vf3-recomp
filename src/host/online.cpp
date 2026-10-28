@@ -1077,7 +1077,7 @@ bool Online::step(uint16_t input)
 		}
 		if (sel) select_off_from = UINT32_MAX;
 		else if (select_off_from == UINT32_MAX) select_off_from = f;
-		const bool want = sel || (session->in_lockstep() && f - select_off_from < SELECT_LINGER);
+		const bool want = vf3net::SELECT_LOCKSTEP && (sel || (session->in_lockstep() && f - select_off_from < SELECT_LINGER));
 		if (want != session->in_lockstep()) {
 			session->set_lockstep(want);
 			log_line((want ? "the character select: in lockstep, input delay " + std::to_string(session->delay_now()) : "the character select over: rollback again, input delay " + std::to_string(session->delay())) +
