@@ -175,6 +175,10 @@ host's arcade settings (rounds, difficulty, energy). The stage is the game's own
 that's been on all day: a random one for the first match, the game's order after it. Each player uses their own
 Player 1 controls.
 
+**The rounds are the host's.** How many rounds win a match is the host's Menu > Arcade settings >
+**Rounds to win (vs player)** (3 plays first to 3, as SEGA's tournaments and Japan's arcades do).
+Host, and it's yours; join a friend, and it's theirs; with RANDOM, it's whoever the match makes host.
+
 **A random opponent:** Menu > **Online** > **RANDOM**. It finds whoever else is looking, the nearest first (the
 best connection), and widens the search the longer you wait; **Stop** gives up. Play solo while you wait: the match
 takes over once it's found. After the match, **New opponent** looks again.
