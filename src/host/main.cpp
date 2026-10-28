@@ -3124,6 +3124,7 @@ int main(int argc, char **argv)
 		const bool stopped = !online.playing() && (paused || menu.is_open() || online.starting());
 		const bool ff = !stopped && !online.playing() && SDL_GetKeyboardState(nullptr)[SDL_SCANCODE_TAB];
 		int due = 0;
+		int pass_burst = 2;   // (the frames a pass may run, this pass: more when pictures take over a frame's time, below)
 		if (stopped) {
 			pace.stopped_s += double(SDL_GetTicksNS() - clock_t) / 1e9;   // (the menu's time isn't the game's)
 			restart_clock_real();
@@ -3198,6 +3199,7 @@ int main(int argc, char **argv)
 			// the game keeps its speed with fewer pictures: 57.4 frames a second here at 40 ms, 18 pictures)
 			const int burst = picture_avg_ms > 2000.0 / FRAME_HZ ? 6 : picture_avg_ms > 1000.0 / FRAME_HZ ? 4 : 2;
 			if (!ff && due > burst && due > low) { frame_clock -= due - std::max(burst, low); due = std::max(burst, low); }
+			pass_burst = burst;
 			if (ff) { due = 8; frame_clock = double(frames_run + due); }
 			else if (sound_full) { due = 0; frame_clock = std::min(frame_clock, double(frames_run) + 1); }
 			frames_run += due;
@@ -3288,7 +3290,10 @@ int main(int argc, char **argv)
 		for (int i = 0; i < due && running; i++) {
 			// A frame more than this pass's first (a slow pass let two fall due): started on the game's own thread, not
 			// run here, and taken next pass (run here it made this pass slow too, and the next, one after another)
-			if (emu_threaded && i > 0 && !half && !ff && cfg.smooth) {
+			// (with pictures over a frame's time (pass_burst over 2), the frames due run here but the last, as online's:
+			// handed on from the second, the rest of the pass's were dropped, and a slow machine offline kept to a frame
+			// or two a picture whatever the burst allowed)
+			if (emu_threaded && i > 0 && !half && !ff && cfg.smooth && (pass_burst <= 2 || i + 1 == due)) {
 				frames_run -= uint64_t(due - i);
 				frame_clock = std::min(frame_clock, double(frames_run) + 1.0);
 				const uint64_t th = SDL_GetTicksNS();
