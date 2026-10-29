@@ -1471,6 +1471,76 @@ menu_page settings_page(Online &o, OnlineSettings &s, game_menu &menu, std::func
 	return p;
 }
 
+// Playing by address: on the same network (Wi-Fi, a cable) or both on a VPN like Tailscale, no online service. The
+// host's address typed (a keyboard) or picked (a pad): as the host's screen shows it, four numbers with dots, a name,
+// either with :port, or an IPv6 address in [ ]. (Typed in capitals, as the other screens: clean_address lowers them.)
+const std::string ADDRESS_PAD = "0123456789.:ABCDEFGHIJKLMNOPQRSTUVWXYZ-[]";
+menu_page join_address_page(Online &o, OnlineSettings &s, game_menu &menu, std::function<void()> changed)
+{
+	menu_page p{ "Join by address", "", {} };
+	auto t = std::make_shared<Entry>();
+	t->text = s.address;
+	for (char &ch : t->text) ch = char(toupper(uint8_t(ch)));
+	const size_t max = 64;
+	auto join = [&o, &s, &menu, t, changed] {
+		const std::string a = clean_address(t->text);
+		if (a.empty()) { t->problem = "Type the host's address."; return; }
+		s.address = a;
+		changed();
+		std::string err;
+		if (!o.join(s, err)) { t->problem = err; return; }
+		menu.pop();   // (this page, and Play by address: the Online screen, joining)
+		menu.pop();
+		again(o, s, menu, changed);
+	};
+	for (char ch : ADDRESS_PAD)
+		p.items.push_back({ std::string(1, ch), "", {}, {}, [t, ch, max] { add_to(*t, ADDRESS_PAD, max, std::string(1, ch)); } });
+	p.items.push_back({ "Delete", "", {}, {}, [t] { if (!t->text.empty()) t->text.pop_back(); t->problem.clear(); } });
+	p.items.push_back({ "OK", "", {}, {}, join });
+	p.start = 0;
+	p.text = true;
+	p.on_event = [&menu, t, join, max](const SDL_Event &e) {
+		return entry_event(menu, *t, ADDRESS_PAD, max, e, join, [&menu] { menu.pop(); }, [] {});
+	};
+	p.screen = [t](int sel, bool pad) {
+		std::string r = "<div class=\"scr\"><div class=\"col\"><div class=\"title\">JOIN BY ADDRESS</div>"
+		                "<div class=\"sub\">The address the host's screen shows (192.168.1.20, or with :port if it's not 7700)</div>"
+		                "<div class=\"address\">" + (t->text.empty() ? std::string("&nbsp;") : E(t->text)) + "</div>";
+		if (pad) r += keypad(ADDRESS_PAD, 14, 0, sel, true, "name");
+		else r += "<div class=\"typed\"><div>Just type it</div><div class=\"small\">Numbers, dots, a name, :port</div></div>";
+		if (!t->problem.empty()) r += "<div class=\"problem\">" + E(t->problem) + "</div>";
+		r += "</div>";
+		return r + (pad ? foot(true, { { "A", "", "type" }, { "X", "", "delete" }, { "Start", "", "join" }, { "B", "", "cancel" } })
+		                : foot(false, { { "", "Enter", "join" }, { "", "Backspace", "delete" }, { "", "Esc", "cancel" } })) + "</div>";
+	};
+	return p;
+}
+
+menu_page address_page(Online &o, OnlineSettings &s, game_menu &menu, std::function<void()> changed)
+{
+	menu_page p{ "Play by address", "On the same network (Wi-Fi, a cable), or both on a VPN like Tailscale: no online service needed. "
+	             "(Room codes connect directly too, whenever the routers allow it.)", {} };
+	auto problem = std::make_shared<std::string>();
+	menu_item h{ "Host by address", "Waits for a player on your network (or your VPN) to join with your address, which your screen shows.", {}, {},
+		[&o, &s, &menu, problem, changed] {
+			named(s, menu, changed, [&o, &s, &menu, problem, changed] {
+				std::string err;
+				if (!o.host(s, err)) { *problem = err; return; }
+				menu.pop();   // (this page: the Online screen, waiting)
+				again(o, s, menu, changed);
+			});
+		} };
+	h.below = [problem] { return *problem; };
+	p.items.push_back(h);
+	p.items.push_back({ "Join by address", "Joins a player hosting by address: type the address their screen shows.", {}, {},
+		[&o, &s, &menu, changed] { named(s, menu, changed, [&o, &s, &menu, changed] { menu.push(join_address_page(o, s, menu, changed)); }); } });
+	p.items.push_back({ "Port", "The UDP port Host by address waits on (7700 unless another program has it). Room codes need no port.",
+		[&s] { return std::to_string(s.port); },
+		[&s, changed](int d) { s.port = std::clamp(s.port + d, 1024, 65535); changed(); } });
+	p.items.push_back({ "Back", "", {}, {}, [&menu] { menu.pop(); } });
+	return p;
+}
+
 // A screen page: B / Esc closes the menu (back to the game, what's going on going on), not back a page
 bool closes(game_menu &menu, const SDL_Event &e)
 {
@@ -1612,7 +1682,7 @@ menu_page page(Online &o, OnlineSettings &s, game_menu &menu, std::function<void
 			std::vector<std::pair<std::string, Mark>> v;
 			if (hosting) {
 				const std::string here = o.local_address().empty() ? std::string("No network") : o.local_address() + (o.local_port() != 7700 ? ":" + std::to_string(o.local_port()) : "");
-				r += "<div class=\"title\">WAITING FOR A PLAYER</div><div class=\"sub\">On your network, or a VPN: they choose Play by address, then Join, and type this</div>"
+				r += "<div class=\"title\">WAITING FOR A PLAYER</div><div class=\"sub\">On your network, or a VPN: they choose Play by address, then Join by address, and type this</div>"
 				     "<div class=\"address\">" + E(here) + "</div>";
 				v = { { "OPPONENT", talking ? done : now }, { "CONNECT", started ? done : talking ? now : todo }, { "FIGHT", started ? now : todo } };
 			} else {
@@ -1733,7 +1803,7 @@ menu_page page(Online &o, OnlineSettings &s, game_menu &menu, std::function<void
 	}
 
 	// ---- the two choices ----
-	const int chip = 0, rnd = 1, host = 2, join = 3, settings = 4;
+	const int chip = 0, rnd = 1, host = 2, join = 3, addr = 4, settings = 5;
 	auto change_name = [&s, &menu, changed] { menu.push(name_page(s, menu, changed, {})); };
 	p.items.push_back({ "Your name", "", {}, {}, change_name });
 	p.items.push_back({ "Random", "", {}, {}, [&o, &s, &menu, problem, changed] {
@@ -1753,6 +1823,7 @@ menu_page page(Online &o, OnlineSettings &s, game_menu &menu, std::function<void
 	p.items.push_back({ "Join", "", {}, {}, [&o, &s, &menu, changed] {
 		named(s, menu, changed, [&o, &s, &menu, changed] { menu.push(code_page(o, s, menu, changed)); });
 	} });
+	p.items.push_back({ "Play by address", "", {}, {}, [&o, &s, &menu, changed] { menu.push(address_page(o, s, menu, changed)); } });
 	p.items.push_back({ "Settings", "", {}, {}, [&o, &s, &menu, changed] { menu.push(settings_page(o, s, menu, changed)); } });
 	p.start = rnd;
 	p.on_event = [change_name](const SDL_Event &e) {
@@ -1771,7 +1842,8 @@ menu_page page(Online &o, OnlineSettings &s, game_menu &menu, std::function<void
 		     "<div " + menu_row(host, sel, "tile") + "><div class=\"t\">HOST</div><div class=\"s\">Get a code for a friend</div></div>"
 		     "<div " + menu_row(join, sel, "tile") + "><div class=\"t\">JOIN</div><div class=\"s\">Type a friend's code</div></div></div>";
 		if (!problem->empty()) r += "<div class=\"problem\">" + E(*problem) + "</div>";
-		r += "<div class=\"more\"><div " + menu_row(settings, sel, "link") + ">Settings</div></div></div>";
+		r += "<div class=\"more\"><div>Same network?</div><div " + menu_row(addr, sel, "link") + ">Play by address</div><div>\xC2\xB7</div>"
+		     "<div " + menu_row(settings, sel, "link") + ">Settings</div></div></div>";
 		return r + foot(pad, { { "A", "Enter", "select" }, { "B", "Esc", "back" } }) + "</div>";
 	};
 	return p;

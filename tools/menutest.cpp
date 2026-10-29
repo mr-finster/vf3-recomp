@@ -179,7 +179,7 @@ int main(int argc, char **argv)
 	key(SDL_SCANCODE_RIGHT);
 	check(gm.selected() == 2, "Right goes to Host");
 	key(SDL_SCANCODE_DOWN);
-	check(gm.selected() == 4, "Down goes to Settings");
+	check(gm.selected() == 4, "Down goes to Play by address");
 	key(SDL_SCANCODE_UP);
 	key(SDL_SCANCODE_UP);
 	check(gm.selected() == 0, "Up from the tiles goes to the name");
@@ -240,6 +240,26 @@ int main(int argc, char **argv)
 	check(s.name == "AKIRA" && top() == "Join with a code", "then goes on to the code");
 	key(SDL_SCANCODE_ESCAPE);
 	s.name = "MRFINSTER";
+
+	// Play by address, from the home screen's link: its page, then the address typed on a keyboard and a pad
+	again();
+	key(SDL_SCANCODE_RIGHT);   // (Random to Host: then down to the links)
+	key(SDL_SCANCODE_DOWN);
+	key(SDL_SCANCODE_RETURN);
+	check(top() == "Play by address", "the link opens Play by address");
+	shot("address_page.png", w, h);
+	key(SDL_SCANCODE_DOWN);
+	key(SDL_SCANCODE_RETURN);
+	check(top() == "Join by address", "Join by address opens the address");
+	text("192.168.1.20");
+	shot("address_key.png", w, h);
+	pad(SDL_GAMEPAD_BUTTON_DPAD_DOWN);
+	shot("address_pad.png", w, h);
+	pad(SDL_GAMEPAD_BUTTON_EAST);   // (B: back to Play by address)
+	check(top() == "Play by address", "B goes back from the address");
+	key(SDL_SCANCODE_ESCAPE);
+	s.address.clear();
+	again();
 
 	// by address: hosting, then joining a host that isn't there
 	std::string err;

@@ -5,6 +5,7 @@
 //
 //   vf3 [vf3.zip] [--arcade] [--fullscreen | --window] [--no-sound] [--volume N] [--music N] [--effects N]
 //       [--scale N] [--aspect fit|4:3|16:10|16:9|21:9] [--show-boot] [--interp] [--roms <folder>]
+//       [--host [--port N] | --join ADDRESS[:PORT]]   (online by address: a LAN or a VPN, as Online > Play by address)
 //
 // --volume, --music and --effects (0-100) as the menu's Sound page: the overall volume, and the music's and the
 // effects' and voices' within it.
@@ -1209,6 +1210,11 @@ int main(int argc, char **argv)
 	bool arg_arcade = false, sound = true, show_boot = false, arg_interp = getenv("VF3_INTERP") != nullptr;
 	int arg_volume = -1, arg_music = -1, arg_effects = -1, arg_scale = 0, arg_aspect = -1, arg_full = -1;
 	std::string arg_roms;
+	// Playing by address from the command line (a LAN, a VPN): --host waits for a player, --join ADDRESS joins one;
+	// --port N the host's UDP port (7700); as Online > Play by address, started as the game is up
+	bool arg_host = false;
+	std::string arg_join;
+	int arg_port = 0;
 	for (int i = 1; i < argc; i++) {
 		const std::string a = argv[i];
 		if (a == "--arcade") arg_arcade = true;
@@ -1228,6 +1234,11 @@ int main(int argc, char **argv)
 			if (arg_aspect < 0) { fprintf(stderr, "--aspect: fit, 4:3, 16:10, 16:9 or 21:9\n"); return 2; }
 		}
 		else if (a == "--show-boot") show_boot = true;
+		else if (a == "--host") arg_host = true;
+		else if (a == "--join" && i + 1 < argc) arg_join = argv[++i];
+		else if (a.rfind("--join=", 0) == 0) arg_join = a.substr(7);
+		else if (a == "--port" && i + 1 < argc) arg_port = std::clamp(atoi(argv[++i]), 1024, 65535);
+		else if (a.rfind("--port=", 0) == 0) arg_port = std::clamp(atoi(a.c_str() + 7), 1024, 65535);
 		else if (a.rfind("--", 0) == 0) { fprintf(stderr, "unknown option %s\n", a.c_str()); return 2; }
 		else if (a.rfind("-psn_", 0) == 0) {}
 		else {
@@ -2714,6 +2725,7 @@ int main(int argc, char **argv)
 		}
 		return online_menu::page(online, cfg.online, menu, [&] { cfg_dirty = true; });
 	};
+	auto online_row = [&] { return board.profile->settings.at ? 5 : 4; };   // (the main page's Online row: Arcade settings before it when known)
 	auto main_page = [&] {
 		menu_page p{ "", "", {} };
 		if (online.playing() || nvram_away) {   // (the match goes on under the menu; or it's starting, on its board)
@@ -2953,7 +2965,7 @@ int main(int argc, char **argv)
 		if (reopen && menu.ready()) {
 			if (menu.is_open()) menu.close();
 			menu.open(main_page());
-			menu.select_row(5);   // (Online)
+			menu.select_row(online_row());
 			menu.push(online_page());
 		}
 		sync_menu_sound();
@@ -3140,6 +3152,25 @@ int main(int argc, char **argv)
 		uint64_t pass_work_ns = 0;
 		const bool menu_was_open = menu.is_open();
 		// (tests: a room hosted, or joined with its code, as the menu would, once the game's past its start)
+		if ((arg_host || !arg_join.empty()) && pass == 60) {   // (--host, --join: by address, the Online screen showing it)
+			if (!board.profile->online) fprintf(stderr, "online: --host / --join: online play isn't ready for %s yet\n", board.profile->name);
+			else {
+				online_page();   // (the identity, as opening the Online page sets it)
+				OnlineSettings os = cfg.online;
+				if (os.name.empty()) os.name = "PLAYER";   // (no name asked for: the command line's)
+				if (arg_port) os.port = arg_port;
+				if (!arg_join.empty()) os.address = online_menu::clean_address(arg_join);
+				std::string err;
+				if (!(arg_host ? online.host(os, err) : online.join(os, err))) fprintf(stderr, "online: %s: %s\n", arg_host ? "--host" : "--join", err.c_str());
+				else fprintf(stderr, "online: %s from the command line\n", arg_host ? "hosting by address" : ("joining " + os.address).c_str());
+				if (menu.ready()) {
+					if (menu.is_open()) menu.close();
+					menu.open(main_page());
+					menu.select_row(online_row());
+					menu.push(online_page());
+				}
+			}
+		}
 		static const char *test_host_room = getenv("VF3_HOST_ROOM"), *test_join_code = getenv("VF3_JOIN_CODE"), *test_random = getenv("VF3_RANDOM");
 		if ((test_host_room || test_join_code || test_random) && pass == 60) {
 			online_page();   // (the identity, as opening the Online page sets it)
