@@ -95,6 +95,9 @@ public:
 	// adapter does after the frame, and gives them to midi_out).
 	std::function<void(bool resim)> run;
 	std::function<void()> program_changed;     // the CROM changed (the recompiled code must be made again)
+	// Dural on the select (Game > Cheats) in this match: both sides the same (their online versions match, "+dural"
+	// on it: the host program sets both), her patches applied at the start (Model3::set_dural)
+	bool dural = false;
 	std::function<void()> settle;              // before a save or load: anything running alongside the board waits
 	std::function<void(const std::vector<uint8_t> &)> midi_out;   // bytes for the sound board
 	std::function<void()> on_begin;            // a match's start, before the board is set up for it (keep the player's NVRAM)

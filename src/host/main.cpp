@@ -2553,6 +2553,24 @@ int main(int argc, char **argv)
 		p.items.push_back(back_item());
 		return p;
 	};
+	bool online_ready = false;   // (the identity for the handshake made: again after a cheat changes it)
+	// Game > Cheats: Dural on the select (issue #12). With it on, the online version is the build's with "+dural":
+	// such matches meet only each other (both sides then play her patches), and everyone else is unaffected
+	auto cheats_page = [&] {
+		menu_page p{ "Cheats", "", {} };
+		p.items.push_back({ "Dural on the select",
+			"The boss, Dural, on the character select: a 13th spot past Kage (right from Kage, or left from Akira). Either player can choose her, or anyone (Start held: her other colours). Online, it plays only against others with it on. The arcade froze on Akira's stage with her: fixed here. Changing it restarts the game.",
+			[&] { return std::string(cfg.dural ? "On" : "Off"); },
+			[&](int) {
+				if (nvram_away || online.phase() != Online::Phase::off) return;
+				cfg.dural = cfg.dural ? 0 : 1;
+				cfg_dirty = true;
+				online_ready = false;   // (the online version with it, or without)
+				reset_game();
+			} });
+		p.items.push_back(back_item());
+		return p;
+	};
 	auto game_page = [&] {
 		menu_page p{ "Game", "", {} };
 		p.items.push_back({ "Play style",
@@ -2561,12 +2579,8 @@ int main(int argc, char **argv)
 			[&](int) { if (nvram_away) return; cfg.arcade = !cfg.arcade; g_pc_mode = !cfg.arcade; cfg_dirty = true; reset_game(); } });
 		p.items.push_back({ "Reset game", "Restarts the game, like switching the arcade off and on. Rankings and settings are kept. (F3)",
 			{}, {}, [&] { reset_game(); } });
-		if (board.profile->dural) {   // (issue #12)
-			p.items.push_back({ "Dural on the select",
-				"A cheat: the boss, Dural, on the character select, a 13th spot past Kage (right from Kage, or left from Akira): either player can choose her, or anyone (Start held, her other colours). With it on, online matches only meet others with it on. The arcade froze on Akira's stage with her: fixed here. Changing it restarts the game.",
-				[&] { return std::string(cfg.dural ? "On" : "Off"); },
-				[&](int) { if (nvram_away) return; cfg.dural = cfg.dural ? 0 : 1; cfg_dirty = true; reset_game(); } });
-		}
+		if (board.profile->dural)   // (issue #12)
+			p.items.push_back({ "Cheats", "Dural on the select.", {}, {}, [&] { menu.push(cheats_page()); } });
 		if (programs.size() > 1)   // (the zips hold both: Revision D and Team Battle)
 			p.items.push_back({ "Version",
 				"Which Virtua Fighter 3 to play: the original (Revision D) or Team Battle, three fighters a side. Each keeps its own rankings and arcade settings. Changing it saves and starts the game again in the other.",
@@ -2779,11 +2793,12 @@ int main(int argc, char **argv)
 		pg.items.push_back(back_item());
 		return pg;
 	};
-	bool online_ready = false;
 	auto online_page = [&] {
-		if (!online_ready) {   // (the ROM's hash for the handshake, once)
+		if (!online_ready) {   // (the ROM's hash for the handshake, once; again after a cheat changed)
 			if (game.emu_thread.joinable()) game.job_wait();
-			online.identity = { board.profile->set, vf3net::online_version(VF3_VERSION), vf3net::content_hash(board), "" };   // (the online version, not the release's)
+			const bool dural = cfg.dural && board.profile->dural;
+			online.identity = { board.profile->set, vf3net::online_version(VF3_VERSION) + (dural ? "+dural" : ""), vf3net::content_hash(board), "" };   // (the online version, not the release's)
+			online.adapter.dural = dural;
 			online_ready = true;
 		}
 		return online_menu::page(online, cfg.online, menu, [&] { cfg_dirty = true; });
@@ -2973,7 +2988,7 @@ int main(int argc, char **argv)
 		}
 	};
 	online.adapter.on_begin = [&] {
-		game.dural_players = 0;   // (Play as Dural: never in a match; the adapter takes its patches out)
+		game.dural_players = online.adapter.dural ? 3 : 0;   // (Dural on the select: the match's, as both sides play it; her cell's picture)
 		if (!nvram_away) {   // (this player's own, given back after the match)
 			own_backup = board.backup;
 			memcpy(own_eeprom, board.eeprom.regs, sizeof own_eeprom);
@@ -3255,7 +3270,7 @@ int main(int argc, char **argv)
 				OnlineSettings os = cfg.online;
 				if (os.name.empty()) os.name = "PLAYER";   // (no name asked for: the command line's)
 				if (arg_port) os.port = arg_port;
-				if (!arg_join.empty()) os.address = online_menu::clean_address(arg_join);
+				if (!arg_join.empty()) os.address = cfg.online.address = online_menu::clean_address(arg_join);   // (the Online screen says where)
 				std::string err;
 				if (!(arg_host ? online.host(os, err) : online.join(os, err))) fprintf(stderr, "online: %s: %s\n", arg_host ? "--host" : "--join", err.c_str());
 				else fprintf(stderr, "online: %s from the command line\n", arg_host ? "hosting by address" : ("joining " + os.address).c_str());

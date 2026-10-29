@@ -586,6 +586,28 @@ void Online::close_room()
 namespace {
 
 // The lobby's no, in words: what happened and what to do
+// Two versions apart only by Dural on the select (Game > Cheats: "+dural" on the online version): said so
+std::string dural_apart(const std::string &theirs, const std::string &mine)
+{
+	const auto plain = [](std::string v) { const size_t at = v.find("+dural"); return at == std::string::npos ? v : v.substr(0, at); };
+	const bool they = theirs.find("+dural") != std::string::npos, me = mine.find("+dural") != std::string::npos;
+	if (they == me || plain(theirs) != plain(mine)) return "";
+	return they ? "Your opponent has Dural on the select (Game > Cheats): turn it on too to play them, or ask them to turn it off."
+	            : "Your opponent has Dural on the select off, and you have it on (Game > Cheats): turn it off to play them.";
+}
+
+// A refusal's "Your opponent has X, you have Y" or "The host has X, you have Y": the Dural one if that's all it is
+std::string dural_said(const std::string &text, const std::string &mine)
+{
+	for (const char *lead : { "Your opponent has ", "The host has " }) {
+		const size_t at = text.find(lead), comma = text.find(", you have ");
+		if (at == std::string::npos || comma == std::string::npos || comma < at) continue;
+		const size_t from = at + strlen(lead);
+		if (const std::string d = dural_apart(text.substr(from, comma - from), mine); !d.empty()) return d;
+	}
+	return text;
+}
+
 std::string lobby_says(const vfnet::http::Reply &r, const std::string &code, const std::string &mine)
 {
 	if (r.status == 0)
@@ -600,6 +622,7 @@ std::string lobby_says(const vfnet::http::Reply &r, const std::string &code, con
 		std::string theirs;
 		for (char ch : v["host_version"].str())
 			if (isalnum(uint8_t(ch)) || ch == '.' || ch == '-' || ch == '+' || ch == '_') theirs += ch;
+		if (const std::string d = dural_apart(v["host_version"].str(), mine); !d.empty()) return d;
 		return "The host has " + (theirs.empty() ? std::string("another version") : theirs.substr(0, 40)) + ", you have " + mine +
 		       ": you both need the same version (the newest, from the site).";
 	}
@@ -958,8 +981,9 @@ void Online::poll(double t)
 			// before the game started); anything else ends it
 			if (!was_playing && is_host && (why == vfnet::Session::End::rejected || why == vfnet::Session::End::timeout || why == vfnet::Session::End::opponent_quit)) {
 				if (rooms) { host_again(e.text); return; }
-				notices.push_back({ Notice::refused, "A player couldn't join: " + e.text });
-				note = "A player couldn't join: " + e.text;
+				const std::string said = why == vfnet::Session::End::rejected ? dural_said(e.text, identity.build) : e.text;
+				notices.push_back({ Notice::refused, "A player couldn't join: " + said });
+				note = "A player couldn't join: " + said;
 				std::string err;
 				if (!open_host(err)) { notices.push_back({ Notice::ended, err }); session.reset(); link.reset(); ph = Phase::off; }
 				return;
@@ -984,6 +1008,7 @@ void Online::poll(double t)
 			}
 			if (!was_playing && !is_host && why != vfnet::Session::End::quit) {
 				failure = e.text;
+				if (why == vfnet::Session::End::rejected) failure = dural_said(failure, identity.build);
 				fail_step = rooms ? st : Step::connecting;
 				if (rooms && room && room->local_blocked())   // (only a Mac's refuses like this)
 					failure = "This Mac blocked the game from the local network: System Settings > Privacy & Security > Local Network, turn on "

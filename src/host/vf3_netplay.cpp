@@ -119,7 +119,8 @@ bool Adapter::begin(const std::vector<uint8_t> &blob)
 	memcpy(board.eeprom.regs, blob.data() + 4 + board.backup.size(), sizeof board.eeprom.regs);
 	// the PC way on both sides, whatever each plays offline: the FREE PLAY notices hidden in the CROM the boot
 	// copies the program from, free play in the settings, the boot run unseen, the same clock
-	board.set_dural(false);   // (offline's Play as Dural: never in a match)
+	if (!dural) board.set_dural(false);   // (Dural on the select: the match's, the same on both sides)
+	else if (board.set_dural(true) == 0) return false;
 	if (board.hide_free_play_text() != 2) return false;
 	if (program_changed) program_changed();
 	board.rtc_time = 0;
