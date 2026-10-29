@@ -1765,9 +1765,9 @@ menu_page page(Online &o, OnlineSettings &s, game_menu &menu, std::function<void
 		if (s.name.empty()) r += "<div class=\"me\">Set your name</div>";
 		else r += "<div class=\"who\">Playing as</div>" + flag(o.my_country()) + "<div class=\"me\">" + E(s.name) + "</div>";
 		if (pad) r += "<div class=\"key\">Y</div><div class=\"who\">change</div>";
-		const int players = o.players_online(s);   // (playing at random now: on the Random card)
+		const int players = o.players_online(s);   // (playing at random now: on the Random card, 0 too; -1 not known yet)
 		r += "</div><div class=\"tiles\">"
-		     "<div " + menu_row(rnd, sel, "tile") + "><div class=\"t\">RANDOM</div><div class=\"s\">" + (players > 0 ? "<span class=\"live\"></span>" + std::to_string(players) + " online" : std::string("Anyone near you")) + "</div></div>"
+		     "<div " + menu_row(rnd, sel, "tile") + "><div class=\"t\">RANDOM</div><div class=\"s\">" + (players >= 0 ? (players > 0 ? "<span class=\"live\"></span>" : "") + std::to_string(players) + " online" : std::string("Anyone near you")) + "</div></div>"
 		     "<div " + menu_row(host, sel, "tile") + "><div class=\"t\">HOST</div><div class=\"s\">Get a code for a friend</div></div>"
 		     "<div " + menu_row(join, sel, "tile") + "><div class=\"t\">JOIN</div><div class=\"s\">Type a friend's code</div></div></div>";
 		if (!problem->empty()) r += "<div class=\"problem\">" + E(*problem) + "</div>";
