@@ -139,8 +139,11 @@ const Profile VF3_TB = {
 	960, 0x102002, 0x106080, 0, 0x10601A, 0x10601B, 0x106029,
 	0,   // (the select's cursor: not looked for yet, so no Play as Dural)
 	0x102008,   // (3, 5, 7 in the attract, the select and a fight, as Revision D's)
-	// the backdrops: Revision D's (a fight's sky found with no tile on screen wrong, as Revision D's: checked on the dojo)
-	{ 0x1E0C, 0xFFB30004, 0x161614, 0x1617B4 },
+	// the backdrops: Revision D's (a fight's sky found with no tile on screen wrong, as Revision D's: checked on the dojo),
+	// but the backdrop's place at 0x16195C (Revision D's 0x1617B4 holds something else here: the routine that writes
+	// the map, Revision D's 0x5CF00 at 0x624FC, sets r17 to 0x16195C where Revision D's sets it to 0x1617B4; checked:
+	// +4, +8 follow the map's place found, Jeffry's beach)
+	{ 0x1E0C, 0xFFB30004, 0x161614, 0x16195C },
 	ppcrec::vf3tb_map, ppcrec::vf3tb_map_count,
 	"vf3tb",
 };

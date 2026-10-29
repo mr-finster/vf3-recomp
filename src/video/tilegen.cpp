@@ -492,10 +492,58 @@ void TileGen::find_backdrop(const m3::Model3 &board, bool full)
 				else votes[bank]--;
 			}
 	};
+	// The places tried first (the game's own, this frame's and the last's; the last place found; those near it) are
+	// told apart by all of the screen, a tile in 5 of every row: the rows compared above are of the most different
+	// tiles, but a sky's rows of few tiles (a moon's glow, a dusk's bands) agree with them a column or two off too, 14
+	// of 76 missed where the right place misses none, and with banks just moved a place a row off can match them all
+	// (the patterns running on from row to row: stage 49's sky, the camera looking up). Taken: the one that misses
+	// fewest of the screen's, not the first good enough. The first looked at, the last place, had stuck there for
+	// frames while the camera turned (Jeffry's beach in Team Battle, whose place the game keeps elsewhere: the sides
+	// drawn from rows a few tiles off, a bright bar); the game's this frame's is often a frame ahead of the screen's.
+	// One that misses none ends it (the usual frame: the first looked at); the rest each given up past the best so far.
+	const int n_screen = 48 * ((62 + 4) / 5);
+	auto screen_misses = [&](int x0, int y0, int limit) {
+		int missed = 0;
+		for (int r = sy >> 3; r < (sy >> 3) + 48; r++)
+			for (int c = s; c < s + 62; c += 5) {
+				const int e = raw(x0 + c, y0 + (r & 63)), bank = (e >> 7) & 0x7F;
+				const int t = int(name_at(names, r & 63, c) & 0x3FFF);
+				if (!(t == (((e & 0x7F) + b.bank[bank]) & 0x3FFF) || (b.seen[bank] >= 0 && t == (((e & 0x7F) + b.seen[bank]) & 0x3FFF))) && ++missed > limit) return missed;
+			}
+		return missed;
+	};
+	int pbest = INT32_MAX, pbx = 0, pby = INT32_MIN;
+	bool must_agree = false;
+	// (a place's misses of the screen, if it agrees where it must; ties: the one looked at first)
+	auto consider = [&](int x0, int y0) {
+		if (pbest == 0 || (must_agree && !agrees(x0, y0))) return;
+		const int m = screen_misses(x0, y0, pbest == INT32_MAX ? INT32_MAX : pbest - 1);
+		if (m < pbest) { pbest = m; pbx = ((x0 % w) + w) % w; pby = y0; }
+	};
+	// the game's own place, kept at 0x1617B4 + 4 and + 8 in pixels (Team Battle's 0x16195C; the routine at 0x5D000
+	// writes the map from the place it kept the frame before, 0x5D12C: this frame's and the last's tried)
+	const int gx = int(int32_t(board.peek32(board.profile->backdrops.place + 4))) >> 3, gy = int(int32_t(board.peek32(board.profile->backdrops.place + 8))) >> 3;
+	if (board.frame != b.game_frame) { b.prev_x = b.game_x; b.prev_y = b.game_y; b.game_x = gx; b.game_y = gy; b.game_frame = board.frame; }
+	const bool same = had && desc == b.desc;
+	auto first_places = [&]() {
+		// (a place off the map further than the screen's rows reach is none: another program's)
+		if (gy >= -112 && gy <= h + 48) consider(gx, gy);
+		if (b.prev_y >= -112 && b.prev_y <= h + 48) consider(b.prev_x, b.prev_y);
+		if (same || must_agree) consider(b.x0, b.y0);
+	};
+	auto near_places = [&]() {
+		for (int d = 1; d <= 6 && pbest > 0; d++)
+			for (int dy = -2; dy <= 2 && pbest > 0; dy++) {
+				const int ax = d - std::abs(dy);
+				if (ax < 0 || ax > 4) continue;
+				consider(b.x0 + ax, b.y0 + dy);
+				if (ax) consider(b.x0 - ax, b.y0 + dy);
+			}
+	};
 	if (few) {
 		// Too little on screen to tell: as before, if the same backdrop; but a screen of the map's top or bottom
 		// filler alone (the camera up at the sky, down at the sea) puts the map's place above or below it
-		b.ok = had && desc == b.desc;
+		b.ok = same;
 		// (the fillers as the table places their banks, or the screen had them)
 		const uint32_t top = backdrop_entry(board, 0, -1) & 0x3FFF, bottom = backdrop_entry(board, 0, h) & 0x3FFF;
 		const uint32_t top_t = backdrop_entry(board, 0, -1, true) & 0x3FFF, bottom_t = backdrop_entry(board, 0, h, true) & 0x3FFF;
@@ -505,26 +553,29 @@ void TileGen::find_backdrop(const m3::Model3 &board, bool full)
 				const uint32_t t = name_at(names, r & 63, c) & 0x3FFF;
 				n++; n_top += t == top || t == top_t; n_bottom += t == bottom || t == bottom_t;
 			}
-		if (n_bottom * 10 >= n * 9) { b.y0 = h - (sy >> 3); b.ok = true; see(); }
-		else if (n_top * 10 >= n * 9) { b.y0 = -(sy >> 3) - 48; b.ok = true; see(); }
+		// (but first the places above, where one has 9 in 10 of the screen's tiles, the filler's place only where
+		// it misses fewer: the camera down at the sea with the horizon's last rows at the screen's top, stage 47's,
+		// had the filler's place, those rows a few tiles off, for a hundred frames)
+		pbest = n_screen / 10 + 1;   // (more missed than 1 in 10: none)
+		first_places();
+		const int filler_y0 = n_bottom * 10 >= n * 9 ? h - (sy >> 3) : n_top * 10 >= n * 9 ? -(sy >> 3) - 48 : INT32_MIN;
+		if (pbest > 0 && filler_y0 != INT32_MIN) {
+			const int m = screen_misses(b.x0, filler_y0, INT32_MAX);
+			if (m < pbest || pby == INT32_MIN) { pbest = m; pbx = b.x0; pby = filler_y0; }
+		}
+		if (same) near_places();
+		if (pby != INT32_MIN) { b.x0 = pbx; b.y0 = pby; b.ok = true; see(); }
 		else if (kinds[0] <= 2) b.ok = false;   // (the map cleared, one tile all over: no backdrop on show)
 		return;
 	}
-	// First where the game says it is: its backdrop's place in pixels, kept at 0x1617B4 + 4 and + 8 (the routine at
-	// 0x5D000 writes the map from the place it kept the frame before, 0x5D12C: this frame's and the last's tried), as
-	// the table places the banks or, with banks the game has just moved, each bank in one place
+	// First those places, of those that agree (as the table places the banks or, with banks the game has just moved,
+	// each bank in one place), the one that misses fewest of the screen
 	{
-		const int gx = int(int32_t(board.peek32(board.profile->backdrops.place + 4))) >> 3, gy = int(int32_t(board.peek32(board.profile->backdrops.place + 8))) >> 3;
-		if (board.frame != b.game_frame) { b.prev_x = b.game_x; b.prev_y = b.game_y; b.game_x = gx; b.game_y = gy; b.game_frame = board.frame; }
-		const int cand[2][2] = { { gx, gy }, { b.prev_x, b.prev_y } };
-		for (const auto &cxy : cand) {
-			const int x0 = ((cxy[0] % w) + w) % w, y0 = cxy[1];
-			if (agrees(x0, y0)) { b.x0 = x0; b.y0 = y0; b.ok = true; see(); return; }
-		}
+		must_agree = true;
+		first_places();
+		if (pbest > 0) near_places();
+		if (pby != INT32_MIN) { b.x0 = pbx; b.y0 = pby; b.ok = true; see(); return; }
 	}
-	for (int dy = -2; dy <= 2; dy++)
-		for (int dx = -4; dx <= 4; dx++)
-			if (agrees(b.x0 + dx, b.y0 + dy)) { b.x0 = ((b.x0 + dx) % w + w) % w; b.y0 += dy; b.ok = true; see(); return; }
 	// (all of it: the one nearest the last place of those that agree)
 	if (!full) return;
 	// (looked through in vain with the same rows on screen, the same map and banks: not again, for it finds nothing
