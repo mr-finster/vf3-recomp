@@ -360,7 +360,7 @@ uint8_t Scsi::read(unsigned reg)
 
 bool Model3::load(const std::string &zip, std::string &error)
 {
-	romset::result r = romset::load(zip);
+	romset::result r = romset::load(zip, *profile);
 	if (!r.ok) {
 		error = r.error;
 		return false;
@@ -704,9 +704,10 @@ bool Model3::load_state(const uint8_t *p, size_t n)
 
 std::vector<uint32_t> Model3::program_image() const
 {
-	// The boot copies 0xA0000 bytes from the fixed CROM's offset 0x710000 to RAM 0 (docs/step1-measure.md)
-	std::vector<uint32_t> img(0xA0000 / 4);
-	memcpy(img.data(), &crom[0x710000], 0xA0000);
+	// The boot copies the program from the fixed CROM to RAM 0 (Revision D's: 0xA0000 bytes from 0x710000,
+	// docs/step1-measure.md)
+	std::vector<uint32_t> img(profile->program_size / 4);
+	memcpy(img.data(), &crom[profile->program_at], profile->program_size);
 	return img;
 }
 
@@ -1361,8 +1362,9 @@ void Model3::write64(uint32_t a, uint64_t d)
 	write32(a + 4, uint32_t(d));
 }
 
-// The FREE PLAY notices, in the fixed CROM the boot copies the program from (the program image's address + 0x710000;
-// the CROM holds the PowerPC's 32-bit words, so byte a of the image is crom[(a + 0x710000) ^ 3]):
+// The FREE PLAY notices, in the fixed CROM the boot copies the program from (the program image's address + the
+// profile's program_at; the CROM holds the PowerPC's 32-bit words, so byte a of the image is crom[(a + at) ^ 3]).
+// Revision D's (the profile's free_play_text):
 // - the fight's top line (alternating with PRESS START BUTTON): "     FREE PLAY       " (21 characters) at the
 //   image's 0x7CAE0, between "PRESS START BUTTON   " and "CREDIT": spaces;
 // - the attract's, bottom left: picture 0x4018 (its number from a table at 0x7CB50), drawn by the call at 0x4E9C0
@@ -1370,7 +1372,8 @@ void Model3::write64(uint32_t a, uint64_t d)
 int Model3::hide_free_play_text()
 {
 	if (!free_play_text.empty()) return int(free_play_text.size());   // (hidden already)
-	constexpr size_t CROM_AT = 0x710000;
+	const size_t CROM_AT = profile->program_at;
+	const Profile::FreePlayText &t = profile->free_play_text;
 	auto at = [&](size_t a) -> uint8_t & { return crom[(a + CROM_AT) ^ 3]; };
 	auto is = [&](size_t a, const char *t) {
 		for (size_t k = 0; t[k]; k++)
@@ -1383,20 +1386,20 @@ int Model3::hide_free_play_text()
 		for (size_t k = 0; k < n; k++) { was.push_back(at(a + k)); at(a + k) = to[k]; }
 		free_play_text.push_back({ a, was });
 	};
-	if (!is(0x7CACA, "PRESS START BUTTON   ") || !is(0x7CAE0, "     FREE PLAY       ") || !is(0x7CAF6, "CREDIT") ||
-		word(0x7CB50) != 0x4018 || word(0x4E9C0) != 0x4BFE4941)
+	if (!is(t.press_start, "PRESS START BUTTON   ") || !is(t.free_play, "     FREE PLAY       ") || !is(t.credit, "CREDIT") ||
+		word(t.picture_table) != t.picture || word(t.draw_call) != t.draw_word)
 		return 0;
 	const uint8_t spaces[21] = { ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ' };
 	const uint8_t nop[4] = { 0x60, 0x00, 0x00, 0x00 };
-	patch(0x7CAE0, spaces, sizeof spaces);
-	patch(0x4E9C0, nop, sizeof nop);
+	patch(t.free_play, spaces, sizeof spaces);
+	patch(t.draw_call, nop, sizeof nop);
 	return int(free_play_text.size());
 }
 
 void Model3::show_free_play_text()
 {
 	for (auto &[a, bytes] : free_play_text)
-		for (size_t k = 0; k < bytes.size(); k++) crom[(a + 0x710000 + k) ^ 3] = bytes[k];
+		for (size_t k = 0; k < bytes.size(); k++) crom[(a + profile->program_at + k) ^ 3] = bytes[k];
 	free_play_text.clear();
 }
 

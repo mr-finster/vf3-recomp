@@ -57,7 +57,7 @@ int main(int argc, char **argv)
 		return 1;
 	}
 	ppcrec::Rec rec;
-	if (!rec.build(board.cpu, board.program_image())) { fprintf(stderr, "vf3detect: the recompile failed\n"); return 1; }
+	if (!rec.build(board.cpu, board.program_image(), board.profile->map, board.profile->map_count)) { fprintf(stderr, "vf3detect: the recompile failed\n"); return 1; }
 	board.cpu.rec = &rec;
 	board.rtc_time = 0;
 	board.reset();

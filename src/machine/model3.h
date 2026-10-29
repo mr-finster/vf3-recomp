@@ -8,6 +8,7 @@
 // rather than known hardware behaviour.
 #pragma once
 #include "../ppc/ppc.h"
+#include "profile.h"
 #include "state_io.h"
 #include <cstdint>
 #include <deque>
@@ -133,6 +134,7 @@ public:
 	Jtag jtag;
 	Scsi scsi;
 	Controls controls;
+	const Profile *profile = &VF3_REV_D;   // the program's (profile.h): set before load
 
 	std::vector<uint8_t> ram;        // 8 MB, host-order words
 	std::vector<uint8_t> crom;       // fixed CROM, 8 MB, host-order words
@@ -142,25 +144,28 @@ public:
 	std::vector<uint8_t> backup;     // 128 KB backup RAM, host-order words
 
 	// The test menu's COIN ASSIGNMENTS > COIN/CREDIT SETTING, in backup RAM (found by setting each in the test menu,
-	// leaving it, and comparing): the setting's number (1-27) at 0x1E033; for #1-#26 the same at 0x1E037 and 0 at
-	// 0x1E03B; #27, FREE PLAY, sets 0x1E03B to 1 and leaves 0x1E037. No checksum. A board that has never run has 0
-	// there until the game writes its settings (by frame 120): -1, not written yet.
+	// leaving it, and comparing; Revision D's at 0x1E033, 0x1E037 and 0x1E03B: the profile's coin): the setting's
+	// number (1-27) at `setting`; for #1-#26 the same at `credits` and 0 at `free_play`; #27, FREE PLAY, sets
+	// `free_play` to 1 and leaves `credits`. No checksum. A board that has never run has 0 there until the game writes
+	// its settings (by frame 120): -1, not written yet.
 	static constexpr int COIN_FACTORY = 1, COIN_FREE_PLAY = 27;
 	int coin_setting() const
 	{
-		const int v = backup.size() > 0x1E03B ? backup[0x1E033] : 0;
+		const Profile::Coin &k = profile->coin;
+		const int v = backup.size() > k.free_play ? backup[k.setting] : 0;
 		return v >= 1 && v <= COIN_FREE_PLAY ? v : -1;
 	}
 	bool set_coin_setting(int v)   // (true if it changed)
 	{
 		if (coin_setting() < 0 || v < 1 || v > COIN_FREE_PLAY) return false;
-		const uint8_t was[3] = { backup[0x1E033], backup[0x1E037], backup[0x1E03B] };
-		backup[0x1E033] = uint8_t(v);
-		if (v == COIN_FREE_PLAY) backup[0x1E03B] = 1;
-		else backup[0x1E037] = uint8_t(v), backup[0x1E03B] = 0;
-		return was[0] != backup[0x1E033] || was[1] != backup[0x1E037] || was[2] != backup[0x1E03B];
+		const Profile::Coin &k = profile->coin;
+		const uint8_t was[3] = { backup[k.setting], backup[k.credits], backup[k.free_play] };
+		backup[k.setting] = uint8_t(v);
+		if (v == COIN_FREE_PLAY) backup[k.free_play] = 1;
+		else backup[k.credits] = uint8_t(v), backup[k.free_play] = 0;
+		return was[0] != backup[k.setting] || was[1] != backup[k.credits] || was[2] != backup[k.free_play];
 	}
-	bool free_play() const { return coin_setting() == COIN_FREE_PLAY && backup[0x1E03B] == 1; }
+	bool free_play() const { return coin_setting() == COIN_FREE_PLAY && backup[profile->coin.free_play] == 1; }
 	// Blanks the FREE PLAY notices (the PC way: always free play, nothing to say), in the fixed CROM the boot copies
 	// the program from (so from the next boot). Checked against the known data around them first; returns how many
 	// it changed (2; 0: not the data known). show_free_play_text puts them back.

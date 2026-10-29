@@ -76,7 +76,7 @@ int main(int argc, char **argv)
 			return 2;
 		}
 		ppcrec::Stats st;
-		if (!recompiler.build(board.cpu, board.program_image(), &st)) {
+		if (!recompiler.build(board.cpu, board.program_image(), board.profile->map, board.profile->map_count, &st)) {
 			fprintf(stderr, "vf3run: the recompile failed\n");
 			return 1;
 		}
@@ -574,13 +574,13 @@ int main(int argc, char **argv)
 		}
 		if (getenv("VF3_PANO") && long(board.frame) == atol(getenv("VF3_PANO"))) {   // (tests: the stage's backdrop map, as the game keeps it)
 			const uint32_t r13 = board.cpu.s.r[13];
-			const int stage = int16_t(board.peek16(r13 - 0x1e0c));
-			const uint32_t desc = stage >= 0 ? board.peek32(0xFFB30004 + 4 * stage) : 0;
+			const int stage = int16_t(board.peek16(r13 - board.profile->backdrops.stage_below_r13));
+			const uint32_t desc = stage >= 0 ? board.peek32(board.profile->backdrops.descriptors + 4 * stage) : 0;
 			const int w = board.peek16(desc + 4), h = board.peek16(desc + 6);
 			fprintf(stderr, "pano r13 %08x stage %d desc %08x w %d h %d\n", r13, stage, desc, w, h);
 			auto entry = [&](int x, int y) {
 				const uint16_t e = board.peek16(desc + 8 + 2 * uint32_t(std::clamp(y, 0, h - 1) * w + ((x % w) + w) % w));
-				return int((e & 0x7F) + int16_t(board.peek16(0x161614 + ((e >> 6) & 0xFE))));
+				return int((e & 0x7F) + int16_t(board.peek16(board.profile->backdrops.banks + ((e >> 6) & 0xFE))));
 			};
 			const uint32_t *vr = reinterpret_cast<const uint32_t *>(board.tile_ram.data()) + (0xF8000 + 3 * 0x2000) / 4;
 			int tm[4][64];
@@ -617,11 +617,11 @@ int main(int argc, char **argv)
 					const uint16_t e = board.peek16(desc + 8 + 2 * uint32_t((y0 + lrow) * w + ((x0 + c) % w)));
 					fprintf(stderr, "c%d map e%04x(b%d i%d)=%04x tile %04x\n", c, e, (e >> 7) & 0x7F, e & 0x7F, entry(x0 + c, y0 + lrow) & 0x3FFF, ((c & 1) ? wd & 0xFFFF : wd >> 16) & 0x3FFF);
 				}
-				for (int i = 0; i < 40; i++) fprintf(stderr, "bank %d %04x\n", i, board.peek16(0x161614 + 2 * i));
+				for (int i = 0; i < 40; i++) fprintf(stderr, "bank %d %04x\n", i, board.peek16(board.profile->backdrops.banks + 2 * i));
 			}
 			if (getenv("VF3_PANO_ALL"))   // (tests: every stage's map looked through for the layer's rows)
 				for (int st = 0; st < 96; st++) {
-					const uint32_t d2 = board.peek32(0xFFB30004 + 4 * st);
+					const uint32_t d2 = board.peek32(board.profile->backdrops.descriptors + 4 * st);
 					if (d2 < 0xFF000000u) continue;
 					const int w2 = board.peek16(d2 + 4), h2 = board.peek16(d2 + 6);
 					if (w2 < 32 || w2 > 2048 || h2 < 1 || h2 > 256) continue;
@@ -630,7 +630,7 @@ int main(int argc, char **argv)
 							int ok = 0;
 							for (int c = 0; c < 60; c += 4) {
 								const uint16_t e = board.peek16(d2 + 8 + 2 * uint32_t(y * w2 + (x + c) % w2));
-								ok += ((e & 0x7F) + board.peek16(0x161614 + ((e >> 6) & 0xFE)) & 0x3FFF) == tm[0][c];
+								ok += ((e & 0x7F) + board.peek16(board.profile->backdrops.banks + ((e >> 6) & 0xFE)) & 0x3FFF) == tm[0][c];
 							}
 							if (ok >= 13) fprintf(stderr, "pano-all stage %d desc %08x %dx%d row %d col %d: %d/15\n", st, d2, w2, h2, y, x, ok);
 						}

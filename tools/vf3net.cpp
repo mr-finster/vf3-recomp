@@ -39,7 +39,7 @@ struct Board
 			std::vector<uint32_t> img = m.program_image();
 			if (img == image) return;
 			image = std::move(img);
-			if (rec.build(m.cpu, image)) m.cpu.rec = &rec;
+			if (rec.build(m.cpu, image, m.profile->map, m.profile->map_count)) m.cpu.rec = &rec;
 			else m.cpu.rec = nullptr;
 		};
 		return true;

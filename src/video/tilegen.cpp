@@ -327,16 +327,16 @@ std::string TileGen::audit(const m3::Model3 &board) const
 	const uint32_t *regs = regs_of(board);
 	char buf[256];
 	const bool on = regs[0x60 / 4 + 3] & 0x80000000u;
-	const int stage = int16_t(board.peek16(board.cpu.s.r[13] - 0x1E0C));
+	const int stage = int16_t(board.peek16(board.cpu.s.r[13] - board.profile->backdrops.stage_below_r13));
 	if (!on) return "off";
 	if (!backdrop.ok) {
 		// (tests: why: the best place's mismatches on screen, and the bank table's changes since the last frame)
 		static int16_t prev[128];
 		int changed = 0;
 		int16_t cur[128];
-		for (int i = 0; i < 128; i++) { cur[i] = int16_t(board.peek16(0x161614 + 2 * uint32_t(i))); changed += cur[i] != prev[i]; }
+		for (int i = 0; i < 128; i++) { cur[i] = int16_t(board.peek16(board.profile->backdrops.banks + 2 * uint32_t(i))); changed += cur[i] != prev[i]; }
 		memcpy(prev, cur, sizeof prev);
-		snprintf(buf, sizeof buf, "NOMAP stage %d desc %08x bank-changes %d", stage, board.peek32(0xFFB30004 + 4 * uint32_t(stage)), changed);
+		snprintf(buf, sizeof buf, "NOMAP stage %d desc %08x bank-changes %d", stage, board.peek32(board.profile->backdrops.descriptors + 4 * uint32_t(stage)), changed);
 		return buf;
 	}
 	const Backdrop &b = backdrop;
@@ -389,11 +389,11 @@ uint64_t TileGen::backdrop_inputs(const m3::Model3 &board, bool full) const
 	add(vram[(0xF6000 + 3 * 0x400) / 4]);   // (the layer's first line's own scroll)
 	const uint32_t *names = vram + (0xF8000 + 3 * 0x2000) / 4;
 	for (int i = 0; i < 64 * 32; i++) add(names[i]);
-	const int stage = int16_t(board.peek16(board.cpu.s.r[13] - 0x1E0C));
+	const int stage = int16_t(board.peek16(board.cpu.s.r[13] - board.profile->backdrops.stage_below_r13));
 	add(uint64_t(uint32_t(stage)));
-	if (stage >= 0 && stage <= 255) add(board.peek32(0xFFB30004 + 4 * uint32_t(stage)));
-	for (int i = 0; i < 128; i++) add(board.peek16(0x161614 + 2 * uint32_t(i)));
-	add(board.peek32(0x1617B4 + 4)); add(board.peek32(0x1617B4 + 8));
+	if (stage >= 0 && stage <= 255) add(board.peek32(board.profile->backdrops.descriptors + 4 * uint32_t(stage)));
+	for (int i = 0; i < 128; i++) add(board.peek16(board.profile->backdrops.banks + 2 * uint32_t(i)));
+	add(board.peek32(board.profile->backdrops.place + 4)); add(board.peek32(board.profile->backdrops.place + 8));
 	add(b.ok); add(b.known); add(b.desc); add(uint64_t(b.w) << 32 | uint32_t(b.h)); add(uint64_t(uint32_t(b.x0)) << 32 | uint32_t(b.y0));
 	add(uint64_t(uint32_t(b.game_x)) << 32 | uint32_t(b.game_y)); add(uint64_t(uint32_t(b.prev_x)) << 32 | uint32_t(b.prev_y)); add(b.game_frame);
 	add(b.map.size()); add(banks_sum(b));
@@ -422,9 +422,9 @@ void TileGen::find_backdrop(const m3::Model3 &board, bool full)
 	const uint32_t *vram = reinterpret_cast<const uint32_t *>(board.tile_ram.data());
 	const uint32_t *regs = regs_of(board);
 	if (!(regs[0x60 / 4 + 3] & 0x80000000u)) return;
-	const int stage = int16_t(board.peek16(board.cpu.s.r[13] - 0x1E0C));
+	const int stage = int16_t(board.peek16(board.cpu.s.r[13] - board.profile->backdrops.stage_below_r13));
 	if (stage < 0 || stage > 255) return;
-	const uint32_t desc = board.peek32(0xFFB30004 + 4 * uint32_t(stage));
+	const uint32_t desc = board.peek32(board.profile->backdrops.descriptors + 4 * uint32_t(stage));
 	if (desc < 0xFF000000u) return;
 	const int w = board.peek16(desc + 4), h = board.peek16(desc + 6);
 	if (w < 64 || w > 2048 || h < 1 || h > 256) return;
@@ -436,7 +436,7 @@ void TileGen::find_backdrop(const m3::Model3 &board, bool full)
 	}
 	b.desc = desc; b.w = w; b.h = h;
 	b.known = true;
-	for (int i = 0; i < 128; i++) b.bank[i] = int16_t(board.peek16(0x161614 + 2 * uint32_t(i)));
+	for (int i = 0; i < 128; i++) b.bank[i] = int16_t(board.peek16(board.profile->backdrops.banks + 2 * uint32_t(i)));
 	// where the layer's map is in it: some of the rows on screen compared
 	const uint32_t *names = vram + (0xF8000 + 3 * 0x2000) / 4;
 	const int sy = int((regs[0x60 / 4 + 3] >> 16) & 0x1FF), s = (scroll_x(vram, regs, 3, 0) & 511) >> 3;
@@ -513,7 +513,7 @@ void TileGen::find_backdrop(const m3::Model3 &board, bool full)
 	// 0x5D000 writes the map from the place it kept the frame before, 0x5D12C: this frame's and the last's tried), as
 	// the table places the banks or, with banks the game has just moved, each bank in one place
 	{
-		const int gx = int(int32_t(board.peek32(0x1617B4 + 4))) >> 3, gy = int(int32_t(board.peek32(0x1617B4 + 8))) >> 3;
+		const int gx = int(int32_t(board.peek32(board.profile->backdrops.place + 4))) >> 3, gy = int(int32_t(board.peek32(board.profile->backdrops.place + 8))) >> 3;
 		if (board.frame != b.game_frame) { b.prev_x = b.game_x; b.prev_y = b.game_y; b.game_x = gx; b.game_y = gy; b.game_frame = board.frame; }
 		const int cand[2][2] = { { gx, gy }, { b.prev_x, b.prev_y } };
 		for (const auto &cxy : cand) {
@@ -545,7 +545,7 @@ void TileGen::find_backdrop(const m3::Model3 &board, bool full)
 	full_failed_sum = screen_sum;
 	// (none exactly: the game's place with banks it has just moved, each bank in one place)
 	{
-		const int cand[2][2] = { { int(int32_t(board.peek32(0x1617B4 + 4))) >> 3, int(int32_t(board.peek32(0x1617B4 + 8))) >> 3 }, { b.prev_x, b.prev_y } };
+		const int cand[2][2] = { { int(int32_t(board.peek32(board.profile->backdrops.place + 4))) >> 3, int(int32_t(board.peek32(board.profile->backdrops.place + 8))) >> 3 }, { b.prev_x, b.prev_y } };
 		for (const auto &cxy : cand) {
 			const int x0 = ((cxy[0] % w) + w) % w, y0 = cxy[1];
 			int place[128], n = 0, bad = 0;

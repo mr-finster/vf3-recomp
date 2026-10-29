@@ -1068,12 +1068,12 @@ Rec::~Rec()
 	if (code) sljit_free_code(code, nullptr);
 }
 
-bool Rec::build(Cpu &c, const std::vector<uint32_t> &image, Stats *stats)
+bool Rec::build(Cpu &c, const std::vector<uint32_t> &image, const uint32_t *seed_map, size_t seed_count, Stats *stats)
 {
 	auto t0 = std::chrono::steady_clock::now();
 	cpu = &c;
 	const uint32_t hi = uint32_t(image.size() * 4);
-	std::vector<uint32_t> seeds(vf3_map, vf3_map + vf3_map_count);
+	std::vector<uint32_t> seeds(seed_map, seed_map + seed_count);
 	std::vector<uint32_t> addrs = analyse(image, 0, hi, seeds);
 	map.assign(hi / 4, 0);
 	bad.assign(hi / 4, 0);

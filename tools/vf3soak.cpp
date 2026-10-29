@@ -123,7 +123,7 @@ int main(int argc, char **argv)
 	}
 	ppcrec::Rec rec_a, rec_b;
 	if (rec) {
-		if (!rec_a.build(A.cpu, A.program_image()) || !rec_b.build(B.cpu, B.program_image())) {
+		if (!rec_a.build(A.cpu, A.program_image(), A.profile->map, A.profile->map_count) || !rec_b.build(B.cpu, B.program_image(), B.profile->map, B.profile->map_count)) {
 			fprintf(stderr, "vf3soak: the recompile failed\n");
 			return 1;
 		}

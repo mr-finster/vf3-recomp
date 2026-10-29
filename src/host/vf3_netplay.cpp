@@ -68,7 +68,7 @@ uint64_t content_hash(m3::Model3 &b)
 
 void set_versus_count(m3::Model3 &b, uint32_t count)
 {
-	memcpy(b.ram.data() + VERSUS_COUNT, &count, 4);   // (the RAM's words in the host's order)
+	memcpy(b.ram.data() + b.profile->versus_count, &count, 4);   // (the RAM's words in the host's order)
 }
 
 uint32_t random_versus_count()
@@ -128,9 +128,9 @@ bool Adapter::begin(const std::vector<uint8_t> &blob)
 	if (board.coin_setting() < 0 || (!board.set_coin_setting(m3::Model3::COIN_FREE_PLAY) && !board.free_play())) return false;
 	// and its stage select off, as most arcades had it (no stage screen: the game's own next stage), starting at
 	// the host's random place in the stages' list, as an arcade on all day would be
-	board.backup[STAGE_SELECT] = 1;
+	board.backup[stage_select(board)] = 1;
 	board.power_on();
-	for (int i = 0; i < BOOT_FRAMES; i++) {
+	for (int i = 0; i < board.profile->boot_frames; i++) {
 		board.run_frame();
 		if (booting && i % 60 == 59) booting();
 	}
@@ -188,7 +188,8 @@ void Adapter::advance(const uint16_t input[2], bool resim)
 void Score::frame(const m3::Model3 &board)
 {
 	auto byte = [&](uint32_t a) { return board.ram[a ^ 3]; };   // (the RAM's host-order words: the game's byte)
-	const uint8_t r[3] = { byte(ROUNDS_P1), byte(ROUNDS_P2), uint8_t(byte(PLAYING) & 3) };
+	const m3::Profile &p = *board.profile;
+	const uint8_t r[3] = { byte(p.rounds_p1), byte(p.rounds_p2), uint8_t(byte(p.playing) & 3) };
 	if (memcmp(r, now, 3) != 0) { memcpy(now, r, 3); held = 0; return; }
 	if (++held != 30) return;   // (once, when it's held long enough)
 	playing = r[2];

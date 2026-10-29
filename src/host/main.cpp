@@ -161,7 +161,6 @@ constexpr double FRAME_HZ = 57.524160;       // the Model 3's frame rate (the re
 constexpr int SOUND_RATE = 44100;
 constexpr float LEVEL = 4.0f;                 // --volume 100: the board's output raised 12 dB (it peaks well under full scale), limited
 constexpr int MAX_SCALE = 6;
-constexpr int BOOT_FRAMES = 960;              // the boot, up to the SEGA logo (the PC way: unseen)
 
 std::string find_assets()
 {
@@ -783,7 +782,7 @@ struct Game
 		if (!interp) {
 			ppcrec::Stats st;
 			built_image = board.program_image();
-			recompiled = rec.build(board.cpu, built_image, &st);
+			recompiled = rec.build(board.cpu, built_image, board.profile->map, board.profile->map_count, &st);
 			if (recompiled) {
 				board.cpu.rec = &rec;
 				fprintf(stderr, "recompiled %zu instructions (%zu native) to %zu KB of native code in %.0f ms\n",
@@ -808,7 +807,7 @@ struct Game
 		if (img == built_image) return;
 		built_image = std::move(img);
 		ppcrec::Stats st;
-		if (rec.build(board.cpu, built_image, &st))
+		if (rec.build(board.cpu, built_image, board.profile->map, board.profile->map_count, &st))
 			fprintf(stderr, "recompiled again (the program changed): %zu instructions in %.0f ms\n", st.instructions, st.ms);
 		else fprintf(stderr, "couldn't recompile the changed program: the interpreter runs it\n");
 	}
@@ -1279,12 +1278,16 @@ int main(int argc, char **argv)
 		if (!game.load(zip, err, arg_interp)) return fail(err);
 	}
 	m3::Model3 &board = game.board;
+	const uint64_t BOOT_FRAMES = uint64_t(board.profile->boot_frames);   // the boot, up to the SEGA logo (the PC way: unseen)
 	// Online play (online.h): in a match the board holds the host's NVRAM, and this player's own is kept here
 	static Online online(board);
 	std::vector<uint8_t> own_backup;
 	uint16_t own_eeprom[64] = {};
 	bool nvram_away = false;
-	const std::string backup_path = data + "/backup", eeprom_path = data + "/eeprom";
+	// (the program's own folder under the data folder, if its profile has one: Revision D's is the data folder itself)
+	const std::string nvram_dir = *board.profile->data_folder ? data + "/" + board.profile->data_folder : data;
+	if (nvram_dir != data) { std::error_code ec; std::filesystem::create_directories(nvram_dir, ec); }
+	const std::string backup_path = nvram_dir + "/backup", eeprom_path = nvram_dir + "/eeprom";
 	load_blob(backup_path, board.backup.data(), board.backup.size());
 	load_blob(eeprom_path, board.eeprom.regs, sizeof(board.eeprom.regs));
 	auto nvram_hash = [&] { return fnv(board.eeprom.regs, sizeof(board.eeprom.regs), fnv(board.backup.data(), board.backup.size())); };
@@ -1350,7 +1353,7 @@ int main(int argc, char **argv)
 			game_frame++;
 		}
 		game.tiles_on = true;
-		if (!scripted) vf3net::set_versus_count(board, vf3net::random_versus_count());   // (vf3net::VERSUS_COUNT: the first match between two players' stage)
+		if (!scripted) vf3net::set_versus_count(board, vf3net::random_versus_count());   // (the profile's versus_count: the first match between two players' stage)
 		else if (const char *vc = getenv("VF3_VERSUS_COUNT")) vf3net::set_versus_count(board, uint32_t(atoi(vc)));   // (tests: that stage)
 		fprintf(stderr, "boot: %llu frames in %.2f s, unseen\n", (unsigned long long)game_frame,
 				std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
@@ -2427,14 +2430,15 @@ int main(int argc, char **argv)
 		return p;
 	};
 	// The arcade's own settings (its test menu's GAME ASSIGNMENTS), read and written where the game keeps them in the
-	// backup RAM: a byte each at 0x1E000 on (found by changing each in the test menu), the energies 32-bit. The game
-	// reads them as it starts: a change restarts it when the menu closes (as VF2's), if they differ from when their
-	// page opened (a value stepped there and back, or at its limit, doesn't).
+	// backup RAM: a byte each at 0x1E000 on (the profile's settings; found by changing each in the test menu), the
+	// energies 32-bit. The game reads them as it starts: a change restarts it when the menu closes (as VF2's), if
+	// they differ from when their page opened (a value stepped there and back, or at its limit, doesn't).
 	std::vector<uint8_t> arcade_before;   // (empty: the page not opened since the menu last closed)
-	auto arcade_bytes = [&] { if (game.emu_thread.joinable()) game.job_wait(); return std::vector<uint8_t>(board.backup.begin() + 0x1E000, board.backup.begin() + 0x1E040); };
+	auto arcade_bytes = [&] { if (game.emu_thread.joinable()) game.job_wait(); const size_t at = board.profile->settings.at; return std::vector<uint8_t>(board.backup.begin() + at, board.backup.begin() + at + 0x40); };
 	auto arcade_page = [&] {
 		menu_page p{ "Arcade settings: a change restarts the game when the menu closes", "", {} };
-		auto at = [&](int o) -> uint8_t & { return board.backup[0x1E000 + size_t(o)]; };
+		const m3::Profile::Settings &set = board.profile->settings;
+		auto at = [&, base = set.at](int o) -> uint8_t & { return board.backup[base + size_t(o)]; };   // (kept by the page's items)
 		auto choice = [&](const char *label, const char *help, int o, int lo, int hi, std::function<std::string(int)> name) {
 			p.items.push_back({ label, help,
 				[at, o, lo, hi, name] { const int v = at(o); return v < lo || v > hi ? std::string("-") : name(v); },
@@ -2457,16 +2461,16 @@ int main(int argc, char **argv)
 		};
 		static const char *DIFFICULTY[] = { "Easy", "Normal", "Hard", "Hardest" };
 		static const char *COUNTRY[] = { "Japan", "USA", "Export", "Asia" };
-		choice("Difficulty", "How hard the computer fights.", 6, 0, 3, [](int v) { return std::string(DIFFICULTY[v]); });
-		choice("Rounds to win (vs CPU)", "Rounds needed to win a match against the computer.", 2, 2, 5, [](int v) { return std::to_string(v); });
-		choice("Rounds to win (vs player)", "Rounds needed to win a match between two players.", 3, 2, 5, [](int v) { return std::to_string(v); });
-		energy("Energy (vs CPU)", "Each fighter's energy in a match against the computer (the arcade's ENERGY MAX).", 8, 160, 360);
-		energy("Energy (vs player)", "Each fighter's energy in a match between two players.", 12, 180, 400);
+		choice("Difficulty", "How hard the computer fights.", set.difficulty, 0, 3, [](int v) { return std::string(DIFFICULTY[v]); });
+		choice("Rounds to win (vs CPU)", "Rounds needed to win a match against the computer.", set.rounds_cpu, 2, 5, [](int v) { return std::to_string(v); });
+		choice("Rounds to win (vs player)", "Rounds needed to win a match between two players.", set.rounds_vs, 2, 5, [](int v) { return std::to_string(v); });
+		energy("Energy (vs CPU)", "Each fighter's energy in a match against the computer (the arcade's ENERGY MAX).", set.energy_cpu, 160, 360);
+		energy("Energy (vs player)", "Each fighter's energy in a match between two players.", set.energy_vs, 180, 400);
 		choice("Stage select (vs player)", "A match between two players: the challenger picks the stage (the arcade's own screen, 8 seconds; "
 		       "hold Start on one for its Dural version). Off, as most arcades had it, each match goes to the game's next stage. Online matches have it off.",
-		       0x17, 0, 1, [&](int v) { return on_off(v == 0); });
-		choice("Demo sound", "Sound during the demo that plays between games.", 7, 0, 1, [&](int v) { return on_off(v == 0); });
-		choice("Country", "The arcade's region: Japan, USA, Export or Asia. It changes the game's text and what it shows.", 0x1E, 0, 3,
+		       set.stage_select, 0, 1, [&](int v) { return on_off(v == 0); });
+		choice("Demo sound", "Sound during the demo that plays between games.", set.demo_sound, 0, 1, [&](int v) { return on_off(v == 0); });
+		choice("Country", "The arcade's region: Japan, USA, Export or Asia. It changes the game's text and what it shows.", set.country, 0, 3,
 			[](int v) { return std::string(COUNTRY[v]); });
 		p.items.push_back({ "Service menu",
 			"The arcade's own test menu: input and sound tests, the rest of its game settings, coin settings and bookkeeping. Down moves, Start selects (or 9 and F2 on a keyboard). Choose EXIT to come back.",
@@ -2605,7 +2609,7 @@ int main(int argc, char **argv)
 	auto online_page = [&] {
 		if (!online_ready) {   // (the ROM's hash for the handshake, once)
 			if (game.emu_thread.joinable()) game.job_wait();
-			online.identity = { "vf3", vf3net::online_version(VF3_VERSION), vf3net::content_hash(board), "" };   // (the online version, not the release's)
+			online.identity = { board.profile->set, vf3net::online_version(VF3_VERSION), vf3net::content_hash(board), "" };   // (the online version, not the release's)
 			online_ready = true;
 		}
 		return online_menu::page(online, cfg.online, menu, [&] { cfg_dirty = true; });
@@ -2888,7 +2892,7 @@ int main(int argc, char **argv)
 					late_midi.clear();
 				};
 				game.tiles_on = true;
-				game_frame = vf3net::BOOT_FRAMES;
+				game_frame = BOOT_FRAMES;
 				game.hud_names[online.local_player()] = online.identity.name;   // (the name the other side was sent)
 				game.hud_names[online.local_player() ^ 1] = online.opponent();
 				hud_country[online.local_player()] = online.my_country();
@@ -3219,11 +3223,11 @@ int main(int argc, char **argv)
 				mix(c.left, script_ctl.left, live.left); mix(c.right, script_ctl.right, live.right);
 				mix(c.punch, script_ctl.punch, live.punch); mix(c.kick, script_ctl.kick, live.kick);
 				mix(c.guard, script_ctl.guard, live.guard); mix(c.escape, script_ctl.escape, live.escape);
-				// The arcade's test menu (RAM 0x102002 is 4 while it's up; 0 at the attract, a fight, the boot): Down
+				// The arcade's test menu (RAM 0x102002, the profile's test_menu, is 4 while it's up; 0 at the attract, a fight, the boot): Down
 				// moves (the service button) and Start selects (the test button), any pad or key, as VF1's and VF2's;
 				// the menu's Service menu presses test once the game is past its boot; leaving it, the PC way restarts
 				// at once past the boot (the game reboots through its own, about 7 s)
-				const bool test_mode = board.ram.size() > 0x102002 && board.ram[0x102002 ^ 3] == 4;
+				const bool test_mode = board.ram.size() > board.profile->test_menu && board.ram[board.profile->test_menu ^ 3] == 4;
 				test_mode_frames = test_mode ? test_mode_frames + 1 : 0;
 				if (!in_test && test_mode_frames >= 30) in_test = true;
 				left_test = false;
