@@ -31,9 +31,10 @@ struct Stats
 	double ms = 0;
 };
 
-// The address map this build ships with (src/rec/vf3_map.cpp)
-extern const uint32_t vf3_map[];
-extern const size_t vf3_map_count;
+// The address maps this build ships with: Revision D's (src/rec/vf3_map.cpp, from coverage runs) and Team Battle's
+// (src/rec/vf3tb_map.cpp, learnt: tools/recomp/mklearnt.py)
+extern const uint32_t vf3_map[], vf3tb_map[];
+extern const size_t vf3_map_count, vf3tb_map_count;
 
 // Which instructions to compile: walked from the seeds through the direct flow, within [lo, hi)
 std::vector<uint32_t> analyse(const std::vector<uint32_t> &image, uint32_t lo, uint32_t hi, const std::vector<uint32_t> &seeds);
@@ -59,7 +60,9 @@ public:
 	// what the interpreter ran instead: while the code in RAM wasn't the program (the boot, before its copy),
 	// outside the program (the boot code in CROM), or where no code was made (an address the map didn't have)
 	uint64_t interp_disabled = 0, interp_outside = 0, interp_unmapped = 0;
-	std::vector<uint32_t> unmapped;   // the addresses of the last kind (first few hundred)
+	std::vector<uint32_t> unmapped;   // the addresses of the last kind (the first unmapped_max)
+	size_t unmapped_max = 512;
+	std::vector<uint8_t> unmapped_seen;   // (past 512: which are in it, a byte a word)
 
 private:
 	bool built = false;

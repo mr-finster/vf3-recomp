@@ -1142,8 +1142,17 @@ bool Rec::run(Cpu &c)
 	const uintptr_t l = label[npc >> 2];
 	if (!l) {
 		interp_unmapped++;
-		if (unmapped.size() < 512 && std::find(unmapped.begin(), unmapped.end(), npc) == unmapped.end())
-			unmapped.push_back(npc);
+		if (unmapped.size() < unmapped_max) {   // (each once: a bit a word, kept once the list outgrows a search)
+			if (unmapped.size() >= 512 && unmapped_seen.empty()) {
+				unmapped_seen.assign(code_limit / 4, 0);
+				for (uint32_t a : unmapped) unmapped_seen[a >> 2] = 1;
+			}
+			const bool seen = unmapped_seen.empty() ? std::find(unmapped.begin(), unmapped.end(), npc) != unmapped.end() : unmapped_seen[npc >> 2];
+			if (!seen) {
+				unmapped.push_back(npc);
+				if (!unmapped_seen.empty()) unmapped_seen[npc >> 2] = 1;
+			}
+		}
 		return false;
 	}
 	entries++;

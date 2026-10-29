@@ -20,7 +20,9 @@ struct zip
 	std::vector<uint8_t> data;
 	std::vector<entry> entries;
 
-	bool open(const std::string &path)
+	// listing: only the directory (the names and CRCs), not the ROMs: the zip's last 1 MB read, where the directory is
+	// (39 names: a few KB); a zip whose directory starts before that is read whole
+	bool open(const std::string &path, bool listing = false)
 	{
 		// vf3.zip is about 112 MB: anything over 512 MB isn't the set, and isn't read
 		std::error_code ec;
@@ -28,12 +30,20 @@ struct zip
 		if (ec || size < 22 || size > (512u << 20)) return false;
 		FILE *f = fopen(path.c_str(), "rb");
 		if (!f) return false;
+		size_t from = listing && size > (1u << 20) ? size_t(size) - (1u << 20) : 0;
+		data.assign(size_t(size), 0);
+		const bool got = fseek(f, long(from), SEEK_SET) == 0 && fread(data.data() + from, 1, data.size() - from, f) == data.size() - from;
+		if (!got) { fclose(f); return false; }
 		const long n = long(size);
-		data.resize(size_t(n));
-		const bool got = fread(data.data(), 1, data.size(), f) == data.size();
-		fclose(f);
-		if (!got) return false;
 		long eocd = -1;
+		for (long i = n - 22; i >= long(from) && i >= n - 22 - 65535; i--)
+			if (le32(&data[i]) == 0x06054b50) { eocd = i; break; }
+		if (eocd >= 0 && from > 0 && le32(&data[eocd + 16]) < from) {   // (the directory further back: the rest read too)
+			const bool rest = fseek(f, 0, SEEK_SET) == 0 && fread(data.data(), 1, from, f) == from;
+			if (!rest) { fclose(f); return false; }
+		}
+		fclose(f);
+		eocd = -1;
 		for (long i = n - 22; i >= 0 && i >= n - 22 - 65535; i--)
 			if (le32(&data[i]) == 0x06054b50) { eocd = i; break; }
 		if (eocd < 0) return false;
@@ -108,13 +118,46 @@ void to_host_words(std::vector<uint8_t> &v)
 	}
 }
 
+// A clone's other ROMs, from its parent's zip beside it (a split set: vf3tb.zip with only Team Battle's own ROMs,
+// vf3.zip in the same folder)
+std::string parent_zip(const std::string &path, const m3::Profile &profile)
+{
+	if (!profile.parent) return {};
+	const std::filesystem::path p = std::filesystem::path(path).parent_path() / (std::string(profile.parent) + ".zip");
+	std::error_code ec;
+	return std::filesystem::is_regular_file(p, ec) && !std::filesystem::equivalent(p, path, ec) ? p.string() : std::string();
+}
+
 } // namespace
+
+std::vector<const m3::Profile *> sets_in(const std::string &path)
+{
+	std::vector<const m3::Profile *> out;
+	zip z;
+	if (!z.open(path, true)) return out;
+	for (const m3::Profile *const *p = m3::PROFILES; *p; p++) {
+		zip parent;
+		const std::string pz = parent_zip(path, **p);
+		const bool has_parent = !pz.empty() && parent.open(pz, true);
+		bool all = true;
+		for (size_t i = 0; i < (*p)->rom_count && all; i++) {
+			bool found = false;
+			for (const entry &x : z.entries) found |= x.crc == (*p)->roms[i].crc;
+			if (has_parent) for (const entry &x : parent.entries) found |= x.crc == (*p)->roms[i].crc;
+			all = found;
+		}
+		if (all) out.push_back(*p);
+	}
+	return out;
+}
 
 result load(const std::string &path, const m3::Profile &profile)
 {
 	result res;
-	zip z;
+	zip z, parent;
 	if (!z.open(path)) { res.error = "Couldn't read " + path + " as a zip file."; return res; }
+	const std::string pz = parent_zip(path, profile);
+	const bool has_parent = !pz.empty() && parent.open(pz);
 	std::vector<uint8_t> region[N_REGIONS];
 	for (int r = 0; r < N_REGIONS; r++) region[r].assign(REGION_SIZE[r], 0);
 	int bad = 0;
@@ -122,9 +165,11 @@ result load(const std::string &path, const m3::Profile &profile)
 	for (size_t i = 0; i < profile.rom_count; i++) {
 		const rom &ro = profile.roms[i];
 		const entry *e = nullptr;
+		const zip *from = &z;
 		for (const entry &x : z.entries) if (x.crc == ro.crc && x.name == ro.name) { e = &x; break; }
 		if (!e) for (const entry &x : z.entries) if (x.crc == ro.crc) { e = &x; break; }
-		if (!e || !z.read(*e, d)) {
+		if (!e && has_parent) for (const entry &x : parent.entries) if (x.crc == ro.crc) { e = &x; from = &parent; break; }
+		if (!e || !from->read(*e, d)) {
 			if (!bad++) res.error = std::string("This isn't a complete ") + profile.title + " set, \"" + profile.set + "\". Not usable:";
 			res.error += std::string(" ") + ro.name;
 			continue;

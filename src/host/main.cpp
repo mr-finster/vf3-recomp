@@ -487,6 +487,7 @@ struct settings
 	int music = 100, effects = 100;   // within the volume
 	int arcade_coin = -2;   // the arcade way's coin setting, while the PC way's FREE PLAY replaces it (-1 none to give back, -2 none kept yet)
 	std::string roms_folder;
+	std::string game;   // the program played, its set's name ("vf3", "vf3tb"): Game > Version, when the zips hold both
 	static constexpr const char *BUILD = VF3_VERSION " " VF3_DATE " " VF3_COMMIT;   // (what gpu3d_failed was learnt by)
 	std::string gpu3d_failed;   // SDL_GPU's drivers whose 3D failed here ("direct3d12 vulkan"): the next start tries the next
 	bool fullscreen = false, arcade = false, show_fps = false, smooth = true;
@@ -523,6 +524,7 @@ struct settings
 		num("arcade_coins", arcade_coin, -2, m3::Model3::COIN_FREE_PLAY - 1);
 		num("renderer_3d", renderer3d, 0, 2);
 		if (auto it = kv.find("roms_folder"); it != kv.end()) roms_folder = it->second;
+		if (auto it = kv.find("game"); it != kv.end() && m3::find_profile(it->second.c_str())) game = it->second;
 		if (auto it = kv.find("online_name"); it != kv.end()) online.name = online_menu::clean_name(it->second);
 		if (auto it = kv.find("online_address"); it != kv.end()) online.address = online_menu::clean_address(it->second);
 		if (auto it = kv.find("online_lobby"); it != kv.end() && (it->second.rfind("https://", 0) == 0 || it->second.rfind("http://", 0) == 0))
@@ -602,6 +604,7 @@ struct settings
 				"smooth_motion = %d\nrenderer_3d = %d\nbackground_filter = %d\n", scale, aspect, int(fullscreen), volume, int(arcade), int(show_fps),
 				int(smooth), renderer3d, int(smooth_bg));
 		if (!roms_folder.empty()) fprintf(f, "roms_folder = %s\n", roms_folder.c_str());
+		if (!game.empty()) fprintf(f, "game = %s\n", game.c_str());
 		if (!gpu3d_failed.empty()) fprintf(f, "gpu_3d_failed = %s\ngpu_3d_failed_build = %s\n", gpu3d_failed.c_str(), BUILD);
 		fprintf(f, "crt_colours = %d\nbrightness = %d\ngamma = %d\nsharp_textures = %d\n", crt_colours, brightness, gamma, int(sharp_textures));
 		if (graphics) fprintf(f, "graphics = %d\n", graphics);
@@ -644,29 +647,47 @@ bool copy_whole(const std::filesystem::path &from, const std::filesystem::path &
 	return ok;
 }
 
+// The zips a program can be in, by name (vf3.zip, vf3tb.zip: each profile's set's), and the first in a folder that
+// holds one (by the profiles' order); none there: the folder's vf3.zip (to say where it goes)
+std::filesystem::path set_zip(const std::filesystem::path &dir)
+{
+	std::error_code ec;
+	for (const m3::Profile *const *p = m3::PROFILES; *p; p++) {
+		const std::filesystem::path z = dir / (std::string((*p)->set) + ".zip");
+		if (std::filesystem::is_regular_file(z, ec) && !romset::sets_in(z.string()).empty()) return z;
+	}
+	return dir / (std::string(m3::PROFILES[0]->set) + ".zip");
+}
+
 // The player's own game, the first time: no complete set in their data folder's roms/ yet, so ask for MAME's
-// vf3.zip with a file picker, check it, and copy it in. The player's ROM folder (`folder`) is looked in first and
-// only read. `keep`: the player's data folder when the data folder is the program's own (the Steam Deck package):
-// a copy of the zip is kept there too, so an update unpacked into a new folder doesn't ask for it again (as VF1's).
-// The zip's path in `out`; false if they cancel.
+// vf3.zip (or vf3tb.zip, Team Battle's) with a file picker, check it, and copy it in. The player's ROM folder
+// (`folder`) is looked in first and only read. `keep`: the player's data folder when the data folder is the
+// program's own (the Steam Deck package): a copy of the zips is kept there too, so an update unpacked into a new
+// folder doesn't ask for them again (as VF1's). The zip's path in `out` (the others beside it: game_zips); false if
+// they cancel.
 bool first_launch(const std::string &data, const std::string &keep, const std::string &folder, std::string &out)
 {
 	namespace fs = std::filesystem;
 	const fs::path own = fs::path(data) / "roms";
-	const fs::path roms = folder.empty() ? own : fs::path(folder), zip = roms / "vf3.zip";
+	const fs::path roms = folder.empty() ? own : fs::path(folder), zip = set_zip(roms);
 	const fs::path kept = !folder.empty() || keep.empty() ? own : fs::path(keep) / "roms";
 	std::error_code ec;
-	auto keep_copy = [&] {   // (when it isn't there already)
-		if (kept == roms || !folder.empty() || !fs::is_regular_file(zip, ec)) return;
-		if (fs::is_regular_file(kept / "vf3.zip", ec) && fs::file_size(kept / "vf3.zip", ec) == fs::file_size(zip, ec)) return;
-		fs::create_directories(kept, ec);
-		std::string why;
-		if (copy_whole(zip, kept / "vf3.zip", why)) fprintf(stderr, "a copy of vf3.zip kept in %s (for the next update)\n", kept.string().c_str());
-		else fprintf(stderr, "couldn't keep a copy of vf3.zip: %s\n", why.c_str());
+	auto keep_copy = [&] {   // (each set's zip, when it isn't there already)
+		if (kept == roms || !folder.empty()) return;
+		for (const m3::Profile *const *p = m3::PROFILES; *p; p++) {
+			const std::string name = std::string((*p)->set) + ".zip";
+			if (!fs::is_regular_file(roms / name, ec)) continue;
+			if (fs::is_regular_file(kept / name, ec) && fs::file_size(kept / name, ec) == fs::file_size(roms / name, ec)) continue;
+			fs::create_directories(kept, ec);
+			std::string why;
+			if (copy_whole(roms / name, kept / name, why)) fprintf(stderr, "a copy of %s kept in %s (for the next update)\n", name.c_str(), kept.string().c_str());
+			else fprintf(stderr, "couldn't keep a copy of %s: %s\n", name.c_str(), why.c_str());
+		}
 	};
 	std::string problem;
 	auto check = [&](const fs::path &z) -> bool {
-		romset::result r = romset::load(z.string());
+		const std::vector<const m3::Profile *> sets = romset::sets_in(z.string());
+		romset::result r = romset::load(z.string(), sets.empty() ? m3::VF3_REV_D : *sets[0]);
 		if (r.ok) { out = z.string(); return true; }
 		problem = r.error + "\n\n";
 		return false;
@@ -674,9 +695,9 @@ bool first_launch(const std::string &data, const std::string &keep, const std::s
 	if (!folder.empty()) {
 		if (fs::is_regular_file(zip, ec)) fprintf(stderr, "the game from the ROM folder %s\n", roms.string().c_str());
 		else {
-			fprintf(stderr, "ROM folder: no vf3.zip in %s%s: looking in %s next\n", roms.string().c_str(),
+			fprintf(stderr, "ROM folder: no vf3.zip or vf3tb.zip in %s%s: looking in %s next\n", roms.string().c_str(),
 					fs::is_directory(roms, ec) ? "" : " (no such folder)", own.string().c_str());
-			if (fs::is_regular_file(own / "vf3.zip", ec) && check(own / "vf3.zip")) {
+			if (fs::is_regular_file(set_zip(own), ec) && check(set_zip(own))) {
 				fprintf(stderr, "the game from %s\n", own.string().c_str());
 				return true;
 			}
@@ -686,8 +707,8 @@ bool first_launch(const std::string &data, const std::string &keep, const std::s
 		keep_copy();
 		return true;
 	}
-	// an update in a new folder: the set kept from before
-	if (kept != roms && fs::is_regular_file(kept / "vf3.zip", ec) && check(kept / "vf3.zip")) {
+	// an update in a new folder: the sets kept from before (copied back beside each other: a split vf3tb.zip needs vf3.zip)
+	if (kept != roms && fs::is_regular_file(set_zip(kept), ec) && check(set_zip(kept))) {
 		fprintf(stderr, "the game from %s\n", kept.string().c_str());
 		return true;
 	}
@@ -697,11 +718,12 @@ bool first_launch(const std::string &data, const std::string &keep, const std::s
 	}
 	SDL_Init(SDL_INIT_VIDEO);
 	const char *title = "Virtua Fighter 3";
-	// (the player's ROM folder holds a vf3.zip that isn't the set: the one chosen goes in the data folder's roms,
-	// not over the player's own file)
-	const fs::path into = !folder.empty() && fs::exists(zip, ec) ? own : roms, into_zip = into / "vf3.zip";
+	// (the player's ROM folder holds a zip that isn't a set: the one chosen goes in the data folder's roms, not over
+	// the player's own file)
+	const fs::path into = !folder.empty() && fs::exists(zip, ec) ? own : roms;
 	const std::string where = "It's copied into " + into.string() + ", so you only do this once.";
-	std::string note = problem + "Choose your copy of Virtua Fighter 3: MAME's \"vf3\" set (vf3.zip, Revision D).\n\n" + where;
+	std::string note = problem + "Choose your copy of Virtua Fighter 3: MAME's \"vf3\" set (vf3.zip, Revision D), or its Team Battle, "
+	                   "\"vf3tb\" (vf3tb.zip).\n\n" + where;
 	for (;;) {
 		if (!message_box(SDL_MESSAGEBOX_INFORMATION, title, note)) return false;
 		// (the callback may run on another thread: what it writes is read only after done, set last)
@@ -717,16 +739,21 @@ bool first_launch(const std::string &data, const std::string &keep, const std::s
 		if (chosen.failed) {
 			fs::create_directories(roms, ec);
 			message_box(SDL_MESSAGEBOX_INFORMATION, title,
-				"There's no file picker here. Put your vf3.zip in this folder, then start the game again:\n\n" + roms.string());
+				"There's no file picker here. Put your vf3.zip (or vf3tb.zip) in this folder, then start the game again:\n\n" + roms.string());
 			return false;
 		}
 		if (chosen.files.empty()) return false;
 		const std::string f = chosen.files[0];
-		romset::result r = romset::load(f);
+		const std::vector<const m3::Profile *> sets = romset::sets_in(f);
+		romset::result r = romset::load(f, sets.empty() ? m3::VF3_REV_D : *sets[0]);
 		if (!r.ok) {
-			note = fs::path(f).filename().string() + ": " + r.error + "\n\nChoose MAME's \"vf3\" set (vf3.zip).\n\n" + where;
+			note = fs::path(f).filename().string() + ": " + r.error + "\n\nChoose MAME's \"vf3\" set (vf3.zip) or \"vf3tb\" (vf3tb.zip).\n\n" + where;
 			continue;
 		}
+		// (named for what it holds: Team Battle's whole set vf3tb.zip, a set of both, or Revision D's, vf3.zip)
+		bool tb = false;
+		for (const m3::Profile *p : sets) tb |= p == &m3::VF3_TB;
+		const fs::path into_zip = into / (tb ? "vf3tb.zip" : "vf3.zip");
 		fs::create_directories(into, ec);
 		std::string why;
 		if (!fs::equivalent(f, into_zip, ec) && !copy_whole(f, into_zip, why)) {
@@ -737,6 +764,32 @@ bool first_launch(const std::string &data, const std::string &keep, const std::s
 		out = into_zip.string();
 		return true;
 	}
+}
+
+// The programs the zip and the set zips beside it hold (each with the zip it loads from: its own name's first),
+// in the profiles' order
+std::vector<std::pair<const m3::Profile *, std::string>> game_zips(const std::string &zip)
+{
+	namespace fs = std::filesystem;
+	std::vector<std::string> zips;
+	std::error_code ec;
+	const fs::path dir = fs::path(zip).parent_path();
+	for (const m3::Profile *const *p = m3::PROFILES; *p; p++) {
+		const fs::path z = dir / (std::string((*p)->set) + ".zip");
+		if (fs::is_regular_file(z, ec)) zips.push_back(z.string());
+	}
+	if (std::find(zips.begin(), zips.end(), zip) == zips.end()) zips.insert(zips.begin(), zip);
+	std::vector<std::pair<const m3::Profile *, std::string>> out;
+	for (const m3::Profile *const *p = m3::PROFILES; *p; p++) {
+		std::string from;
+		for (const std::string &z : zips) {
+			const std::vector<const m3::Profile *> sets = romset::sets_in(z);
+			if (std::find(sets.begin(), sets.end(), *p) == sets.end()) continue;
+			if (from.empty() || fs::path(z).stem() == (*p)->set) from = z;
+		}
+		if (!from.empty()) out.push_back({ *p, from });
+	}
+	return out;
 }
 
 // The board and what makes its pictures and sound
@@ -1273,6 +1326,17 @@ int main(int argc, char **argv)
 		if (!first_launch(data, keep_data, roms_folder, zip)) return hidden ? 1 : 0;
 	}
 	static Game game;   // (large: not on the stack)
+	// The program: the one last played (Game > Version) if the zips hold it, else the first they hold (Revision D's
+	// before Team Battle's)
+	const std::vector<std::pair<const m3::Profile *, std::string>> programs = game_zips(zip);
+	if (!programs.empty()) {
+		auto pick = programs.front();
+		for (const auto &pz : programs) if (cfg.game == pz.first->set) pick = pz;
+		game.board.profile = pick.first;
+		zip = pick.second;
+	}
+	for (const auto &pz : programs)
+		fprintf(stderr, "%s %s: %s\n", pz.first == game.board.profile ? "playing" : "also here,", pz.first->title, pz.second.c_str());
 	{
 		std::string err;
 		if (!game.load(zip, err, arg_interp)) return fail(err);
@@ -1375,7 +1439,7 @@ int main(int argc, char **argv)
 			win_w = int(win_w * k); win_h = int(win_h * k);
 		}
 	}
-	SDL_Window *win = SDL_CreateWindow("Virtua Fighter 3", win_w, win_h,
+	SDL_Window *win = SDL_CreateWindow(board.profile->name, win_w, win_h,
 		SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | (cfg.fullscreen ? SDL_WINDOW_FULLSCREEN : 0) | SDL_WINDOW_HIDDEN);
 	if (!win) return fail(std::string("Couldn't open the window: ") + SDL_GetError());
 	SDL_HideCursor();
@@ -2426,6 +2490,21 @@ int main(int argc, char **argv)
 			[&](int) { if (nvram_away) return; cfg.arcade = !cfg.arcade; g_pc_mode = !cfg.arcade; cfg_dirty = true; reset_game(); } });
 		p.items.push_back({ "Reset game", "Restarts the game, like switching the arcade off and on. Rankings and settings are kept. (F3)",
 			{}, {}, [&] { reset_game(); } });
+		if (programs.size() > 1)   // (the zips hold both: Revision D and Team Battle)
+			p.items.push_back({ "Version",
+				"Which Virtua Fighter 3 to play: the original (Revision D) or Team Battle, three fighters a side. Each keeps its own rankings and arcade settings. Changing it takes effect the next time the game starts.",
+				[&] {
+					const m3::Profile *want = board.profile;
+					for (const auto &pz : programs) if (cfg.game == pz.first->set) want = pz.first;
+					return std::string(want == &m3::VF3_TB ? "Team Battle" : "Virtua Fighter 3") + (want != board.profile ? " (from the next start)" : "");
+				},
+				[&](int d) {
+					size_t i = 0;
+					for (size_t k = 0; k < programs.size(); k++) if (programs[k].first->set == (cfg.game.empty() ? std::string(board.profile->set) : cfg.game)) i = k;
+					i = (i + programs.size() + (d < 0 ? programs.size() - 1 : 1)) % programs.size();
+					cfg.game = programs[i].first->set;
+					cfg_dirty = true;
+				} });
 		p.items.push_back(back_item());
 		return p;
 	};
@@ -2628,9 +2707,13 @@ int main(int argc, char **argv)
 		p.items.push_back({ "Display", "Sharpness, antialiasing, screen shape, the 3D renderer, smooth motion, background and screen filters, frame rate and fullscreen.", {}, {}, [&] { menu.push(display_page()); } });
 		p.items.push_back({ "Sound", "The overall, music and effects volumes.", {}, {}, [&] { menu.push(sound_page()); } });
 		p.items.push_back({ "Game", "Play style and reset.", {}, {}, [&] { menu.push(game_page()); } });
-		p.items.push_back({ "Arcade settings", "Difficulty, rounds, energy, demo sound, country and the service menu. Changing them restarts the game.", {}, {},
-							[&] { if (arcade_before.empty()) arcade_before = arcade_bytes(); menu.push(arcade_page()); } });
-		p.items.push_back({ "Online", "Play someone over the network: host a match, or join one.", {}, {}, [&] { menu.push(online_page()); } });
+		if (board.profile->settings.at)   // (where the program keeps them known)
+			p.items.push_back({ "Arcade settings", "Difficulty, rounds, energy, demo sound, country and the service menu. Changing them restarts the game.", {}, {},
+								[&] { if (arcade_before.empty()) arcade_before = arcade_bytes(); menu.push(arcade_page()); } });
+		if (board.profile->online)
+			p.items.push_back({ "Online", "Play someone over the network: host a match, or join one.", {}, {}, [&] { menu.push(online_page()); } });
+		else
+			p.items.push_back({ "Online", std::string("Online play isn't ready for ") + board.profile->name + " yet: switch to Virtua Fighter 3 in Game > Version to play online.", {}, {}, {} });
 		p.items.push_back({ "Controls", "Each player's controller, keys and buttons.", {}, {}, [&] { menu.push(controls_page()); } });
 		p.items.push_back({ "Quit", "Saves and closes the game.", {}, {}, [&] { running = false; } });
 		return p;
@@ -3227,7 +3310,7 @@ int main(int argc, char **argv)
 				// moves (the service button) and Start selects (the test button), any pad or key, as VF1's and VF2's;
 				// the menu's Service menu presses test once the game is past its boot; leaving it, the PC way restarts
 				// at once past the boot (the game reboots through its own, about 7 s)
-				const bool test_mode = board.ram.size() > board.profile->test_menu && board.ram[board.profile->test_menu ^ 3] == 4;
+				const bool test_mode = board.profile->test_menu && board.ram.size() > board.profile->test_menu && board.ram[board.profile->test_menu ^ 3] == 4;
 				test_mode_frames = test_mode ? test_mode_frames + 1 : 0;
 				if (!in_test && test_mode_frames >= 30) in_test = true;
 				left_test = false;
@@ -3560,16 +3643,16 @@ int main(int argc, char **argv)
 		if (cfg.timings && SDL_GetTicksNS() - t9.t0 >= 2000000000ull) {
 			const double secs = double(SDL_GetTicksNS() - t9.t0) / 1e9;
 			char t[200];
-			snprintf(t, sizeof t, "Virtua Fighter 3  %dx  %.1f frames/s  %.1f pictures/s  game %.2f ms/frame  picture %.2f ms", scale, t9.frames / secs,
+			snprintf(t, sizeof t, "%s  %dx  %.1f frames/s  %.1f pictures/s  game %.2f ms/frame  picture %.2f ms", board.profile->name, scale, t9.frames / secs,
 					 t9.pictures / secs, t9.frames ? t9.emu_ms / t9.frames : 0.0, t9.pictures ? t9.draw_ms / t9.pictures : 0.0);
 			SDL_SetWindowTitle(win, t);
 			fprintf(stderr, "%s\n", t);
 			t9 = {};
 			t9.t0 = SDL_GetTicksNS();
 		} else if (!cfg.timings) {
-			char t[96];
-			if (cfg.aspect) snprintf(t, sizeof t, "Virtua Fighter 3  %dx  %s", scale, ASPECT_NAMES[cfg.aspect]);
-			else snprintf(t, sizeof t, "Virtua Fighter 3  %dx  fit (%.2f:1)", scale, picture_aspect());
+			char t[128];
+			if (cfg.aspect) snprintf(t, sizeof t, "%s  %dx  %s", board.profile->name, scale, ASPECT_NAMES[cfg.aspect]);
+			else snprintf(t, sizeof t, "%s  %dx  fit (%.2f:1)", board.profile->name, scale, picture_aspect());
 			if (title_now != t) { title_now = t; SDL_SetWindowTitle(win, t); }
 		}
 		if (SDL_GetTicksNS() - pace.t0 > (pace_log ? 2000000000ull : 10000000000ull)) {

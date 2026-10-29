@@ -25,6 +25,9 @@ struct Profile
 {
 	const char *set;     // MAME's set: the zip's name ("vf3" for vf3.zip) and the online game
 	const char *title;   // for the player ("Virtua Fighter 3 (Revision D)")
+	const char *name;    // the window's and the menu's ("Virtua Fighter 3")
+	const char *parent;  // a clone's: the set its other ROMs are in (a split zip takes them from that zip beside it)
+	bool online;         // online play (needs the FREE PLAY patch, the select and the score: all known)
 	const RomFile *roms;
 	size_t rom_count;
 
@@ -69,6 +72,8 @@ struct Profile
 	const char *data_folder;
 };
 
-extern const Profile VF3_REV_D;
+extern const Profile VF3_REV_D, VF3_TB;
+extern const Profile *const PROFILES[];   // every program known, Revision D first; nullptr after the last
+const Profile *find_profile(const char *set);   // by MAME's set name ("vf3", "vf3tb"); nullptr if none
 
 } // namespace m3

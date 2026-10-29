@@ -5,13 +5,18 @@
 // quits), playing an input script, and writes the CPU state and a RAM hash after every frame in the reference
 // build's format, for tools/statecmp.py.
 //   vf3run <vf3.zip> [--frames N] [--script FILE] [--state FILE] [--ram-at FRAME] [--watch ADDR] [--rec] [--quiet]
-// --wav FILE runs the sound board and writes what it plays. --shots DIR writes the script's screenshots there as PNG. --rec runs the recompiled code (src/rec) with the interpreter for the rest. --ram-at writes RAM after that frame to ram_<frame>.bin in the current folder (the tile generator's RAM and registers to tiles_<frame>.bin); --watch ADDR (hex) reports
+// --sets ZIP lists the programs the zip holds. --wav FILE runs the sound board and writes what it plays. --shots DIR writes the script's screenshots there as PNG. --rec runs the recompiled code (src/rec) with the interpreter for the rest. --ram-at writes RAM after that frame to ram_<frame>.bin in the current folder (the tile generator's RAM and registers to tiles_<frame>.bin); --watch ADDR (hex) reports
 // the CPU's stores to that word (--trace-pc ADDR: r3-r8 and LR each time that instruction runs; both on the interpreter). VF3_VOLUMES=music,effects (percent) sets the sound board's two volumes for --wav. VF3_POKE=addr=value
 // (hex address into --ram-at's dump, a byte; "b" first: the backup RAM's) writes RAM before every frame
 // (VF3_POKE_FRAMES=from-to: only those). VF3_FREE_PLAY=1: the coin setting FREE PLAY before the boot, as the PC way.
+// VF3_SET=vf3tb: Team Battle's profile (the zip must hold its set); VF3_MAP_OF=vf3: another profile's recompiler map (none: the interrupts' entries only);
+// VF3_BORROW=backdrops,coin,settings,test_menu,versus_count,scene,score,free_play_text: those addresses from
+// VF3_BORROW_FROM's profile (default vf3), to try them on another program; VF3_MAP_IN=file: more entry points (hex, a line each); VF3_MAP_OUT=file: appends every address the interpreter ran
+// from for want of one (--rec; a map's learning: run again with them in until none are new).
 #include <map>
 #include "../src/host/input_script.h"
 #include "../src/machine/model3.h"
+#include "../src/machine/romset.h"
 #include "../src/rec/ppc_rec.h"
 #include "../src/host/png.h"
 #include "../src/video/tilegen.h"
@@ -39,6 +44,10 @@ int main(int argc, char **argv)
 		else if (a == "--shots" && i + 1 < argc) shots = argv[++i];
 		else if (a == "--wav" && i + 1 < argc) wav_path = argv[++i];
 		else if (a == "--quiet") quiet = true;
+		else if (a == "--sets" && i + 1 < argc) {   // which programs a zip holds (romset::sets_in), and nothing else
+			for (const m3::Profile *p : romset::sets_in(argv[++i])) printf("%s (%s)\n", p->set, p->title);
+			return 0;
+		}
 		else if (a == "--rec") rec = true;
 		else if (a == "--ram-at" && i + 1 < argc) ram_at = strtol(argv[++i], nullptr, 10);
 		else if (a == "--watch" && i + 1 < argc) watch = uint32_t(strtoul(argv[++i], nullptr, 16));
@@ -54,6 +63,25 @@ int main(int argc, char **argv)
 		return 2;
 	}
 	static m3::Model3 board;
+	if (const char *set = getenv("VF3_SET")) {   // tests: another program's profile ("vf3tb"; profile.h)
+		if (!(board.profile = m3::find_profile(set))) { fprintf(stderr, "vf3run: no such set %s\n", set); return 2; }
+	}
+	if (const char *groups = getenv("VF3_BORROW")) {   // tests: "backdrops,coin,...": those addresses from VF3_BORROW_FROM's profile (vf3)
+		static m3::Profile mixed = *board.profile;
+		const m3::Profile *from = m3::find_profile(getenv("VF3_BORROW_FROM") ? getenv("VF3_BORROW_FROM") : "vf3");
+		if (!from) { fprintf(stderr, "vf3run: no such set to borrow from\n"); return 2; }
+		const std::string g = std::string(",") + groups + ",";
+		auto has = [&](const char *k) { return g.find(std::string(",") + k + ",") != std::string::npos; };
+		if (has("free_play_text")) mixed.free_play_text = from->free_play_text;
+		if (has("coin")) mixed.coin = from->coin;
+		if (has("settings")) mixed.settings = from->settings;
+		if (has("test_menu")) mixed.test_menu = from->test_menu;
+		if (has("versus_count")) mixed.versus_count = from->versus_count;
+		if (has("scene")) mixed.scene = from->scene;
+		if (has("score")) mixed.rounds_p1 = from->rounds_p1, mixed.rounds_p2 = from->rounds_p2, mixed.playing = from->playing;
+		if (has("backdrops")) mixed.backdrops = from->backdrops;
+		board.profile = &mixed;
+	}
 	std::string error;
 	if (!board.load(rom, error)) {
 		fprintf(stderr, "vf3run: %s\n", error.c_str());
@@ -76,7 +104,15 @@ int main(int argc, char **argv)
 			return 2;
 		}
 		ppcrec::Stats st;
-		if (!recompiler.build(board.cpu, board.program_image(), board.profile->map, board.profile->map_count, &st)) {
+		const m3::Profile *map_of = getenv("VF3_MAP_OF") ? m3::find_profile(getenv("VF3_MAP_OF")) : board.profile;
+		if (!map_of) map_of = board.profile;
+		std::vector<uint32_t> seeds(map_of->map, map_of->map + map_of->map_count);
+		if (getenv("VF3_MAP_OF") && strcmp(getenv("VF3_MAP_OF"), "none") == 0) seeds = { 0x100, 0x500, 0x900 };   // (the interrupts' only)
+		if (const char *in = getenv("VF3_MAP_IN")) {   // (tests: more entry points, a hex address a line)
+			if (FILE *f = fopen(in, "r")) { unsigned a; while (fscanf(f, "%x", &a) == 1) seeds.push_back(a); fclose(f); }
+		}
+		if (getenv("VF3_MAP_OUT")) recompiler.unmapped_max = size_t(1) << 20;
+		if (!recompiler.build(board.cpu, board.program_image(), seeds.data(), seeds.size(), &st)) {
 			fprintf(stderr, "vf3run: the recompile failed\n");
 			return 1;
 		}
@@ -911,6 +947,9 @@ int main(int argc, char **argv)
 		       (unsigned long long)recompiler.interp_unmapped);
 		for (size_t i = 0; i < recompiler.unmapped.size() && i < 8; i++) printf(i ? " %05X" : " (%05X", recompiler.unmapped[i]);
 		printf(recompiler.unmapped.empty() ? "\n" : ")\n");
+	}
+	if (const char *out = getenv("VF3_MAP_OUT"); rec && out) {   // (tests: where the interpreter ran for want of a map entry, added)
+		if (FILE *f = fopen(out, "a")) { for (uint32_t a : recompiler.unmapped) fprintf(f, "%05X\n", a); fclose(f); }
 	}
 	return board.cpu.s.fatal ? 1 : 0;
 }

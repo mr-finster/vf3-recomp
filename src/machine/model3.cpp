@@ -1374,6 +1374,7 @@ int Model3::hide_free_play_text()
 	if (!free_play_text.empty()) return int(free_play_text.size());   // (hidden already)
 	const size_t CROM_AT = profile->program_at;
 	const Profile::FreePlayText &t = profile->free_play_text;
+	if (!t.free_play) return 0;   // (not known for this program)
 	auto at = [&](size_t a) -> uint8_t & { return crom[(a + CROM_AT) ^ 3]; };
 	auto is = [&](size_t a, const char *t) {
 		for (size_t k = 0; t[k]; k++)

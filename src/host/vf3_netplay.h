@@ -62,7 +62,7 @@ constexpr uint16_t START_BUTTON = 256;   // (the input word's Start: pack's)
 // to the VS screen, and never elsewhere (0 at the boot, the title and the attract, 4 at the VS screens and fights, 7 between a 1P run's
 // fights; found by probing every byte of RAM over two 9,000-frame runs, a 1P and a 2P). A match plays it in
 // lockstep (vfnet::Session::set_lockstep): no frame on a guess, so a face never flashes as a guess is put right.
-inline int scene_byte(const m3::Model3 &board) { const size_t a = board.profile->scene; return board.ram.size() > a ? board.ram[a ^ 3] : -1; }
+inline int scene_byte(const m3::Model3 &board) { const size_t a = board.profile->scene; return a && board.ram.size() > a ? board.ram[a ^ 3] : -1; }
 inline bool in_select(const m3::Model3 &board) { return scene_byte(board) == 5; }
 
 // The score between the two players, read from the game's own RAM after each frame (as Fightcade's detectors do,

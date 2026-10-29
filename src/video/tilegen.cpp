@@ -422,6 +422,7 @@ void TileGen::find_backdrop(const m3::Model3 &board, bool full)
 	const uint32_t *vram = reinterpret_cast<const uint32_t *>(board.tile_ram.data());
 	const uint32_t *regs = regs_of(board);
 	if (!(regs[0x60 / 4 + 3] & 0x80000000u)) return;
+	if (!board.profile->backdrops.descriptors) return;   // (not known for this program: the sky kept to the middle 4:3)
 	const int stage = int16_t(board.peek16(board.cpu.s.r[13] - board.profile->backdrops.stage_below_r13));
 	if (stage < 0 || stage > 255) return;
 	const uint32_t desc = board.peek32(board.profile->backdrops.descriptors + 4 * uint32_t(stage));

@@ -68,7 +68,7 @@ uint64_t content_hash(m3::Model3 &b)
 
 void set_versus_count(m3::Model3 &b, uint32_t count)
 {
-	memcpy(b.ram.data() + b.profile->versus_count, &count, 4);   // (the RAM's words in the host's order)
+	if (b.profile->versus_count) memcpy(b.ram.data() + b.profile->versus_count, &count, 4);   // (0: not known for this program)   // (the RAM's words in the host's order)
 }
 
 uint32_t random_versus_count()
@@ -189,6 +189,7 @@ void Score::frame(const m3::Model3 &board)
 {
 	auto byte = [&](uint32_t a) { return board.ram[a ^ 3]; };   // (the RAM's host-order words: the game's byte)
 	const m3::Profile &p = *board.profile;
+	if (!p.rounds_p1) return;   // (not known for this program)
 	const uint8_t r[3] = { byte(p.rounds_p1), byte(p.rounds_p2), uint8_t(byte(p.playing) & 3) };
 	if (memcmp(r, now, 3) != 0) { memcpy(now, r, 3); held = 0; return; }
 	if (++held != 30) return;   // (once, when it's held long enough)
