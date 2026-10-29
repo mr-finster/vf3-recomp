@@ -16,11 +16,22 @@ struct DuralPicture
 	int w = 0, h = 0;               // her picture (0: not decoded yet, -1: couldn't be)
 	std::vector<uint32_t> px;       // 0xAABBGGRR, alpha 0 where see-through
 	std::vector<uint32_t> cell;     // the cell's picture (CELL_W x CELL_H), made from px once
+	std::vector<uint32_t> mark2;    // player 2's marker as the game draws it (kept when seen on another cell)
+};
+
+// Her cell and what's round it, in the aligned picture's pixels: x 461-533, y 270-365 (past the 4:3 picture's 496)
+constexpr int WIDE_X = 461, WIDE_Y = 270, WIDE_W = 73, WIDE_H = 96;
+struct DuralWide
+{
+	bool on = false;                // (drawn this frame)
+	std::vector<uint32_t> px;       // WIDE_W x WIDE_H, 0xAABBGGRR: the cell whole, for a picture wider than 4:3
 };
 
 // above: the layers above the 3D as TileGen::aligned gives them (W x H). Draws her cell if the select's grid is on
-// screen (tile layer B's map: the grid's panel, rows 34-47, columns 0-61); false if it isn't, or no picture.
-bool dural_cell(const m3::Model3 &board, std::vector<uint32_t> &above, DuralPicture &pic);
+// screen (tile layer B's map: the grid's panel, rows 34-47, columns 0-61), as far as the 4:3 picture goes; wide: all
+// of it (the cell, and the cursor's frame when the game's is on her), for widescreen's right side. False if it isn't
+// there, or no picture.
+bool dural_cell(const m3::Model3 &board, std::vector<uint32_t> &above, DuralPicture &pic, DuralWide *wide = nullptr);
 
 // (tests: the picture alone)
 bool dural_picture(const m3::Model3 &board, DuralPicture &pic);

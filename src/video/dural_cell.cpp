@@ -8,12 +8,21 @@ namespace video {
 
 namespace {
 
-// The cell's place in the aligned picture: the grid's cells are 70 pixels apart, the top row's faces at y 272-313
-// (Kage's x 392-459, his cursor's frame 390-459, 270-315): hers is the next, x 462-527 (the 4:3 picture shows to 495)
-constexpr int CELL_X = 462, CELL_Y = 272, CELL_W = 66, CELL_H = 42;
-// and the part of her picture in it: her face (x 178-417, y 130-282 of the 496 x 384), its middle in the cell's
-// first 34 pixels (what the 4:3 picture shows of it)
-constexpr int CROP_X = 178, CROP_Y = 130, CROP_W = 240, CROP_H = 153;
+// The cell's place in the aligned picture: the grid's cells are 70 pixels apart, each a face in a 1-pixel white
+// ring, 2 black pixels between (Kage's: black 389-390, white 391, face 392-458, white 459, black 460-461; the top
+// row's black 270-271, white 272, face 273-315, white 316, black 317-318, the bottom row's white 319, face 320-362,
+// white 363, black 364-365). The cursor's frame on her (the game's own, 3 pixels of bevel: x 462-531, y 270-316 on
+// the top row, 317-363 on the bottom, where her seventh column is too) is 2 pixels on from the step after Kage's,
+// so hers is set inside it, one cell the height of both rows: face x 464-530, y 273-362, the ring round it, black
+// round that (the 4:3 picture shows to x 495)
+constexpr int CELL_X = 464, CELL_Y = 273, CELL_W = 67, CELL_H = 90;
+constexpr int FRAME_X0 = 462, FRAME_X1 = 531, FRAME_Y0[2] = { 270, 317 }, FRAME_H = 47;
+// and the part of her picture in it: her face (x 166-357, y 50-306 of the 496 x 384), its middle in the cell's first
+// 32 pixels (what the 4:3 picture shows of it)
+constexpr int CROP_X = 166, CROP_Y = 50, CROP_W = 191, CROP_H = 257;
+// the 2P marker in its frame (its lower right: the frame's x + 44-66, y + 26-43), kept from where the game draws it
+// (on Kage's, or any of the 12) for hers, where the game's is past the picture's edge
+constexpr int MARK_DX = 44, MARK_DY = 26, MARK_W = 23, MARK_H = 18;
 
 // The ROM as the game reads it: a big-endian byte of the fixed CROM (0xFF800000 on) or of a bank of the banked
 struct Rom
@@ -154,8 +163,9 @@ bool dural_picture(const m3::Model3 &board, DuralPicture &pic)
 	return true;
 }
 
-bool dural_cell(const m3::Model3 &board, std::vector<uint32_t> &above, DuralPicture &pic)
+bool dural_cell(const m3::Model3 &board, std::vector<uint32_t> &above, DuralPicture &pic, DuralWide *wide)
 {
+	if (wide) wide->on = false;
 	if (board.tile_ram.size() < 0x120000 || above.size() < size_t(W) * H) return false;
 	const uint32_t *vram = reinterpret_cast<const uint32_t *>(board.tile_ram.data());
 	// layer B (2): on and unscrolled, its map the grid's panel: rows 34-47, columns 0-61, nothing round it
@@ -200,12 +210,64 @@ bool dural_cell(const m3::Model3 &board, std::vector<uint32_t> &above, DuralPict
 		}
 		return !(c & 0x8000);
 	};
-	for (int y = CELL_Y - 1; y <= CELL_Y + CELL_H; y++)
-		for (int x = CELL_X - 1; x <= CELL_X + CELL_W && x < W; x++) {
-			if (y < 0 || y >= H || a_shows(x, y) || !b_shows(x, y)) continue;
-			const bool edge = y < CELL_Y || y >= CELL_Y + CELL_H || x < CELL_X || x >= CELL_X + CELL_W;
-			above[size_t(y) * W + x] = faded(edge ? 0xFF000000u : pic.cell[size_t(y - CELL_Y) * CELL_W + (x - CELL_X)]);
+	// the cell's pixel: the face, its white ring, the black round that
+	auto cell_px = [&](int x, int y) -> uint32_t {
+		if (x >= CELL_X && x < CELL_X + CELL_W && y >= CELL_Y && y < CELL_Y + CELL_H) return pic.cell[size_t(y - CELL_Y) * CELL_W + (x - CELL_X)];
+		if (x >= CELL_X - 1 && x <= CELL_X + CELL_W && y >= CELL_Y - 1 && y <= CELL_Y + CELL_H) return 0xFFFFFFFFu;
+		return 0xFF000000u;
+	};
+	for (int y = WIDE_Y; y < WIDE_Y + WIDE_H; y++)
+		for (int x = WIDE_X; x < W; x++) {
+			if (a_shows(x, y) || !b_shows(x, y)) continue;
+			above[size_t(y) * W + x] = faded(cell_px(x, y));
 		}
+	// the 2P marker as the game draws it in player 2's frame (layer A's texels, as shown), kept for hers
+	const uint32_t at = board.profile->select_cursor;
+	const int col2 = at ? board.ram[(at + 0x80) ^ 3] : -1, row2 = at ? board.ram[(at + 0x80 - 1) ^ 3] & 1 : 0;
+	if (col2 >= 0 && col2 < 6) {
+		const int fx = 390 - 70 * (5 - col2), fy = FRAME_Y0[row2];
+		if (a_shows(fx, fy + 10) && a_shows(fx + 1, fy + 10)) {
+			pic.mark2.assign(size_t(MARK_W) * MARK_H, 0);
+			for (int y = 0; y < MARK_H; y++)
+				for (int x = 0; x < MARK_W; x++)
+					if (a_shows(fx + MARK_DX + x, fy + MARK_DY + y)) pic.mark2[size_t(y) * MARK_W + x] = above[size_t(fy + MARK_DY + y) * W + fx + MARK_DX + x];
+		}
+	}
+	if (wide) {
+		// past the 4:3 edge: the rest of the cell, and of the cursor's frame where the game's shows on her (the game
+		// draws it in the layer's columns past 496, which the picture leaves out): its left edge (x 462-464) mirrored for
+		// the right (531-529), its top and bottom bevels as at x 495, and player 2's marker in its lower right
+		wide->on = true;
+		wide->px.assign(size_t(WIDE_W) * WIDE_H, 0);
+		for (int y = WIDE_Y; y < WIDE_Y + WIDE_H; y++)
+			for (int x = WIDE_X; x < WIDE_X + WIDE_W; x++) {
+				uint32_t &o = wide->px[size_t(y - WIDE_Y) * WIDE_W + (x - WIDE_X)];
+				if (x < W) { o = above[size_t(y) * W + x]; continue; }
+				if (!b_shows(W - 1, y)) continue;
+				o = faded(cell_px(x, y));
+				if (x > FRAME_X1) continue;
+				for (int r = 0; r < 2; r++) {
+					const int y0 = FRAME_Y0[r], y1 = y0 + FRAME_H - 1;
+					if (y < y0 || y > y1) continue;
+					int sx = -1;
+					if (x > FRAME_X1 - 3) sx = FRAME_X0 + (FRAME_X1 - x);   // (the right edge, as the left)
+					else if (y < y0 + 3 || y > y1 - 3) sx = W - 1;   // (the top and bottom)
+					if (sx >= 0 && a_shows(sx, y)) o = above[size_t(y) * W + sx];
+				}
+			}
+		// player 2's frame on her (its left edge blue, not player 1's red): the marker
+		if (col2 == 6 && !pic.mark2.empty()) {
+			const int fy = FRAME_Y0[row2];
+			const uint32_t edge = above[size_t(fy + 10) * W + FRAME_X0];
+			if (a_shows(FRAME_X0, fy + 10) && ((edge >> 16) & 0xFF) > (edge & 0xFF))
+				for (int y = 0; y < MARK_H; y++)
+					for (int x = 0; x < MARK_W; x++) {
+						const int X = FRAME_X0 + MARK_DX + x, Y = fy + MARK_DY + y;
+						const uint32_t v = pic.mark2[size_t(y) * MARK_W + x];
+						if ((v >> 24) && X >= W && X < WIDE_X + WIDE_W) wide->px[size_t(Y - WIDE_Y) * WIDE_W + (X - WIDE_X)] = v;
+					}
+		}
+	}
 	return true;
 }
 

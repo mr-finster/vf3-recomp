@@ -1063,6 +1063,7 @@ struct Game
 	// Play as Dural: her spot on the select is the program's (Model3::set_dural); its picture the host's (dural_cell)
 	std::atomic<int> dural_players{ 0 };
 	video::DuralPicture dural_pic;   // (decoded from the ROM when first needed)
+	video::DuralWide dural_wide;     // (her cell whole, for widescreen's right side)
 	void start_frame()
 	{
 		const uint64_t t = SDL_GetTicksNS();
@@ -1118,7 +1119,8 @@ struct Game
 					for (auto &a : hud_flag_at) a[0] = a[1] = -1;
 			} else
 				for (auto &a : hud_flag_at) a[0] = a[1] = -1;
-			if (dural_players.load(std::memory_order_relaxed)) video::dural_cell(board, above, dural_pic);   // (her spot's picture)
+			dural_wide.on = false;
+			if (dural_players.load(std::memory_order_relaxed)) video::dural_cell(board, above, dural_pic, &dural_wide);   // (her spot's picture)
 			tiles.aligned_wide(below_wide);
 		});
 		t = SDL_GetTicksNS();
@@ -1155,6 +1157,7 @@ struct Game
 		std::vector<uint32_t> below = std::vector<uint32_t>(video::W * video::H), above = std::vector<uint32_t>(video::W * video::H);
 		std::vector<uint32_t> below_wide = std::vector<uint32_t>(video::WW * video::H);
 		int hud_flag_at[2][2] = { { -1, -1 }, { -1, -1 } };
+		video::DuralWide dural_wide;
 		video::SkyLead sky;
 		std::vector<uint16_t> tex;
 		std::vector<m3::Model3::TexUpload> uploads;   // (the areas changed since a renderer last took them)
@@ -1173,6 +1176,7 @@ struct Game
 		view.below = below;
 		view.above = above;
 		memcpy(view.hud_flag_at, hud_flag_at, sizeof hud_flag_at);
+		view.dural_wide = dural_wide;
 		view.below_wide = below_wide;
 		view.sky = sky;
 		// the texture RAM: the rows written since the last (all of it the first time, or after many)
@@ -2207,6 +2211,28 @@ int main(int argc, char **argv)
 		flag_made[p] = hud_country[p];
 		return flag_tex[p];
 	};
+	// Dural on the select: her cell's part past the 4:3 picture's right edge (the 4:3 part is in the layers above),
+	// where the picture is wider (dural_cell.h)
+	SDL_Texture *dural_tex = nullptr;
+	auto draw_dural_wide = [&](const SDL_FRect &all, const SDL_FRect &mid) {
+		const video::DuralWide &dw = game.view.dural_wide;
+		if (!dw.on || dw.px.size() != size_t(video::WIDE_W) * video::WIDE_H || all.x + all.w <= mid.x + mid.w + 0.5f) return;
+		if (!dural_tex) {
+			dural_tex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING, video::WIDE_W, video::WIDE_H);
+			if (!dural_tex) return;
+			SDL_SetTextureBlendMode(dural_tex, SDL_BLENDMODE_BLEND);
+			SDL_SetTextureScaleMode(dural_tex, SDL_SCALEMODE_NEAREST);
+		}
+		SDL_UpdateTexture(dural_tex, nullptr, dw.px.data(), video::WIDE_W * 4);
+		const float k = mid.w / float(video::W), ky = mid.h / float(video::H);
+		const float from = float(video::W - video::WIDE_X);   // (the texture's column at the 4:3 edge)
+		const float right = std::min(all.x + all.w, mid.x + (video::WIDE_X + video::WIDE_W) * k);
+		const float w = right - (mid.x + mid.w);
+		if (w <= 0) return;
+		const SDL_FRect src{ from, 0, w / k, float(video::WIDE_H) };
+		const SDL_FRect dst{ mid.x + mid.w, mid.y + video::WIDE_Y * ky, w, video::WIDE_H * ky };
+		SDL_RenderTexture(ren, dural_tex, &src, &dst);
+	};
 	// (mid: the 4:3 picture's place in the target's pixels)
 	auto draw_hud_flags = [&](const SDL_FRect &mid) {
 		const float kx = mid.w / float(video::W), ky = mid.h / float(video::H);
@@ -2251,6 +2277,7 @@ int main(int argc, char **argv)
 				if (bar.w > 0) SDL_RenderFillRect(ren, &bar);
 			}
 		SDL_RenderTexture(ren, tex_above, nullptr, &mid);
+		draw_dural_wide(all, mid);
 		draw_hud_flags(mid);
 		if (crt) {
 			SDL_SetRenderTarget(ren, nullptr);
@@ -2940,6 +2967,7 @@ int main(int argc, char **argv)
 		if (g3.tex) { SDL_DestroyTexture(g3.tex); g3.tex = nullptr; g3.w = g3.h = 0; }
 		SDL_DestroyTexture(tex_below);
 		SDL_DestroyTexture(tex_above);
+		if (dural_tex) { SDL_DestroyTexture(dural_tex); dural_tex = nullptr; }   // (made again when next drawn)
 		make_2d(tex_below, video::WW);
 		SDL_SetTextureScaleMode(tex_below, cfg.smooth_bg ? SDL_SCALEMODE_LINEAR : SDL_SCALEMODE_NEAREST);
 		make_2d(tex_above, video::W);
@@ -3892,6 +3920,7 @@ int main(int argc, char **argv)
 	crt_paint.release();
 	SDL_DestroyTexture(tex_below);
 	SDL_DestroyTexture(tex_above);
+	if (dural_tex) SDL_DestroyTexture(dural_tex);
 	SDL_DestroyRenderer(ren);
 	SDL_DestroyWindow(win);
 	marker_done(true);
