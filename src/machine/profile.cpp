@@ -114,8 +114,8 @@ const Profile VF3_REV_D = {
 	"",
 };
 
-// Team Battle: its ROMs, and the addresses found so far; what isn't known yet is 0 (that feature off: no Arcade
-// settings, no select, score or test menu readings; no online).
+// Team Battle: its ROMs, and the addresses found so far; what isn't known yet is 0 (that feature off: the select's
+// byte, so no online yet).
 const Profile VF3_TB = {
 	"vf3tb", "Virtua Fighter 3 Team Battle", "Virtua Fighter 3 Team Battle", "vf3", false, TB_ROMS, sizeof TB_ROMS / sizeof TB_ROMS[0],
 	0x710000, 0xA0000,
@@ -124,8 +124,14 @@ const Profile VF3_TB = {
 	{ 0x82CBA, 0x82CD0, 0x82CE6, 0x82D50, 0x4018, 0x5419C, 0x4BFE3E61 },
 	// the coin setting: Revision D's (FREE PLAY there shows FREE PLAY and Start needs no credit: checked)
 	{ 0x1E033, 0x1E037, 0x1E03B },
-	{},
-	960, 0, 0, 0, 0, 0, 0,
+	// GAME ASSIGNMENTS: Revision D's places (its test menu shows a change there: MATCH COUNT(1P)), a marker 0x2E31 in
+	// the halves Revision D leaves 0; it has more (drink, naked, VS finish, default mode, energy recovery) not here yet.
+	// Its STAGE SELECT: 0 CHALLENGER (Revision D's on)
+	{ 0x1E000, 2, 3, 6, 7, 8, 12, 0x17, 0x1E },
+	// the test menu's byte (4 while it's up: checked), the versus count and the score: Revision D's (the same code
+	// refers to them, r13-relative: tools found every reference unchanged); the select byte not found yet (only
+	// online needs it: 0x1001B3 is 0, 5, 1 in the attract, the select and a fight)
+	960, 0x102002, 0x106080, 0, 0x10601A, 0x10601B, 0x106029,
 	// the backdrops: Revision D's (a fight's sky found with no tile on screen wrong, as Revision D's: checked on the dojo)
 	{ 0x1E0C, 0xFFB30004, 0x161614, 0x1617B4 },
 	ppcrec::vf3tb_map, ppcrec::vf3tb_map_count,
