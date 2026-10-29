@@ -1414,8 +1414,22 @@ int Model3::hide_free_play_text()
 //   head, 0x0095. But her lists are copies of Shun's (0x7DB80, 0x7DDC4), so it isn't loaded (the cyan box). The pair
 //   table's own entry for her (0x77184: 0x0095 then the lists' end) makes a list of one: her head shows. Player 2's
 //   side shows her second costume (id 22), whose head is 0x10AF, the gold one (0x0095 there drew nothing): the
-//   program's FFFF 10AF FFFF at 0x77608 holds the list [0x10AF] at 0x7760A. Both duller than in a fight: the fight
-//   rebuilds the model's vertices and normals every frame (0x37C84-0x37E2C), the select draws the template as stored.
+//   program's FFFF 10AF FFFF at 0x77608 holds the list [0x10AF] at 0x7760A (both are also the per-fighter
+//   sequences of heads the select draws, 0x77650[9] and [22]: 0x774FE and 0x7760A).
+// - her chrome: those heads are made to be environment mapped. A fight remakes their texture coordinates every frame
+//   (her object at 0x444C0: matrix stack push 0x2C20, view times the bone, the translation times [0x1514] and the
+//   third column negated, then 0x450F8(model in RAM, words), which writes each vertex's UV from its normal and the
+//   view, and 0x3B454 to send it to the polygon RAM); the select draws them as stored, the UVs that fit no view (the
+//   "teeth"). Now the select's three head draws (0x2E1AC, 0x2E050 and 0x2E0D8: addi r3,rN,0 before bl 0x207B8) go
+//   through stubs in the erased ROM after the program's data (0x9F000-0x9F0EC: FFFFFFFF, nothing refers to it), which
+//   for 0x0095 or 0x10AF only: copy the head from the ROM once into unused RAM (0x7E0000 or 0x7E4000, above the 2 MB
+//   the game uses; 0x3B2E0, marked at +0x3FF8), find its polygon RAM place in the select's load lists (0x5522C), do as
+//   the fight does with the select's matrix (the portrait's camera and turn) and write the words to the polygon RAM.
+//   Her reflection (the corridor picture her textures upload, in her costume's row of the portraits' slot) can be
+//   overwritten when she's held from the select's start (1P: the hidden right side's Akira, id 0, loads into the same
+//   row a few frames after hers): when the texture loader (0x13C800) is idle and its last load was another
+//   fighter's in her row, 0x46 of her side's select object asks for hers again (once). Every other fighter's draw
+//   runs 6 more instructions, the same pictures.
 int Model3::set_dural(bool on)
 {
 	const size_t CROM_AT = profile->program_at;
@@ -1424,6 +1438,7 @@ int Model3::set_dural(bool on)
 	auto put = [&](size_t a, uint32_t v) { for (int k = 0; k < 4; k++) at(a + k) = uint8_t(v >> (24 - 8 * k)); };
 	if (!on) {
 		for (auto it = dural_words.rbegin(); it != dural_words.rend(); ++it) put(it->first, it->second);
+		if (!dural_words.empty() && ram.size() >= 0x7E8000) std::fill(ram.begin() + 0x7E0000, ram.begin() + 0x7E8000, 0);   // (her portrait heads' copies: as the game leaves that RAM)
 		dural_words.clear();
 		return 0;
 	}
@@ -1436,7 +1451,10 @@ int Model3::set_dural(bool on)
 		{ 0x498FC, 0x4E800020 }, { 0x49A08, 0x4E800020 }, { 0x49634, 0x4E800020 }, { 0x49644, 0x4BFFFFF4 },
 		{ 0x49654, 0 }, { 0x49660, 0x3821FFF0 }, { 0x3B294, 0x3860FFFF }, { 0x3B29C, 0x2C030000 },
 		{ 0x7DEB2, 0x7DB80 }, { 0x7DEE6, 0x7DDC4 }, { 0x77184, 0x0095FFFF }, { 0x77608, 0xFFFF10AF },
-		{ 0x7760C, 0xFFFF122A }, { 0x77414, 0x10880095 }, { 0x77430, 0x10AF122A },
+		{ 0x7760C, 0xFFFF122A }, { 0x77414, 0x10880095 }, { 0x77430, 0x10AF122A }, { 0x774FC, 0xFFFF0095 },
+		{ 0x2E1B0, 0x4BFF2609 }, { 0x2E054, 0x4BFF2765 }, { 0x2E0DC, 0x4BFF26DD }, { 0x2E12C, 0x3821FFF0 },
+		{ 0x2E00C, 0x3821FFF0 }, { 0x2C20, 0xD681FFD0 }, { 0x2C54, 0xC2810000 }, { 0x3B2E0, 0x3821FFF0 },
+		{ 0x5522C, 0x3CC00014 }, { 0x450F8, 0x3821FFF0 }, { 0x45518, 0x7CD8852C }, { 0x1514, 0x45000000 },
 	};
 	static const uint32_t patch[][3] = {   // address, the word known, the new one
 		{ 0x49894, 0x3821FFF0, 0x3821FFB0 },   // addi r1,r1,-0x10 -> addi r1,r1,-0x50
@@ -1454,6 +1472,37 @@ int Model3::set_dural(bool on)
 		{ 0x49650, 0x00000000, 0x48000284 },   // b 0x498D4 (stw r0,0(r15) and the rest of the routine)
 		{ 0x7DEB6, 0x7DB80, 0x77184 },         // her portrait's list (unaligned words: the table's)
 		{ 0x7DEEA, 0x7DDC4, 0x7760A },         // and her second costume's: [0x10AF], her gold head (0x0095 drew nothing on the right)
+		{ 0x2E1AC, 0x38650000, 0x48070E54 },   // addi r3,r5,0 -> b 0x9F000 (the select's head draw; stub: addi, bl 0x9F024, b back)
+		{ 0x2E050, 0x38650000, 0x48070FBC },   // addi r3,r5,0 -> b 0x9F00C (the chosen head's first)
+		{ 0x2E0D8, 0x38660000, 0x48070F40 },   // addi r3,r6,0 -> b 0x9F018 (the chosen head's)
+		// the stubs and 0x9F024 (her heads' texture coordinates, as a fight makes them), in erased ROM
+		{ 0x9F000, 0xFFFFFFFF, 0x38650000 }, { 0x9F004, 0xFFFFFFFF, 0x48000021 }, { 0x9F008, 0xFFFFFFFF, 0x4BF8F1A8 },
+		{ 0x9F00C, 0xFFFFFFFF, 0x38650000 }, { 0x9F010, 0xFFFFFFFF, 0x48000015 }, { 0x9F014, 0xFFFFFFFF, 0x4BF8F040 },
+		{ 0x9F018, 0xFFFFFFFF, 0x38660000 }, { 0x9F01C, 0xFFFFFFFF, 0x48000009 }, { 0x9F020, 0xFFFFFFFF, 0x4BF8F0BC },
+		{ 0x9F024, 0xFFFFFFFF, 0x28030095 }, { 0x9F028, 0xFFFFFFFF, 0x4182000C }, { 0x9F02C, 0xFFFFFFFF, 0x280310AF },
+		{ 0x9F030, 0xFFFFFFFF, 0x4C820020 }, { 0x9F034, 0xFFFFFFFF, 0x9421FFC0 }, { 0x9F038, 0xFFFFFFFF, 0x7C0802A6 },
+		{ 0x9F03C, 0xFFFFFFFF, 0x9001003C }, { 0x9F040, 0xFFFFFFFF, 0xBF210008 }, { 0x9F044, 0xFFFFFFFF, 0x7C7E1B78 },
+		{ 0x9F048, 0xFFFFFFFF, 0x3CC00014 }, { 0x9F04C, 0xFFFFFFFF, 0x38C6C800 }, { 0x9F050, 0xFFFFFFFF, 0x80E60000 },
+		{ 0x9F054, 0xFFFFFFFF, 0x28070000 }, { 0x9F058, 0xFFFFFFFF, 0x40820044 }, { 0x9F05C, 0xFFFFFFFF, 0x80E60004 },
+		{ 0x9F060, 0xFFFFFFFF, 0x890E0070 }, { 0x9F064, 0xFFFFFFFF, 0x7C074000 }, { 0x9F068, 0xFFFFFFFF, 0x41820034 },
+		{ 0x9F06C, 0xFFFFFFFF, 0x39200000 }, { 0x9F070, 0xFFFFFFFF, 0x2807000D }, { 0x9F074, 0xFFFFFFFF, 0x41800008 },
+		{ 0x9F078, 0xFFFFFFFF, 0x39200001 }, { 0x9F07C, 0xFFFFFFFF, 0x39400000 }, { 0x9F080, 0xFFFFFFFF, 0x2808000D },
+		{ 0x9F084, 0xFFFFFFFF, 0x41800008 }, { 0x9F088, 0xFFFFFFFF, 0x39400001 }, { 0x9F08C, 0xFFFFFFFF, 0x7C095000 },
+		{ 0x9F090, 0xFFFFFFFF, 0x4082000C }, { 0x9F094, 0xFFFFFFFF, 0x38000001 }, { 0x9F098, 0xFFFFFFFF, 0x981D0046 },
+		{ 0x9F09C, 0xFFFFFFFF, 0x3FE0007E }, { 0x9F0A0, 0xFFFFFFFF, 0x281E0095 }, { 0x9F0A4, 0xFFFFFFFF, 0x41820008 },
+		{ 0x9F0A8, 0xFFFFFFFF, 0x3BFF4000 }, { 0x9F0AC, 0xFFFFFFFF, 0x807F3FF8 }, { 0x9F0B0, 0xFFFFFFFF, 0x7C03F000 },
+		{ 0x9F0B4, 0xFFFFFFFF, 0x41820014 }, { 0x9F0B8, 0xFFFFFFFF, 0x7FC3F378 }, { 0x9F0BC, 0xFFFFFFFF, 0x7FE4FB78 },
+		{ 0x9F0C0, 0xFFFFFFFF, 0x4BF9C221 }, { 0x9F0C4, 0xFFFFFFFF, 0x93DF3FF8 }, { 0x9F0C8, 0xFFFFFFFF, 0x7FC3F378 },
+		{ 0x9F0CC, 0xFFFFFFFF, 0x4BFB6161 }, { 0x9F0D0, 0xFFFFFFFF, 0x4082005C }, { 0x9F0D4, 0xFFFFFFFF, 0x7CBD2B78 },
+		{ 0x9F0D8, 0xFFFFFFFF, 0x7C9C2378 }, { 0x9F0DC, 0xFFFFFFFF, 0x4BF63B45 }, { 0x9F0E0, 0xFFFFFFFF, 0xC0001514 },
+		{ 0x9F0E4, 0xFFFFFFFF, 0xEFBD0032 }, { 0x9F0E8, 0xFFFFFFFF, 0xEFDE0032 }, { 0x9F0EC, 0xFFFFFFFF, 0xEFFF0032 },
+		{ 0x9F0F0, 0xFFFFFFFF, 0xFF40D050 }, { 0x9F0F4, 0xFFFFFFFF, 0xFF60D850 }, { 0x9F0F8, 0xFFFFFFFF, 0xFF80E050 },
+		{ 0x9F0FC, 0xFFFFFFFF, 0x7FE3FB78 }, { 0x9F100, 0xFFFFFFFF, 0x7F84E378 }, { 0x9F104, 0xFFFFFFFF, 0x4BFA5FF5 },
+		{ 0x9F108, 0xFFFFFFFF, 0x4BF63B4D }, { 0x9F10C, 0xFFFFFFFF, 0x7F8903A6 }, { 0x9F110, 0xFFFFFFFF, 0x38DFFFFC },
+		{ 0x9F114, 0xFFFFFFFF, 0x57A7103A }, { 0x9F118, 0xFFFFFFFF, 0x64E79800 }, { 0x9F11C, 0xFFFFFFFF, 0x38E7FFFC },
+		{ 0x9F120, 0xFFFFFFFF, 0x85060004 }, { 0x9F124, 0xFFFFFFFF, 0x95070004 }, { 0x9F128, 0xFFFFFFFF, 0x4200FFF8 },
+		{ 0x9F12C, 0xFFFFFFFF, 0x7FC3F378 }, { 0x9F130, 0xFFFFFFFF, 0xBB210008 }, { 0x9F134, 0xFFFFFFFF, 0x8001003C },
+		{ 0x9F138, 0xFFFFFFFF, 0x7C0803A6 }, { 0x9F13C, 0xFFFFFFFF, 0x38210040 }, { 0x9F140, 0xFFFFFFFF, 0x4E800020 },
 	};
 	for (auto &k : known)
 		if (word(k[0]) != k[1]) return 0;
