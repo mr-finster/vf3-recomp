@@ -10,6 +10,9 @@
 // (hex address into --ram-at's dump, a byte; "b" first: the backup RAM's) writes RAM before every frame
 // (VF3_POKE_FRAMES=from-to: only those). VF3_FREE_PLAY=1: the coin setting FREE PLAY before the boot, as the PC way.
 // VF3_SET=vf3tb: Team Battle's profile (the zip must hold its set); VF3_MAP_OF=vf3: another profile's recompiler map (none: the interrupts' entries only);
+// VF3_TILE_LAG=1: the tile layers' lines drawn at the frame's end from the registers each line had (the host's tile
+// worker at its latest); VF3_TILE_EVERY=n: the tile layers drawn every n-th frame only (a netplay match's frames run
+// again unseen after a rollback), the sky audit then of those frames.
 // VF3_LOG_BYTES=addr,...: those RAM bytes each frame ("bytes FRAME v..."). VF3_DURAL=1|2|3: Play as Dural for player 1, 2 or both (as Game > Play as Dural). VF3_BORROW=backdrops,coin,settings,test_menu,versus_count,scene,score,free_play_text: those addresses from
 // VF3_BORROW_FROM's profile (default vf3), to try them on another program; VF3_MAP_IN=file: more entry points (hex, a line each); VF3_MAP_OUT=file: appends every address the interpreter ran
 // from for want of one (--rec; a map's learning: run again with them in until none are new).
@@ -132,8 +135,25 @@ int main(int argc, char **argv)
 	static video::Scene scene;
 	static video::Raster raster;
 	raster.resize(video::W, video::H);
+	// VF3_TILE_LAG=1 (tests): the lines drawn as the host's tile worker can draw them at the latest, each from its
+	// registers as the line began but the tile RAM and the game's RAM as the frame ends (video/tile_worker.h)
+	static const bool tile_lag = getenv("VF3_TILE_LAG") != nullptr;
+	// VF3_TILE_EVERY=n (tests): the tile layers drawn only every n-th frame, the rest run unseen, as a netplay match's
+	// frames run again after a rollback are (the board alone, main.cpp's adapter.run)
+	static const long tile_every = getenv("VF3_TILE_EVERY") ? std::max(1L, atol(getenv("VF3_TILE_EVERY"))) : 1;
+	static uint32_t lag_regs[video::H][64];
+	static bool lag_line[video::H];
 	if (!shots.empty())
 		board.on_line = [&](unsigned y) {
+			if (board.frame % uint64_t(tile_every)) return;
+			if (tile_lag) {
+				if (y < unsigned(video::H)) {
+					memcpy(lag_regs[y], board.tile_regs, sizeof lag_regs[y]);
+					if (y) lag_regs[y][0x20 / 4] = lag_regs[0][0x20 / 4];
+					lag_line[y] = true;
+				}
+				return;
+			}
 			auto a = std::chrono::steady_clock::now();
 			if (y == 0) tiles.clear();
 			tiles.line(board, y);
@@ -204,6 +224,16 @@ int main(int argc, char **argv)
 				if (dural >> p & 1) board.ram[(board.profile->select_cursor + 0x80 * size_t(p)) ^ 3] = 13;
 		auto tp0 = std::chrono::steady_clock::now();
 		board.run_frame();
+		if (tile_lag && !shots.empty()) {
+			auto a = std::chrono::steady_clock::now();
+			for (int y = 0; y < video::H; y++) {
+				if (!lag_line[y]) continue;
+				lag_line[y] = false;
+				if (y == 0) tiles.clear();
+				tiles.line(board, unsigned(y), lag_regs[y]);
+			}
+			tile_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - a).count();
+		}
 		auto tp1 = std::chrono::steady_clock::now();
 		t_board += std::chrono::duration<double, std::milli>(tp1 - tp0).count();
 		if (prof) {
@@ -693,7 +723,7 @@ int main(int argc, char **argv)
 					}
 				}
 		}
-		if (getenv("VF3_SKY_AUDIT") && !shots.empty())   // (tests: the widescreen backdrop's state each frame)
+		if (getenv("VF3_SKY_AUDIT") && !shots.empty() && (board.frame - 1) % uint64_t(tile_every) == 0)   // (tests: the widescreen backdrop's state each frame)
 		{
 			static long r0, f0, b0, n0;
 			fprintf(stderr, "sky %llu %s rows %ld refind %ld bad %ld nomap %ld\n", (unsigned long long)board.frame, tiles.audit(board).c_str(),

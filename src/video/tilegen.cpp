@@ -522,23 +522,35 @@ void TileGen::find_backdrop(const m3::Model3 &board, bool full)
 	};
 	// the game's own place, kept at 0x1617B4 + 4 and + 8 in pixels (Team Battle's 0x16195C; the routine at 0x5D000
 	// writes the map from the place it kept the frame before, 0x5D12C: this frame's and the last's tried)
+	// (the last frame's only if find_backdrop saw it: a netplay match's frames run again after a rollback are run
+	// unseen, and the place it saw last is then frames old, as is the last place found: the camera's moved on since,
+	// further than near it looks. So near the game's own place too, a frame's move at most from the screen's)
 	const int gx = int(int32_t(board.peek32(board.profile->backdrops.place + 4))) >> 3, gy = int(int32_t(board.peek32(board.profile->backdrops.place + 8))) >> 3;
-	if (board.frame != b.game_frame) { b.prev_x = b.game_x; b.prev_y = b.game_y; b.game_x = gx; b.game_y = gy; b.game_frame = board.frame; }
+	if (board.frame != b.game_frame) {
+		const bool last_frame = b.game_frame != ~0ull && board.frame == b.game_frame + 1;
+		b.prev_x = b.game_x; b.prev_y = last_frame ? b.game_y : INT32_MIN;
+		b.game_x = gx; b.game_y = gy; b.game_frame = board.frame;
+	}
 	const bool same = had && desc == b.desc;
+	const bool game_sane = gy >= -112 && gy <= h + 48;   // (a place off the map further than the screen's rows reach is none: another program's)
 	auto first_places = [&]() {
-		// (a place off the map further than the screen's rows reach is none: another program's)
-		if (gy >= -112 && gy <= h + 48) consider(gx, gy);
+		if (game_sane) consider(gx, gy);
 		if (b.prev_y >= -112 && b.prev_y <= h + 48) consider(b.prev_x, b.prev_y);
 		if (same || must_agree) consider(b.x0, b.y0);
 	};
 	auto near_places = [&]() {
-		for (int d = 1; d <= 6 && pbest > 0; d++)
-			for (int dy = -2; dy <= 2 && pbest > 0; dy++) {
-				const int ax = d - std::abs(dy);
-				if (ax < 0 || ax > 4) continue;
-				consider(b.x0 + ax, b.y0 + dy);
-				if (ax) consider(b.x0 - ax, b.y0 + dy);
-			}
+		const int gdx = ((gx - b.x0) % w + w) % w;
+		const bool around_game = game_sane && (std::abs(gy - b.y0) > 2 || std::min(gdx, w - gdx) > 4);   // (and not near the last place: looked at there)
+		for (int k = around_game ? 0 : 1; k < 2 && pbest > 0; k++) {
+			const int cx = k ? b.x0 : gx, cy = k ? b.y0 : gy;
+			for (int d = 1; d <= 6 && pbest > 0; d++)
+				for (int dy = -2; dy <= 2 && pbest > 0; dy++) {
+					const int ax = d - std::abs(dy);
+					if (ax < 0 || ax > 4) continue;
+					consider(cx + ax, cy + dy);
+					if (ax) consider(cx - ax, cy + dy);
+				}
+		}
 	};
 	if (few) {
 		// Too little on screen to tell: as before, if the same backdrop; but a screen of the map's top or bottom
@@ -599,6 +611,7 @@ void TileGen::find_backdrop(const m3::Model3 &board, bool full)
 	{
 		const int cand[2][2] = { { int(int32_t(board.peek32(board.profile->backdrops.place + 4))) >> 3, int(int32_t(board.peek32(board.profile->backdrops.place + 8))) >> 3 }, { b.prev_x, b.prev_y } };
 		for (const auto &cxy : cand) {
+			if (cxy[1] < -112 || cxy[1] > h + 48) continue;   // (none: as above)
 			const int x0 = ((cxy[0] % w) + w) % w, y0 = cxy[1];
 			int place[128], n = 0, bad = 0;
 			std::fill(std::begin(place), std::end(place), -1);
