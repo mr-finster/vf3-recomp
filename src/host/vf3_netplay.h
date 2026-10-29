@@ -28,13 +28,15 @@ inline constexpr const char *NET_VERSION = "v0.1.7-online-preview";
 // release's players: only the same build
 std::string online_version(const std::string &build);
 
-constexpr int BOOT_FRAMES = 960;   // the boot, unseen, up to the SEGA logo (as the PC way's, main.cpp)
-constexpr size_t STAGE_SELECT = 0x1E017;   // the arcade's VS stage select in its backup RAM: 0 on, 1 off (found by changing it)
-// The game's count of the matches between two players since it was switched on (a word of RAM, r13 - 0x1f80): each
-// one's stage is the next of a list of 16 in its program (0x76fd6, at (count + 1) % 16), the stage select off. An
+// The addresses below are Revision D's, kept in the board's profile (src/machine/profile.h): the boot, unseen, up
+// to the SEGA logo (as the PC way's, main.cpp): 960 frames, the profile's boot_frames; the arcade's VS stage
+// select in its backup RAM, 0 on, 1 off (found by changing it): 0x1E017, its settings' at + stage_select.
+inline size_t stage_select(const m3::Model3 &board) { return board.profile->settings.at + size_t(board.profile->settings.stage_select); }
+// The game's count of the matches between two players since it was switched on (a word of RAM, r13 - 0x1f80: the
+// profile's versus_count, 0x106080): each one's stage is the next of a list of 16 in its program (0x76fd6, at
+// (count + 1) % 16), the stage select off. An
 // arcade's ran all day, so a challenge's stage was anyone's guess; a game just booted has 0, and its first match
 // between two players is always on the same stage (the lava's). Set after the boot: where in the list it starts.
-constexpr size_t VERSUS_COUNT = 0x106080;
 void set_versus_count(m3::Model3 &board, uint32_t count);
 uint32_t random_versus_count();   // (0 to 15, a fresh one each call)
 
@@ -56,18 +58,17 @@ uint64_t content_hash(m3::Model3 &board);
 // The host's starting blob: its backup RAM and EEPROM, and where the stages' list starts (random_versus_count)
 std::vector<uint8_t> start_blob(const m3::Model3 &board);
 constexpr uint16_t START_BUTTON = 256;   // (the input word's Start: pack's)
-// The character select on screen: a byte of RAM 5 from the first frame after Start to the VS screen, and never
-// elsewhere (0 at the boot, the title and the attract, 4 at the VS screens and fights, 7 between a 1P run's
+// The character select on screen: a byte of RAM (the profile's scene, 0xe4046) 5 from the first frame after Start
+// to the VS screen, and never elsewhere (0 at the boot, the title and the attract, 4 at the VS screens and fights, 7 between a 1P run's
 // fights; found by probing every byte of RAM over two 9,000-frame runs, a 1P and a 2P). A match plays it in
 // lockstep (vfnet::Session::set_lockstep): no frame on a guess, so a face never flashes as a guess is put right.
-constexpr size_t SCENE_BYTE = 0xe4046;
-inline int scene_byte(const m3::Model3 &board) { return board.ram.size() > SCENE_BYTE ? board.ram[SCENE_BYTE ^ 3] : -1; }
+inline int scene_byte(const m3::Model3 &board) { const size_t a = board.profile->scene; return board.ram.size() > a ? board.ram[a ^ 3] : -1; }
 inline bool in_select(const m3::Model3 &board) { return scene_byte(board) == 5; }
 
 // The score between the two players, read from the game's own RAM after each frame (as Fightcade's detectors do,
-// tools/vf3detect.cpp found where): each player's rounds won in the match on now (0x10601a, 0x10601b: both back
-// to 0 when it's over), and which players are playing (0x106029: bit 0 player 1, bit 1 player 2; a side not
-// playing is the CPU's). A match counts only if both were playing at each round it was won (not the winner's
+// tools/vf3detect.cpp found where; the profile's rounds_p1, rounds_p2 and playing): each player's rounds won in the
+// match on now (0x10601a, 0x10601b: both back to 0 when it's over), and which players are playing (0x106029: bit 0
+// player 1, bit 1 player 2; a side not playing is the CPU's). A match counts only if both were playing at each round it was won (not the winner's
 // fights against the CPU after it, nor one a challenger broke into); each reading only once it's held 30 frames,
 // longer than any rollback, so a guessed frame never scores.
 struct Score
@@ -77,7 +78,6 @@ struct Score
 	int players() const { return playing; }
 	uint8_t players_now() const { return now[2]; }   // (as the RAM has it this frame, not yet held: when one went out)
 	int round_ends = 0;   // (each round's end, any players': a moment no one's in control, ~2 s while the game shows who won)   // (who's in the game, as held: bit 0 player 1, bit 1 player 2)
-	static constexpr uint32_t ROUNDS_P1 = 0x10601a, ROUNDS_P2 = 0x10601b, PLAYING = 0x106029;
 private:
 	uint8_t seen[2] = {}, now[3] = {}, playing = 0;
 	int held = 0;

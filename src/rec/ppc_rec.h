@@ -43,9 +43,10 @@ class Rec : public ppc::Recompiler
 public:
 	Rec();
 	~Rec() override;
-	// image: the program as RAM holds it after the boot copy, words from 0 (host order). False if no code
-	// could be made (the interpreter then runs everything).
-	bool build(ppc::Cpu &cpu, const std::vector<uint32_t> &image, Stats *stats = nullptr);
+	// image: the program as RAM holds it after the boot copy, words from 0 (host order); map: its address map
+	// (the board's profile's: vf3_map for Revision D). False if no code could be made (the interpreter then runs
+	// everything).
+	bool build(ppc::Cpu &cpu, const std::vector<uint32_t> &image, const uint32_t *map, size_t map_count, Stats *stats = nullptr);
 	bool run(ppc::Cpu &cpu) override;
 	void code_written(uint32_t addr) override;
 	void recount() override;

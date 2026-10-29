@@ -1,6 +1,7 @@
 // The player's own Virtua Fighter 3 set (Revision D, MAME's and Supermodel's "vf3"), read straight from the zip:
 // every ROM checked by CRC and laid out as the Model 3 sees it.
 #pragma once
+#include "profile.h"
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -20,6 +21,6 @@ struct result
 
 // The CROM regions come back as host-order 32-bit words (as the CPU core reads them); the others as the bytes
 // of the big-endian words.
-result load(const std::string &zip);
+result load(const std::string &zip, const m3::Profile &profile = m3::VF3_REV_D);
 
 } // namespace romset
