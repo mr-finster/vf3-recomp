@@ -1397,6 +1397,72 @@ int Model3::hide_free_play_text()
 	return int(free_play_text.size());
 }
 
+// Revision D's, found for issue #12 (Dural playable):
+// - the crash: the dojo's (stage 14, the byte at 0x10201C) extra model. The routine at 0x49878 takes a share of the
+//   pool 0xA0000-0xE0000 for it (bl 0x3B25C: the old top, or -1 and cr0 "less" when it doesn't fit) and copies table
+//   entry 0x1A90 (0xD7B8 bytes) there (bl 0x3B2E0) without looking. Akira vs Kage there leaves 0xCBB4 bytes free;
+//   Dural's 17 extra pieces (0x44430) take 0xE334, so the share fails and the copy writes from 0xFFFFFFFF up, over
+//   the program at RAM 0 (0440004B at 0x18BC, frame 3254 of the issue's run). Now the share is checked, in as many
+//   instructions as before (the stack frame's two addi r1 become one, so the bl 0x3B2E0 stays at 0x498C8 and all the
+//   routine leaves in memory and registers is as it was): after the share, blt to dead words after 0x49634's blr
+//   (0x49648-0x49650, zeros nothing branches to), which set the object's state to the blr at 0x498FC (what every
+//   other stage's object gets) and join the routine's end. Nothing is copied: Dural on the dojo goes without that
+//   model (with Akira there it's never drawn either: the same pictures with it left out). Without Dural the share
+//   never fails: the same state every frame as without the patch (vf3run --state, the program's words aside).
+// - her portrait: the select's big portrait is a 3D head. On a cursor move 0x55E68 loads the list of models and
+//   textures at 0x7DE92[fighter] (her ids 9 and 22) and draws what the tables at 0x77160 and 0x77404 name: her own
+//   head, 0x0095. But her lists are copies of Shun's (0x7DB80, 0x7DDC4), so it isn't loaded (the cyan box). The pair
+//   table's own entries for her (0x77184, 0x771B8: 0x0095 then the lists' end) make a list of one: her head shows
+//   (shaded duller than in a fight: not found why).
+int Model3::set_dural(bool on)
+{
+	const size_t CROM_AT = profile->program_at;
+	auto at = [&](size_t a) -> uint8_t & { return crom[(a + CROM_AT) ^ 3]; };
+	auto word = [&](size_t a) { return uint32_t(at(a)) << 24 | uint32_t(at(a + 1)) << 16 | uint32_t(at(a + 2)) << 8 | at(a + 3); };
+	auto put = [&](size_t a, uint32_t v) { for (int k = 0; k < 4; k++) at(a + k) = uint8_t(v >> (24 - 8 * k)); };
+	if (!on) {
+		for (auto it = dural_words.rbegin(); it != dural_words.rend(); ++it) put(it->first, it->second);
+		dural_words.clear();
+		return 0;
+	}
+	if (!dural_words.empty()) return int(dural_words.size());   // (on already)
+	if (profile != &VF3_REV_D || crom.size() < CROM_AT + 0xA0000) return 0;
+	static const uint32_t known[][2] = {   // (the words around the patches, to be sure it's this program)
+		{ 0x49878, 0x886DA01C }, { 0x4987C, 0x2803000E }, { 0x49880, 0x41820014 }, { 0x49888, 0x300098FC },
+		{ 0x49898, 0x7C0802A6 }, { 0x498C0, 0x7C641B78 }, { 0x498C8, 0x4BFF1A19 }, { 0x498D4, 0x900F0000 },
+		{ 0x498DC, 0x30009A08 }, { 0x498E4, 0xBA010000 }, { 0x498E8, 0x38210040 }, { 0x498EC, 0x80010000 },
+		{ 0x498FC, 0x4E800020 }, { 0x49A08, 0x4E800020 }, { 0x49634, 0x4E800020 }, { 0x49644, 0x4BFFFFF4 },
+		{ 0x49654, 0 }, { 0x49660, 0x3821FFF0 }, { 0x3B294, 0x3860FFFF }, { 0x3B29C, 0x2C030000 },
+		{ 0x7DEB2, 0x7DB80 }, { 0x7DEE6, 0x7DDC4 }, { 0x77184, 0x0095FFFF }, { 0x771B8, 0x0095FFFF },
+	};
+	static const uint32_t patch[][3] = {   // address, the word known, the new one
+		{ 0x49894, 0x3821FFF0, 0x3821FFB0 },   // addi r1,r1,-0x10 -> addi r1,r1,-0x50
+		{ 0x4989C, 0x90010000, 0x90010040 },   // stw r0,0(r1) -> stw r0,0x40(r1) (the same word)
+		{ 0x498A0, 0x3821FFC0, 0xBE010000 },   // addi r1,r1,-0x40 -> stmw r16,0(r1) (from 0x498A4)
+		{ 0x498A4, 0xBE010000, 0x7E138378 },   // mr r19,r16
+		{ 0x498A8, 0x7E138378, 0x3A201A90 },   // li r17,0x1A90
+		{ 0x498AC, 0x3A201A90, 0xB2330038 },   // sth r17,0x38(r19)
+		{ 0x498B0, 0xB2330038, 0x7E238B78 },   // mr r3,r17
+		{ 0x498B4, 0x7E238B78, 0x4BFF19A9 },   // bl 0x3B25C (the share)
+		{ 0x498B8, 0x4BFF19A5, 0x90730058 },   // stw r3,0x58(r19)
+		{ 0x498BC, 0x90730058, 0x4180FD8C },   // blt 0x49648 (new: it failed)
+		{ 0x49648, 0x00000000, 0x3C000005 },   // lis r0,5
+		{ 0x4964C, 0x00000000, 0x300098FC },   // addic r0,r0,-0x6704 (0x498FC, as at 0x49888)
+		{ 0x49650, 0x00000000, 0x48000284 },   // b 0x498D4 (stw r0,0(r15) and the rest of the routine)
+		{ 0x7DEB6, 0x7DB80, 0x77184 },         // her portrait's list (unaligned words: the table's)
+		{ 0x7DEEA, 0x7DDC4, 0x771B8 },         // and her second costume's
+	};
+	for (auto &k : known)
+		if (word(k[0]) != k[1]) return 0;
+	for (auto &p : patch)
+		if (word(p[0]) != p[1]) return 0;
+	for (auto &p : patch) {
+		dural_words.push_back({ p[0], p[1] });
+		put(p[0], p[2]);
+	}
+	return int(dural_words.size());
+}
+
 void Model3::show_free_play_text()
 {
 	for (auto &[a, bytes] : free_play_text)

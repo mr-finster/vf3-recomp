@@ -59,6 +59,7 @@ struct Profile
 	uint32_t versus_count;    // a word: the matches between two players since power-on (vf3_netplay.h)
 	uint32_t scene;           // a byte: 5 on the character select (vf3_netplay.h)
 	uint32_t rounds_p1, rounds_p2, playing;   // the score's bytes (vf3_netplay.h's Score)
+	uint32_t select_cursor;   // a byte: player 1's place on the character select (player 2's 0x80 on); 13 is Dural
 
 	// The stages' backdrops (tilegen.cpp): the stage's number at r13 minus this, the backdrops' descriptors (a word
 	// per stage), the bank table (128 halfwords) and the backdrop's place (+4, +8)
