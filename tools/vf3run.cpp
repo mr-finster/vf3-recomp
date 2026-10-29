@@ -10,7 +10,7 @@
 // (hex address into --ram-at's dump, a byte; "b" first: the backup RAM's) writes RAM before every frame
 // (VF3_POKE_FRAMES=from-to: only those). VF3_FREE_PLAY=1: the coin setting FREE PLAY before the boot, as the PC way.
 // VF3_SET=vf3tb: Team Battle's profile (the zip must hold its set); VF3_MAP_OF=vf3: another profile's recompiler map (none: the interrupts' entries only);
-// VF3_DURAL=1|2|3: Play as Dural for player 1, 2 or both (as Game > Play as Dural). VF3_BORROW=backdrops,coin,settings,test_menu,versus_count,scene,score,free_play_text: those addresses from
+// VF3_LOG_BYTES=addr,...: those RAM bytes each frame ("bytes FRAME v..."). VF3_DURAL=1|2|3: Play as Dural for player 1, 2 or both (as Game > Play as Dural). VF3_BORROW=backdrops,coin,settings,test_menu,versus_count,scene,score,free_play_text: those addresses from
 // VF3_BORROW_FROM's profile (default vf3), to try them on another program; VF3_MAP_IN=file: more entry points (hex, a line each); VF3_MAP_OUT=file: appends every address the interpreter ran
 // from for want of one (--rec; a map's learning: run again with them in until none are new).
 #include <map>
@@ -194,7 +194,12 @@ int main(int argc, char **argv)
 					if (pa < mem.size()) mem[pa] = uint8_t(pv);
 				}
 		}
-		if (dural && board.profile->scene && board.ram[board.profile->scene ^ 3] == 5)
+		if (const char *lb = getenv("VF3_LOG_BYTES")) {   // tests: "addr,addr,...": those RAM bytes (the game's addresses) each frame
+			printf("bytes %llu", (unsigned long long)board.frame);
+			for (const char *q = lb; q && *q; q = strchr(q, ','), q = q ? q + 1 : nullptr) printf(" %u", board.ram[(strtoul(q, nullptr, 16)) ^ 3]);
+			printf("\n");
+		}
+		if (dural && board.profile->select_cursor && board.ram[board.profile->mode ^ 3] == 5)
 			for (int p = 0; p < 2; p++)
 				if (dural >> p & 1) board.ram[(board.profile->select_cursor + 0x80 * size_t(p)) ^ 3] = 13;
 		auto tp0 = std::chrono::steady_clock::now();

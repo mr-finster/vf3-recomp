@@ -1022,7 +1022,7 @@ struct Game
 	void start_frame()
 	{
 		const uint64_t t = SDL_GetTicksNS();
-		if (const int dp = dural_players.load(std::memory_order_relaxed); dp && board.profile->select_cursor && vf3net::in_select(board))
+		if (const int dp = dural_players.load(std::memory_order_relaxed); dp && board.profile->select_cursor && board.ram[board.profile->mode ^ 3] == 5)
 			for (int p = 0; p < 2; p++)
 				if (dp >> p & 1) board.ram[(board.profile->select_cursor + 0x80 * size_t(p)) ^ 3] = 13;
 		board.run_frame_start();
