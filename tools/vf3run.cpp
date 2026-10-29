@@ -13,7 +13,7 @@
 // VF3_TILE_LAG=1: the tile layers' lines drawn at the frame's end from the registers each line had (the host's tile
 // worker at its latest); VF3_TILE_EVERY=n: the tile layers drawn every n-th frame only (a netplay match's frames run
 // again unseen after a rollback), the sky audit then of those frames.
-// VF3_LOG_BYTES=addr,...: those RAM bytes each frame ("bytes FRAME v..."). VF3_DURAL=1|2|3: Play as Dural for player 1, 2 or both (as Game > Play as Dural). VF3_BORROW=backdrops,coin,settings,test_menu,versus_count,scene,score,free_play_text: those addresses from
+// VF3_LOG_BYTES=addr,...: those RAM bytes each frame ("bytes FRAME v..."). VF3_DURAL=1: Dural on the select (as the cheat: the program's patches, and her spot's picture in --shots). VF3_BORROW=backdrops,coin,settings,test_menu,versus_count,scene,score,free_play_text: those addresses from
 // VF3_BORROW_FROM's profile (default vf3), to try them on another program; VF3_MAP_IN=file: more entry points (hex, a line each); VF3_MAP_OUT=file: appends every address the interpreter ran
 // from for want of one (--rec; a map's learning: run again with them in until none are new).
 #include <map>
@@ -26,6 +26,7 @@
 #include "../src/video/sky_lead.h"
 #include "../src/video/r3d_raster.h"
 #include "../src/video/hud_names.h"
+#include "../src/video/dural_cell.h"
 #include "../src/sound/soundboard.h"
 #include <chrono>
 #include <cstdio>
@@ -91,8 +92,8 @@ int main(int argc, char **argv)
 		return 1;
 	}
 	// tests: Play as Dural as the game has it (main.cpp): her patches, and these players' select cursors held on her
-	const int dural = getenv("VF3_DURAL") ? atoi(getenv("VF3_DURAL")) & 3 : 0;
-	if (dural && board.set_dural(true) == 0) fprintf(stderr, "not the program known: no Play as Dural\n");
+	const bool dural = getenv("VF3_DURAL") && atoi(getenv("VF3_DURAL"));
+	if (dural && board.set_dural(true) == 0) fprintf(stderr, "not the program known: no Dural on the select\n");
 	InputScript script;
 	if (!script_path.empty() && !script.load(script_path, error)) {
 		fprintf(stderr, "vf3run: %s\n", error.c_str());
@@ -219,9 +220,6 @@ int main(int argc, char **argv)
 			for (const char *q = lb; q && *q; q = strchr(q, ','), q = q ? q + 1 : nullptr) printf(" %u", board.ram[(strtoul(q, nullptr, 16)) ^ 3]);
 			printf("\n");
 		}
-		if (dural && board.profile->select_cursor && board.ram[board.profile->mode ^ 3] == 5)
-			for (int p = 0; p < 2; p++)
-				if (dural >> p & 1) board.ram[(board.profile->select_cursor + 0x80 * size_t(p)) ^ 3] = 13;
 		auto tp0 = std::chrono::steady_clock::now();
 		board.run_frame();
 		if (tile_lag && !shots.empty()) {
@@ -858,6 +856,10 @@ int main(int argc, char **argv)
 					const size_t comma = v.find(',');
 					const std::string names[2] = { v.substr(0, comma), comma == std::string::npos ? std::string() : v.substr(comma + 1) };
 					video::hud_names(board, above, names);
+				}
+				if (dural && board.dural_on()) {   // (her spot's picture, as the host draws it)
+					static video::DuralPicture dural_pic;
+					video::dural_cell(board, above, dural_pic);
 				}
 				if (getenv("VF3_VP")) {
 					for (int x : { 0, video::W - 3 }) {

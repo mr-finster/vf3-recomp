@@ -8,7 +8,8 @@
 //   vf3soak <vf3.zip> --script FILE [--frames N] [--delay D] [--only-misses] [--rec] [--hashes FILE] [--quiet]
 // --rec: the recompiled code on both boards (as the game runs), else the interpreter. --hashes FILE: the straight
 // board's state hash for each frame, to compare runs on other machines (x86-64 and ARM64 must match). Also
-// reports what a frame costs (save, restore, run), against the 17.4 ms a frame has at 57.5 Hz.
+// reports what a frame costs (save, restore, run), against the 17.4 ms a frame has at 57.5 Hz. VF3_SET=vf3tb: Team
+// Battle's profile; VF3_DURAL=1: Dural on the select's patches on both boards.
 #include "../src/host/input_script.h"
 #include "../src/machine/model3.h"
 #include "../src/rec/ppc_rec.h"
@@ -107,8 +108,15 @@ int main(int argc, char **argv)
 	auto pa = std::make_unique<m3::Model3>(), pb = std::make_unique<m3::Model3>();
 	m3::Model3 &A = *pa, &B = *pb;   // A straight through, B rolled back
 	std::string error;
+	if (const char *set = getenv("VF3_SET")) {   // (another program's profile: "vf3tb", as vf3run's)
+		if (!(A.profile = B.profile = m3::find_profile(set))) { fprintf(stderr, "vf3soak: no such set %s\n", set); return 2; }
+	}
 	if (!A.load(rom, error) || !B.load(rom, error)) {
 		fprintf(stderr, "vf3soak: %s\n", error.c_str());
+		return 1;
+	}
+	if (getenv("VF3_DURAL") && atoi(getenv("VF3_DURAL")) && (A.set_dural(true) == 0 || B.set_dural(true) == 0)) {   // (Dural on the select's patches)
+		fprintf(stderr, "vf3soak: not the program known: no Dural on the select\n");
 		return 1;
 	}
 	InputScript script;

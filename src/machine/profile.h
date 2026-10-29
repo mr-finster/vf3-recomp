@@ -21,6 +21,20 @@ struct RomFile
 	bool swap;
 };
 
+// Play as Dural (Model3::set_dural, src/machine/dural.cpp): the program's words its patches check and change, and what
+// the host needs to draw her spot on the select (src/video/dural_cell.cpp)
+struct DuralPatch
+{
+	const uint32_t (*known)[2];   // program words that must be as listed (the program image's addresses)
+	size_t known_count;
+	const uint32_t (*patch)[3];   // the patches: address, the word known there, the new word
+	size_t patch_count;
+	uint32_t ram_from, ram_to;    // RAM the patched code keeps its copies in (cleared when the patches go)
+	// her picture, the FINAL MATCH screen's (the tile generator's pictures: a descriptor (in the fixed CROM) of chunk
+	// count, width and height in tiles and the map, then chunks of palette and patterns in the banked CROM)
+	uint32_t picture, descriptors, data, data_bank;
+};
+
 struct Profile
 {
 	const char *set;     // MAME's set: the zip's name ("vf3" for vf3.zip) and the online game
@@ -59,7 +73,7 @@ struct Profile
 	uint32_t versus_count;    // a word: the matches between two players since power-on (vf3_netplay.h)
 	uint32_t scene;           // a byte: 5 on the character select (vf3_netplay.h)
 	uint32_t rounds_p1, rounds_p2, playing;   // the score's bytes (vf3_netplay.h's Score)
-	uint32_t select_cursor;   // a byte: player 1's place on the character select (player 2's 0x80 on); 13 is Dural
+	uint32_t select_cursor;   // a byte: player 1's column on the character select (player 2's 0x80 on; the row the byte before)
 	uint32_t mode;            // a byte: the game's mode, 5 from Start through the select (the stage select too)
 
 	// The stages' backdrops (tilegen.cpp): the stage's number at r13 minus this, the backdrops' descriptors (a word
@@ -72,9 +86,12 @@ struct Profile
 
 	// The player's data (backup, eeprom) in this folder under the data folder ("": the data folder itself)
 	const char *data_folder;
+
+	const DuralPatch *dural;   // Play as Dural's (none: not known for this program)
 };
 
 extern const Profile VF3_REV_D, VF3_TB;
+extern const DuralPatch REV_D_DURAL, TB_DURAL;
 extern const Profile *const PROFILES[];   // every program known, Revision D first; nullptr after the last
 const Profile *find_profile(const char *set);   // by MAME's set name ("vf3", "vf3tb"); nullptr if none
 

@@ -171,11 +171,13 @@ public:
 	// it changed (2; 0: not the data known). show_free_play_text puts them back.
 	int hide_free_play_text();
 	void show_free_play_text();
-	// Play as Dural (Game > Play as Dural, offline only; issue #12): the two patches she needs to the program, in the
-	// fixed CROM the boot copies from (so from the next boot), each checked against the known words first. The dojo's
-	// extra model (stage 14) checks its share of the model pool (with Dural in the fight the pool is full, and the
-	// allocator's -1 was copied to: over RAM 0, the program, the arcade's freeze); her select portrait loads her own
-	// head. On: returns how many words changed (15; 0: not the program known, nothing changed). Off: puts them back.
+	// Play as Dural (Game > Play as Dural, offline only; issue #12): the patches she needs to the program
+	// (src/machine/dural.cpp, the profile's DuralPatch), in the fixed CROM the boot copies from (so from the next boot),
+	// each checked against the known words first: the dojo's extra model (stage 14) checks its share of the model pool
+	// (with Dural in the fight the pool is full, and the allocator's -1 was copied to: over RAM 0, the program, the
+	// arcade's freeze); her select portrait loads her own head, made chrome as a fight makes it; and either player's
+	// cursor can move onto her, a seventh column of the grid. On: returns how many words changed (0: not the program
+	// known, nothing changed). Off: puts them back.
 	int set_dural(bool on);
 	bool dural_on() const { return !dural_words.empty(); }
 	std::vector<std::pair<size_t, uint32_t>> dural_words;   // what set_dural replaced (the program's word addresses)
