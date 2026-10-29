@@ -141,11 +141,17 @@ __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
 #endif
 #include <vector>
 #ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>   // (relaunch: CreateProcessW)
 #include <io.h>
 #define isatty _isatty
 #define fileno _fileno
 #else
 #include <unistd.h>
+#endif
+#ifdef __APPLE__
+#include <mach-o/dyld.h>   // (_NSGetExecutablePath: relaunch)
 #endif
 
 // Every message box goes through here: a test run (VF3_HIDDEN) never shows one (nor a file picker); the message
@@ -794,6 +800,42 @@ std::vector<std::pair<const m3::Profile *, std::string>> game_zips(const std::st
 		if (!from.empty()) out.push_back({ *p, from });
 	}
 	return out;
+}
+
+// The game started again, in place (Game > Version: the other program): the same program file and arguments, after
+// everything's saved and closed. POSIX: this process becomes the new one (execv); Windows: a new process, then this
+// one ends. False if it couldn't (the player is told to start it again).
+bool relaunch(int argc, char **argv)
+{
+	(void)argc;
+#ifdef _WIN32
+	wchar_t exe[32768];
+	const DWORD n = GetModuleFileNameW(nullptr, exe, 32768);
+	if (n == 0 || n >= 32768) return false;
+	STARTUPINFOW si{};
+	si.cb = sizeof si;
+	PROCESS_INFORMATION pi{};
+	std::wstring cmd = GetCommandLineW();
+	if (!CreateProcessW(exe, cmd.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi)) return false;
+	CloseHandle(pi.hThread);
+	CloseHandle(pi.hProcess);
+	return true;
+#else
+	std::string exe;
+#ifdef __APPLE__
+	uint32_t size = 0;
+	_NSGetExecutablePath(nullptr, &size);
+	exe.resize(size);
+	if (_NSGetExecutablePath(exe.data(), &size) != 0) return false;
+	exe.resize(strlen(exe.c_str()));
+#else
+	std::error_code ec;
+	exe = std::filesystem::read_symlink("/proc/self/exe", ec).string();
+	if (ec) exe = argv[0];
+#endif
+	execv(exe.c_str(), argv);   // (returns only if it failed)
+	return false;
+#endif
 }
 
 // The board and what makes its pictures and sound
@@ -2300,6 +2342,11 @@ int main(int argc, char **argv)
 		fprintf(stderr, "no menu: its files (assets/ui) weren't found\n");
 	menu.set_footer(std::string("Virtua Fighter 3 Recomp ") + VF3_VERSION + (*VF3_DATE ? std::string(" \u00b7 ") + VF3_DATE : std::string()));
 	bool running = true, paused = false;
+	bool restart = false;   // (Game > Version: started again as it quits, the other program)
+	// Game > Add Team Battle's file picker (it answers on its own thread: what it wrote is read once done is set)
+	struct zip_pick { std::atomic<bool> done{ false }; bool failed = false; std::vector<std::string> files; };
+	std::unique_ptr<zip_pick> add_pick;
+	std::string add_error;
 	pad_state pstate[2];
 
 	// ---- the governor (tests only: VF3_GOVERN) ----
@@ -2524,18 +2571,36 @@ int main(int argc, char **argv)
 		}
 		if (programs.size() > 1)   // (the zips hold both: Revision D and Team Battle)
 			p.items.push_back({ "Version",
-				"Which Virtua Fighter 3 to play: the original (Revision D) or Team Battle, three fighters a side. Each keeps its own rankings and arcade settings. Changing it takes effect the next time the game starts.",
-				[&] {
-					const m3::Profile *want = board.profile;
-					for (const auto &pz : programs) if (cfg.game == pz.first->set) want = pz.first;
-					return std::string(want == &m3::VF3_TB ? "Team Battle" : "Virtua Fighter 3") + (want != board.profile ? " (from the next start)" : "");
-				},
+				"Which Virtua Fighter 3 to play: the original (Revision D) or Team Battle, three fighters a side. Each keeps its own rankings and arcade settings. Changing it saves and starts the game again in the other.",
+				[&] { return std::string(board.profile == &m3::VF3_TB ? "Team Battle" : "Virtua Fighter 3"); },
 				[&](int d) {
+					if (nvram_away || online.phase() != Online::Phase::off) return;   // (not in an online match)
 					size_t i = 0;
-					for (size_t k = 0; k < programs.size(); k++) if (programs[k].first->set == (cfg.game.empty() ? std::string(board.profile->set) : cfg.game)) i = k;
+					for (size_t k = 0; k < programs.size(); k++) if (programs[k].first == board.profile) i = k;
 					i = (i + programs.size() + (d < 0 ? programs.size() - 1 : 1)) % programs.size();
+					if (programs[i].first == board.profile) return;
 					cfg.game = programs[i].first->set;
 					cfg_dirty = true;
+					fprintf(stderr, "Game > Version: %s, the game starts again\n", programs[i].first->title);
+					restart = true;
+					running = false;
+				} });
+		else if (board.profile == &m3::VF3_REV_D)   // (Team Battle not found beside it: a way to add it)
+			p.items.push_back({ "Add Team Battle",
+				"Virtua Fighter 3 Team Battle, three fighters a side: choose your vf3tb.zip (MAME's set). It's copied beside your vf3.zip, and the game starts again in Team Battle. Game > Version switches between the two after that.",
+				[&] { return add_pick ? std::string("choosing...") : add_error.empty() ? std::string("vf3tb.zip") : add_error; },
+				{},
+				[&] {
+					if (add_pick || nvram_away || online.phase() != Online::Phase::off) return;
+					add_error.clear();
+					add_pick = std::make_unique<zip_pick>();
+					static const SDL_DialogFileFilter filters[] = { { "MAME ROM sets (zip)", "zip" } };
+					SDL_ShowOpenFileDialog([](void *ud, const char *const *list, int) {
+						auto *c = static_cast<zip_pick *>(ud);
+						if (!list) c->failed = true;
+						else for (; *list; list++) c->files.push_back(*list);
+						c->done.store(true, std::memory_order_release);
+					}, add_pick.get(), win, filters, 1, nullptr, false);
 				} });
 		p.items.push_back(back_item());
 		return p;
@@ -3152,6 +3217,39 @@ int main(int argc, char **argv)
 		uint64_t pass_work_ns = 0;
 		const bool menu_was_open = menu.is_open();
 		// (tests: a room hosted, or joined with its code, as the menu would, once the game's past its start)
+		if (add_pick && add_pick->done.load(std::memory_order_acquire)) {   // (Game > Add Team Battle: the zip chosen)
+			std::string why;
+			if (add_pick->failed) why = "no file picker here: put vf3tb.zip beside vf3.zip";
+			else if (!add_pick->files.empty()) {
+				const std::string f = add_pick->files[0];
+				const std::vector<const m3::Profile *> sets = romset::sets_in(f);
+				const std::filesystem::path to = std::filesystem::path(zip).parent_path() / "vf3tb.zip";
+				std::error_code ec;
+				const bool whole = std::find(sets.begin(), sets.end(), &m3::VF3_TB) != sets.end();
+				if (whole && std::filesystem::equivalent(f, to, ec)) {}   // (it's there already)
+				else if (!whole && std::filesystem::exists(to, ec)) why = "not Team Battle: choose MAME's vf3tb.zip";
+				else if (!copy_whole(f, to, why)) why = "couldn't copy it: " + why;
+				else if (!whole) {
+					// (a split vf3tb.zip holds only Team Battle's own ROMs: it counts once beside vf3.zip, where it's now)
+					const std::vector<const m3::Profile *> beside = romset::sets_in(to.string());
+					if (std::find(beside.begin(), beside.end(), &m3::VF3_TB) == beside.end()) {
+						std::filesystem::remove(to, ec);
+						why = "not Team Battle: choose MAME's vf3tb.zip";
+					}
+				}
+				if (why.empty()) {
+					fprintf(stderr, "Game > Add Team Battle: %s copied to %s; the game starts again in Team Battle\n", f.c_str(), to.string().c_str());
+					cfg.game = m3::VF3_TB.set;
+					cfg_dirty = true;
+					restart = true;
+					running = false;
+				}
+			}
+			if (!why.empty()) fprintf(stderr, "Game > Add Team Battle: %s\n", why.c_str());
+			add_error = why;
+			add_pick.reset();
+			menu.refresh();
+		}
 		if ((arg_host || !arg_join.empty()) && pass == 60) {   // (--host, --join: by address, the Online screen showing it)
 			if (!board.profile->online) fprintf(stderr, "online: --host / --join: online play isn't ready for %s yet\n", board.profile->name);
 			else {
@@ -3786,5 +3884,10 @@ int main(int argc, char **argv)
 	marker_done(true);
 	SDL_Quit();
 	fprintf(stderr, "quit after %llu frames\n", (unsigned long long)game_frame);
+	if (restart) {
+		fprintf(stderr, "starting again (Game > Version)\n");
+		fflush(stderr);
+		if (!relaunch(argc, argv)) fprintf(stderr, "couldn't start the game again: start it yourself\n");
+	}
 	return 0;
 }
