@@ -1412,8 +1412,10 @@ int Model3::hide_free_play_text()
 // - her portrait: the select's big portrait is a 3D head. On a cursor move 0x55E68 loads the list of models and
 //   textures at 0x7DE92[fighter] (her ids 9 and 22) and draws what the tables at 0x77160 and 0x77404 name: her own
 //   head, 0x0095. But her lists are copies of Shun's (0x7DB80, 0x7DDC4), so it isn't loaded (the cyan box). The pair
-//   table's own entries for her (0x77184, 0x771B8: 0x0095 then the lists' end) make a list of one: her head shows
-//   (shaded duller than in a fight: not found why).
+//   table's own entry for her (0x77184: 0x0095 then the lists' end) makes a list of one: her head shows. Player 2's
+//   side shows her second costume (id 22), whose head is 0x10AF, the gold one (0x0095 there drew nothing): the
+//   program's FFFF 10AF FFFF at 0x77608 holds the list [0x10AF] at 0x7760A. Both duller than in a fight: the fight
+//   rebuilds the model's vertices and normals every frame (0x37C84-0x37E2C), the select draws the template as stored.
 int Model3::set_dural(bool on)
 {
 	const size_t CROM_AT = profile->program_at;
@@ -1433,7 +1435,8 @@ int Model3::set_dural(bool on)
 		{ 0x498DC, 0x30009A08 }, { 0x498E4, 0xBA010000 }, { 0x498E8, 0x38210040 }, { 0x498EC, 0x80010000 },
 		{ 0x498FC, 0x4E800020 }, { 0x49A08, 0x4E800020 }, { 0x49634, 0x4E800020 }, { 0x49644, 0x4BFFFFF4 },
 		{ 0x49654, 0 }, { 0x49660, 0x3821FFF0 }, { 0x3B294, 0x3860FFFF }, { 0x3B29C, 0x2C030000 },
-		{ 0x7DEB2, 0x7DB80 }, { 0x7DEE6, 0x7DDC4 }, { 0x77184, 0x0095FFFF }, { 0x771B8, 0x0095FFFF },
+		{ 0x7DEB2, 0x7DB80 }, { 0x7DEE6, 0x7DDC4 }, { 0x77184, 0x0095FFFF }, { 0x77608, 0xFFFF10AF },
+		{ 0x7760C, 0xFFFF122A }, { 0x77414, 0x10880095 }, { 0x77430, 0x10AF122A },
 	};
 	static const uint32_t patch[][3] = {   // address, the word known, the new one
 		{ 0x49894, 0x3821FFF0, 0x3821FFB0 },   // addi r1,r1,-0x10 -> addi r1,r1,-0x50
@@ -1450,7 +1453,7 @@ int Model3::set_dural(bool on)
 		{ 0x4964C, 0x00000000, 0x300098FC },   // addic r0,r0,-0x6704 (0x498FC, as at 0x49888)
 		{ 0x49650, 0x00000000, 0x48000284 },   // b 0x498D4 (stw r0,0(r15) and the rest of the routine)
 		{ 0x7DEB6, 0x7DB80, 0x77184 },         // her portrait's list (unaligned words: the table's)
-		{ 0x7DEEA, 0x7DDC4, 0x771B8 },         // and her second costume's
+		{ 0x7DEEA, 0x7DDC4, 0x7760A },         // and her second costume's: [0x10AF], her gold head (0x0095 drew nothing on the right)
 	};
 	for (auto &k : known)
 		if (word(k[0]) != k[1]) return 0;
