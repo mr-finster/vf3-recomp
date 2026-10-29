@@ -152,7 +152,7 @@ public:
 	int coin_setting() const
 	{
 		const Profile::Coin &k = profile->coin;
-		const int v = backup.size() > k.free_play ? backup[k.setting] : 0;
+		const int v = k.setting && backup.size() > k.free_play ? backup[k.setting] : 0;   // (0: not known for this program)
 		return v >= 1 && v <= COIN_FREE_PLAY ? v : -1;
 	}
 	bool set_coin_setting(int v)   // (true if it changed)

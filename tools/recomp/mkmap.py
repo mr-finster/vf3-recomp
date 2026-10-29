@@ -7,20 +7,22 @@
 #   tools/recomp/mkmap.py <map folder> <vf3.zip> src/rec/vf3_map.cpp
 import struct, sys, zipfile
 
-mapdir, rom, out_path = sys.argv[1:4]
 LIMIT = 0xA0000   # the program the boot copies to RAM (from the fixed CROM's offset 0x710000)
+REV_D = ['epr-19230d.20', 'epr-19229d.19', 'epr-19228d.18', 'epr-19227d.17']
 
-# the program image, as romset.cpp lays it out: the four program ROMs in 2-byte chunks every 8 bytes, swapped
-z = zipfile.ZipFile(rom)
-names = ['epr-19230d.20', 'epr-19229d.19', 'epr-19228d.18', 'epr-19227d.17']
-files = [z.read(n) for n in names]
-crom = bytearray(len(files[0]) * 4)
-for k, f in enumerate(files):
-    for i in range(0, len(f), 2):
-        o = (i // 2) * 8 + k * 2
-        crom[o] = f[i + 1]
-        crom[o + 1] = f[i]
-base = 0x710000 - (0x800000 - len(crom))
+crom, base = None, 0
+def load(rom, names=REV_D):
+    # the program image, as romset.cpp lays it out: the four program ROMs in 2-byte chunks every 8 bytes, swapped
+    global crom, base
+    z = zipfile.ZipFile(rom)
+    files = [z.read(n) for n in names]
+    crom = bytearray(len(files[0]) * 4)
+    for k, f in enumerate(files):
+        for i in range(0, len(f), 2):
+            o = (i // 2) * 8 + k * 2
+            crom[o] = f[i + 1]
+            crom[o + 1] = f[i]
+    base = 0x710000 - (0x800000 - len(crom))
 def word(a): return struct.unpack('>I', crom[base + a:base + a + 4])[0]
 
 OK31 = {0, 4, 8, 520, 10, 522, 11, 19, 20, 23, 24, 26, 28, 540, 32, 40, 552, 54, 86, 246, 278, 470, 1014, 55, 60, 75,
@@ -67,31 +69,34 @@ def walk(seeds):   # as ppc_rec.cpp's analyse()
             a += 4
     return seen
 
-flags = open(mapdir + '/flags_ram.bin', 'rb').read()
-seeds = set()
-for i in range(LIMIT // 4):
-    if flags[i] & (2 | 16):                                # call targets, interrupt entries
-        seeds.add(i * 4)
-for line in open(mapdir + '/indirect.txt'):               # indirect jumps' and calls' targets (not rfi's)
-    kind, src, dst, n = line.split()
-    if kind not in ('rfi', 'interrupt') and int(dst, 16) < LIMIT:
-        seeds.add(int(dst, 16))
-ran = {i * 4 for i in range(LIMIT // 4) if flags[i] & 1}
-reached = walk(seeds)
-extra = sorted(ran - reached)
-# each piece the walk missed needs only its first instruction: walk again with each added
-for a in extra:
-    if a not in reached:
-        seeds.add(a)
-        reached |= walk([a])
-missing = ran - reached
-seeds = sorted(seeds)
-with open(out_path, 'w') as out:
-    out.write('// The recompiler\'s address map: where VF3\'s code starts (calls, indirect jumps\' targets, interrupt\n')
-    out.write('// entries, places reached only by returning from an interrupt), from the coverage runs of\n')
-    out.write('// docs/step1-measure.md. Made by tools/recomp/mkmap.py. Addresses only.\n')
-    out.write('#include "ppc_rec.h"\n\nnamespace ppcrec {\n\nconst uint32_t vf3_map[] = {\n')
-    for k in range(0, len(seeds), 10):
-        out.write('\t' + ', '.join('0x%05X' % a for a in seeds[k:k + 10]) + ',\n')
-    out.write('};\nconst size_t vf3_map_count = sizeof(vf3_map) / sizeof(vf3_map[0]);\n\n} // namespace ppcrec\n')
-print('%d addresses; %d instructions found, %d of the %d seen running, %d not' % (len(seeds), len(reached), len(ran & reached), len(ran), len(missing)))
+if __name__ == '__main__':   # (imported, mklearnt.py: the functions above only)
+    mapdir, rom, out_path = sys.argv[1:4]
+    load(rom)
+    flags = open(mapdir + '/flags_ram.bin', 'rb').read()
+    seeds = set()
+    for i in range(LIMIT // 4):
+        if flags[i] & (2 | 16):                                # call targets, interrupt entries
+            seeds.add(i * 4)
+    for line in open(mapdir + '/indirect.txt'):               # indirect jumps' and calls' targets (not rfi's)
+        kind, src, dst, n = line.split()
+        if kind not in ('rfi', 'interrupt') and int(dst, 16) < LIMIT:
+            seeds.add(int(dst, 16))
+    ran = {i * 4 for i in range(LIMIT // 4) if flags[i] & 1}
+    reached = walk(seeds)
+    extra = sorted(ran - reached)
+    # each piece the walk missed needs only its first instruction: walk again with each added
+    for a in extra:
+        if a not in reached:
+            seeds.add(a)
+            reached |= walk([a])
+    missing = ran - reached
+    seeds = sorted(seeds)
+    with open(out_path, 'w') as out:
+        out.write('// The recompiler\'s address map: where VF3\'s code starts (calls, indirect jumps\' targets, interrupt\n')
+        out.write('// entries, places reached only by returning from an interrupt), from the coverage runs of\n')
+        out.write('// docs/step1-measure.md. Made by tools/recomp/mkmap.py. Addresses only.\n')
+        out.write('#include "ppc_rec.h"\n\nnamespace ppcrec {\n\nconst uint32_t vf3_map[] = {\n')
+        for k in range(0, len(seeds), 10):
+            out.write('\t' + ', '.join('0x%05X' % a for a in seeds[k:k + 10]) + ',\n')
+        out.write('};\nconst size_t vf3_map_count = sizeof(vf3_map) / sizeof(vf3_map[0]);\n\n} // namespace ppcrec\n')
+    print('%d addresses; %d instructions found, %d of the %d seen running, %d not' % (len(seeds), len(reached), len(ran & reached), len(ran), len(missing)))
