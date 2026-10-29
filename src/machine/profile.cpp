@@ -109,6 +109,7 @@ const Profile VF3_REV_D = {
 	// 0x17, country 0x1E
 	{ 0x1E000, 2, 3, 6, 7, 8, 12, 0x17, 0x1E },
 	960, 0x102002, 0x106080, 0xE4046, 0x10601A, 0x10601B, 0x106029,
+	0x108045,   // (found by choosing each fighter and comparing; 0-12 the select's, 13 Dural: issue #12)
 	{ 0x1E0C, 0xFFB30004, 0x161614, 0x1617B4 },
 	ppcrec::vf3_map, ppcrec::vf3_map_count,
 	"",
@@ -132,6 +133,7 @@ const Profile VF3_TB = {
 	// refers to them, r13-relative: tools found every reference unchanged); the select byte not found yet (only
 	// online needs it: 0x1001B3 is 0, 5, 1 in the attract, the select and a fight)
 	960, 0x102002, 0x106080, 0, 0x10601A, 0x10601B, 0x106029,
+	0,   // (the select's cursor: not looked for yet, so no Play as Dural)
 	// the backdrops: Revision D's (a fight's sky found with no tile on screen wrong, as Revision D's: checked on the dojo)
 	{ 0x1E0C, 0xFFB30004, 0x161614, 0x1617B4 },
 	ppcrec::vf3tb_map, ppcrec::vf3tb_map_count,

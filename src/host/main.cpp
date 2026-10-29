@@ -487,6 +487,7 @@ struct settings
 	int music = 100, effects = 100;   // within the volume
 	int arcade_coin = -2;   // the arcade way's coin setting, while the PC way's FREE PLAY replaces it (-1 none to give back, -2 none kept yet)
 	std::string roms_folder;
+	int dural = 0;      // Play as Dural (a cheat, offline only): 0 off, 1 player 1, 2 player 2, 3 both
 	std::string game;   // the program played, its set's name ("vf3", "vf3tb"): Game > Version, when the zips hold both
 	static constexpr const char *BUILD = VF3_VERSION " " VF3_DATE " " VF3_COMMIT;   // (what gpu3d_failed was learnt by)
 	std::string gpu3d_failed;   // SDL_GPU's drivers whose 3D failed here ("direct3d12 vulkan"): the next start tries the next
@@ -525,6 +526,7 @@ struct settings
 		num("renderer_3d", renderer3d, 0, 2);
 		if (auto it = kv.find("roms_folder"); it != kv.end()) roms_folder = it->second;
 		if (auto it = kv.find("game"); it != kv.end() && m3::find_profile(it->second.c_str())) game = it->second;
+		num("cheat_dural", dural, 0, 3);
 		if (auto it = kv.find("online_name"); it != kv.end()) online.name = online_menu::clean_name(it->second);
 		if (auto it = kv.find("online_address"); it != kv.end()) online.address = online_menu::clean_address(it->second);
 		if (auto it = kv.find("online_lobby"); it != kv.end() && (it->second.rfind("https://", 0) == 0 || it->second.rfind("http://", 0) == 0))
@@ -605,6 +607,7 @@ struct settings
 				int(smooth), renderer3d, int(smooth_bg));
 		if (!roms_folder.empty()) fprintf(f, "roms_folder = %s\n", roms_folder.c_str());
 		if (!game.empty()) fprintf(f, "game = %s\n", game.c_str());
+		if (dural) fprintf(f, "cheat_dural = %d\n", dural);
 		if (!gpu3d_failed.empty()) fprintf(f, "gpu_3d_failed = %s\ngpu_3d_failed_build = %s\n", gpu3d_failed.c_str(), BUILD);
 		fprintf(f, "crt_colours = %d\nbrightness = %d\ngamma = %d\nsharp_textures = %d\n", crt_colours, brightness, gamma, int(sharp_textures));
 		if (graphics) fprintf(f, "graphics = %d\n", graphics);
@@ -1013,9 +1016,15 @@ struct Game
 	double part_ms[5] = {};   // the board, waiting for the sound, the scene, the 2D layers, the sky
 	uint64_t part_n = 0;
 	static double ms_since(uint64_t t) { return double(SDL_GetTicksNS() - t) / 1e6; }
+	// Play as Dural: these players' select cursors held on her (bit 0 player 1, bit 1 player 2; 0 in a match), the
+	// select's every frame (the button chooses whoever the cursor's on)
+	std::atomic<int> dural_players{ 0 };
 	void start_frame()
 	{
 		const uint64_t t = SDL_GetTicksNS();
+		if (const int dp = dural_players.load(std::memory_order_relaxed); dp && board.profile->select_cursor && vf3net::in_select(board))
+			for (int p = 0; p < 2; p++)
+				if (dp >> p & 1) board.ram[(board.profile->select_cursor + 0x80 * size_t(p)) ^ 3] = 13;
 		board.run_frame_start();
 		part_ms[0] += ms_since(t);
 	}
@@ -1383,6 +1392,11 @@ int main(int argc, char **argv)
 		if (game.emu_thread.joinable()) game.job_wait();   // (not while a frame runs alongside)
 		if (!g_pc_mode) board.show_free_play_text();
 		else if (board.hide_free_play_text() != 2) fprintf(stderr, "not the data known: the FREE PLAY notices stay\n");
+		// Play as Dural's patches (her portrait, the dojo's model checked: the arcade froze there with her), for it only
+		const bool dural = cfg.dural && board.profile->select_cursor && !nvram_away;
+		if (dural && board.set_dural(true) == 0) fprintf(stderr, "not the program known: no Play as Dural\n");
+		if (!dural) board.set_dural(false);
+		game.dural_players = dural && board.dural_on() ? cfg.dural : 0;
 		game.program_changed();
 	};
 	auto boot = [&] {
@@ -2490,6 +2504,13 @@ int main(int argc, char **argv)
 			[&](int) { if (nvram_away) return; cfg.arcade = !cfg.arcade; g_pc_mode = !cfg.arcade; cfg_dirty = true; reset_game(); } });
 		p.items.push_back({ "Reset game", "Restarts the game, like switching the arcade off and on. Rankings and settings are kept. (F3)",
 			{}, {}, [&] { reset_game(); } });
+		if (board.profile->select_cursor) {   // (Revision D's: issue #12)
+			static const char *WHO[] = { "Off", "Player 1", "Player 2", "Both players" };
+			p.items.push_back({ "Play as Dural",
+				"A cheat: the boss, Dural, playable. On the character select that player's cursor stays on her: any button chooses her (Start held, her other colours). Offline only; online matches are always without it. The arcade froze on Akira's stage with her: fixed here. Changing it restarts the game.",
+				[&] { return std::string(WHO[std::clamp(cfg.dural, 0, 3)]); },
+				[&](int d) { if (nvram_away) return; cfg.dural = (cfg.dural + 4 + d) % 4; cfg_dirty = true; reset_game(); } });
+		}
 		if (programs.size() > 1)   // (the zips hold both: Revision D and Team Battle)
 			p.items.push_back({ "Version",
 				"Which Virtua Fighter 3 to play: the original (Revision D) or Team Battle, three fighters a side. Each keeps its own rankings and arcade settings. Changing it takes effect the next time the game starts.",
@@ -2877,6 +2898,7 @@ int main(int argc, char **argv)
 		}
 	};
 	online.adapter.on_begin = [&] {
+		game.dural_players = 0;   // (Play as Dural: never in a match; the adapter takes its patches out)
 		if (!nvram_away) {   // (this player's own, given back after the match)
 			own_backup = board.backup;
 			memcpy(own_eeprom, board.eeprom.regs, sizeof own_eeprom);
