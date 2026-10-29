@@ -117,6 +117,7 @@ const Profile VF3_REV_D = {
 	{ 0x1E0C, 0xFFB30004, 0x161614, 0x1617B4 },
 	ppcrec::vf3_map, ppcrec::vf3_map_count,
 	"",
+	&REV_D_DURAL,
 };
 
 // Team Battle: its ROMs, and the addresses found so far; what isn't known yet is 0 (that feature off: the select's
@@ -137,7 +138,7 @@ const Profile VF3_TB = {
 	// refers to them, r13-relative: tools found every reference unchanged); the select byte not found yet (only
 	// online needs it: 0x1001B3 is 0, 5, 1 in the attract, the select and a fight)
 	960, 0x102002, 0x106080, 0, 0x10601A, 0x10601B, 0x106029,
-	0,   // (the select's cursor: not looked for yet, so no Play as Dural)
+	0x108045,   // (the select's column: Revision D's place, the same code (0x305DC) loads it: checked choosing Dural there)
 	0x102008,   // (3, 5, 7 in the attract, the select and a fight, as Revision D's)
 	// the backdrops: Revision D's (a fight's sky found with no tile on screen wrong, as Revision D's: checked on the dojo),
 	// but the backdrop's place at 0x16195C (Revision D's 0x1617B4 holds something else here: the routine that writes
@@ -146,6 +147,7 @@ const Profile VF3_TB = {
 	{ 0x1E0C, 0xFFB30004, 0x161614, 0x16195C },
 	ppcrec::vf3tb_map, ppcrec::vf3tb_map_count,
 	"vf3tb",
+	&TB_DURAL,
 };
 
 const Profile *const PROFILES[] = { &VF3_REV_D, &VF3_TB, nullptr };

@@ -90,6 +90,7 @@
 #include "version.h"      // VF3_VERSION, VF3_DATE (made by the Makefile from git)
 #include "online.h"
 #include "../video/hud_names.h"
+#include "../video/dural_cell.h"
 #include "flags.h"
 #include "../machine/model3.h"
 #include "../machine/romset.h"
@@ -494,7 +495,7 @@ struct settings
 	int music = 100, effects = 100;   // within the volume
 	int arcade_coin = -2;   // the arcade way's coin setting, while the PC way's FREE PLAY replaces it (-1 none to give back, -2 none kept yet)
 	std::string roms_folder;
-	int dural = 0;      // Play as Dural (a cheat, offline only): 0 off, 1 player 1, 2 player 2, 3 both
+	int dural = 0;      // Dural on the select (a cheat): 0 off, else on (1-3, from when it was per player)
 	std::string game;   // the program played, its set's name ("vf3", "vf3tb"): Game > Version, when the zips hold both
 	static constexpr const char *BUILD = VF3_VERSION " " VF3_DATE " " VF3_COMMIT;   // (what gpu3d_failed was learnt by)
 	std::string gpu3d_failed;   // SDL_GPU's drivers whose 3D failed here ("direct3d12 vulkan"): the next start tries the next
@@ -1059,15 +1060,12 @@ struct Game
 	double part_ms[5] = {};   // the board, waiting for the sound, the scene, the 2D layers, the sky
 	uint64_t part_n = 0;
 	static double ms_since(uint64_t t) { return double(SDL_GetTicksNS() - t) / 1e6; }
-	// Play as Dural: these players' select cursors held on her (bit 0 player 1, bit 1 player 2; 0 in a match), the
-	// select's every frame (the button chooses whoever the cursor's on)
+	// Play as Dural: her spot on the select is the program's (Model3::set_dural); its picture the host's (dural_cell)
 	std::atomic<int> dural_players{ 0 };
+	video::DuralPicture dural_pic;   // (decoded from the ROM when first needed)
 	void start_frame()
 	{
 		const uint64_t t = SDL_GetTicksNS();
-		if (const int dp = dural_players.load(std::memory_order_relaxed); dp && board.profile->select_cursor && board.ram[board.profile->mode ^ 3] == 5)
-			for (int p = 0; p < 2; p++)
-				if (dp >> p & 1) board.ram[(board.profile->select_cursor + 0x80 * size_t(p)) ^ 3] = 13;
 		board.run_frame_start();
 		part_ms[0] += ms_since(t);
 	}
@@ -1120,6 +1118,7 @@ struct Game
 					for (auto &a : hud_flag_at) a[0] = a[1] = -1;
 			} else
 				for (auto &a : hud_flag_at) a[0] = a[1] = -1;
+			if (dural_players.load(std::memory_order_relaxed)) video::dural_cell(board, above, dural_pic);   // (her spot's picture)
 			tiles.aligned_wide(below_wide);
 		});
 		t = SDL_GetTicksNS();
@@ -1446,10 +1445,10 @@ int main(int argc, char **argv)
 		if (!g_pc_mode) board.show_free_play_text();
 		else if (board.hide_free_play_text() != 2) fprintf(stderr, "not the data known: the FREE PLAY notices stay\n");
 		// Play as Dural's patches (her portrait, the dojo's model checked: the arcade froze there with her), for it only
-		const bool dural = cfg.dural && board.profile->select_cursor && !nvram_away;
-		if (dural && board.set_dural(true) == 0) fprintf(stderr, "not the program known: no Play as Dural\n");
+		const bool dural = cfg.dural && board.profile->dural && !nvram_away;
+		if (dural && board.set_dural(true) == 0) fprintf(stderr, "not the program known: no Dural on the select\n");
 		if (!dural) board.set_dural(false);
-		game.dural_players = dural && board.dural_on() ? cfg.dural : 0;
+		game.dural_players = dural && board.dural_on() ? 3 : 0;
 		game.program_changed();
 	};
 	auto boot = [&] {
@@ -2562,12 +2561,11 @@ int main(int argc, char **argv)
 			[&](int) { if (nvram_away) return; cfg.arcade = !cfg.arcade; g_pc_mode = !cfg.arcade; cfg_dirty = true; reset_game(); } });
 		p.items.push_back({ "Reset game", "Restarts the game, like switching the arcade off and on. Rankings and settings are kept. (F3)",
 			{}, {}, [&] { reset_game(); } });
-		if (board.profile->select_cursor) {   // (Revision D's: issue #12)
-			static const char *WHO[] = { "Off", "Player 1", "Player 2", "Both players" };
-			p.items.push_back({ "Play as Dural",
-				"A cheat: the boss, Dural, playable. On the character select that player's cursor stays on her: any button chooses her (Start held, her other colours). Offline only; online matches are always without it. The arcade froze on Akira's stage with her: fixed here. Changing it restarts the game.",
-				[&] { return std::string(WHO[std::clamp(cfg.dural, 0, 3)]); },
-				[&](int d) { if (nvram_away) return; cfg.dural = (cfg.dural + 4 + d) % 4; cfg_dirty = true; reset_game(); } });
+		if (board.profile->dural) {   // (issue #12)
+			p.items.push_back({ "Dural on the select",
+				"A cheat: the boss, Dural, on the character select, a 13th spot past Kage (right from Kage, or left from Akira): either player can choose her, or anyone (Start held, her other colours). With it on, online matches only meet others with it on. The arcade froze on Akira's stage with her: fixed here. Changing it restarts the game.",
+				[&] { return std::string(cfg.dural ? "On" : "Off"); },
+				[&](int) { if (nvram_away) return; cfg.dural = cfg.dural ? 0 : 1; cfg_dirty = true; reset_game(); } });
 		}
 		if (programs.size() > 1)   // (the zips hold both: Revision D and Team Battle)
 			p.items.push_back({ "Version",
