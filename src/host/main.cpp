@@ -136,6 +136,7 @@ __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
 #include <atomic>
 #include <memory>
 #include <optional>
+#include <random>
 #include <string>
 #include <thread>
 #if defined(__APPLE__)
@@ -1501,6 +1502,8 @@ int main(int argc, char **argv)
 		game.tiles_on = true;
 		if (!scripted) vf3net::set_versus_count(board, vf3net::random_versus_count());   // (the profile's versus_count: the first match between two players' stage)
 		else if (const char *vc = getenv("VF3_VERSUS_COUNT")) vf3net::set_versus_count(board, uint32_t(atoi(vc)));   // (tests: that stage)
+		if (!scripted) vf3net::set_random_seed(board, std::random_device{}());   // (the CPU's opponents and their order: not the same every time)
+		else if (const char *rs = getenv("VF3_SEED")) vf3net::set_random_seed(board, uint32_t(strtoul(rs, nullptr, 0)));   // (tests: that seed)
 		fprintf(stderr, "boot: %llu frames in %.2f s, unseen\n", (unsigned long long)game_frame,
 				std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
 	};
@@ -3631,6 +3634,8 @@ int main(int argc, char **argv)
 			game_frame++;
 			if (game_frame == BOOT_FRAMES && !scripted && !skip_boot()) vf3net::set_versus_count(board, vf3net::random_versus_count());   // (the boot seen: as after an unseen one)
 			if (game_frame == BOOT_FRAMES && scripted) if (const char *vc = getenv("VF3_VERSUS_COUNT")) vf3net::set_versus_count(board, uint32_t(atoi(vc)));   // (tests: that stage)
+			if (game_frame == BOOT_FRAMES && !scripted && !skip_boot()) vf3net::set_random_seed(board, std::random_device{}());   // (as after an unseen boot)
+			if (game_frame == BOOT_FRAMES && scripted) if (const char *rs = getenv("VF3_SEED")) vf3net::set_random_seed(board, uint32_t(strtoul(rs, nullptr, 0)));
 			pace.frames++;
 			pace.emu_ms += double(SDL_GetTicksNS() - te) / 1e6;
 			t9.frames++;

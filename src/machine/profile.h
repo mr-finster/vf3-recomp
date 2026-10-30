@@ -88,6 +88,13 @@ struct Profile
 	const char *data_folder;
 
 	const DuralPatch *dural;   // Play as Dural's (none: not known for this program)
+
+	// RAM: the seed of the random numbers the game draws from (a word; 0: not known): Team Battle's CPU teams and
+	// their stages, the attract's fights (Revision D's 1P order is its own, the same whatever the seed: checked). The
+	// boot leaves it the same every time (Revision D 0, Team Battle a constant at frame 789), so offline, the PC way
+	// skipping the boot, the same teams came but for when Start was pressed: the host sets it at random after the
+	// boot (an arcade on all day had it anywhere)
+	uint32_t random_seed;
 };
 
 extern const Profile VF3_REV_D, VF3_TB;

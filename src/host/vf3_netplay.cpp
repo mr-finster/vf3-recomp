@@ -73,6 +73,11 @@ void set_versus_count(m3::Model3 &b, uint32_t count)
 	if (b.profile->versus_count) memcpy(b.ram.data() + b.profile->versus_count, &count, 4);   // (0: not known for this program)   // (the RAM's words in the host's order)
 }
 
+void set_random_seed(m3::Model3 &b, uint32_t seed)
+{
+	if (b.profile->random_seed) memcpy(b.ram.data() + b.profile->random_seed, &seed, 4);   // (the RAM's words in the host's order)
+}
+
 uint32_t random_versus_count()
 {
 	return std::random_device{}() % 16;
