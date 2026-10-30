@@ -2638,26 +2638,36 @@ int main(int argc, char **argv)
 			[&](int) { if (nvram_away) return; cfg.arcade = !cfg.arcade; g_pc_mode = !cfg.arcade; cfg_dirty = true; reset_game(); } });
 		p.items.push_back({ "Reset game", "Restarts the game, like switching the arcade off and on. Rankings and settings are kept. (F3)",
 			{}, {}, [&] { reset_game(); } });
-		if (programs.size() > 1)   // (the zips hold both: Revision D and Team Battle)
+		if (programs.size() > 1) {   // (the zips hold both: Revision D and Team Battle)
+			// (Left, Right or Enter: the other version, asked first: the switch restarts the game)
+			auto ask = [&] {
+				if (nvram_away || online.phase() != Online::Phase::off) return;   // (not in an online match)
+				const m3::Profile *other = nullptr;
+				for (const auto &pr : programs) if (pr.first != board.profile) other = pr.first;
+				if (!other) return;
+				menu_page q{ std::string("Switch to ") + other->name + "?", "", {} };
+				q.items.push_back({ "Switch and restart", std::string("The game saves and starts again in ") + other->name +
+				                    ". Each version keeps its own rankings and arcade settings: nothing is lost.", {}, {},
+					[&, other] {
+						cfg.game = other->set;
+						cfg_dirty = true;
+						fprintf(stderr, "Game > Version: %s, the game starts again\n", other->title);
+						restart = true;
+						running = false;
+					} });
+				q.items.push_back({ "Cancel", std::string("Stay in ") + board.profile->name + ".", {}, {}, [&] { menu.pop(); } });
+				q.start = 1;   // (Cancel: a press too many changes nothing)
+				menu.push(q);
+			};
 			p.items.push_back({ "Version",
-				"Which Virtua Fighter 3 to play: the original (Revision D) or Team Battle, three fighters a side. Each keeps its own rankings and arcade settings. Changing it saves and starts the game again in the other.",
+				"Which Virtua Fighter 3 to play: the original (Revision D) or Team Battle, three fighters a side. Each keeps its own rankings and arcade settings. Switching restarts the game (it asks first).",
 				[&] { return std::string(board.profile == &m3::VF3_TB ? "Team Battle" : "Virtua Fighter 3"); },
-				[&](int d) {
-					if (nvram_away || online.phase() != Online::Phase::off) return;   // (not in an online match)
-					size_t i = 0;
-					for (size_t k = 0; k < programs.size(); k++) if (programs[k].first == board.profile) i = k;
-					i = (i + programs.size() + (d < 0 ? programs.size() - 1 : 1)) % programs.size();
-					if (programs[i].first == board.profile) return;
-					cfg.game = programs[i].first->set;
-					cfg_dirty = true;
-					fprintf(stderr, "Game > Version: %s, the game starts again\n", programs[i].first->title);
-					restart = true;
-					running = false;
-				} });
+				[ask](int) { ask(); }, ask });
+		}
 		else if (board.profile == &m3::VF3_REV_D)   // (Team Battle not found beside it: a way to add it)
 			p.items.push_back({ "Add Team Battle",
 				"Virtua Fighter 3 Team Battle, three fighters a side: choose your vf3tb.zip (MAME's set). It's copied beside your vf3.zip, and the game starts again in Team Battle. Game > Version switches between the two after that.",
-				[&] { return add_pick ? std::string("choosing...") : add_error.empty() ? std::string("vf3tb.zip") : add_error; },
+				[&] { return add_pick ? std::string("choosing...") : std::string("vf3tb.zip"); },
 				{},
 				[&] {
 					if (add_pick || nvram_away || online.phase() != Online::Phase::off) return;
@@ -2671,6 +2681,7 @@ int main(int argc, char **argv)
 						c->done.store(true, std::memory_order_release);
 					}, add_pick.get(), win, filters, 1, nullptr, false);
 				} });
+			p.items.back().below = [&] { return add_error; };   // (why the last try didn't add it: under the row, whole)
 		p.items.push_back(back_item());
 		return p;
 	};
@@ -3295,7 +3306,7 @@ int main(int argc, char **argv)
 		// (tests: a room hosted, or joined with its code, as the menu would, once the game's past its start)
 		if (add_pick && add_pick->done.load(std::memory_order_acquire)) {   // (Game > Add Team Battle: the zip chosen)
 			std::string why;
-			if (add_pick->failed) why = "no file picker here: put vf3tb.zip beside vf3.zip";
+			if (add_pick->failed) why = "No file picker here: put your vf3tb.zip beside your vf3.zip, then start the game again.";
 			else if (!add_pick->files.empty()) {
 				const std::string f = add_pick->files[0];
 				const std::vector<const m3::Profile *> sets = romset::sets_in(f);
@@ -3303,14 +3314,14 @@ int main(int argc, char **argv)
 				std::error_code ec;
 				const bool whole = std::find(sets.begin(), sets.end(), &m3::VF3_TB) != sets.end();
 				if (whole && std::filesystem::equivalent(f, to, ec)) {}   // (it's there already)
-				else if (!whole && std::filesystem::exists(to, ec)) why = "not Team Battle: choose MAME's vf3tb.zip";
-				else if (!copy_whole(f, to, why)) why = "couldn't copy it: " + why;
+				else if (!whole && std::filesystem::exists(to, ec)) why = "That zip isn't Team Battle: choose MAME's vf3tb.zip.";
+				else if (!copy_whole(f, to, why)) why = "Couldn't copy it: " + why;
 				else if (!whole) {
 					// (a split vf3tb.zip holds only Team Battle's own ROMs: it counts once beside vf3.zip, where it's now)
 					const std::vector<const m3::Profile *> beside = romset::sets_in(to.string());
 					if (std::find(beside.begin(), beside.end(), &m3::VF3_TB) == beside.end()) {
 						std::filesystem::remove(to, ec);
-						why = "not Team Battle: choose MAME's vf3tb.zip";
+						why = "That zip isn't Team Battle: choose MAME's vf3tb.zip.";
 					}
 				}
 				if (why.empty()) {
