@@ -39,7 +39,7 @@ const TURN_PER_ADDRESS_DAY = 200;
 // How long a relay login works: longer than a long night's session (a login ending may end a match through the relay
 // with it), short enough that one taken for something else is soon worthless
 const TURN_TTL = 6 * 3600;
-const GAMES = /^vf[123]$/;   // (the games there are: no queue or count made for anything else)
+const GAMES = /^(vf[123]|vf3tb)$/;   // (the games there are: no queue or count made for anything else)
 
 const json = (body, status = 200) =>
 	new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });

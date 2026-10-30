@@ -120,10 +120,10 @@ const Profile VF3_REV_D = {
 	&REV_D_DURAL,
 };
 
-// Team Battle: its ROMs, and the addresses found so far; what isn't known yet is 0 (that feature off: the select's
-// byte, so no online yet).
+// Team Battle: its ROMs, and the addresses found so far; what isn't known yet is 0 (that feature off). Online: only
+// with Team Battle (the game's name "vf3tb" and its ROM's hash), its select by the mode byte (below).
 const Profile VF3_TB = {
-	"vf3tb", "Virtua Fighter 3 Team Battle", "Virtua Fighter 3 Team Battle", "vf3", false, TB_ROMS, sizeof TB_ROMS / sizeof TB_ROMS[0],
+	"vf3tb", "Virtua Fighter 3 Team Battle", "Virtua Fighter 3 Team Battle", "vf3", true, TB_ROMS, sizeof TB_ROMS / sizeof TB_ROMS[0],
 	0x710000, 0xA0000,
 	// FREE PLAY: Revision D's text 0x61F0 on (0x82CD0), its picture's table 0x82D50, drawn by bl 0x37FFC at 0x5419C (the
 	// same code as Revision D's 0x4E990-0x4E9C0, with one more argument): found by matching Revision D's code
@@ -135,9 +135,10 @@ const Profile VF3_TB = {
 	// Its STAGE SELECT: 0 CHALLENGER (Revision D's on)
 	{ 0x1E000, 2, 3, 6, 7, 8, 12, 0x17, 0x1E },
 	// the test menu's byte (4 while it's up: checked), the versus count and the score: Revision D's (the same code
-	// refers to them, r13-relative: tools found every reference unchanged); the select byte not found yet (only
-	// online needs it: 0x1001B3 is 0, 5, 1 in the attract, the select and a fight)
-	960, 0x102002, 0x106080, 0, 0x10601A, 0x10601B, 0x106029,
+	// refers to them, r13-relative: tools found every reference unchanged); the select's byte is the mode's (5 from
+	// Start through the select and the stage select, as Revision D's: what online's lockstep needs, a frame never
+	// run on a guess there; Revision D's own 0xE4046 is 4 on player 2's select)
+	960, 0x102002, 0x106080, 0x102008, 0x10601A, 0x10601B, 0x106029,
 	0x108045,   // (the select's column: Revision D's place, the same code (0x305DC) loads it: checked choosing Dural there)
 	0x102008,   // (3, 5, 7 in the attract, the select and a fight, as Revision D's)
 	// the backdrops: Revision D's (a fight's sky found with no tile on screen wrong, as Revision D's: checked on the dojo),
