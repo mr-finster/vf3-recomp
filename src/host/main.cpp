@@ -871,6 +871,7 @@ struct Game
 	std::vector<uint32_t> below = std::vector<uint32_t>(video::W * video::H), above = std::vector<uint32_t>(video::W * video::H);
 	std::vector<uint32_t> below_wide = std::vector<uint32_t>(video::WW * video::H);   // (widescreen's: tilegen.h)
 	bool full_3d = false;
+	bool no_stage_screen = false;   // (the newest frame's: the character select's or the ranking's, never a stage)
 	video::TileGen::Scroll prev_scroll;   // the frame before's (for bg_dx, bg_dy)
 	std::vector<uint32_t> prev_below;
 	bool bg_moved = false;                // the layer below the 3D scrolled this frame by bg_dx, bg_dy
@@ -1145,6 +1146,12 @@ struct Game
 		bool full = false;   // (the 3D drawn full width: a stage; a close-up's or a title's 3D isn't)
 		for (auto &v : scene[newest].viewports) full |= v.full_screen && !v.models.empty();
 		full_3d = full;
+		// The game's mode (profile.h): no stage, whatever the 3D and the 2D look like, from Start through the character
+		// select (4, 5; the stage select too: its 3D heads full width, its 2D clear of the edges as it fades in, the sides
+		// were its backdrop's rows carried on) and on the ranking after a game (16, 17: its bands, opaque all across, held
+		// as a stage's letterbox for 20 frames)
+		const int mode = board.profile->mode ? board.ram[board.profile->mode ^ 3] : -1;
+		no_stage_screen = mode == 4 || mode == 5 || mode == 16 || mode == 17;
 	}
 	const video::Scene &cur() const { return scene[newest]; }
 	const video::Scene &prev() const { return scene[newest ^ 1]; }
@@ -1156,7 +1163,7 @@ struct Game
 	struct View {
 		video::Scene scene[2];
 		int newest = 0;
-		bool have_prev = false, full_3d = false, bg_moved = false;
+		bool have_prev = false, full_3d = false, bg_moved = false, no_stage_screen = false;
 		float bg_dx = 0, bg_dy = 0;
 		std::vector<uint32_t> below = std::vector<uint32_t>(video::W * video::H), above = std::vector<uint32_t>(video::W * video::H);
 		std::vector<uint32_t> below_wide = std::vector<uint32_t>(video::WW * video::H);
@@ -1174,6 +1181,7 @@ struct Game
 		view.scene[view.newest] = scene[newest];
 		view.have_prev = have_prev;
 		view.full_3d = full_3d;
+		view.no_stage_screen = no_stage_screen;
 		view.bg_moved = bg_moved;
 		view.bg_dx = bg_dx;
 		view.bg_dy = bg_dy;
@@ -2011,7 +2019,7 @@ int main(int argc, char **argv)
 				covered += c;
 				edge_rows += (row[0] >> 24) != 0 || (row[video::W - 1] >> 24) != 0;
 			}
-			const bool seen = game.view.full_3d && rows > 0 && edge_rows * 20 < video::H && covered * 100 < long(rows) * video::W * 50;
+			const bool seen = game.view.full_3d && !game.view.no_stage_screen && rows > 0 && edge_rows * 20 < video::H && covered * 100 < long(rows) * video::W * 50;
 			// a stage stays one through a round's opening wipe and the like (2D over part of it for under 20 frames);
 			// a picture over all of it (the next match's, a close-up) or the 3D gone ends it at once. In a match a
 			// stage shows from its second frame, and is held only once seen 8 frames running, more than a rollback
@@ -2023,7 +2031,7 @@ int main(int argc, char **argv)
 			const bool match = online.playing();
 			bool stage = seen && (stage_hold > 0 || stage_seen >= (match ? 2 : 1));
 			if (stage && (!match || stage_seen >= 8)) stage_hold = 20;
-			else if (stage_hold > 0 && game.view.full_3d && covered * 100 < long(std::max(rows, 1)) * video::W * 50) { stage_hold--; stage = true; }
+			else if (stage_hold > 0 && game.view.full_3d && !game.view.no_stage_screen && covered * 100 < long(std::max(rows, 1)) * video::W * 50) { stage_hold--; stage = true; }
 			else stage_hold = 0;
 			// On a stage the sky is stretched across the picture and the letterbox bands carried across the sides;
 			// elsewhere the picture is 4:3 with bars the full height over whatever is beside it: the 2D's edge colour
