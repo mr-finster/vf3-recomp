@@ -476,6 +476,7 @@ void Session::handle(const std::vector<uint8_t> &p)
 			if (rtt >= 0 && rtt < 5000) {
 				if (stats_.rtt_ms) stats_.jitter_ms = stats_.jitter_ms * 0.9 + std::fabs(rtt - stats_.rtt_ms) * 0.1;
 				stats_.rtt_ms = stats_.rtt_ms ? stats_.rtt_ms * 0.9 + rtt * 0.1 : rtt;
+				stats_.rtt_samples++;
 			}
 		}
 		if (hash_frame != UINT32_MAX) {
@@ -487,6 +488,7 @@ void Session::handle(const std::vector<uint8_t> &p)
 		return;
 	}
 	case QUIT:
+		if (in.need(1)) their_quit = in.u8();
 		finish(End::opponent_quit, "Your opponent left the match.");
 		return;
 	default:
@@ -692,10 +694,12 @@ int Session::lockstep_delay() const
 	return std::clamp(int(std::ceil((stats_.rtt_ms / 2 + stats_.jitter_ms) / cfg.frame_ms)) + 1, 0, MAX_DELAY);
 }
 
-void Session::quit()
+void Session::quit(uint8_t reason)
 {
 	if (st == State::ended) return;
-	for (int i = 0; i < 3; i++) send_packet(Out(QUIT, token).b);
+	Out q(QUIT, token);
+	if (reason) q.u8(reason);   // (after the rest: a build that reads none is as before)
+	for (int i = 0; i < 3; i++) send_packet(q.b);
 	finish(End::quit, "You left the match.");
 }
 

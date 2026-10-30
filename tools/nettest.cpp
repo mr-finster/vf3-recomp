@@ -90,6 +90,8 @@ struct Case
 	int redelay_a = 0, redelay_b = 0;
 	uint32_t lockstep_from = UINT32_MAX, lockstep_to = 0;   // (both sides in lockstep for these frames: none run twice)
 	size_t blob = 1000;
+	uint32_t quit_a_at = UINT32_MAX;   // (the host leaves at this frame, saying why: quit_reason)
+	uint8_t quit_reason = 0;
 	// what should happen
 	vfnet::Session::End expect_a = vfnet::Session::End::none, expect_b = vfnet::Session::End::none;
 	bool expect_interrupt = false;
@@ -124,6 +126,7 @@ bool run(const Case &c)
 		if (b.frame() == c.redelay_at && b.delay() != c.redelay_b) b.set_delay(c.redelay_b);
 		a.set_lockstep(a.frame() >= c.lockstep_from && a.frame() < c.lockstep_to);
 		b.set_lockstep(b.frame() >= c.lockstep_from && b.frame() < c.lockstep_to);
+		if (a.frame() == c.quit_a_at && a.state() == vfnet::Session::State::running) a.quit(c.quit_reason);
 		if (t >= next_a) { a.step(pa.next()); next_a += fa_ms; }
 		if (t >= next_b) { b.step(pb.next()); next_b += fb_ms; }
 		vfnet::Session::Event e;
@@ -142,6 +145,8 @@ bool run(const Case &c)
 	if (a.end_reason() != c.expect_a) fail("host ended " + std::to_string(int(a.end_reason())) + ", not " + std::to_string(int(c.expect_a)));
 	if (b.end_reason() != c.expect_b) fail("guest ended " + std::to_string(int(b.end_reason())) + ", not " + std::to_string(int(c.expect_b)));
 	if (c.expect_interrupt && !interrupted) fail("no interruption seen");
+	if (c.quit_a_at != UINT32_MAX && b.opponent_quit_reason() != c.quit_reason)
+		fail("the guest heard the reason " + std::to_string(b.opponent_quit_reason()) + ", not " + std::to_string(c.quit_reason));
 	if (c.expect_host_untouched && !ga.began_with.empty()) fail("the host's game was set up for a match that never began");
 	// the ping shown: within a few ms of the wire's own (its latency both ways, half the jitter each on average)
 	const double true_rtt = c.ab.latency_ms + c.ba.latency_ms + (c.ab.jitter_ms + c.ba.jitter_ms) / 2;
@@ -197,6 +202,21 @@ int main(int argc, char **argv)
 	cases.push_back({ "bad (70 ms, jitter 20, 10% loss)", P{ 70, 20, 0.10 }, P{ 70, 20, 0.10 } });
 	cases.push_back({ "one-sided (15 / 90 ms)", P{ 15, 2, 0 }, P{ 90, 2, 0 } });
 	cases.push_back({ "far (150 ms each way)", P{ 150, 5, 0 }, P{ 150, 5, 0 } });
+	{
+		Case c{ "the host leaves, too far (the reason heard)", P{ 60, 5, 0 }, P{ 60, 5, 0 } };
+		c.quit_a_at = 300;
+		c.quit_reason = vfnet::QUIT_TOO_FAR;
+		c.expect_a = E::quit;
+		c.expect_b = E::opponent_quit;
+		cases.push_back(c);
+	}
+	{
+		Case c{ "the host leaves (no reason)", P{ 20, 2, 0 }, P{ 20, 2, 0 } };
+		c.quit_a_at = 300;
+		c.expect_a = E::quit;
+		c.expect_b = E::opponent_quit;
+		cases.push_back(c);
+	}
 	{
 		Case c{ "delay 0 / 4 (30 ms)", P{ 30, 4, 0 }, P{ 30, 4, 0 } };
 		c.delay_a = 0; c.delay_b = 4;

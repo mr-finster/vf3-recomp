@@ -30,6 +30,8 @@ struct OnlineSettings
 	std::string address;          // the last address joined
 	std::string lobby;            // the lobby's address ("" the built-in one)
 	bool hide_ip = false;         // a room code's matches always through the relay: the other player never sees this address
+	int max_ping = 0;             // Random's: an opponent further than this (the ping, ms) passed over for another; 0 any
+	bool chime = true;            // a chime when a match is found (and the window flashing, if it's not the one in front)
 };
 
 class Online
@@ -227,6 +229,12 @@ private:
 	void room_failed(const std::string &why);
 	void joined(const vfnet::json::Value &v);   // (the room found: connecting to its host)
 	void search();                      // (into the queue for a random opponent)
+	void search_again(const std::string &why);   // (a random opponent connected but too far: another)
+	void begin_match(const std::string &who);    // (connected, and the ping fine if it's measured first: playing)
+	bool checking = false;              // (a random match connected, its ping measured before it begins: max_ping)
+	double check_from = 0;
+	std::string check_who;
+	std::vector<std::pair<std::string, double>> avoid;   // (the rooms of random opponents too far, and when: the lobby keeps those apart)
 	static std::string country(const std::string &c);
 	void close_room();                  // (the host's: the lobby told, on a thread, nothing waited for)
 };

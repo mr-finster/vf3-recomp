@@ -70,7 +70,10 @@ and the games started with `VF_LOBBY=http://127.0.0.1:8787`.
   so isn't); one who leaves mid-match-making closes the room made. The count on the Random card is those searching
   plus two a random match made in the last 10 minutes, kept 30 s at Cloudflare's edge (everyone on the Online
   screen asks: the queue answers once a place). It's fine into the thousands searching at once; well past that,
-  the queue's pairing (each against all) would want splitting by region.
+  the queue's pairing (each against all) would want splitting by region. A player who found the other too far (their
+  Random: max ping) names the room when they search again (`avoid`), and the two aren't matched again for 10 minutes
+  (each room's two players, by address and name, kept in the queue's storage that long: it's let go of while they
+  connect).
 - **A room's code after it's closed** is kept for 2 hours for its host alone (by the room's key): a Play again opens
   the same code, and no one else can take it while the other player waits on it.
 - **Addresses a game gives** are read whole (any way an IPv6 is written) and dropped if they'd point the other

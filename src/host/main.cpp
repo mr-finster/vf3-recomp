@@ -90,6 +90,7 @@
 //                        start's grace (the governor's tests)
 #include "version.h"      // VF3_VERSION, VF3_DATE (made by the Makefile from git)
 #include "online.h"
+#include "chime.h"
 #include "../video/hud_names.h"
 #include "../video/dural_cell.h"
 #include "flags.h"
@@ -544,6 +545,8 @@ struct settings
 		num("online_port", online.port, 1024, 65535);
 		num("online_connection", online.show_connection, 0, 2);
 		flag("online_hide_ip", online.hide_ip);
+		num("online_max_ping", online.max_ping, 0, 1000);
+		flag("online_chime", online.chime);
 		if (auto it = kv.find("gpu_3d_failed"); it != kv.end()) gpu3d_failed = it->second;
 		std::string failed_build;
 		if (auto it = kv.find("gpu_3d_failed_build"); it != kv.end()) failed_build = it->second;
@@ -625,7 +628,7 @@ struct settings
 				online.show_connection, online.port);
 		if (!online.address.empty()) fprintf(f, "online_address = %s\n", online.address.c_str());
 		if (!online.lobby.empty()) fprintf(f, "online_lobby = %s\n", online.lobby.c_str());
-		fprintf(f, "online_hide_ip = %d\n", int(online.hide_ip));
+		fprintf(f, "online_hide_ip = %d\nonline_max_ping = %d\nonline_chime = %d\n", int(online.hide_ip), online.max_ping, int(online.chime));
 		for (int p = 0; p < 2; p++) ctl[p].save(f, p);
 		const bool flushed = flush_to_disk(f);
 		if (fclose(f) == 0 && flushed && replace_file(path, tmp)) return true;
@@ -2311,6 +2314,7 @@ int main(int argc, char **argv)
 
 	// ---- sound ----
 	SDL_AudioStream *audio = nullptr;
+	SDL_AudioStream *chime_stream = nullptr;   // (the match found chime's: opened the first time)
 	if (sound) {
 		SDL_AudioSpec spec{ SDL_AUDIO_S16, 2, SOUND_RATE };
 		audio = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, nullptr, nullptr);
@@ -3110,6 +3114,7 @@ int main(int argc, char **argv)
 		Online::Notice n;
 		while (online.next_notice(n)) {
 			if (n.kind == Online::Notice::joined) {
+				if (cfg.online.chime) chime::play(chime_stream, win, audio && !hidden ? float(cfg.volume) / 100.0f : 0.0f);
 				match_on = true;
 				late_midi.clear();
 				game.take_midi = [&](std::vector<uint8_t> &out) {
@@ -3913,6 +3918,7 @@ int main(int argc, char **argv)
 	if (cfg_dirty && quit_after < 0) cfg.save(settings_path);
 	game.set_sound_free(nullptr, 0);   // (the sound thread off the stream first)
 	if (audio) SDL_DestroyAudioStream(audio);
+	if (chime_stream) SDL_DestroyAudioStream(chime_stream);
 	for (auto &p : pads) if (p) SDL_CloseGamepad(p);
 	menu_owner.reset();
 	if (g3.tex) SDL_DestroyTexture(g3.tex);
