@@ -586,14 +586,14 @@ void Online::close_room()
 namespace {
 
 // The lobby's no, in words: what happened and what to do
-// Two versions apart only by Dural on the select (Game > Cheats: "+dural" on the online version): said so
+// Two versions apart only by Dural on the select (Cheats: "+dural" on the online version): said so
 std::string dural_apart(const std::string &theirs, const std::string &mine)
 {
 	const auto plain = [](std::string v) { const size_t at = v.find("+dural"); return at == std::string::npos ? v : v.substr(0, at); };
 	const bool they = theirs.find("+dural") != std::string::npos, me = mine.find("+dural") != std::string::npos;
 	if (they == me || plain(theirs) != plain(mine)) return "";
-	return they ? "Your opponent has Dural on the select (Game > Cheats): turn it on too to play them, or ask them to turn it off."
-	            : "Your opponent has Dural on the select off, and you have it on (Game > Cheats): turn it off to play them.";
+	return they ? "Your opponent has Dural on the select (Cheats): turn it on too to play them, or ask them to turn it off."
+	            : "Your opponent has Dural on the select off, and you have it on (Cheats): turn it off to play them.";
 }
 
 // A refusal's "Your opponent has X, you have Y" or "The host has X, you have Y": the Dural one if that's all it is

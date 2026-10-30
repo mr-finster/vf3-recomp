@@ -2594,12 +2594,12 @@ int main(int argc, char **argv)
 		return p;
 	};
 	bool online_ready = false;   // (the identity for the handshake made: again after a cheat changes it)
-	// Game > Cheats: Dural on the select (issue #12). With it on, the online version is the build's with "+dural":
+	// Cheats (the main page's): Dural on the select (issue #12). With it on, the online version is the build's with "+dural":
 	// such matches meet only each other (both sides then play her patches), and everyone else is unaffected
 	auto cheats_page = [&] {
 		menu_page p{ "Cheats", "", {} };
 		p.items.push_back({ "Dural on the select",
-			"The boss, Dural, on the character select: a 13th spot past Kage (right from Kage, or left from Akira). Either player can choose her, or anyone (Start held: her other colours). Online, it plays only against others with it on. The arcade froze on Akira's stage with her: fixed here. Changing it restarts the game.",
+			"Dural, the boss, in a 13th spot past Kage on the select, for either player. Changing it restarts the game. ONLINE: while it's on, you only meet players who have it on too. Turn it off to play everyone.",
 			[&] { return std::string(cfg.dural ? "On" : "Off"); },
 			[&](int) {
 				if (nvram_away || online.phase() != Online::Phase::off) return;
@@ -2619,8 +2619,6 @@ int main(int argc, char **argv)
 			[&](int) { if (nvram_away) return; cfg.arcade = !cfg.arcade; g_pc_mode = !cfg.arcade; cfg_dirty = true; reset_game(); } });
 		p.items.push_back({ "Reset game", "Restarts the game, like switching the arcade off and on. Rankings and settings are kept. (F3)",
 			{}, {}, [&] { reset_game(); } });
-		if (board.profile->dural)   // (issue #12)
-			p.items.push_back({ "Cheats", "Dural on the select.", {}, {}, [&] { menu.push(cheats_page()); } });
 		if (programs.size() > 1)   // (the zips hold both: Revision D and Team Battle)
 			p.items.push_back({ "Version",
 				"Which Virtua Fighter 3 to play: the original (Revision D) or Team Battle, three fighters a side. Each keeps its own rankings and arcade settings. Changing it saves and starts the game again in the other.",
@@ -2865,6 +2863,8 @@ int main(int argc, char **argv)
 			p.items.push_back({ "Online", "Play someone over the network: host a match, or join one.", {}, {}, [&] { menu.push(online_page()); } });
 		else
 			p.items.push_back({ "Online", std::string("Online play isn't ready for ") + board.profile->name + " yet: switch to Virtua Fighter 3 in Game > Version to play online.", {}, {}, {} });
+		if (board.profile->dural)   // (issue #12; after Online: online_row's place kept)
+			p.items.push_back({ "Cheats", cfg.dural ? "Dural on the select: ON. Online you'll meet only players who have it on too." : "Dural on the select.", {}, {}, [&] { menu.push(cheats_page()); } });
 		p.items.push_back({ "Controls", "Each player's controller, keys and buttons.", {}, {}, [&] { menu.push(controls_page()); } });
 		p.items.push_back({ "Quit", "Saves and closes the game.", {}, {}, [&] { running = false; } });
 		return p;
