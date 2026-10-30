@@ -507,55 +507,61 @@ void mesh_state(Mesh &m, const uint32_t *h)
 	}
 }
 
-// VF3's beach stage (Jeffry's) has a texture animation for a model the game's model table gives no words (model
-// 0x1488: 0 in the table at 0xFFA1A440), but its routine (0x49B48) rewrites the texture's place in a polygon before
-// it looks at the count, so every few frames it writes the first polygon of whatever model the game's allocator put
-// at the same RAM address (the empty model takes none): Wolf's head there, whose lower lip's first triangle then shows
-// a corner of texture sheet 1 that holds nothing (black) whenever the head is sent to the Real3D again (the win pose,
-// the faces the fighters pull). The arcade drew the same, a pixel or so at its 384 lines; at 4K it is a black
-// triangle. The game's state is left alone: only the picture takes the place back from the polygon beside it.
-// A model's first polygon is taken to have had its place rewritten so when the next polygon is the other half of
-// its quad (an edge in common, in the same plane, with the same state and texture LOD), on a texture of the same
-// size and sheet, but at a place no other polygon of the model uses; first is then its header with the next one's
-// place.
+// VF3's beach stage (Jeffry's, and Team Battle's at night) has a texture animation for a model the game's model table
+// gives no words (model 0x1488: 0 in the table at 0xFFA1A440), but its routine (Revision D 0x49A0C, its loop at
+// 0x49B48) rewrites the texture's place in the model's first polygon before it looks at the count. So every few
+// frames it rewrites the first polygon of whatever model the game's allocator put at the same RAM address (the empty
+// model takes no room): a fighter's head (which one the matchup decides; every fighter's in the runs checked), whose
+// first polygon (by the mouth) then shows another corner of texture sheet 1 (black, or someone's clothes) whenever
+// the head is sent to the Real3D again (the win pose, the faces they pull). The arcade drew the same, a pixel or so at
+// its 384 lines; at 4K it is a dark triangle. The place the model had is in none of the game's memories any more, and
+// the game's state is left alone: the picture takes it back from the polygons around it.
+// A polygon RAM model's first polygon is taken to have had its place rewritten so when it is textured at a place no
+// other polygon of the model (on that sheet) uses, and polygons of the model on a texture of the same size, sheet and
+// format give one of its corners again with the same texture coordinates (the same corner of the same picture); first
+// is then its header with the place most of those have. (false: not so)
 bool stray_texture_place(const uint32_t *h, const uint32_t *limit, uint32_t first[7])
 {
-	if (h + 7 > limit || h[6] == 0 || (h[1] & 4) || !(h[6] & 0x400))
-		return false;
-	const int own = ((h[0] & 0x40) ? 4 : 3) - shared_count[h[0] & 0xF];
-	const uint32_t *n = h + 7 + own * 4;
-	if (n + 7 > limit || n[6] == 0)
-		return false;
-	// an edge in common: the vertices the next one takes from it, and those it gives again at the same places
-	const int n_own = ((n[0] & 0x40) ? 4 : 3) - shared_count[n[0] & 0xF];
-	if (n + 7 + n_own * 4 > limit)
-		return false;
-	int common = shared_count[n[0] & 0xF];
-	for (int i = 0; i < n_own; i++)
-		for (int k = 0; k < own; k++) {
-			const uint32_t *a = n + 7 + i * 4, *b = h + 7 + k * 4;
-			if (!((a[0] ^ b[0]) & 0xFFFFFF00) && !((a[1] ^ b[1]) & 0xFFFFFF00) && !((a[2] ^ b[2]) & 0xFFFFFF00)) { common++; break; }
-		}
-	if (common < 2)
+	auto size_of = [](const uint32_t *q) { return 7 + (((q[0] & 0x40) ? 4 : 3) - shared_count[q[0] & 0xF]) * 4; };
+	if (h + 7 > limit || h[6] == 0 || (h[1] & 4) || !(h[6] & 0x400) || h + size_of(h) > limit)
 		return false;
 	const uint32_t place_4 = 0x3F, place_5 = 0xFF;   // (the bits the animation writes: X in 4's 0-5 and 5's 7, Y in 5's 0-4)
-	if (((h[0] ^ n[0]) & 0xFC0003F0) || ((h[1] ^ n[1]) & ~4u) || h[2] != n[2] || h[3] != n[3] || h[6] != n[6] ||
-		((h[4] ^ n[4]) & ~place_4) || ((h[5] ^ n[5]) & ~place_5))
-		return false;
 	auto place = [&](const uint32_t *q) { return (q[4] & place_4) << 8 | (q[5] & place_5); };
-	const uint32_t p0 = place(h);
-	if (p0 == place(n))
+	auto vertex_is = [](const uint32_t *a, const uint32_t *b) {   // (the same place, normals aside, and texture coordinates)
+		return !((a[0] ^ b[0]) & 0xFFFFFF00) && !((a[1] ^ b[1]) & 0xFFFFFF00) && !((a[2] ^ b[2]) & 0xFFFFFF00) && a[3] == b[3];
+	};
+	const int own = size_of(h) / 4 - 1;   // (its corners given here, not taken from the model before)
+	if (own < 1)
 		return false;
-	for (const uint32_t *q = n; q + 7 <= limit && q[6] != 0;) {
-		if ((q[6] & 0x400) && ((q[4] ^ h[4]) & 0x40) == 0 && place(q) == p0)
-			return false;
+	struct Count { uint32_t place; int n; const uint32_t *by; };
+	Count counts[8];
+	int kinds = 0;
+	for (const uint32_t *q = h + size_of(h); q + 7 <= limit && q[6] != 0 && q + size_of(q) <= limit; q += size_of(q)) {
+		if ((q[6] & 0x400) && !((q[4] ^ h[4]) & 0x40) && place(q) == place(h))
+			return false;   // (its place is one the model has: not rewritten, or rewritten to one of its own)
+		if ((q[6] & 0x400) && !((q[4] ^ h[4]) & 0x40) && !((q[3] ^ h[3]) & 0x3F) && !((q[6] ^ h[6]) & 0x380)) {
+			bool beside = false;
+			for (int i = 0; i < size_of(q) / 4 - 1 && !beside; i++)
+				for (int k = 0; k < own && !beside; k++)
+					beside = vertex_is(q + 7 + i * 4, h + 7 + k * 4);
+			if (beside) {
+				int c = 0;
+				while (c < kinds && counts[c].place != place(q)) c++;
+				if (c == kinds && kinds < 8) counts[kinds++] = { place(q), 0, q };
+				if (c < kinds) counts[c].n++;
+			}
+		}
 		if (q[1] & 4)
 			break;
-		q += 7 + (((q[0] & 0x40) ? 4 : 3) - shared_count[q[0] & 0xF]) * 4;
 	}
+	const Count *most = nullptr;
+	for (int c = 0; c < kinds; c++)
+		if (!most || counts[c].n > most->n) most = &counts[c];
+	if (!most)
+		return false;
 	memcpy(first, h, 7 * sizeof(uint32_t));
-	first[4] = (h[4] & ~place_4) | (n[4] & place_4);
-	first[5] = (h[5] & ~place_5) | (n[5] & place_5);
+	first[4] = (h[4] & ~place_4) | (most->by[4] & place_4);
+	first[5] = (h[5] & ~place_5) | (most->by[5] & place_5);
 	return true;
 }
 
