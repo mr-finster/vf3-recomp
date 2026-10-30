@@ -77,6 +77,9 @@ struct Config
 	double hard_wait_lead = 2.5;
 };
 
+// Why a player left, said with the quit (Session::quit): over the ping a random match's player allows (Online)
+enum : uint8_t { QUIT_TOO_FAR = 1 };
+
 class Session
 {
 public:
@@ -90,6 +93,7 @@ public:
 	struct Stats
 	{
 		double rtt_ms = 0;
+		uint64_t rtt_samples = 0;   // (the round trips it's from)
 		double jitter_ms = 0;  // how much the round trip varies (its average difference from the average)
 		int rollback = 0;      // the last rollback's frames
 		int rollback_max = 0;  // the most in the last second
@@ -115,7 +119,9 @@ public:
 	// done, the other side is too far behind (max_rollback), or this side is ahead and waits a frame to keep in
 	// time. Call it again next frame with the input as it is then.
 	bool step(uint16_t input);
-	void quit();               // leave: the other side is told
+	// leave: the other side is told (and why, a QUIT_ reason: a build that doesn't know it reads a plain quit)
+	void quit(uint8_t reason = 0);
+	uint8_t opponent_quit_reason() const { return their_quit; }   // (End::opponent_quit: theirs, 0 none said)
 	// The input delay from now on (Auto's, once the ping is known): longer repeats the input for the frames between,
 	// shorter keeps the inputs already sent and takes new ones once the frames reach them
 	void set_delay(int frames) { cfg.delay = std::clamp(frames, 0, MAX_DELAY); }
@@ -170,6 +176,7 @@ private:
 	bool host;
 	State st = State::handshake;
 	End why = End::none;
+	uint8_t their_quit = 0;
 	std::deque<Event> events;
 	std::string their_name, their_extra;
 	Stats stats_;

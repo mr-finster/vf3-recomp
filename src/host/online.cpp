@@ -801,7 +801,15 @@ void Online::room_poll()
 		if (!job && retry_at > 0 && now >= retry_at) {
 			retry_at = 0;
 			const std::string url = lobby_url(ticket.empty() ? "/v1/random" : "/v1/random/wait");
-			const std::string body = me_json(ticket.empty() ? "" : ",\"ticket\":" + vfnet::json::quote(ticket));
+			std::string extra = ticket.empty() ? "" : ",\"ticket\":" + vfnet::json::quote(ticket);
+			if (ticket.empty()) {   // (the rooms of those too far lately, for the lobby to keep apart: ten minutes)
+				avoid.erase(std::remove_if(avoid.begin(), avoid.end(), [this](const auto &a) { return now - a.second > 600000; }), avoid.end());
+				if (avoid.size() > 8) avoid.erase(avoid.begin(), avoid.end() - 8);
+				std::vector<std::string> codes;
+				for (const auto &a : avoid) codes.push_back(a.first);
+				if (!codes.empty()) extra += ",\"avoid\":" + vfnet::json::list(codes);
+			}
+			const std::string body = me_json(extra);
 			start_job([url, body](Job &j) { j.reply = vfnet::http::request("POST", url, body, 30000); });
 		}
 		if (job && job->done) {
@@ -890,6 +898,23 @@ void Online::search()
 	log_line("searching for a random opponent");
 }
 
+// A random opponent connected but too far (the ping over one side's limit): the room let go, into the queue again
+// (the lobby told to keep these two apart a while: they'd only be matched again)
+void Online::search_again(const std::string &why)
+{
+	close_room();
+	session.reset();
+	room->clear_peer();
+	checking = false;
+	is_host = false;
+	ph = Phase::joining;
+	peer_name.clear();
+	country_peer.clear();
+	code.clear();
+	note = why;
+	search();
+}
+
 // Two letters, or nothing
 std::string Online::country(const std::string &c)
 {
@@ -931,6 +956,42 @@ void Online::stop()
 	ph = Phase::off;
 	st = Step::none;
 	rooms = false;
+	checking = false;
+}
+
+// Connected (and the ping within the limit, if it's measured first): the match begins
+void Online::begin_match(const std::string &who)
+{
+	ph = Phase::playing;
+	began_at = now;
+	// (the log's figures from this session's own: the last match's would wrap the first line's differences)
+	logged_at = now;
+	logged_rb = logged_resim = logged_stalls = logged_waits = logged_steps = 0;
+	logged_save = logged_run = logged_resim_ms = logged_hash = 0;
+	if (rooms) {
+		log_line(std::string("connected ") + (room->via_relay() ? "through a relay" : "directly") + ", " + mask(room->way()) + ": " + room->report(mask));
+		close_room();   // (the code's done its job)
+	}
+	notices.push_back({ Notice::joined, "Playing " + who + ": press Start" });
+	// (on one network through the relay, only because this Mac may not reach it: slower than need be, said on the
+	// versus screen)
+	local_slow = rooms && room && room->via_relay() && room->local_blocked();
+	score = {};
+	adelay = {};
+	round_ends_seen = 0;
+	round_end_frame = 0;
+	both_in = false;
+	random_misses = 0;
+	out_scan[0] = out_scan[1] = SIZE_MAX;
+	out_pressed[0] = out_pressed[1] = false;
+	out_from[0] = out_from[1] = SIZE_MAX;
+	in_before = 0;
+	select_off_from = UINT32_MAX;
+	select_was = -1;
+	start_scan[0] = start_scan[1] = 0;
+	start_seen[0] = start_seen[1] = false;
+	note.clear();
+	ticket.clear();   // (out of the queue: the lobby's done with it)
 }
 
 void Online::poll(double t)
@@ -943,40 +1004,30 @@ void Online::poll(double t)
 	while (session && session->next_event(e)) {
 		switch (e.kind) {
 		case vfnet::Session::Event::connected:
-			ph = Phase::playing;
-			began_at = now;
-			// (the log's figures from this session's own: the last match's would wrap the first line's differences)
-			logged_at = now;
-			logged_rb = logged_resim = logged_stalls = logged_waits = logged_steps = 0;
-			logged_save = logged_run = logged_resim_ms = logged_hash = 0;
-			if (rooms) {
-				log_line(std::string("connected ") + (room->via_relay() ? "through a relay" : "directly") + ", " + mask(room->way()) + ": " + room->report(mask));
-				close_room();   // (the code's done its job)
+			// a random opponent with a limit to the ping (Online settings): measured first, the game held meanwhile
+			// (the session's inputs go back and forth all the same, the ping from them), a second or so
+			if (rooms && random && started_with.max_ping > 0) {
+				checking = true;
+				check_from = now;
+				check_who = e.text;
+				log_line(std::string("connected ") + (room->via_relay() ? "through a relay" : "directly") + ": the ping measured first (at most " +
+				         std::to_string(started_with.max_ping) + " ms)");
+				break;
 			}
-			notices.push_back({ Notice::joined, "Playing " + e.text + ": press Start" });
-			// (on one network through the relay, only because this Mac may not reach it: slower than need be, said on the
-			// versus screen)
-			local_slow = rooms && room && room->via_relay() && room->local_blocked();
-			score = {};
-			adelay = {};
-			round_ends_seen = 0;
-			round_end_frame = 0;
-			both_in = false;
-			random_misses = 0;
-			out_scan[0] = out_scan[1] = SIZE_MAX;
-			out_pressed[0] = out_pressed[1] = false;
-			out_from[0] = out_from[1] = SIZE_MAX;
-			in_before = 0;
-			select_off_from = UINT32_MAX;
-			select_was = -1;
-			start_scan[0] = start_scan[1] = 0;
-			start_seen[0] = start_seen[1] = false;
-			note.clear();
-			ticket.clear();   // (out of the queue: the lobby's done with it)
+			begin_match(e.text);
 			break;
 		case vfnet::Session::Event::ended: {
 			const auto why = session->end_reason();
 			const bool was_playing = ph == Phase::playing;
+			checking = false;
+			// a random opponent who found this one too far for their limit (Online settings): someone else, at once
+			if (rooms && random && room && why == vfnet::Session::End::opponent_quit && session->opponent_quit_reason() == vfnet::QUIT_TOO_FAR) {
+				const std::string who = opponent();
+				log_line(who + " left: the ping over their limit; searching again");
+				if (!code.empty()) avoid.push_back({ code, now });
+				search_again(who + " was too far away for their ping limit: looking for someone else...");
+				return;
+			}
 			// a host goes on waiting after a player who couldn't join (another version, another ROM, gone quiet
 			// before the game started); anything else ends it
 			if (!was_playing && is_host && (why == vfnet::Session::End::rejected || why == vfnet::Session::End::timeout || why == vfnet::Session::End::opponent_quit)) {
@@ -1035,6 +1086,26 @@ void Online::poll(double t)
 		}
 		default:
 			break;
+		}
+	}
+	// a random match's ping, measured before it begins: 30 round trips (its average settled: a second or so once both
+	// games are going, the other's first frames can take seconds), at most 10 s if it's not known by then (let
+	// through: not held up for it)
+	if (checking && session && session->state() == vfnet::Session::State::running) {
+		const double ms = session->stats().rtt_ms;
+		if (session->stats().rtt_samples >= 30 || now - check_from >= 10000) {
+			checking = false;
+			const std::string who = opponent();
+			if (ms > started_with.max_ping) {
+				const std::string n = std::to_string(int(ms + 0.5)), limit = std::to_string(started_with.max_ping);
+				log_line("the ping to " + who + " " + n + " ms, over the " + limit + " ms allowed (Online settings): searching again");
+				session->quit(vfnet::QUIT_TOO_FAR);
+				if (!code.empty()) avoid.push_back({ code, now });
+				search_again(who + "'s ping was " + n + " ms, over your limit (" + limit + " ms): looking for someone else...");
+				return;
+			}
+			log_line("the ping to " + who + " " + std::to_string(int(ms + 0.5)) + " ms: within the " + std::to_string(started_with.max_ping) + " ms allowed");
+			begin_match(check_who);
 		}
 	}
 	// the connection in the log every 10 s of a match (what a report needs: the ping, the rollbacks, the waits)
@@ -1140,6 +1211,7 @@ std::string Online::status() const
 	const std::string who = session && !session->opponent_name().empty() ? opponent() : online_menu::clean_name(peer_name);
 	if (rooms) {
 		const std::string relay = via_relay() ? " (through the relay)" : "";
+		if (checking) return "Connected to " + (who.empty() ? std::string("your opponent") : who) + relay + ": checking the ping...";
 		switch (st) {
 		case Step::getting_ready: return "Getting ready...";
 		case Step::opening: return "Opening a room...";
@@ -1147,6 +1219,7 @@ std::string Online::status() const
 			if (random) return "Connecting to " + (who.empty() ? std::string("your opponent") : who) + "...";
 			return "Send it to your opponent: they choose Join and type it";
 		case Step::searching:
+			if (!note.empty()) return note;   // (an opponent passed over, the service hard to reach)
 			return players > 1 ? "Looking for an opponent near you (" + std::to_string(players - 1) + " more searching)..." : "Looking for an opponent near you...";
 		case Step::finding:
 			if (patient()) return "Waiting for " + (patient_for.empty() ? std::string("the host") : patient_for) + " to open room " + room_code() + " again...";
@@ -1492,6 +1565,21 @@ menu_page settings_page(Online &o, OnlineSettings &s, game_menu &menu, std::func
 	p.items.push_back({ "Hide my IP address", "On: every online match (a code's or a random one) goes through the relay (Cloudflare's), so the other "
 		"player never sees your address. A little more ping. Off: directly when the routers allow it, which is quickest.",
 		[&s] { return std::string(s.hide_ip ? "On" : "Off"); }, [&s, changed](int) { s.hide_ip = !s.hide_ip; changed(); } });
+	p.items.push_back({ "Random: max ping", "Random only passes over an opponent whose ping is higher than this: it's measured as you connect, "
+		"before the match starts, and if it's over, the game leaves and looks for someone else (the two of you aren't matched again "
+		"for a while). Any: whoever's nearest. Room codes and addresses play whatever the ping.",
+		[&s] { return s.max_ping > 0 ? std::to_string(s.max_ping) + " ms" : std::string("Any"); },
+		[&s, changed](int d) {
+			static const int steps[] = { 0, 80, 100, 150, 200, 250 };
+			int i = 0;
+			while (i < 5 && steps[i] != s.max_ping) i++;
+			if (steps[i] != s.max_ping) i = 0;
+			s.max_ping = steps[(i + (d < 0 ? 5 : 1)) % 6];
+			changed();
+		} });
+	p.items.push_back({ "Match found chime", "A chime when an online match is found (and the game's window flashes if it isn't the one in front), so "
+		"you can wait in another window.",
+		[&s] { return std::string(s.chime ? "On" : "Off"); }, [&s, changed](int) { s.chime = !s.chime; changed(); } });
 	p.items.push_back({ "Back", "", {}, {}, [&menu] { menu.pop(); } });
 	return p;
 }

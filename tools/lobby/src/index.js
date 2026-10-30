@@ -10,7 +10,8 @@
 //   POST /v1/reopen {code, key}   (the host's, after a player who didn't get going: the same code, open again)
 //   POST /v1/close  {code, key}
 //   POST /v1/turn   {game, version, content} -> {servers: [{host, port, username, credential}], ttl, country}   (TURN_PER_DAY a day, all told)
-//   POST /v1/random {game, version, content, name, cands, relay} -> {ticket, waiting, players} or a match
+//   POST /v1/random {game, version, content, name, cands, relay, avoid?} -> {ticket, waiting, players} or a match
+//        (avoid: room codes of random matches lately, their other player not matched with this one again)
 //   POST /v1/random/wait  {ticket}  (waits up to 20 s) -> the same
 //   POST /v1/random/leave {ticket}
 //   POST /v1/random/count {game, version, content} -> {players}: searching, or in a random match made in the last 10 minutes
@@ -267,7 +268,7 @@ export default {
 				}
 				return q.fetch('https://queue' + (path === '/v1/random' ? '/enter' : path.slice(10)), {
 					method: 'POST',
-					body: JSON.stringify({ me, geo: geo_of(req), from: sender(req), ticket: clean(b.ticket, 32) }),
+					body: JSON.stringify({ me, geo: geo_of(req), from: sender(req), ticket: clean(b.ticket, 32), avoid: Array.isArray(b.avoid) ? b.avoid.slice(0, 8).map((c) => clean(c, 8)) : [] }),
 				});
 			}
 
@@ -465,8 +466,15 @@ export class Queue {
 		this.waiting = new Map();   // ticket -> { me, geo, from, since, seen, result, waiters, partner, room, left }
 		this.matched = [];          // (when each match was made, the last RANDOM_PLAYING_MS: for the count; kept in storage,
 		                            // the queue being let go of by Cloudflare once no one's searching)
-		ctx.blockConcurrencyWhile(async () => { this.matched = (await ctx.storage.get('matched')) || []; });
 		this.made = new Map();      // address -> when its matches were made, the last RANDOM_PLAYING_MS
+		this.pairs = new Map();     // a match's room code -> its two players ({from, name}) and when, the last RANDOM_PLAYING_MS:
+		                            // a player passing the other over (too far for their ping limit) names the room, and the
+		                            // two aren't matched again meanwhile (kept in storage too: the two are connecting, no one
+		                            // asking, when the queue's let go of)
+		ctx.blockConcurrencyWhile(async () => {
+			this.matched = (await ctx.storage.get('matched')) || [];
+			this.pairs = new Map((await ctx.storage.get('pairs')) || []);
+		});
 	}
 	prune() {
 		const now = Date.now();
@@ -474,6 +482,12 @@ export class Queue {
 			if (now - w.seen > (w.result ? RANDOM_KEPT_MS : RANDOM_GONE_MS)) this.waiting.delete(t);
 		for (const [a, times] of this.made)
 			if (!times.length || now - times[times.length - 1] > RANDOM_PLAYING_MS) this.made.delete(a);
+		for (const [c, p] of this.pairs) if (now - p.t > RANDOM_PLAYING_MS) this.pairs.delete(c);
+	}
+	// (one of those this one passed over, or was passed over by)
+	apart(w, o) {
+		const is = (x, y) => x.from === y.from && x.me.name === y.name;
+		return w.avoid.some((p) => is(o, p)) || o.avoid.some((p) => is(w, p));
 	}
 	searching() {
 		let n = 0;
@@ -486,7 +500,7 @@ export class Queue {
 		const now = Date.now();
 		let pick = null, best = Infinity;
 		for (const [t, o] of this.waiting) {
-			if (t === ticket || o.result || o.waiters.length === 0) continue;
+			if (t === ticket || o.result || o.waiters.length === 0 || this.apart(w, o)) continue;
 			const d = km(w.geo, o.geo), waited = Math.max(now - w.since, now - o.since) / 1000;
 			if (d <= reach_km(waited) && d < best) { pick = o; best = d; }
 		}
@@ -516,6 +530,9 @@ export class Queue {
 		this.matched.push(t);
 		this.ctx.storage.put('matched', this.matched);   // (not awaited: nothing's to run between here and the settling; the write's kept before any answer goes)
 		for (const x of [host, guest]) this.made.set(x.from, [...(this.made.get(x.from) || []).filter((y) => t - y < RANDOM_PLAYING_MS), t]);
+		this.pairs.set(m.host.code, { t, players: [host, guest].map((x) => ({ from: x.from, name: x.me.name })) });
+		for (const [c, p] of this.pairs) if (t - p.t > RANDOM_PLAYING_MS) this.pairs.delete(c);
+		this.ctx.storage.put('pairs', [...this.pairs]);   // (not awaited, as matched's)
 		host.partner = guest;
 		guest.partner = host;
 		host.room = guest.room = { code: m.host.code, key: m.host.key };
@@ -571,7 +588,13 @@ export class Queue {
 			if (made.length) this.made.set(b.from, made); else this.made.delete(b.from);
 			if (made.length >= RANDOM_MATCHES_PER_ADDRESS) return json({ error: 'busy' }, 429);
 			const ticket = random_hex(12);
-			const w = { me: b.me, geo: b.geo, from: b.from, since: now, seen: now, result: null, waiters: [], partner: null, room: null, left: false };
+			// (the other player of each room it names: those it's kept apart from)
+			const avoid = [];
+			for (const c of Array.isArray(b.avoid) ? b.avoid : []) {
+				const p = this.pairs.get(c);
+				if (p) for (const x of p.players) if (x.from !== b.from || x.name !== b.me.name) avoid.push(x);
+			}
+			const w = { me: b.me, geo: b.geo, from: b.from, avoid, since: now, seen: now, result: null, waiters: [], partner: null, room: null, left: false };
 			this.waiting.set(ticket, w);
 			await this.try_match(ticket, w);
 			return this.answer(ticket, w);

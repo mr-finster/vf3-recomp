@@ -261,6 +261,31 @@ int main(int argc, char **argv)
 	s.address.clear();
 	again();
 
+	// Settings, beside Play by address: Random's max ping, a step at a time (Any, 80, 100, ...), and the chime
+	key(SDL_SCANCODE_RIGHT);
+	key(SDL_SCANCODE_DOWN);
+	key(SDL_SCANCODE_RIGHT);
+	key(SDL_SCANCODE_RETURN);
+	check(top() == "Settings", "Settings is beside Play by address");
+	for (int i = 0; i < 3; i++) key(SDL_SCANCODE_DOWN);
+	key(SDL_SCANCODE_RIGHT);
+	key(SDL_SCANCODE_RIGHT);
+	check(s.max_ping == 100, ("Random: max ping steps to 100 ms (" + std::to_string(s.max_ping) + ")").c_str());
+	key(SDL_SCANCODE_LEFT);
+	key(SDL_SCANCODE_LEFT);
+	check(s.max_ping == 0, "and back to Any");
+	key(SDL_SCANCODE_LEFT);
+	check(s.max_ping == 250, "Any's left is the most, 250 ms");
+	key(SDL_SCANCODE_DOWN);
+	key(SDL_SCANCODE_RIGHT);
+	check(!s.chime, "the chime turns off");
+	key(SDL_SCANCODE_RIGHT);
+	check(s.chime, "and on");
+	shot("settings.png", w, h);
+	s.max_ping = 0;
+	key(SDL_SCANCODE_ESCAPE);
+	again();
+
 	// by address: hosting, then joining a host that isn't there
 	std::string err;
 	if (!o.host(s, err)) fprintf(stderr, "menutest: hosting: %s\n", err.c_str());

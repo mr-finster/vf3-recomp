@@ -227,6 +227,11 @@ lobby. The flags are the countries Cloudflare places each player's connection in
   as the numbers change (the dot green, yellow or red); Detailed adds a row: the jitter, the average rollback, how far
   ahead your side runs and each frame's cost. Under about 100 ms ping plays well; past ~250 ms the delay rises to keep
   the game at its full speed.
+- **Random: max ping:** Any, or 80 to 250 ms. A random opponent's ping is measured as you connect, before the match
+  starts; over your limit, the game leaves and looks for someone else (and the two of you aren't matched again for 10
+  minutes). Room codes and addresses play whatever the ping.
+- **Match found chime:** On (the default) plays a chime when an online match is found, and the game's window flashes in
+  the taskbar or the Dock if it isn't the one in front, so you can wait for an opponent in another window.
 
 **Good to know**
 
