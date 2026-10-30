@@ -2061,7 +2061,23 @@ int main(int argc, char **argv)
 				}
 			}
 			const uint64_t tu = SDL_GetTicksNS();
-			send_2d(tex_below, game.view.below_wide, video::WW);
+			// Not a stage: the layer below as the game has it, the 4:3 alone (its edge columns carried a few pixels on,
+			// for the smooth backgrounds' filter and smooth motion's fraction of a pixel to read), not the widened
+			// layer: its middle is the screen moved 2 pixels as the 3D is, so the 4:3's last 2 columns were the right
+			// side's first, what the sides make of a screen that isn't a stage (Team Battle's select: a black notch
+			// and a pink bar at the sea panel's right edge)
+			if (stage) send_2d(tex_below, game.view.below_wide, video::WW);
+			else {
+				static std::vector<uint32_t> narrow;
+				narrow.assign(size_t(video::WW) * video::H, 0);
+				for (int y = 0; y < video::H; y++) {
+					const uint32_t *src = &game.view.below[size_t(y) * video::W];
+					uint32_t *dst = &narrow[size_t(y) * video::WW];
+					std::copy(src, src + video::W, dst + video::EXT);
+					for (int x = 1; x <= 8; x++) { dst[video::EXT - x] = src[0]; dst[video::EXT + video::W - 1 + x] = src[video::W - 1]; }
+				}
+				send_2d(tex_below, narrow, video::WW);
+			}
 			send_2d(tex_above, game.view.above, video::W);
 			pace.upload_ms += double(SDL_GetTicksNS() - tu) / 1e6;
 		}
