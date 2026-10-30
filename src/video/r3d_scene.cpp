@@ -507,9 +507,61 @@ void mesh_state(Mesh &m, const uint32_t *h)
 	}
 }
 
+// VF3's beach stage (Jeffry's) has a texture animation for a model the game's model table gives no words (model
+// 0x1488: 0 in the table at 0xFFA1A440), but its routine (0x49B48) rewrites the texture's place in a polygon before
+// it looks at the count, so every few frames it writes the first polygon of whatever model the game's allocator put
+// at the same RAM address (the empty model takes none): Wolf's head there, whose lower lip's first triangle then shows
+// a corner of texture sheet 1 that holds nothing (black) whenever the head is sent to the Real3D again (the win pose,
+// the faces the fighters pull). The arcade drew the same, a pixel or so at its 384 lines; at 4K it is a black
+// triangle. The game's state is left alone: only the picture takes the place back from the polygon beside it.
+// A model's first polygon is taken to have had its place rewritten so when the next polygon is the other half of
+// its quad (an edge in common, in the same plane, with the same state and texture LOD), on a texture of the same
+// size and sheet, but at a place no other polygon of the model uses; first is then its header with the next one's
+// place.
+bool stray_texture_place(const uint32_t *h, const uint32_t *limit, uint32_t first[7])
+{
+	if (h + 7 > limit || h[6] == 0 || (h[1] & 4) || !(h[6] & 0x400))
+		return false;
+	const int own = ((h[0] & 0x40) ? 4 : 3) - shared_count[h[0] & 0xF];
+	const uint32_t *n = h + 7 + own * 4;
+	if (n + 7 > limit || n[6] == 0)
+		return false;
+	// an edge in common: the vertices the next one takes from it, and those it gives again at the same places
+	const int n_own = ((n[0] & 0x40) ? 4 : 3) - shared_count[n[0] & 0xF];
+	if (n + 7 + n_own * 4 > limit)
+		return false;
+	int common = shared_count[n[0] & 0xF];
+	for (int i = 0; i < n_own; i++)
+		for (int k = 0; k < own; k++) {
+			const uint32_t *a = n + 7 + i * 4, *b = h + 7 + k * 4;
+			if (!((a[0] ^ b[0]) & 0xFFFFFF00) && !((a[1] ^ b[1]) & 0xFFFFFF00) && !((a[2] ^ b[2]) & 0xFFFFFF00)) { common++; break; }
+		}
+	if (common < 2)
+		return false;
+	const uint32_t place_4 = 0x3F, place_5 = 0xFF;   // (the bits the animation writes: X in 4's 0-5 and 5's 7, Y in 5's 0-4)
+	if (((h[0] ^ n[0]) & 0xFC0003F0) || ((h[1] ^ n[1]) & ~4u) || h[2] != n[2] || h[3] != n[3] || h[6] != n[6] ||
+		((h[4] ^ n[4]) & ~place_4) || ((h[5] ^ n[5]) & ~place_5))
+		return false;
+	auto place = [&](const uint32_t *q) { return (q[4] & place_4) << 8 | (q[5] & place_5); };
+	const uint32_t p0 = place(h);
+	if (p0 == place(n))
+		return false;
+	for (const uint32_t *q = n; q + 7 <= limit && q[6] != 0;) {
+		if ((q[6] & 0x400) && ((q[4] ^ h[4]) & 0x40) == 0 && place(q) == p0)
+			return false;
+		if (q[1] & 4)
+			break;
+		q += 7 + (((q[0] & 0x40) ? 4 : 3) - shared_count[q[0] & 0xF]) * 4;
+	}
+	memcpy(first, h, 7 * sizeof(uint32_t));
+	first[4] = (h[4] & ~place_4) | (n[4] & place_4);
+	first[5] = (h[5] & ~place_5) | (n[5] & place_5);
+	return true;
+}
+
 } // namespace
 
-Meshes SceneBuilder::parse(const uint32_t *h, bool dynamic)
+Meshes SceneBuilder::parse(const uint32_t *src, bool dynamic)
 {
 	(void)dynamic;
 	auto out = std::make_shared<std::vector<Mesh>>();
@@ -518,10 +570,14 @@ Meshes SceneBuilder::parse(const uint32_t *h, bool dynamic)
 	uint32_t last_rgba = 0;
 	Mesh *mesh = nullptr;
 	const uint32_t *end_lo = poly + 0x100000, *end_rom = vrom + 0x1000000;
-	const uint32_t *limit = (h >= poly && h < end_lo) ? end_lo : end_rom;
+	const bool in_poly_ram = src >= poly && src < end_lo;
+	const uint32_t *limit = in_poly_ram ? end_lo : end_rom;
+	uint32_t first[7];
+	const bool stray = in_poly_ram && stray_texture_place(src, limit, first);
 	for (int guard = 0; guard < 200000; guard++) {
-		if (h + 7 > limit || h[6] == 0)
+		if (src + 7 > limit || src[6] == 0)
 			break;
+		const uint32_t *h = (guard == 0 && stray) ? first : src;   // the polygon's header
 		uint8_t colour[4];
 		if (!(h[1] & 2)) {
 			const uint32_t ci = (colour_table + ((h[4] >> 8) & 0xFFF)) & 0xFFFFF;
@@ -574,7 +630,7 @@ Meshes SceneBuilder::parse(const uint32_t *h, bool dynamic)
 		if (!smooth)
 			for (int i = 0; i < count; i++) memcpy(v[i].normal, face, sizeof(face));
 		const float np = float(h[5] >> 8) / 4096.0f;
-		const uint32_t *d = h + 7;
+		const uint32_t *d = src + 7;
 		for (; j < count; j++, d += 4) {
 			if (d + 4 > limit) break;
 			v[j].pos[0] = float(int32_t(d[0]) >> 8) / 128.0f;
@@ -626,7 +682,7 @@ Meshes SceneBuilder::parse(const uint32_t *h, bool dynamic)
 		}
 		if (h[1] & 4)
 			break;
-		h += 7 + (count - shared_count[h[0] & 0xF]) * 4;
+		src += 7 + (count - shared_count[h[0] & 0xF]) * 4;
 	}
 	// meshes with no triangles are dropped
 	out->erase(std::remove_if(out->begin(), out->end(), [](const Mesh &m) { return m.verts.empty(); }), out->end());
