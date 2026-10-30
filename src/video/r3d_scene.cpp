@@ -701,6 +701,19 @@ uint64_t shape_of(const Model &m)
 	return (n << 32) ^ verts;
 }
 
+// its shape and the kind of picture on each mesh (its size, format and sheet, not its place): a flipbook's steps
+// alike, the sand grains around them not
+uint64_t look_of(const Model &m, uint64_t shape)
+{
+	uint64_t h = shape * 0x9E3779B97F4A7C15ull;
+	if (m.meshes)
+		for (auto &mesh : *m.meshes) {
+			const uint64_t k = mesh.textured ? (uint64_t(mesh.width) | uint64_t(mesh.height) << 12 | uint64_t(mesh.format) << 24 | uint64_t(mesh.page ^ m.page) << 28 | 1ull << 31) : 0;
+			h = (h ^ k) * 0x100000001B3ull;
+		}
+	return h;
+}
+
 } // namespace
 
 // The camera's move between two frames' viewport (b = camera a, for what stands still), from the models alone at
@@ -1117,6 +1130,15 @@ bool interpolate(const Scene &a, const Scene &b, float t, Scene &out, InterpStat
 			}
 		};
 		pair_by([](const Model &m) { return uint64_t(m.addr); }, true);
+		// then by shape and the pictures' kind: a flipbook's next step (Wolf's desert's dust puffs, a quad each, their
+		// picture stepping through a sheet every 2 frames, a new model each step) with the step before. By shape alone
+		// they were among hundreds of sand grains of their shape, each paired in turn with the nearest left: a puff
+		// new that frame took another's step before, and that one another's, the puffs faded from each other's
+		// pictures (a puff changing for a frame, flickering at 120 a second) and some from none (a jump)
+		std::vector<uint64_t> was_look(was.size()), now_look(now.size());
+		for (size_t i = 0; i < was.size(); i++) was_look[i] = look_of(was[i], was_shape[i]);
+		for (size_t j = 0; j < now.size(); j++) now_look[j] = look_of(now[j], now_shape[j]);
+		pair_by([&](const Model &m) { return (&m >= now.data() && &m < now.data() + now.size()) ? now_look[size_t(&m - now.data())] : was_look[size_t(&m - was.data())]; }, false);
 		// then by shape: an animation's next model (the birds' wings, a splash: the game steps through models in
 		// ROM), a model the game builds each frame (in polygon RAM, wherever there was room)
 		pair_by([&](const Model &m) { return (&m >= now.data() && &m < now.data() + now.size()) ? now_shape[size_t(&m - now.data())] : was_shape[size_t(&m - was.data())]; }, false);
@@ -1360,7 +1382,9 @@ bool interpolate(const Scene &a, const Scene &b, float t, Scene &out, InterpStat
 			np.flips[v].resize(np.paired[v].size());
 			for (size_t j = 0; j < np.paired[v].size(); j++) {
 				const int i = np.paired[v][j];
-				if (i < 0) continue;
+				// (only a model blended from its partner: one too far from it, or a swarm's grain, is another thing,
+				// and its picture isn't this one's step before)
+				if (i < 0 || np.from[v][j] < 0) continue;
 				const size_t u = size_t(av[v]);   // (paired: in a viewport of a's)
 				const Flip *pr = chain && size_t(i) < plan.flips[u].size() && plan.flips[u][size_t(i)].age >= 0 ? &plan.flips[u][size_t(i)] : nullptr;
 				Flip &f = np.flips[v][j];
