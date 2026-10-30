@@ -1306,8 +1306,11 @@ void TileGen::line(const m3::Model3 &board, unsigned y, const uint32_t *line_reg
 				if (side) { const int from = W - x0; if (from < 8) put(dst, W, ee->second, l.four, fy, from, 8 - from); }
 				else if (fine) put(dst, -fine, ee->second, l.four, fy, 0, fine);
 				// and its part on the screen, a few pixels at the 4:3 edge (mid-picture in widescreen: a strip in the
-				// sky), where the picture has this layer's tile: the map's
-				if ((ent(edge) & 0x3FFF) != (ee->second & 0x3FFF)) {
+				// sky), where the picture has this layer's tile: the map's. Only with the map's place found for the frame:
+				// a row matched alone can be anywhere in the map, and on a screen of its own with a stage's map still
+				// loaded (Team Battle's character select, its sea matched in stage 45's map) the picture's right edge got
+				// that place's tile, from patterns long since others' (black blocks, an x, a pink bar)
+				if (backdrop.ok && (ent(edge) & 0x3FFF) != (ee->second & 0x3FFF)) {
 					uint32_t was[8 + 2 * EXT] = {}, now[8 + 2 * EXT] = {};
 					put(was + EXT, 0, ent(edge), l.four, fy, 0, 8);
 					put(now + EXT, 0, ee->second, l.four, fy, 0, 8);
