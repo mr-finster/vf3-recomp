@@ -269,6 +269,46 @@ int main(int argc, char **argv)
 				fclose(df);
 			}
 		}
+		// VF3_MODELS=file,from,to (tests): those frames' models, a line each: "m <frame> <vp> <j> <addr> <x> <y> on screen
+		// <depth> <alpha> <vertices>" and its meshes' textures and translucency ("t x,y wxh page fmt pa ta at a"), the
+		// model's polygons' translucency (a: the first vertex's alpha, 255 opaque), "f" layered, trans_select, high priority,
+		// lighting, fixed shading, translator map, microtexture, "w" the wraps, its fog; and "u <frame> x,y wxh": the
+		// texture areas written that frame
+		if (static const char *mp = getenv("VF3_MODELS"); mp) {
+			static FILE *ml = nullptr;
+			static long m_from = 0, m_to = 0;
+			if (!ml) {
+				std::string s = mp;
+				const size_t c = s.find(',');
+				ml = fopen(s.substr(0, c).c_str(), "w");
+				if (c != std::string::npos) sscanf(s.c_str() + c + 1, "%ld,%ld", &m_from, &m_to);
+			}
+			if (ml && long(f) >= m_from && long(f) <= m_to) {
+				static video::Scene ms;
+				scene_builder.build(board, ms);
+				for (size_t v = 0; v < ms.viewports.size(); v++) {
+					const video::Viewport &vp = ms.viewports[v];
+					for (size_t j = 0; j < vp.models.size(); j++) {
+						const video::Model &mm = vp.models[j];
+						const float z = -mm.matrix.m[14];
+						const float sx = z > 0 ? vp.vp_x + vp.vp_w * (mm.matrix.m[12] / z - vp.left) / (vp.right - vp.left) : -1;
+						const float sy = z > 0 ? vp.vp_y + vp.vp_h * (vp.top - mm.matrix.m[13] / z) / (vp.top - vp.bottom) : -1;
+						size_t nv = 0;
+						if (mm.meshes) for (auto &me : *mm.meshes) nv += me.verts.size();
+						fprintf(ml, "m %llu %zu %zu %08x %.0f %.0f %.0f %.2f %zu", (unsigned long long)f, v, j, mm.addr, sx, sy, z, mm.alpha, nv);
+						if (mm.meshes)
+							for (auto &me : *mm.meshes)
+								fprintf(ml, " t %d,%d %dx%d %d %d %d%d%d %d f%d%d%d%d%d%d%d w%d%d fog %.2f", me.x, me.y, me.width, me.height, me.page ^ mm.page, me.format, int(me.poly_alpha), int(me.texture_alpha),
+								        int(me.alpha_test), me.verts.empty() ? -1 : int(me.verts[0].colour[3]), int(me.layered), int(me.trans_select), int(me.high_priority),
+								        int(me.lighting), int(me.fixed_shading), int(me.translator_map), int(me.micro), me.wrap_u, me.wrap_v, me.fog_intensity);
+						fprintf(ml, "\n");
+					}
+				}
+				for (auto &u : board.tex_uploads) fprintf(ml, "u %llu %u,%u %ux%u\n", (unsigned long long)f, u.x, u.y, u.w, u.h);
+				fflush(ml);
+			}
+			board.tex_uploads.clear();   // (the texture areas written: listed per frame)
+		}
 		// VF3_HITCH=file: smooth motion's hitch finder's samples (tools/hitch/hitch.py reads them). Each frame, the
 		// pictures between it and the frame before at t = 0.25, 0.5, 0.75 and 1 (as smooth motion would show them, 4 a
 		// frame at even moments), and where the 3D is on average in each: the mean of the models' blended places in the

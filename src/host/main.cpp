@@ -83,6 +83,7 @@
 //                        fast as it goes) to VF3_RECORD_TO, 60 pictures a second by the game's clock, not the
 //                        real one (smooth motion's in-betweens), the window's whole picture to dir/video.mp4 (by
 //                        ffmpeg) and the sound to dir/sound.wav, in step. Use with VF3_HIDDEN and VF3_WINDOW.
+//                        VF3_RECORD_HZ=n: n pictures a second instead (120: a 120 Hz screen's in-betweens)
 //   VF3_GOVERN=1         the governor on (off for players and tests: the settings as set)
 //   VF3_THREADS=N        threads drawing the 3D (default: the cores less 1, 12 at most)
 //   VF3_TEST_LOAD=ms:s   each picture ms longer (by the scale's square, from 1x) for the first s seconds after the
@@ -2907,12 +2908,14 @@ int main(int argc, char **argv)
 		FILE *video = nullptr, *wav = nullptr;
 		uint32_t wav_bytes = 0;
 		int w = 0, h = 0;
+		int hz = 60;   // the pictures a second of the game's clock (VF3_RECORD_HZ)
 	} rec;
 	if (const char *d = getenv("VF3_RECORD")) {
 		rec.dir = d;
 		std::filesystem::create_directories(rec.dir, ec);
 		if (const char *f = getenv("VF3_RECORD_FROM")) rec.from = strtoull(f, nullptr, 10);
 		if (const char *f = getenv("VF3_RECORD_TO")) rec.to = strtoull(f, nullptr, 10);
+		if (const char *f = getenv("VF3_RECORD_HZ")) rec.hz = std::clamp(atoi(f), 1, 240);
 	}
 	auto wav_header = [&] {
 		const uint32_t rate = SOUND_RATE, br = rate * 4, sz = 36 + rec.wav_bytes;
@@ -2928,7 +2931,7 @@ int main(int argc, char **argv)
 	auto rec_stop = [&] {
 		if (rec.video) pclose(rec.video);
 		if (rec.wav) { wav_header(); fclose(rec.wav); }
-		if (rec.on) fprintf(stderr, "record: %llu pictures, %.1f s, to %s\n", (unsigned long long)rec.n, rec.n / 60.0, rec.dir.c_str());
+		if (rec.on) fprintf(stderr, "record: %llu pictures, %.1f s, to %s\n", (unsigned long long)rec.n, rec.n / double(rec.hz), rec.dir.c_str());
 		rec.video = rec.wav = nullptr;
 		rec.on = false;
 	};
@@ -3418,7 +3421,7 @@ int main(int argc, char **argv)
 				SDL_GetCurrentRenderOutputSize(ren, &ww, &wh);
 				rec.w = ww & ~1; rec.h = wh & ~1;
 				const std::string cmd = "ffmpeg -loglevel error -y -f rawvideo -pix_fmt rgba -s " + std::to_string(rec.w) + "x" + std::to_string(rec.h) +
-				                        " -r 60 -i - -c:v libx264 -preset slow -crf 12 -pix_fmt yuv420p '" + rec.dir + "/video.mp4'";
+				                        " -r " + std::to_string(rec.hz) + " -i - -c:v libx264 -preset slow -crf 12 -pix_fmt yuv420p '" + rec.dir + "/video.mp4'";
 				rec.video = popen(cmd.c_str(), "w");
 				rec.wav = fopen((rec.dir + "/sound.wav").c_str(), "wb");
 				if (rec.wav) wav_header();
@@ -3426,7 +3429,7 @@ int main(int argc, char **argv)
 			}
 			if (!rec.on) { due = 8; frame_clock = double(frames_run + due); }
 			else {
-				frame_clock = double(rec.base) + double(rec.n + 1) * FRAME_HZ / 60.0;
+				frame_clock = double(rec.base) + double(rec.n + 1) * FRAME_HZ / double(rec.hz);
 				due = std::max(0, int(int64_t(std::floor(frame_clock)) - int64_t(frames_run)));
 			}
 			frames_run += due;
@@ -3783,7 +3786,7 @@ int main(int argc, char **argv)
 				SDL_DestroySurface(s);
 			}
 			rec.n++;
-			if (rec.n % 600 == 0) fprintf(stderr, "record: %.0f s\n", rec.n / 60.0);
+			if (rec.n % (uint64_t(rec.hz) * 10) == 0) fprintf(stderr, "record: %.0f s\n", rec.n / double(rec.hz));
 			if (game_frame >= rec.to) running = false;
 		}
 		pass_work_ns = SDL_GetTicksNS() - pass_t0;
