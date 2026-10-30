@@ -118,6 +118,8 @@ const Profile VF3_REV_D = {
 	ppcrec::vf3_map, ppcrec::vf3_map_count,
 	"",
 	&REV_D_DURAL,
+	// (r13 0x108000 - 0x1F50: the routines at 0x1ECFC-0x1ED54, seed * 0x10DCD + 1, the select's and the attract's)
+	0x1060B0,
 };
 
 // Team Battle: its ROMs, and the addresses found so far; what isn't known yet is 0 (that feature off). Online: only
@@ -149,6 +151,7 @@ const Profile VF3_TB = {
 	ppcrec::vf3tb_map, ppcrec::vf3tb_map_count,
 	"vf3tb",
 	&TB_DURAL,
+	0x1060B0,   // (Revision D's: the same routines at 0x20DD4-0x20E30, r13 the same)
 };
 
 const Profile *const PROFILES[] = { &VF3_REV_D, &VF3_TB, nullptr };

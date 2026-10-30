@@ -39,6 +39,9 @@ inline size_t stage_select(const m3::Model3 &board) { return board.profile->sett
 // between two players is always on the same stage (the lava's). Set after the boot: where in the list it starts.
 void set_versus_count(m3::Model3 &board, uint32_t count);
 uint32_t random_versus_count();   // (0 to 15, a fresh one each call)
+// The game's random numbers' seed (the profile's random_seed): offline only, after the boot (online, both sides boot
+// the same and the seed stays the boot's)
+void set_random_seed(m3::Model3 &board, uint32_t seed);
 
 // A player's switches as the session's input word (coin, start, the stick, the four buttons; never test or
 // service), and back
