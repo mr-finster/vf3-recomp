@@ -1742,7 +1742,7 @@ int main(int argc, char **argv)
 	static video::Raster raster;
 	// ---- the 3D on the GPU ----
 	static R3dGpu gpu3d;
-	struct { bool on = false, failed = false, checked = false; SDL_Texture *tex = nullptr; int w = 0, h = 0, k = 1; double cpu_ms = 0, gpu_ms = 0; } g3;
+	struct { bool on = false, failed = false, checked = false; int misses = 0; uint64_t check_from = 0; SDL_Texture *tex = nullptr; int w = 0, h = 0, k = 1; double cpu_ms = 0, gpu_ms = 0; } g3;
 	if (r3d_mode != R3D_CPU) {
 		const char *rn = SDL_GetRendererName(ren);
 		SDL_GPUDevice *gd = rn && !strcmp(rn, "gpu") ? SDL_GetGPURendererDevice(ren) : nullptr;
@@ -1938,6 +1938,16 @@ int main(int argc, char **argv)
 			write_png((d + "/gpu.png").c_str(), gp.data(), cw, ch);
 			write_png((d + "/cpu.png").c_str(), cp.data(), cw, ch);
 		}
+		// (a scene can be off by more than rounding where a working GPU draws it: the title's Kage close-up, a few
+		// texels filling the screen, its texels' edges a hair apart from the CPU's, 10920 pixels where 10490 kept,
+		// an RX 9060 XT's; the demo's order at random since the seed is: it came first. Two more scenes, 5 s apart,
+		// before the GPU's let go: a GPU drawing wrongly is wrong in all three)
+		if (!keep && ++g3.misses < 3) {
+			fprintf(stderr, "the 3D on the GPU: checked again on another scene in 5 s (%d of 3)\n", g3.misses + 1);
+			g3.checked = false;
+			g3.check_from = game_frame + 300;
+			return false;   // (this picture the CPU's)
+		}
 		if (!keep) { g3_fail("its pictures aren't the CPU's"); return false; }
 		return true;
 	};
@@ -1984,7 +1994,7 @@ int main(int argc, char **argv)
 				g3.gpu_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - tg).count();
 				// checked once, on a scene with enough in it
 				size_t polys = raster.tris.size();
-				if (!g3.checked && polys > 500) { g3.checked = true; on_gpu = g3_check(*s); }
+				if (!g3.checked && polys > 500 && game_frame >= g3.check_from) { g3.checked = true; on_gpu = g3_check(*s); }
 				// (checked: the CPU's drawing buffers let go, made again if it ever draws: at 2x with 3x antialiasing on
 				// a Steam Deck they were near 500 MB of its shared memory, kept for nothing)
 				if (on_gpu && g3.checked) raster.drop_buffers();
