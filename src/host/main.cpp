@@ -504,6 +504,8 @@ struct settings
 	static constexpr const char *BUILD = VF3_VERSION " " VF3_DATE " " VF3_COMMIT;   // (what gpu3d_failed was learnt by)
 	std::string gpu3d_failed;   // SDL_GPU's drivers whose 3D failed here ("direct3d12 vulkan"): the next start tries the next
 	bool fullscreen = false, arcade = false, show_fps = false, smooth = true;
+	bool fs_window = false;  // fullscreen as a borderless window a line taller than the screen, never the driver's own
+	                         // (settings.ini's fullscreen_window = 1: a test for AMD's Vulkan on Windows, issue #7)
 	bool timings = false;    // F9: the timings in the title bar
 	bool smooth_bg = true;   // the 2D backgrounds (the layers below the 3D) scaled smoothly, not as blocks
 	bool sharp_textures = true;   // the 3D's textures' mipmap levels for the picture's size (false: the arcade's, video::Raster::arcade_lod)
@@ -567,6 +569,7 @@ struct settings
 		num("graphics", graphics, 0, 1);
 		num("antialiasing", aa, 0, 3);
 		flag("team_battle_1v1", tb_one);
+		flag("fullscreen_window", fs_window);
 		if (aa == 0) aa = 1;   // (VF2's Low, edges smoothed after drawing: not in this game's renderer)
 		for (int p = 0; p < 2; p++) ctl[p].load(kv, p);
 		// Upgrades, by the version the settings were written with (saved at once when one is made)
@@ -624,6 +627,7 @@ struct settings
 		if (!game.empty()) fprintf(f, "game = %s\n", game.c_str());
 		if (dural) fprintf(f, "cheat_dural = %d\n", dural);
 		fprintf(f, "team_battle_1v1 = %d\n", int(tb_one));
+		if (fs_window) fprintf(f, "fullscreen_window = 1\n");
 		if (!gpu3d_failed.empty()) fprintf(f, "gpu_3d_failed = %s\ngpu_3d_failed_build = %s\n", gpu3d_failed.c_str(), BUILD);
 		fprintf(f, "crt_colours = %d\nbrightness = %d\ngamma = %d\nsharp_textures = %d\n", crt_colours, brightness, gamma, int(sharp_textures));
 		if (graphics) fprintf(f, "graphics = %d\n", graphics);
@@ -1528,7 +1532,7 @@ int main(int argc, char **argv)
 		}
 	}
 	SDL_Window *win = SDL_CreateWindow(board.profile->name, win_w, win_h,
-		SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | (cfg.fullscreen ? SDL_WINDOW_FULLSCREEN : 0) | SDL_WINDOW_HIDDEN);
+		SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | (cfg.fullscreen && !cfg.fs_window ? SDL_WINDOW_FULLSCREEN : 0) | SDL_WINDOW_HIDDEN);
 	if (!win) return fail(std::string("Couldn't open the window: ") + SDL_GetError());
 	SDL_HideCursor();
 	// the window's icon (the Mac app and the Windows exe carry their own)
@@ -2477,7 +2481,31 @@ int main(int argc, char **argv)
 		fprintf(stderr, "render scale %dx\n", scale);
 	};
 	auto set_shape = [&](int a) { aspect_i = cfg.aspect = a; cfg_dirty = true; gov_fresh(); };
-	auto set_fullscreen = [&](bool on) { SDL_SetWindowFullscreen(win, on); SDL_SyncWindow(win); cfg.fullscreen = on; cfg_dirty = true; gov_fresh(); };
+	// (fullscreen_window: a borderless window over the screen and a line past it, so no driver takes it for a game's
+	// own fullscreen: AMD's Vulkan on Windows froze there, issue #7; the window's place and size kept for the way back)
+	bool fs_win_on = false;
+	SDL_Rect fs_win_was{ 0, 0, 0, 0 };
+	auto is_fullscreen = [&] { return cfg.fs_window ? fs_win_on : (SDL_GetWindowFlags(win) & SDL_WINDOW_FULLSCREEN) != 0; };
+	auto set_fullscreen = [&](bool on) {
+		if (cfg.fs_window) {
+			SDL_Rect b;
+			if (on && !fs_win_on && SDL_GetDisplayBounds(SDL_GetDisplayForWindow(win), &b)) {
+				SDL_GetWindowPosition(win, &fs_win_was.x, &fs_win_was.y);
+				SDL_GetWindowSize(win, &fs_win_was.w, &fs_win_was.h);
+				SDL_SetWindowBordered(win, false);
+				SDL_SetWindowPosition(win, b.x, b.y);
+				SDL_SetWindowSize(win, b.w, b.h + 1);
+				fs_win_on = true;
+				fprintf(stderr, "fullscreen: a borderless window, %d x %d (fullscreen_window)\n", b.w, b.h + 1);
+			} else if (!on && fs_win_on) {
+				SDL_SetWindowBordered(win, true);
+				if (fs_win_was.w > 0) { SDL_SetWindowSize(win, fs_win_was.w, fs_win_was.h); SDL_SetWindowPosition(win, fs_win_was.x, fs_win_was.y); }
+				fs_win_on = false;
+			}
+		} else SDL_SetWindowFullscreen(win, on);
+		SDL_SyncWindow(win); cfg.fullscreen = on; cfg_dirty = true; gov_fresh();
+	};
+	if (cfg.fullscreen && cfg.fs_window) set_fullscreen(true);
 	int test_frames = 0;        // the test button held for these frames (the menu's Service menu; Start in the test menu)
 	int service_frames = 0, test_mode_frames = 0;   // (Down in the test menu: the service button)
 	bool test_pending = false, in_test = false, test_down_was = false, test_start_was = false;
@@ -2602,8 +2630,8 @@ int main(int argc, char **argv)
 			[&] { return on_off(cfg.show_fps); },
 			[&](int) { cfg.show_fps = !cfg.show_fps; cfg_dirty = true; if (!cfg.show_fps) menu.set_fps(""); } });
 		p.items.push_back({ "Fullscreen", "Play fullscreen or in a window. (F11, F or Alt+Enter)",
-			[&] { return on_off(SDL_GetWindowFlags(win) & SDL_WINDOW_FULLSCREEN); },
-			[&](int) { set_fullscreen(!(SDL_GetWindowFlags(win) & SDL_WINDOW_FULLSCREEN)); } });
+			[&] { return on_off(is_fullscreen()); },
+			[&](int) { set_fullscreen(!is_fullscreen()); } });
 		p.items.push_back(back_item());
 		return p;
 	};
@@ -3415,7 +3443,7 @@ int main(int argc, char **argv)
 				return true;
 			};
 			if (e.type == SDL_EVENT_KEY_DOWN && !e.key.repeat && fullscreen_key(e.key)) {
-				set_fullscreen(!(SDL_GetWindowFlags(win) & SDL_WINDOW_FULLSCREEN));
+				set_fullscreen(!is_fullscreen());
 				continue;
 			}
 			if (e.type == SDL_EVENT_KEY_DOWN && !e.key.repeat) {
@@ -3429,7 +3457,7 @@ int main(int argc, char **argv)
 					break;
 				case SDL_SCANCODE_F5: set_scale(scale % MAX_SCALE + 1); break;
 				case SDL_SCANCODE_F6: set_shape((aspect_i + 1) % N_ASPECTS); break;
-				case SDL_SCANCODE_F11: set_fullscreen(!(SDL_GetWindowFlags(win) & SDL_WINDOW_FULLSCREEN)); break;
+				case SDL_SCANCODE_F11: set_fullscreen(!is_fullscreen()); break;
 				case SDL_SCANCODE_F12: {
 					// the picture as drawn (the render scale, antialiased, its shape), without the bars around it or
 					// the screen filter, into Screenshots in the data folder, numbered, never overwritten (as VF2's)
