@@ -53,6 +53,9 @@
 //        RT all three, Start; Menu (View tapped by default), L3 + R3 or the touchpad click: the menu (View
 //        + Start too; View tapped is a coin only when it's set as Coin); View + LB: render scale; View + RB:
 //        picture shape.
+// Sticks: a joystick SDL doesn't know as a pad (a DirectInput arcade stick) is given a fighting stick's layout
+//        (give_stick_layout); Controls > Player > Set up buttons makes one from its own presses (settings.ini's
+//        pad_mapping); a gamecontrollerdb.txt in the data folder or beside the program is read too.
 //
 // Testing without a display:
 //   VF3_HIDDEN=1         no window on screen, no sound out (the board still runs); never a dialog
@@ -71,6 +74,10 @@
 //   VF3_RANDOM=1         looks for a random opponent at pass 60, as Online > Random
 //   VF3_MENU_KEYS=k,...  presses these keys (esc, up, down, left, right, enter, or SDL key names) 6 passes of the
 //                        loop apart from pass 30
+//   VF3_TEST_VJOY=...    a virtual stick SDL doesn't know (10 buttons, a hat, 2 axes), pressed at these passes of
+//                        the loop: b3@200 its button 3, h1@260 its hat (1 up, 2 right, 4 down, 8 left), +0@300 or
+//                        -1@300 an axis to one end (each 8 passes), q@900 quit (a run that saves), p@100 plugged
+//                        in then (not at the start); "1": no presses
 //   VF3_SHOT_AT=n,...    the window as drawn at these passes of the loop, to build/host_window_at_N.png
 //   VF3_ROMS=folder      the player's ROM folder (as --roms)
 //   VF3_3D=cpu|gpu|auto  the 3D renderer for this run (as Display > 3D renderer)
@@ -137,6 +144,7 @@ __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
 #include <memory>
 #include <optional>
 #include <random>
+#include <set>
 #include <string>
 #include <thread>
 #if defined(__APPLE__)
@@ -377,7 +385,106 @@ hotkey read_inputs(m3::Controls &c, SDL_Gamepad *pads[2], pad_state ps[2], const
 		}
 		if (start_held) c.start[p] = true;
 	}
+	static const bool vjoy_log = getenv("VF3_TEST_VJOY") != nullptr;   // (tests: player 1's controls as they change)
+	if (vjoy_log) {
+		static std::string was;
+		std::string now;
+		const bool *f[] = { c.up, c.down, c.left, c.right, c.guard, c.punch, c.kick, c.escape, c.start };
+		static const char *const N[] = { "up", "down", "left", "right", "guard", "punch", "kick", "escape", "start" };
+		for (int i = 0; i < 9; i++) if (f[i][0]) now += std::string(now.empty() ? "" : " ") + N[i];
+		if (now != was) fprintf(stderr, "(test) player 1: %s\n", now.empty() ? "-" : now.c_str());
+		was = now;
+	}
 	return hk;
+}
+
+// ---- sticks SDL doesn't know ----
+// A joystick SDL has no gamepad mapping for (a DirectInput arcade stick: HORI's Virtua Stick, the Astro City Mini's)
+// isn't a gamepad to SDL, and the game reads only gamepads (Supermodel reads the joystick's own buttons). Each is
+// given a fighting stick's layout by its GUID, a mapping as SDL's own database has them (buttons 0-7 as A B X Y LB RB
+// LT RT, 8 View and 9 Start, the hat the d-pad, axes 0 and 1 the left stick), so it shows up as a pad and the rest
+// (Controls' Pad and Pad buttons, the menu, online) is as for any pad. Controls > Player > Set up buttons makes one of
+// its own from what's pressed, kept in settings.ini's pad_mapping lines. A gamecontrollerdb.txt in the data folder or
+// beside the program is read first, and the player's own mappings after it: both win over the layout given here.
+std::set<std::string> g_stick_guids;   // the GUIDs given the stick's layout here (taken after the real pads, by Any pad)
+
+std::string joystick_guid(SDL_JoystickID id)
+{
+	char buf[64];
+	SDL_GUIDToString(SDL_GetJoystickGUIDForID(id), buf, sizeof buf);
+	return buf;
+}
+
+// a name as a mapping holds it (no commas: they part its fields)
+std::string mapping_name(const char *n)
+{
+	std::string s = n && *n ? n : "Joystick";
+	for (char &c : s) if (c == ',') c = ' ';
+	return s;
+}
+
+// A joystick that isn't a gamepad given the stick's layout (true if it was). Not wheels, flight sticks and the like
+// (an axis held at one end would hold a direction), nor one without buttons.
+bool give_stick_layout(SDL_JoystickID id)
+{
+	if (SDL_IsGamepad(id)) return false;
+	switch (SDL_GetJoystickTypeForID(id)) {
+	case SDL_JOYSTICK_TYPE_WHEEL: case SDL_JOYSTICK_TYPE_FLIGHT_STICK: case SDL_JOYSTICK_TYPE_THROTTLE:
+	case SDL_JOYSTICK_TYPE_GUITAR: case SDL_JOYSTICK_TYPE_DRUM_KIT: return false;
+	default: break;
+	}
+	SDL_Joystick *j = SDL_OpenJoystick(id);
+	if (!j) return false;
+	const int nb = SDL_GetNumJoystickButtons(j), nh = SDL_GetNumJoystickHats(j), na = SDL_GetNumJoystickAxes(j);
+	const std::string name = mapping_name(SDL_GetJoystickName(j)), guid = joystick_guid(id);
+	SDL_CloseJoystick(j);
+	if (nb <= 0) return false;
+	static const char *const BUTTONS[] = { "a", "b", "x", "y", "leftshoulder", "rightshoulder", "lefttrigger", "righttrigger" };
+	std::string m = guid + "," + name + ",";
+	for (int b = 0; b < std::min(nb, 8); b++) m += std::string(BUTTONS[b]) + ":b" + std::to_string(b) + ",";
+	if (nb >= 10) m += "back:b8,start:b9,";   // (most sticks' Select and Start, after their eight)
+	else if (nb == 9) m += "start:b8,";
+	if (nh > 0) m += "dpup:h0.1,dpright:h0.2,dpdown:h0.4,dpleft:h0.8,";
+	if (na >= 2) m += "leftx:a0,lefty:a1,";
+	if (SDL_AddGamepadMapping(m.c_str()) < 0) {
+		fprintf(stderr, "a joystick SDL doesn't know: %s (%s): couldn't give it a stick's layout: %s\n", name.c_str(), guid.c_str(), SDL_GetError());
+		return false;
+	}
+	g_stick_guids.insert(guid);
+	fprintf(stderr, "a joystick SDL doesn't know: %s (%s): given a stick's layout; set its buttons in Controls\n", name.c_str(), guid.c_str());
+	return true;
+}
+
+void give_unknown_sticks()
+{
+	int n = 0;
+	SDL_JoystickID *ids = SDL_GetJoysticks(&n);
+	for (int i = 0; i < n; i++) give_stick_layout(ids[i]);
+	SDL_free(ids);
+}
+
+// The player's gamecontrollerdb.txt (SDL's community database's format), in the data folder or beside the program,
+// then their own mappings (Set up buttons'), before the pads are opened: so both win over a stick's layout.
+void load_pad_mappings(const std::string &data, const std::string &program, const std::vector<std::string> &own)
+{
+	std::set<std::string> seen;
+	for (std::string dir : { data, program }) {
+		while (!dir.empty() && (dir.back() == '/' || dir.back() == '\\')) dir.pop_back();
+		if (dir.empty()) continue;
+		const std::string f = dir + "/gamecontrollerdb.txt";   // (as UTF-8, for SDL: not std::filesystem's, Windows' code page)
+		if (!seen.insert(f).second) continue;
+		SDL_PathInfo info;
+		if (!SDL_GetPathInfo(f.c_str(), &info) || info.type != SDL_PATHTYPE_FILE) continue;
+		const int n = SDL_AddGamepadMappingsFromFile(f.c_str());
+		if (n < 0) fprintf(stderr, "pads: couldn't read %s: %s\n", f.c_str(), SDL_GetError());
+		else fprintf(stderr, "pads: %d mappings from %s\n", n, f.c_str());
+	}
+	for (const std::string &m : own)
+		if (SDL_AddGamepadMapping(m.c_str()) < 0) fprintf(stderr, "pads: a pad_mapping in settings.ini wasn't taken (%s): %s\n", SDL_GetError(), m.c_str());
+		else {
+			const size_t a = m.find(','), b = m.find(',', a + 1);
+			fprintf(stderr, "pads: the buttons set up in Controls for %s (%s)\n", m.substr(a + 1, b - a - 1).c_str(), m.substr(0, a).c_str());
+		}
 }
 
 // A save is used only if it's the right size.
@@ -516,6 +623,7 @@ struct settings
 	int graphics = 0;        // Windows: the GPU renderer's driver, 0 Auto (Vulkan first, Direct3D 12 if it fails), 1 Direct3D 12 first
 	int aa = 1;              // antialiasing: the 3D drawn aa times larger each way and averaged (1 off)
 	player_controls ctl[2] = { player_controls::defaults(0), player_controls::defaults(1) };
+	std::vector<std::string> pad_mappings;   // pad_mapping lines: SDL mappings made in Controls > Set up buttons (one a pad)
 
 	void load(const std::string &path)
 	{
@@ -524,7 +632,10 @@ struct settings
 		std::map<std::string, std::string> kv;
 		char line[1100], key[64], val[1024];
 		while (fgets(line, sizeof line, f))
-			if (sscanf(line, " %63[a-z0-9_] = %1023[^\r\n]", key, val) == 2) kv[key] = val;
+			if (sscanf(line, " %63[a-z0-9_] = %1023[^\r\n]", key, val) == 2) {
+				if (!strcmp(key, "pad_mapping")) pad_mappings.push_back(val);   // (several: one a pad)
+				else kv[key] = val;
+			}
 		fclose(f);
 		auto num = [&](const char *k, int &v, int lo, int hi) {
 			auto it = kv.find(k);
@@ -638,6 +749,7 @@ struct settings
 		if (!online.lobby.empty()) fprintf(f, "online_lobby = %s\n", online.lobby.c_str());
 		fprintf(f, "online_hide_ip = %d\nonline_max_ping = %d\nonline_chime = %d\n", int(online.hide_ip), online.max_ping, int(online.chime));
 		for (int p = 0; p < 2; p++) ctl[p].save(f, p);
+		for (const std::string &m : pad_mappings) fprintf(f, "pad_mapping = %s\n", m.c_str());
 		const bool flushed = flush_to_disk(f);
 		if (fclose(f) == 0 && flushed && replace_file(path, tmp)) return true;
 		std::error_code ec;
@@ -1521,6 +1633,26 @@ int main(int argc, char **argv)
 #endif
 	if (!SDL_Init(SDL_INIT_VIDEO)) return fail(std::string("Couldn't start the video: ") + SDL_GetError());
 	if (!SDL_InitSubSystem(SDL_INIT_GAMEPAD)) fprintf(stderr, "no gamepads: %s\n", SDL_GetError());
+	// VF3_TEST_VJOY (tests): a virtual stick SDL doesn't know (10 buttons, a hat, 2 axes), pressed as it says (below)
+	SDL_Joystick *test_vjoy = nullptr;
+	auto attach_vjoy = [&] {
+		SDL_VirtualJoystickDesc d;
+		SDL_INIT_INTERFACE(&d);
+		d.type = SDL_JOYSTICK_TYPE_UNKNOWN;
+		d.vendor_id = 0x1234;
+		d.product_id = 0x5678;
+		d.naxes = 2;
+		d.nbuttons = 10;
+		d.nhats = 1;
+		d.name = "VF3 Test Stick";
+		const SDL_JoystickID id = SDL_AttachVirtualJoystick(&d);
+		test_vjoy = id ? SDL_OpenJoystick(id) : nullptr;
+		fprintf(stderr, "(test) a virtual stick: %s, %s\n", id ? joystick_guid(id).c_str() : SDL_GetError(),
+		        id && SDL_IsGamepad(id) ? "a gamepad to SDL" : "not a gamepad to SDL");
+	};
+	if (const char *v = getenv("VF3_TEST_VJOY"); v && !strchr(v, 'p')) attach_vjoy();   // (p@N: plugged in at pass N instead)
+	load_pad_mappings(data, program_folder(), cfg.pad_mappings);
+	give_unknown_sticks();
 	if (sound && !SDL_InitSubSystem(SDL_INIT_AUDIO)) fprintf(stderr, "no sound: %s\n", SDL_GetError());
 	int win_w = 1366, win_h = 768;
 	const bool fixed_window = getenv("VF3_WINDOW") && sscanf(getenv("VF3_WINDOW"), "%dx%d", &win_w, &win_h) == 2;
@@ -2385,6 +2517,7 @@ int main(int argc, char **argv)
 	};
 	auto open_pads = [&] {
 		for (auto &p : pads) if (p) { SDL_CloseGamepad(p); p = nullptr; }
+		give_unknown_sticks();   // (a joystick that came without its own event)
 		int n = 0;
 		SDL_JoystickID *ids = SDL_GetGamepads(&n);
 		std::vector<bool> taken(size_t(std::max(n, 0)), false);
@@ -2395,13 +2528,16 @@ int main(int argc, char **argv)
 				if (!taken[i] && guid_of(ids[i]) == c) { pads[p] = SDL_OpenGamepad(ids[i]); taken[i] = true; break; }
 		}
 		// then "auto" players take the free ones in order, then a player whose chosen pad isn't there (or shows up
-		// differently: a pad in another mode has another GUID) takes the next free one too (as VF1's and VF2's)
+		// differently: a pad in another mode has another GUID) takes the next free one too (as VF1's and VF2's). The
+		// pads SDL knows first, then the joysticks given a stick's layout here (one that isn't a pad at all, as a
+		// keyboard's lights can be, doesn't take player 1 from a real pad)
 		for (int pass = 0; pass < 2; pass++)
 			for (int p = 0; p < 2; p++) {
 				const std::string &c = cfg.ctl[p].pad_choice;
 				if (pads[p] || c == "none" || (pass == 0 && c != "auto")) continue;
-				for (int i = 0; i < n; i++)
-					if (!taken[i]) { pads[p] = SDL_OpenGamepad(ids[i]); taken[i] = true; break; }
+				for (int stick = 0; stick < 2 && !pads[p]; stick++)
+					for (int i = 0; i < n; i++)
+						if (!taken[i] && g_stick_guids.count(guid_of(ids[i])) == size_t(stick)) { pads[p] = SDL_OpenGamepad(ids[i]); taken[i] = true; break; }
 			}
 		SDL_free(ids);
 		if (pads_swapped && pads[0] && pads[1]) std::swap(pads[0], pads[1]);
@@ -2876,6 +3012,148 @@ int main(int argc, char **argv)
 		pg.items.push_back(back_item());
 		return pg;
 	};
+	// Set up buttons: each of the game's controls asked for in turn, read from the pad's own joystick (its buttons,
+	// hats and axes as they are, not through its mapping), and a mapping made of them for its GUID (as SDL's database's):
+	// the directions the d-pad, Guard Punch Kick Escape X A B Y (the Pad buttons' defaults, set back to them) and Start,
+	// the buttons left over LB RB LT RT and the rest (for the combinations). Kept in settings.ini (pad_mapping), so a
+	// DirectInput stick's own layout, whatever it is, works from then on. Esc stops; Delete skips one (a stick
+	// without it); 10 s with nothing pressed stops too.
+	struct setup_step { const char *name, *target; int action; };
+	static const setup_step SETUP_STEPS[] = {
+		{ "Up", "dpup", -1 }, { "Down", "dpdown", -1 }, { "Left", "dpleft", -1 }, { "Right", "dpright", -1 },
+		{ "Guard", "x", C_GUARD }, { "Punch", "a", C_PUNCH }, { "Kick", "b", C_KICK }, { "Escape", "y", C_ESCAPE },
+		{ "Start", "start", C_START } };
+	constexpr int N_SETUP = int(sizeof SETUP_STEPS / sizeof SETUP_STEPS[0]);
+	struct {
+		int player = -1;            // the player whose pad's being set up (-1: none)
+		SDL_Joystick *joy = nullptr;
+		int step = 0;
+		bool wait_release = true;   // (the press before, or the button that chose Set up buttons, let go first)
+		uint64_t since = 0;         // (SDL_GetTicks: the prompt's, for its time out)
+		bool skip = false;          // (Delete: this one skipped)
+		std::vector<std::string> got;   // each prompt's input, as a mapping has it ("b3", "h0.1", "-a1"; empty: skipped)
+		std::vector<Sint16> rest;   // the axes as they were at the start (a trigger's rest is one end)
+	} setup;
+	auto setup_end = [&] {
+		if (setup.joy) SDL_CloseJoystick(setup.joy);
+		setup.joy = nullptr;
+		setup.player = -1;
+	};
+	auto setup_prompt = [&] {
+		const int p = setup.player;
+		menu.capture(std::string("Press ") + SETUP_STEPS[setup.step].name + " on the pad (player " + std::to_string(p + 1) + ", " +
+					 std::to_string(setup.step + 1) + " of " + std::to_string(N_SETUP) + "). Delete skips it, Esc stops.",
+			[&](const SDL_Event &e) {   // (the pad's own events are swallowed meanwhile: what counts is read below)
+				if (e.type == SDL_EVENT_KEY_DOWN && (e.key.scancode == SDL_SCANCODE_DELETE || e.key.scancode == SDL_SCANCODE_BACKSPACE)) setup.skip = true;
+				return false;
+			},
+			[&] { setup_end(); fprintf(stderr, "set up buttons: stopped\n"); });
+	};
+	auto setup_start = [&](int p) {
+		if (!pads[p]) { menu.toast("No pad for this player: connect one, or choose it in Pad, first."); return; }
+		setup_end();
+		setup.joy = SDL_OpenJoystick(SDL_GetGamepadID(pads[p]));   // (a reference of its own: pads are opened again as they come and go)
+		if (!setup.joy) { menu.toast("That pad can't be read as it is."); return; }
+		setup.player = p;
+		setup.step = 0;
+		setup.wait_release = true;
+		setup.skip = false;
+		setup.since = SDL_GetTicks();
+		setup.got.clear();
+		setup.rest.clear();
+		for (int a = 0; a < SDL_GetNumJoystickAxes(setup.joy); a++) setup.rest.push_back(SDL_GetJoystickAxis(setup.joy, a));
+		fprintf(stderr, "set up buttons: player %d, %s (%s): %d buttons, %d hats, %d axes\n", p + 1, SDL_GetJoystickName(setup.joy),
+		        joystick_guid(SDL_GetJoystickID(setup.joy)).c_str(), SDL_GetNumJoystickButtons(setup.joy), SDL_GetNumJoystickHats(setup.joy),
+		        SDL_GetNumJoystickAxes(setup.joy));
+		setup_prompt();
+	};
+	auto setup_finish = [&] {
+		SDL_Joystick *j = setup.joy;
+		const int p = setup.player;
+		const std::string guid = joystick_guid(SDL_GetJoystickID(j));
+		std::string m = guid + "," + mapping_name(SDL_GetJoystickName(j)) + ",";
+		std::set<int> used;
+		for (int i = 0; i < N_SETUP; i++)
+			if (!setup.got[i].empty()) {
+				m += std::string(SETUP_STEPS[i].target) + ":" + setup.got[i] + ",";
+				if (setup.got[i][0] == 'b') used.insert(atoi(setup.got[i].c_str() + 1));
+			}
+		static const char *const EXTRA[] = { "leftshoulder", "rightshoulder", "lefttrigger", "righttrigger", "misc1", "paddle1", "paddle2", "paddle3", "paddle4" };
+		size_t x = 0;
+		for (int b = 0; b < SDL_GetNumJoystickButtons(j) && x < std::size(EXTRA); b++)
+			if (!used.count(b)) m += std::string(EXTRA[x++]) + ":b" + std::to_string(b) + ",";
+		setup_end();
+		if (SDL_AddGamepadMapping(m.c_str()) < 0) {
+			fprintf(stderr, "set up buttons: the mapping wasn't taken (%s): %s\n", SDL_GetError(), m.c_str());
+			menu.toast("The buttons couldn't be set up.");
+			return;
+		}
+		fprintf(stderr, "set up buttons: %s\n", m.c_str());
+		g_stick_guids.erase(guid);   // (the player's own now: an Any pad like any other)
+		auto &all = cfg.pad_mappings;
+		all.erase(std::remove_if(all.begin(), all.end(), [&](const std::string &o) { return o.compare(0, o.find(','), guid) == 0; }), all.end());
+		all.push_back(m);
+		// the Pad buttons back on what was pressed for them (each code taken from whatever else had it)
+		static const int CODE[] = { SDL_GAMEPAD_BUTTON_WEST, SDL_GAMEPAD_BUTTON_SOUTH, SDL_GAMEPAD_BUTTON_EAST, SDL_GAMEPAD_BUTTON_NORTH, SDL_GAMEPAD_BUTTON_START };
+		for (int i = 4; i < N_SETUP; i++) {
+			if (setup.got[i].empty()) continue;
+			const int code = CODE[i - 4];
+			for (int b = C_GUARD; b < C_COUNT; b++) if (cfg.ctl[p].pad[b] == code) cfg.ctl[p].pad[b] = PAD_NONE;
+			cfg.ctl[p].pad[SETUP_STEPS[i].action] = code;
+		}
+		cfg_dirty = true;
+		menu.end_capture();
+		menu.refresh();
+		menu.toast(std::string("Player ") + std::to_string(p + 1) + "'s buttons are set up.");
+	};
+	// each pass of the loop while it's on: the joystick's state read (SDL updates it as the events are polled)
+	auto setup_poll = [&] {
+		if (setup.player < 0) return;
+		SDL_Joystick *j = setup.joy;
+		if (!menu.capturing() || !SDL_JoystickConnected(j)) {
+			const bool gone = menu.capturing();
+			setup_end();
+			if (gone) { menu.end_capture(); menu.toast("The pad was disconnected."); }
+			return;
+		}
+		const int nb = SDL_GetNumJoystickButtons(j), nh = SDL_GetNumJoystickHats(j), na = std::min(SDL_GetNumJoystickAxes(j), int(setup.rest.size()));
+		std::string in;   // the first input pressed now, as a mapping has it
+		bool any = false;
+		for (int b = 0; b < nb; b++)
+			if (SDL_GetJoystickButton(j, b)) { any = true; if (in.empty()) in = "b" + std::to_string(b); }
+		for (int h = 0; h < nh; h++) {
+			const Uint8 v = SDL_GetJoystickHat(j, h);
+			if (v == SDL_HAT_CENTERED) continue;
+			any = true;
+			if (in.empty() && (v == SDL_HAT_UP || v == SDL_HAT_RIGHT || v == SDL_HAT_DOWN || v == SDL_HAT_LEFT))   // (not a diagonal)
+				in = "h" + std::to_string(h) + "." + std::to_string(v);
+		}
+		for (int a = 0; a < na; a++) {
+			const int v = SDL_GetJoystickAxis(j, a), d = v - setup.rest[a];
+			if (std::abs(d) > 8000) any = true;
+			if (in.empty() && std::abs(d) > 16000) in = (d < 0 ? "-a" : "+a") + std::to_string(a);
+		}
+		const uint64_t now = SDL_GetTicks();
+		if (setup.wait_release) {
+			if (!any) { setup.wait_release = false; setup.since = now; }
+			return;
+		}
+		if (setup.skip) { setup.skip = false; in.clear(); }
+		else if (in.empty() || std::find(setup.got.begin(), setup.got.end(), in) != setup.got.end()) {   // (nothing new pressed)
+			if (now - setup.since > 10000) {
+				setup_end();
+				menu.end_capture();
+				menu.toast("Setting up the buttons stopped: nothing was pressed for 10 seconds.");
+				fprintf(stderr, "set up buttons: nothing pressed for 10 s\n");
+			}
+			return;
+		}
+		fprintf(stderr, "set up buttons: %s is %s\n", SETUP_STEPS[setup.step].name, in.empty() ? "skipped" : in.c_str());
+		setup.got.push_back(in);
+		setup.wait_release = true;
+		if (++setup.step == N_SETUP) setup_finish();
+		else setup_prompt();
+	};
 	auto player_page = [&](int p) {
 		menu_page pg{ p ? "Player 2" : "Player 1", "", {} };
 		pg.items.push_back({ "Pad", "Which controller this player uses: any free one, a particular one, or none.",
@@ -2883,6 +3161,9 @@ int main(int argc, char **argv)
 		pg.items.push_back({ "Keyboard", "Change this player's keys.", {}, {}, [&, p] { menu.push(keys_page(p)); } });
 		pg.items.push_back({ "Pad buttons", "Change which buttons guard, punch, kick, escape, do the combinations, start, add a coin and open the menu.",
 							 {}, {}, [&, p] { menu.push(pad_buttons_page(p)); } });
+		pg.items.push_back({ "Set up buttons", "For an arcade stick, or a pad whose directions or buttons come out wrong: press each direction and "
+							 "button on it when asked, and it works that way from then on. Delete skips one it doesn't have; Esc stops.",
+							 {}, {}, [&, p] { setup_start(p); } });
 		pg.items.push_back({ "Reset to defaults", "Put this player's keys and buttons back as they were.", {}, {},
 							 [&, p] {
 								 cfg.ctl[p] = player_controls::defaults(p);
@@ -2982,6 +3263,17 @@ int main(int argc, char **argv)
 	if (const char *k = getenv("VF3_MENU_KEYS"))
 		for (std::string all = std::string(k) + ","; !all.empty(); all.erase(0, all.find(',') + 1))
 			if (all.find(',') > 0) menu_keys.push_back(all.substr(0, all.find(',')));
+	// VF3_TEST_VJOY=b3@200,h1@260,+0@300,q@900,...: the virtual stick's button 3, its hat up (1, 2 right, 4 down,
+	// 8 left), axis 0 to its + end held from those passes of the loop (8 passes); q: quit then (a run that saves)
+	struct vjoy_press { char what; int n; uint64_t at; };
+	std::vector<vjoy_press> vjoy_presses;
+	if (const char *k = getenv("VF3_TEST_VJOY"))
+		for (std::string all = std::string(k) + ","; !all.empty(); all.erase(0, all.find(',') + 1)) {
+			const std::string t = all.substr(0, all.find(','));
+			const size_t at = t.find('@');
+			if (t.size() < 2 || at == std::string::npos) continue;
+			vjoy_presses.push_back({ t[0], atoi(t.c_str() + 1), strtoull(t.c_str() + at + 1, nullptr, 10) });
+		}
 	auto send_key = [&](SDL_Scancode sc) {
 		SDL_Event e{};
 		e.type = SDL_EVENT_KEY_DOWN;
@@ -3423,12 +3715,25 @@ int main(int argc, char **argv)
 				: SDL_GetScancodeFromName(k.c_str());
 			send_key(sc);
 		}
+		if (!vjoy_presses.empty())   // VF3_TEST_VJOY: each press held 8 passes
+			for (const auto &t : vjoy_presses) {
+				const bool on = pass >= t.at && pass < t.at + 8;
+				if (pass != t.at && pass != t.at + 8) continue;
+				if (!test_vjoy && t.what != 'p' && t.what != 'q') continue;
+				if (t.what == 'b') SDL_SetJoystickVirtualButton(test_vjoy, t.n, on);
+				else if (t.what == 'h') SDL_SetJoystickVirtualHat(test_vjoy, 0, on ? Uint8(t.n) : SDL_HAT_CENTERED);
+				else if (t.what == '+' || t.what == '-') SDL_SetJoystickVirtualAxis(test_vjoy, t.n, on ? (t.what == '+' ? 32767 : -32768) : 0);
+				else if (t.what == 'q' && on) { SDL_Event q{}; q.type = SDL_EVENT_QUIT; SDL_PushEvent(&q); }
+				else if (t.what == 'p' && on && !test_vjoy) attach_vjoy();
+				if (on) fprintf(stderr, "(test) the virtual stick: %c%d at pass %llu\n", t.what, t.n, (unsigned long long)pass);
+			}
 		SDL_Event e;
 		while (SDL_PollEvent(&e)) {
 			if (e.type == SDL_EVENT_QUIT) running = false;
 			if (e.type == SDL_EVENT_RENDER_DEVICE_RESET || e.type == SDL_EVENT_RENDER_TARGETS_RESET) textures_lost(e.type == SDL_EVENT_RENDER_DEVICE_RESET);
 			if (e.type == SDL_EVENT_RENDER_DEVICE_LOST) { fprintf(stderr, "the graphics device was lost: closing\n"); running = false; }
 			if (e.type == SDL_EVENT_GAMEPAD_ADDED || e.type == SDL_EVENT_GAMEPAD_REMOVED) { open_pads(); menu.refresh(); }
+			if (e.type == SDL_EVENT_JOYSTICK_ADDED) give_unknown_sticks();   // (a gamepad's added event follows for one given a layout)
 			if (e.type == SDL_EVENT_WINDOW_ENTER_FULLSCREEN || e.type == SDL_EVENT_WINDOW_LEAVE_FULLSCREEN) {
 				menu.refresh();
 				if (!hidden && SDL_GetKeyboardFocus() != win) SDL_RaiseWindow(win);   // (the move to a new Space can lose it)
@@ -3478,6 +3783,7 @@ int main(int argc, char **argv)
 				}
 			}
 		}
+		setup_poll();
 		sync_menu_sound();
 		if ((menu_was_open && !menu.is_open()) || std::exchange(menu_closed_elsewhere, false)) {
 			// (not a match just left from the menu: Leave closes it before end_match has shown MATCH OVER, which it then didn't)

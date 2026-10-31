@@ -93,6 +93,7 @@ public:
 	// Waits for a key or pad button: on_event sees each input event until it returns true. Esc
 	// cancels. The prompt shows under the items meanwhile.
 	void capture(std::string prompt, std::function<bool(const SDL_Event &)> on_event, std::function<void()> on_cancel = {});
+	void end_capture();                   // a capture over from outside (done, or timed out): not its cancel
 
 	// Takes the event if the menu is open; true when it was used.
 	bool handle_event(const SDL_Event &e);

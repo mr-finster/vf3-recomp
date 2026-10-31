@@ -455,6 +455,14 @@ void game_menu::capture(std::string prompt, std::function<bool(const SDL_Event &
 	show_help();
 }
 
+void game_menu::end_capture()
+{
+	if (!m_capture) return;
+	m_capture = nullptr;
+	m_capture_cancel = nullptr;
+	if (m_open) build();
+}
+
 void game_menu::show_help()
 {
 	if (m_capture) {
