@@ -398,11 +398,19 @@ dialog .x:hover{background:rgba(255,255,255,.2)}
       <div class="pop" role="dialog" aria-label="Changelog">
         <p><b>%VERSION%</b> &middot; %DATE%</p>
         <ul>
+          <li><b>Virtua Fighter 3 Team Battle</b> plays too, online as well (Team Battle with Team Battle): put <code>vf3tb.zip</code> beside <code>vf3.zip</code> and choose it in Menu &gt; Game &gt; Version, or Menu &gt; Game &gt; Add Team Battle. Start in a fight changes the camera; the CPU&rsquo;s teams are new each time.</li>
+          <li><b>Play as Dural:</b> Menu &gt; Cheats &gt; Dural on the select, a 13th spot with her own picture, for either player. Online with others who have it on.</li>
+          <li><b>Play by address</b> (the same network, or a VPN): Menu &gt; Online &gt; Play by address; <code>--host</code>, <code>--join ADDRESS</code> and <code>--port N</code> on the command line.</li>
+          <li><b>Online:</b> a chime when a match is found (the window flashes if it isn&rsquo;t in front), and Random: max ping in Online &gt; Settings. Plays every online build since the preview.</li>
+          <li><b>Widescreen:</b> the skies right on every stage (no more stripes), clean sides on the character select and the rankings, Wolf&rsquo;s desert dust no longer flickers at 120 Hz.</li>
+          <li><b>No more black triangle</b> on fighters&rsquo; faces on the beach at high render scales (the game&rsquo;s own one-pixel slip, made big).</li>
+        </ul>
+        <details><summary>v0.1.11-alpha</summary><ul>
           <li><b>Slower PCs keep the arcade&rsquo;s speed.</b> Where the 3D is drawn on the CPU (a graphics chip the GPU renderer can&rsquo;t use), the game used to slow down to fit its pictures in; now it keeps full speed and shows fewer pictures instead (updated 29 Oct: offline too, where only online did).</li>
           <li><b>Display:</b> brightness and gamma beside CRT colours.</li>
           <li><b>Online:</b> the connection bar&rsquo;s and the Start prompt&rsquo;s text centred in their boxes; the flags on the energy bar sharper; your fighter&rsquo;s line on the VS screen; a side the computer plays shows the game&rsquo;s own name. Plays every online build.</li>
           <li><b>0 online</b> (updated 29 Oct) on the RANDOM card when no one else is: that&rsquo;s where the players online are counted.</li>
-        </ul>
+        </ul></details>
         <details><summary>v0.1.10-alpha</summary><ul>
           <li><b>Online, Hide my IP address:</b> a relay that doesn't answer at once is asked again by itself, so one lost answer no longer stops the match. Plays every online build.</li>
           <li><b>Updated 25 Oct:</b> with a room code, the host now sees the flag of the player who joins (only the joiner saw both); and with Hide my IP address on, the relay is asked again from a new port, the last time on its second port, so a firewall or router that drops the first rarely stops the match.</li>
