@@ -895,7 +895,13 @@ int main(int argc, char **argv)
 					const std::string v = hn;
 					const size_t comma = v.find(',');
 					const std::string names[2] = { v.substr(0, comma), comma == std::string::npos ? std::string() : v.substr(comma + 1) };
-					video::hud_names(board, above, names);
+					static video::HudFlag test_flag;   // (VF3_HUD_FLAG=1: a test flag, 15 x 10, beside both)
+					if (getenv("VF3_HUD_FLAG") && !test_flag.w) {
+						test_flag.w = 15; test_flag.h = 10;
+						for (int y = 0; y < 10; y++) for (int x = 0; x < 15; x++) test_flag.px.push_back(y < 5 ? 0xFFFFFFFFu : 0xFF3030E0u);
+					}
+					const video::HudFlag *fl[2] = { &test_flag, &test_flag };
+					video::hud_names(board, above, names, test_flag.w ? fl : nullptr);
 				}
 				if (dural && board.dural_on()) {   // (her spot's picture, as the host draws it)
 					static video::DuralPicture dural_pic;

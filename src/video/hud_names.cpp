@@ -154,6 +154,21 @@ void draw(std::vector<uint32_t> &px, int x0, int y0, const std::string &s)
 	}
 }
 
+// A flag at fx, in a black edge as the letters are, its middle on the letters' middle (text_y their top); no pixels:
+// its place left for the host to draw it (flag_at)
+void draw_flag(std::vector<uint32_t> &above, const HudFlag &fl, int fx, int text_y, int p, int flag_at[2][2])
+{
+	const int fy = text_y + (GH - fl.h) / 2;
+	if (flag_at) { flag_at[p][0] = fx; flag_at[p][1] = text_y; }
+	for (int y = -1; y <= fl.h && fl.px.size() >= size_t(fl.w) * size_t(fl.h); y++)
+		for (int X = -1; X <= fl.w; X++) {
+			const int ax = fx + X, ay = fy + y;
+			if (ax < 0 || ax >= W || ay < 0 || ay >= H) continue;
+			const bool edge = y < 0 || y >= fl.h || X < 0 || X >= fl.w;
+			above[size_t(ay) * W + ax] = edge ? 0xFF000000u : fl.px[size_t(y) * size_t(fl.w) + size_t(X)];
+		}
+}
+
 } // namespace
 
 bool hud_names(const m3::Model3 &board, std::vector<uint32_t> &above, const std::string names[2], const HudFlag *flags[2], int flag_at[2][2])
@@ -175,8 +190,44 @@ bool hud_names(const m3::Model3 &board, std::vector<uint32_t> &above, const std:
 		return false;
 	// (the picture as aligned: TileGen::aligned moves it 2 pixels up and left)
 	constexpr int S = 2, TOP = ROW * 8 - S, TEXT_Y = TOP + 3, P1_X = 2 * 8 - S + 3, P2_RIGHT = 60 * 8 - S - 3;
+	// Team Battle: each side's three fighters' names, one under the other (rows 6-7, 8-9 and 10-11), the first the
+	// one fighting. The three are moved a line down, whole, and the player's name goes above them: a team of three
+	// under each name, as a fighter is in Revision D.
+	const bool team = board.profile == &m3::VF3_TB;
+	constexpr int LINE = 16, TEAM_LINES = 3;
+	for (int p = 0; p < 2 && team; p++) {
+		if (names[p].empty()) continue;
+		int c0 = 64, c1 = -1;
+		for (int row = ROW; row < ROW + 2 * TEAM_LINES; row++)
+			for (int c = p ? P2_FROM : P1_FROM; c <= (p ? P2_TO : P1_TO); c++) {
+				const uint32_t t = tile_at(map, row, c);
+				if (t != 0 && t != 0x20) { c0 = std::min(c0, c); c1 = std::max(c1, c); }
+			}
+		if (c1 < c0) continue;
+		const int from = std::max(0, c0 * 8 - S), to = std::min(W, (c1 + 1) * 8 - S);
+		for (int y = std::min(H - 1, TOP + LINE * (TEAM_LINES + 1) - 1); y >= TOP + LINE; y--)
+			for (int X = from; X < to; X++) above[size_t(y) * W + X] = above[size_t(y - LINE) * W + X];
+		for (int y = TOP; y < TOP + LINE; y++)
+			for (int X = from; X < to; X++) above[size_t(y) * W + X] = 0;
+	}
 	for (int p = 0; p < 2; p++) {
 		if (names[p].empty()) continue;
+		if (team) {
+			// the line above the team, cleared already: the name (and its flag) only
+			const int tw = text_width(names[p]);
+			const HudFlag *fl = flags && flags[p] && flags[p]->w > 0 ? flags[p] : nullptr;
+			const int gap = 4, limit = p ? (p2_last + 1) * 8 - S + 1 : p1_first * 8 - S - 1;
+			if (fl && (p ? P2_RIGHT - tw - gap - fl->w < limit : P1_X + fl->w + gap + tw > limit)) fl = nullptr;
+			const int w = tw + (fl ? fl->w + gap : 0), x = p ? P2_RIGHT - w : P1_X;
+			int from = std::max(0, x - 2), to = std::min(W, x + w + 2);
+			if (p == 0) to = std::min(to, p1_first * 8 - S - 1);
+			else from = std::max(from, (p2_last + 1) * 8 - S + 1);
+			for (int y = TOP; y < TOP + LINE; y++)
+				for (int X = from; X < to; X++) above[size_t(y) * W + X] = 0;
+			if (fl) draw_flag(above, *fl, p ? x + tw + gap : x, TEXT_Y, p, flag_at);
+			draw(above, p ? x : x + (fl ? fl->w + gap : 0), TEXT_Y, names[p]);
+			continue;
+		}
 		const int tw = text_width(names[p]);
 		// the flag, out from the middle of the name, if it fits short of the round markers (5 of them leave no room)
 		const HudFlag *fl = flags && flags[p] && flags[p]->w > 0 ? flags[p] : nullptr;
@@ -190,18 +241,7 @@ bool hud_names(const m3::Model3 &board, std::vector<uint32_t> &above, const std:
 		else from = std::max(from, (p2_last + 1) * 8 - S + 1);
 		for (int y = TOP; y < TOP + 16; y++)
 			for (int X = from; X < to; X++) above[size_t(y) * W + X] = 0;
-		if (fl) {
-			// in a black edge, as the letters are, its middle on the letters' middle
-			const int fx = p ? x + tw + gap : x, fy = TEXT_Y + (GH - fl->h) / 2;
-			if (flag_at) { flag_at[p][0] = fx; flag_at[p][1] = TEXT_Y; }
-			for (int y = -1; y <= fl->h && fl->px.size() >= size_t(fl->w) * size_t(fl->h); y++)   // (none: the host's to draw)
-				for (int X = -1; X <= fl->w; X++) {
-					const int ax = fx + X, ay = fy + y;
-					if (ax < 0 || ax >= W || ay < 0 || ay >= H) continue;
-					const bool edge = y < 0 || y >= fl->h || X < 0 || X >= fl->w;
-					above[size_t(ay) * W + ax] = edge ? 0xFF000000u : fl->px[size_t(y) * size_t(fl->w) + size_t(X)];
-				}
-		}
+		if (fl) draw_flag(above, *fl, p ? x + tw + gap : x, TEXT_Y, p, flag_at);
 		draw(above, p ? x : x + (fl ? fl->w + gap : 0), TEXT_Y, names[p]);
 	}
 	return true;
