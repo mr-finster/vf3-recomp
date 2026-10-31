@@ -499,6 +499,7 @@ struct settings
 	int arcade_coin = -2;   // the arcade way's coin setting, while the PC way's FREE PLAY replaces it (-1 none to give back, -2 none kept yet)
 	std::string roms_folder;
 	int dural = 0;      // Dural on the select (a cheat): 0 off, else on (1-3, from when it was per player)
+	bool tb_one = true; // Team Battle: a Start that begins a game held Down with it, the arcade's way into 1 vs 1 (false: 3 vs 3)
 	std::string game;   // the program played, its set's name ("vf3", "vf3tb"): Game > Version, when the zips hold both
 	static constexpr const char *BUILD = VF3_VERSION " " VF3_DATE " " VF3_COMMIT;   // (what gpu3d_failed was learnt by)
 	std::string gpu3d_failed;   // SDL_GPU's drivers whose 3D failed here ("direct3d12 vulkan"): the next start tries the next
@@ -565,6 +566,7 @@ struct settings
 		num("gamma", gamma, crt::GAMMA_MIN, crt::GAMMA_MAX);
 		num("graphics", graphics, 0, 1);
 		num("antialiasing", aa, 0, 3);
+		flag("team_battle_1v1", tb_one);
 		if (aa == 0) aa = 1;   // (VF2's Low, edges smoothed after drawing: not in this game's renderer)
 		for (int p = 0; p < 2; p++) ctl[p].load(kv, p);
 		// Upgrades, by the version the settings were written with (saved at once when one is made)
@@ -621,6 +623,7 @@ struct settings
 		if (!roms_folder.empty()) fprintf(f, "roms_folder = %s\n", roms_folder.c_str());
 		if (!game.empty()) fprintf(f, "game = %s\n", game.c_str());
 		if (dural) fprintf(f, "cheat_dural = %d\n", dural);
+		fprintf(f, "team_battle_1v1 = %d\n", int(tb_one));
 		if (!gpu3d_failed.empty()) fprintf(f, "gpu_3d_failed = %s\ngpu_3d_failed_build = %s\n", gpu3d_failed.c_str(), BUILD);
 		fprintf(f, "crt_colours = %d\nbrightness = %d\ngamma = %d\nsharp_textures = %d\n", crt_colours, brightness, gamma, int(sharp_textures));
 		if (graphics) fprintf(f, "graphics = %d\n", graphics);
@@ -2400,6 +2403,11 @@ int main(int argc, char **argv)
 		if (pads_swapped && pads[0] && pads[1]) std::swap(pads[0], pads[1]);
 		for (int p = 0; p < 2; p++)
 			if (pads[p]) fprintf(stderr, "player %d: %s\n", p + 1, SDL_GetGamepadName(pads[p]));
+		if (!pads[0] && !pads[1]) {   // (said, for a log from a player whose pad does nothing: issue #17)
+			int nj = 0;
+			SDL_free(SDL_GetJoysticks(&nj));
+			fprintf(stderr, "pads: none (%d gamepads, %d joysticks seen)\n", n, nj);
+		}
 	};
 	open_pads();
 
@@ -2674,7 +2682,7 @@ int main(int argc, char **argv)
 				[&] { return std::string(board.profile == &m3::VF3_TB ? "Team Battle" : "Virtua Fighter 3"); },
 				[ask](int) { ask(); }, ask });
 		}
-		else if (board.profile == &m3::VF3_REV_D)   // (Team Battle not found beside it: a way to add it)
+		else if (board.profile == &m3::VF3_REV_D) {   // (Team Battle not found beside it: a way to add it)
 			p.items.push_back({ "Add Team Battle",
 				"Virtua Fighter 3 Team Battle, three fighters a side: choose your vf3tb.zip (MAME's set). It's copied beside your vf3.zip, and the game starts again in Team Battle. Game > Version switches between the two after that.",
 				[&] { return add_pick ? std::string("choosing...") : std::string("vf3tb.zip"); },
@@ -2692,6 +2700,12 @@ int main(int argc, char **argv)
 					}, add_pick.get(), win, filters, 1, nullptr, false);
 				} });
 			p.items.back().below = [&] { return add_error; };   // (why the last try didn't add it: under the row, whole)
+		}
+		if (board.profile == &m3::VF3_TB)
+			p.items.push_back({ "Team Battle mode",
+				"1 vs 1: one fighter each, as in Virtua Fighter 3. 3 vs 3: three fighters a side, Team Battle's own. It's how a game starts, as the arcade's Down + Start: a player joining plays the mode already on, and online the Start that begins the match decides. Holding Down as you press Start always gives 1 vs 1.",
+				[&] { return std::string(cfg.tb_one ? "1 vs 1" : "3 vs 3"); },
+				[&](int) { cfg.tb_one = !cfg.tb_one; cfg_dirty = true; }, [&] { cfg.tb_one = !cfg.tb_one; cfg_dirty = true; } });
 		p.items.push_back(back_item());
 		return p;
 	};
@@ -3539,6 +3553,25 @@ int main(int argc, char **argv)
 			else if (sound_full) { due = 0; frame_clock = std::min(frame_clock, double(frames_run) + 1); }
 			frames_run += due;
 		}
+		// Team Battle 1 vs 1 (Game > Team Battle mode): a Start in the demo or the title (the game's mode, 0x102008,
+		// 1-3; 4 as it takes the Start, 5 the select, 6-7 a fight, 8-9 a continue, which keeps the mode) held Down
+		// for 8 frames, the arcade's own Down + Start. Only the Start that begins a game sets the mode: a challenger
+		// joins the one being played, a continue keeps it. A player's own direction held: theirs. (An input like
+		// any other, online: both boards see it)
+		auto tb_start_down = [&](m3::Controls &live) {
+			static bool start_was[2];
+			static int down_frames[2];
+			const size_t at = board.profile->scene;
+			const bool tb = board.profile == &m3::VF3_TB && cfg.tb_one && at && board.ram.size() > at;
+			const int mode = tb ? board.ram[at ^ 3] : 0;
+			for (int p = 0; p < 2; p++) {
+				const bool own = live.up[p] || live.down[p] || live.left[p] || live.right[p];
+				if (tb && mode >= 1 && mode <= 3 && live.start[p] && !start_was[p] && !own) down_frames[p] = 8;
+				start_was[p] = live.start[p];
+				if (!tb) down_frames[p] = 0;
+				if (down_frames[p] > 0) { live.down[p] = true; down_frames[p]--; }
+			}
+		};
 		// the inputs the game reads during a frame, set before it starts (or its first half)
 		auto frame_inputs = [&](hotkey &hk, InputScript::Actions &act, bool &left_test) {
 				// the inputs the game reads during the next frame: the script's, then the player's
@@ -3554,6 +3587,7 @@ int main(int argc, char **argv)
 				mix(c.left, script_ctl.left, live.left); mix(c.right, script_ctl.right, live.right);
 				mix(c.punch, script_ctl.punch, live.punch); mix(c.kick, script_ctl.kick, live.kick);
 				mix(c.guard, script_ctl.guard, live.guard); mix(c.escape, script_ctl.escape, live.escape);
+				tb_start_down(c);
 				// The arcade's test menu (RAM 0x102002, the profile's test_menu, is 4 while it's up; 0 at the attract, a fight, the boot): Down
 				// moves (the service button) and Start selects (the test button), any pad or key, as VF1's and VF2's;
 				// the menu's Service menu presses test once the game is past its boot; leaving it, the PC way restarts
@@ -3587,6 +3621,7 @@ int main(int argc, char **argv)
 					const uint16_t sb = vf3net::pack(script_ctl, 0);
 					vf3net::unpack(uint16_t(vf3net::pack(live, 0) | sb), 0, live);
 				}
+				tb_start_down(live);
 				const uint16_t bits = menu.is_open() ? 0 : uint16_t(vf3net::pack(live, 0) | vf3net::pack(live, 1) | step_carry);
 				game.builder.widen = std::max(1.0f, float(picture_aspect()) * 0.75f) * 1.05f;
 				const uint64_t te = SDL_GetTicksNS();
@@ -3910,10 +3945,10 @@ int main(int argc, char **argv)
 			const double pics = std::max(1, pace.pictures);
 			char stopped_note[64] = "";
 			if (pace.stopped_s >= 0.05) snprintf(stopped_note, sizeof(stopped_note), " (of %.1f s: %.1f s in the menu or paused)", all_s, pace.stopped_s);
-			fprintf(stderr, "pace: %.1f frames/s, %.1f pictures/s%s (%llu between frames, %llu at a cut); a frame %.2f ms; a picture %.2f ms (%s %.2f, uploads %.2f), %dx (%d x %d)%s; sound queued %d bytes\n",
+			fprintf(stderr, "pace: %.1f frames/s, %.1f pictures/s%s (%llu between frames, %llu at a cut); a frame %.2f ms; a picture %.2f ms (%s %.2f, uploads %.2f), %dx (%d x %d)%s%s; sound queued %d bytes\n",
 					pace.frames / s, pace.pictures / all_s, stopped_note, (unsigned long long)between_n, (unsigned long long)cut_n, pace.frames ? pace.emu_ms / pace.frames : 0.0,
 					pace.draw_ms / pics, g3_shown ? "the GPU's set-up" : "the CPU's 3D", g3_shown ? pace.gpu_ms / pics : (pace.draw_ms - pace.upload_ms) / pics,
-					pace.upload_ms / pics, scale, tex_w, tex_h, gov.smooth_off ? ", smooth motion held to 60 a second" : "", audio ? SDL_GetAudioStreamQueued(audio) : -1);
+					pace.upload_ms / pics, scale, tex_w, tex_h, aa_now() > 1 ? (", antialiasing " + std::to_string(aa_now()) + "x").c_str() : ", antialiasing off", gov.smooth_off ? ", smooth motion held to 60 a second" : "", audio ? SDL_GetAudioStreamQueued(audio) : -1);
 			if (game.free_stream) fprintf(stderr, "  a match's sound, to the real clock: ran dry %d times\n", game.sound_dry.exchange(0));
 			if (const std::string pl = sysinfo::placement(); !pl.empty()) fprintf(stderr, "  %s\n", pl.c_str());
 			if (g3_shown && pics > 0)
@@ -3966,6 +4001,12 @@ int main(int argc, char **argv)
 	save_nvram(true);
 	rec_stop();
 	if (cfg_dirty && quit_after < 0) cfg.save(settings_path);
+#ifdef _WIN32
+	// (Game > Version: the new process may bring its window to the front; Windows lets a process do that only if
+	// the one in front allows it, and this window goes before the new one opens: a window not in front gets no
+	// pad input, issue #17)
+	if (restart) AllowSetForegroundWindow(ASFW_ANY);
+#endif
 	game.set_sound_free(nullptr, 0);   // (the sound thread off the stream first)
 	if (audio) SDL_DestroyAudioStream(audio);
 	if (chime_stream) SDL_DestroyAudioStream(chime_stream);
