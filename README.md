@@ -60,12 +60,13 @@ the hardware; none of its code is in this one.
 | Portable mode, your own ROM folder | Working |
 | macOS, Windows, Linux / Steam Deck | macOS (Apple silicon) and the Steam Deck: the downloads working, a steady 60 pictures a second on the Deck; Windows tested under Wine; Intel Macs not yet tried (the Mac build is universal) |
 | Online play | Experimental: rollback netplay with room codes, no setup (see [Online play](#online-play-experimental)) |
+| Virtua Fighter 3 Team Battle (`vf3tb`) | Working, online too (see [Team Battle](#team-battle)) |
 
 **This is an alpha.** Please report anything that looks or plays differently from the arcade in
 [Issues](https://github.com/mr-finster/vf3-recomp/issues), with the `log.txt` from the game's data folder.
 
 Known issues: Shun's stage water is the game's own low-resolution
-2D art up close. Virtua Fighter 3 Team Battle (`vf3tb`) isn't supported yet.
+2D art up close.
 
 Known differences from the reference's pictures: textures far away are softer (the Real3D's own mipmap level choice,
 as Supermodel's New3D documents it, where the reference build used OpenGL's).
@@ -154,15 +155,40 @@ scale; View + RB: picture shape. For Arcade play on a pad, set a Coin button in 
 - **Display:** render scale (up to 6x), antialiasing (2x, 3x), the 3D renderer, picture shape (fit the window, 4:3,
   16:10, 16:9, 21:9), background filter, distant textures (sharp, or as the arcade's), smooth motion, screen filter (scanlines, CRT), CRT colours (an arcade monitor's, as Supermodel's presets), Show FPS, fullscreen.
 - **Sound:** volume, and the music's and the effects' own volumes.
-- **Game:** play style (PC: no boot screen, always free play; Arcade: the boot, coins and credits, its coin settings kept for it), reset.
+- **Game:** play style (PC: no boot screen, always free play; Arcade: the boot, coins and credits, its coin settings kept for it), reset, and **Version**: Virtua Fighter 3 or Team Battle (it asks first: the game restarts), or **Add Team Battle** while it has only one.
 - **Arcade settings:** difficulty, rounds to win, energy, stage select between two players (off as the arcade ships:
   each two-player match on the game's next stage, starting from a random one), demo sound, country, and the arcade's
   own service menu (its other settings, sound test, bookkeeping). A change restarts the game.
 - **Controls:** each player's pad, keys and buttons.
-- **Online:** a random opponent, host a match, join one, your name, input delay, the connection display (see below).
+- **Online:** a random opponent, host a match, join one, play by address, your name, input delay, the connection display (see below).
+- **Cheats:** **Dural on the select** (see [Dural](#dural)).
 
 The settings stay as you set them, as in Virtua Fighter 1 and 2 Recomp: if the computer can't keep up at a render
 scale, choose a lower one (F5).
+
+## Team Battle
+
+Virtua Fighter 3 Team Battle (MAME's `vf3tb`, 1997), three fighters a side, plays too. Either zip works:
+
+- **Have both?** Put `vf3tb.zip` beside your `vf3.zip`. Menu > Game > **Version** switches between them (it asks
+  first: the game saves and starts again in the other). Each keeps its own rankings and arcade settings.
+- **Only `vf3.zip`?** Menu > Game > **Add Team Battle** asks for your `vf3tb.zip`, copies it beside `vf3.zip` and
+  starts Team Battle. A split `vf3tb.zip` (only Team Battle's own ROMs) works beside `vf3.zip`; MAME's full one works
+  on its own.
+- **Press Start in a fight** to change the camera: the normal view, close behind your opponent, high behind you, and
+  from above (Team Battle's own feature).
+- **Online:** Team Battle plays only Team Battle (and Virtua Fighter 3 only Virtua Fighter 3).
+- **The CPU's teams** are new each time you play: the game's random numbers start somewhere new at each launch,
+  as on a cabinet that's been on all day.
+
+## Dural
+
+Menu > **Cheats** > **Dural on the select**: the boss, in a 13th spot past Kage, for either player (right from Kage,
+or left from Akira; Start held for her other colours). Her own picture on the grid and her profile, in both games.
+The arcade froze with her on Akira's stage: fixed here. Changing it restarts the game.
+
+Online, while it's on, you meet only players who have it on too (Random, Host and Join alike). Turn it off to play
+everyone.
 
 ## Online play (experimental)
 
@@ -200,6 +226,11 @@ The games connect to each other directly whenever they can; when a network won't
 office, school and hotel networks), the match goes through a relay (Cloudflare's) instead, automatically. The
 connection display says RELAY then (DIRECT otherwise). The room code only finds the other player: no game data goes through the
 lobby. The flags are the countries Cloudflare places each player's connection in (a VPN shows its own).
+
+**Play by address (the same network, or a VPN like Tailscale: no online service):** Menu > Online, then **Play by
+address** beside Settings. One player picks **Host by address** (it shows the address to give the other), the other
+**Join by address** and types it. **Port** sets the port (7700 unless you change it). From a command line or a
+launcher: `--host` (and `--port N`), or `--join ADDRESS` (with `:PORT` if not 7700), starts it as the game opens.
 
 **If it won't connect**
 
