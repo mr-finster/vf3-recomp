@@ -2812,6 +2812,14 @@ int main(int argc, char **argv)
 		p.items.push_back(back_item());
 		return p;
 	};
+	// Game > Team Battle mode: online it's part of the version (1 vs 1 "+1v1"; 3 vs 3 the plain one, as v0.1.12's, which
+	// starts 3 vs 3), so Random meets only the same mode and a room tells the other apart; not in an online match
+	auto tb_mode_flip = [&] {
+		if (nvram_away || online.phase() != Online::Phase::off) return;
+		cfg.tb_one = !cfg.tb_one;
+		cfg_dirty = true;
+		online_ready = false;
+	};
 	auto game_page = [&] {
 		menu_page p{ "Game", "", {} };
 		p.items.push_back({ "Play style",
@@ -2867,9 +2875,9 @@ int main(int argc, char **argv)
 		}
 		if (board.profile == &m3::VF3_TB)
 			p.items.push_back({ "Team Battle mode",
-				"1 vs 1: one fighter each, as in Virtua Fighter 3. 3 vs 3: three fighters a side, Team Battle's own. It's how a game starts, as the arcade's Down + Start: a player joining plays the mode already on, and online the Start that begins the match decides. Holding Down as you press Start always gives 1 vs 1.",
+				"1 vs 1: one fighter each, as in Virtua Fighter 3. 3 vs 3: three fighters a side, Team Battle's own. Offline it's how a game starts, the arcade's Down + Start: a player joining plays the mode already on, and holding Down as you press Start always gives 1 vs 1. ONLINE: you only meet players who chose the same mode.",
 				[&] { return std::string(cfg.tb_one ? "1 vs 1" : "3 vs 3"); },
-				[&](int) { cfg.tb_one = !cfg.tb_one; cfg_dirty = true; }, [&] { cfg.tb_one = !cfg.tb_one; cfg_dirty = true; } });
+				[&](int) { tb_mode_flip(); }, [&] { tb_mode_flip(); } });
 		p.items.push_back(back_item());
 		return p;
 	};
@@ -3198,7 +3206,8 @@ int main(int argc, char **argv)
 		if (!online_ready) {   // (the ROM's hash for the handshake, once; again after a cheat changed)
 			if (game.emu_thread.joinable()) game.job_wait();
 			const bool dural = cfg.dural && board.profile->dural;
-			online.identity = { board.profile->set, vf3net::online_version(VF3_VERSION) + (dural ? "+dural" : ""), vf3net::content_hash(board), "" };   // (the online version, not the release's)
+			const bool one = board.profile == &m3::VF3_TB && cfg.tb_one;
+			online.identity = { board.profile->set, vf3net::online_version(VF3_VERSION) + (dural ? "+dural" : "") + (one ? "+1v1" : ""), vf3net::content_hash(board), "" };   // (the online version, not the release's)
 			online.adapter.dural = dural;
 			online_ready = true;
 		}
