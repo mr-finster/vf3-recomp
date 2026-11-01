@@ -150,7 +150,7 @@ RT all three, Start. The menu: View (tapped), L3 + R3, or the touchpad's click (
 scale; View + RB: picture shape. For Arcade play on a pad, set a Coin button in Controls.
 
 Arcade sticks the game doesn't know (DirectInput sticks such as HORI's Virtua Stick High Grade or the Astro City
-Mini) get a fighting stick's layout; Controls > Set up buttons sets theirs by pressing each in turn. A
+Mini) get a fighting stick's layout; Controls > Player 1 (or 2) > Set up buttons sets theirs by pressing each in turn. A
 `gamecontrollerdb.txt` (SDL's mappings) in the data folder or beside the program is read too.
 
 ## Menu

@@ -406,7 +406,10 @@ hotkey read_inputs(m3::Controls &c, SDL_Gamepad *pads[2], pad_state ps[2], const
 // (Controls' Pad and Pad buttons, the menu, online) is as for any pad. Controls > Player > Set up buttons makes one of
 // its own from what's pressed, kept in settings.ini's pad_mapping lines. A gamecontrollerdb.txt in the data folder or
 // beside the program is read first, and the player's own mappings after it: both win over the layout given here.
-std::set<std::string> g_stick_guids;   // the GUIDs given the stick's layout here (taken after the real pads, by Any pad)
+// The GUIDs given the stick's layout here and how likely each is a stick (Any pad takes the pads SDL knows first, then
+// these: 1 with a hat or 6 buttons or more, a fighting stick's, then 2 the rest, as the HID device a keyboard's lights
+// can show up as)
+std::map<std::string, int> g_stick_rank;
 
 std::string joystick_guid(SDL_JoystickID id)
 {
@@ -427,7 +430,8 @@ std::string mapping_name(const char *n)
 // (an axis held at one end would hold a direction), nor one without buttons.
 bool give_stick_layout(SDL_JoystickID id)
 {
-	if (SDL_IsGamepad(id)) return false;
+	static std::set<SDL_JoystickID> looked;   // (each joystick once: opening a DirectInput one is slow, and open_pads asks often)
+	if (SDL_IsGamepad(id) || !looked.insert(id).second) return false;
 	switch (SDL_GetJoystickTypeForID(id)) {
 	case SDL_JOYSTICK_TYPE_WHEEL: case SDL_JOYSTICK_TYPE_FLIGHT_STICK: case SDL_JOYSTICK_TYPE_THROTTLE:
 	case SDL_JOYSTICK_TYPE_GUITAR: case SDL_JOYSTICK_TYPE_DRUM_KIT: return false;
@@ -437,6 +441,13 @@ bool give_stick_layout(SDL_JoystickID id)
 	if (!j) return false;
 	const int nb = SDL_GetNumJoystickButtons(j), nh = SDL_GetNumJoystickHats(j), na = SDL_GetNumJoystickAxes(j);
 	const std::string name = mapping_name(SDL_GetJoystickName(j)), guid = joystick_guid(id);
+	// (axes 0 and 1 the left stick only if both rest in the middle: a slider or a trigger resting at one end would hold
+	// a direction)
+	bool centred = na >= 2;
+	for (int a = 0; a < 2 && centred; a++) {
+		Sint16 rest = 0;
+		if (SDL_GetJoystickAxisInitialState(j, a, &rest) && std::abs(int(rest)) > 8000) centred = false;
+	}
 	SDL_CloseJoystick(j);
 	if (nb <= 0) return false;
 	static const char *const BUTTONS[] = { "a", "b", "x", "y", "leftshoulder", "rightshoulder", "lefttrigger", "righttrigger" };
@@ -445,12 +456,12 @@ bool give_stick_layout(SDL_JoystickID id)
 	if (nb >= 10) m += "back:b8,start:b9,";   // (most sticks' Select and Start, after their eight)
 	else if (nb == 9) m += "start:b8,";
 	if (nh > 0) m += "dpup:h0.1,dpright:h0.2,dpdown:h0.4,dpleft:h0.8,";
-	if (na >= 2) m += "leftx:a0,lefty:a1,";
+	if (centred) m += "leftx:a0,lefty:a1,";
 	if (SDL_AddGamepadMapping(m.c_str()) < 0) {
 		fprintf(stderr, "a joystick SDL doesn't know: %s (%s): couldn't give it a stick's layout: %s\n", name.c_str(), guid.c_str(), SDL_GetError());
 		return false;
 	}
-	g_stick_guids.insert(guid);
+	g_stick_rank[guid] = nh > 0 || nb >= 6 ? 1 : 2;
 	fprintf(stderr, "a joystick SDL doesn't know: %s (%s): given a stick's layout; set its buttons in Controls\n", name.c_str(), guid.c_str());
 	return true;
 }
@@ -2119,7 +2130,9 @@ int main(int argc, char **argv)
 		bool on_gpu = false;
 		// (not before the first frame's copy: with no sound to wait on, the first picture can come before any frame,
 		// and the GPU's first upload is the whole texture memory, read from that copy)
-		if (g3.on && g3_texture() && !game.view.tex.empty()) {
+		// (a check missed: the CPU's pictures until the next, not the GPU's unchecked ones)
+		const bool g3_waiting = g3.misses > 0 && !g3.checked && game_frame < g3.check_from;
+		if (g3.on && !g3_waiting && g3_texture() && !game.view.tex.empty()) {
 			const auto tg = std::chrono::steady_clock::now();
 			raster.prepare(*s);
 			const auto tp = std::chrono::steady_clock::now();
@@ -2510,11 +2523,7 @@ int main(int argc, char **argv)
 	// ---- pads ----
 	SDL_Gamepad *pads[2] = { nullptr, nullptr };
 	bool pads_swapped = false;
-	auto guid_of = [](SDL_JoystickID id) {
-		char buf[64];
-		SDL_GUIDToString(SDL_GetGamepadGUIDForID(id), buf, sizeof buf);
-		return std::string(buf);
-	};
+	auto guid_of = [](SDL_JoystickID id) { return joystick_guid(id); };
 	auto open_pads = [&] {
 		for (auto &p : pads) if (p) { SDL_CloseGamepad(p); p = nullptr; }
 		give_unknown_sticks();   // (a joystick that came without its own event)
@@ -2535,9 +2544,11 @@ int main(int argc, char **argv)
 			for (int p = 0; p < 2; p++) {
 				const std::string &c = cfg.ctl[p].pad_choice;
 				if (pads[p] || c == "none" || (pass == 0 && c != "auto")) continue;
-				for (int stick = 0; stick < 2 && !pads[p]; stick++)
-					for (int i = 0; i < n; i++)
-						if (!taken[i] && g_stick_guids.count(guid_of(ids[i])) == size_t(stick)) { pads[p] = SDL_OpenGamepad(ids[i]); taken[i] = true; break; }
+				for (int rank = 0; rank < 3 && !pads[p]; rank++)
+					for (int i = 0; i < n; i++) {
+						const auto r = g_stick_rank.find(guid_of(ids[i]));
+						if (!taken[i] && (r == g_stick_rank.end() ? 0 : r->second) == rank) { pads[p] = SDL_OpenGamepad(ids[i]); taken[i] = true; break; }
+					}
 			}
 		SDL_free(ids);
 		if (pads_swapped && pads[0] && pads[1]) std::swap(pads[0], pads[1]);
@@ -3023,14 +3034,15 @@ int main(int argc, char **argv)
 	// Set up buttons: each of the game's controls asked for in turn, read from the pad's own joystick (its buttons,
 	// hats and axes as they are, not through its mapping), and a mapping made of them for its GUID (as SDL's database's):
 	// the directions the d-pad, Guard Punch Kick Escape X A B Y (the Pad buttons' defaults, set back to them) and Start,
-	// the buttons left over LB RB LT RT and the rest (for the combinations). Kept in settings.ini (pad_mapping), so a
+	// Menu on View (the menu's own button, tapped), the buttons left over LB RB LT RT and the rest (for the combinations), a
+// pad's left stick kept where it rests in the middle and wasn't pressed for something else. Kept in settings.ini (pad_mapping), so a
 	// DirectInput stick's own layout, whatever it is, works from then on. Esc stops; Delete skips one (a stick
 	// without it); 10 s with nothing pressed stops too.
 	struct setup_step { const char *name, *target; int action; };
 	static const setup_step SETUP_STEPS[] = {
 		{ "Up", "dpup", -1 }, { "Down", "dpdown", -1 }, { "Left", "dpleft", -1 }, { "Right", "dpright", -1 },
 		{ "Guard", "x", C_GUARD }, { "Punch", "a", C_PUNCH }, { "Kick", "b", C_KICK }, { "Escape", "y", C_ESCAPE },
-		{ "Start", "start", C_START } };
+		{ "Start", "start", C_START }, { "Menu (View or Select; Delete if it has none)", "back", -1 } };
 	constexpr int N_SETUP = int(sizeof SETUP_STEPS / sizeof SETUP_STEPS[0]);
 	struct {
 		int player = -1;            // the player whose pad's being set up (-1: none)
@@ -3086,6 +3098,10 @@ int main(int argc, char **argv)
 				m += std::string(SETUP_STEPS[i].target) + ":" + setup.got[i] + ",";
 				if (setup.got[i][0] == 'b') used.insert(atoi(setup.got[i].c_str() + 1));
 			}
+		bool axes_used = false;
+		for (const std::string &g : setup.got) axes_used |= g.find("a0") != std::string::npos || g.find("a1") != std::string::npos;
+		if (!axes_used && setup.rest.size() >= 2 && std::abs(int(setup.rest[0])) < 8000 && std::abs(int(setup.rest[1])) < 8000)
+			m += "leftx:a0,lefty:a1,";
 		static const char *const EXTRA[] = { "leftshoulder", "rightshoulder", "lefttrigger", "righttrigger", "misc1", "paddle1", "paddle2", "paddle3", "paddle4" };
 		size_t x = 0;
 		for (int b = 0; b < SDL_GetNumJoystickButtons(j) && x < std::size(EXTRA); b++)
@@ -3097,14 +3113,14 @@ int main(int argc, char **argv)
 			return;
 		}
 		fprintf(stderr, "set up buttons: %s\n", m.c_str());
-		g_stick_guids.erase(guid);   // (the player's own now: an Any pad like any other)
+		g_stick_rank.erase(guid);   // (the player's own now: an Any pad like any other)
 		auto &all = cfg.pad_mappings;
 		all.erase(std::remove_if(all.begin(), all.end(), [&](const std::string &o) { return o.compare(0, o.find(','), guid) == 0; }), all.end());
 		all.push_back(m);
 		// the Pad buttons back on what was pressed for them (each code taken from whatever else had it)
 		static const int CODE[] = { SDL_GAMEPAD_BUTTON_WEST, SDL_GAMEPAD_BUTTON_SOUTH, SDL_GAMEPAD_BUTTON_EAST, SDL_GAMEPAD_BUTTON_NORTH, SDL_GAMEPAD_BUTTON_START };
 		for (int i = 4; i < N_SETUP; i++) {
-			if (setup.got[i].empty()) continue;
+			if (setup.got[i].empty() || SETUP_STEPS[i].action < 0) continue;
 			const int code = CODE[i - 4];
 			for (int b = C_GUARD; b < C_COUNT; b++) if (cfg.ctl[p].pad[b] == code) cfg.ctl[p].pad[b] = PAD_NONE;
 			cfg.ctl[p].pad[SETUP_STEPS[i].action] = code;
@@ -3144,6 +3160,12 @@ int main(int argc, char **argv)
 		const uint64_t now = SDL_GetTicks();
 		if (setup.wait_release) {
 			if (!any) { setup.wait_release = false; setup.since = now; }
+			else if (now - setup.since > 10000) {   // (a switch that reads as held, or an axis off its rest: never let go)
+				setup_end();
+				menu.end_capture();
+				menu.toast("Setting up the buttons stopped: something on the pad stays pressed (a turbo or mode switch?).");
+				fprintf(stderr, "set up buttons: something held for 10 s\n");
+			}
 			return;
 		}
 		if (setup.skip) { setup.skip = false; in.clear(); }
@@ -3159,6 +3181,7 @@ int main(int argc, char **argv)
 		fprintf(stderr, "set up buttons: %s is %s\n", SETUP_STEPS[setup.step].name, in.empty() ? "skipped" : in.c_str());
 		setup.got.push_back(in);
 		setup.wait_release = true;
+		setup.since = now;
 		if (++setup.step == N_SETUP) setup_finish();
 		else setup_prompt();
 	};
@@ -3911,7 +3934,7 @@ int main(int argc, char **argv)
 				const bool own = live.up[p] || live.down[p] || live.left[p] || live.right[p];
 				if (tb && mode >= 1 && mode <= 3 && live.start[p] && !start_was[p] && !own) down_frames[p] = 8;
 				start_was[p] = live.start[p];
-				if (!tb) down_frames[p] = 0;
+				if (!tb || mode < 1 || mode > 4) down_frames[p] = 0;   // (held no further than the Start's taking: never on the select)
 				if (down_frames[p] > 0) { live.down[p] = true; down_frames[p]--; }
 			}
 		};
