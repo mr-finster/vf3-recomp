@@ -622,6 +622,7 @@ struct settings
 	int arcade_coin = -2;   // the arcade way's coin setting, while the PC way's FREE PLAY replaces it (-1 none to give back, -2 none kept yet)
 	std::string roms_folder;
 	int dural = 0;      // Dural on the select (a cheat): 0 off, else on (1-3, from when it was per player)
+	bool log = true;    // log.txt written (Game > Log file: read before the log's opened, so from the next start)
 	bool tb_one = true; // Team Battle: a Start that begins a game held Down with it, the arcade's way into 1 vs 1 (false: 3 vs 3)
 	std::string game;   // the program played, its set's name ("vf3", "vf3tb"): Game > Version, when the zips hold both
 	static constexpr const char *BUILD = VF3_VERSION " " VF3_DATE " " VF3_COMMIT;   // (what gpu3d_failed was learnt by)
@@ -696,6 +697,7 @@ struct settings
 		num("graphics", graphics, 0, 1);
 		num("antialiasing", aa, 0, 3);
 		flag("team_battle_1v1", tb_one);
+		flag("log", log);
 		flag("fullscreen_window", fs_window);
 		if (aa == 0) aa = 1;   // (VF2's Low, edges smoothed after drawing: not in this game's renderer)
 		for (int p = 0; p < 2; p++) ctl[p].load(kv, p);
@@ -754,6 +756,7 @@ struct settings
 		if (!game.empty()) fprintf(f, "game = %s\n", game.c_str());
 		if (dural) fprintf(f, "cheat_dural = %d\n", dural);
 		fprintf(f, "team_battle_1v1 = %d\n", int(tb_one));
+		if (!log) fprintf(f, "log = 0\n");
 		if (fs_window) fprintf(f, "fullscreen_window = 1\n");
 		if (!gpu3d_failed.empty()) fprintf(f, "gpu_3d_failed = %s\ngpu_3d_failed_build = %s\n", gpu3d_failed.c_str(), BUILD);
 		fprintf(f, "crt_colours = %d\nbrightness = %d\ngamma = %d\nsharp_textures = %d\n", crt_colours, brightness, gamma, int(sharp_textures));
@@ -1491,7 +1494,24 @@ int main(int argc, char **argv)
 	}
 	if (data.empty()) data = (std::filesystem::path(zip).parent_path() / "vf3_data").string();
 	if (data.empty()) data = "vf3_data";
-	if (!isatty(fileno(stderr))) {
+	// settings.ini's log = 0 (Game > Log file): no log.txt written, the program's messages thrown away (issue #16);
+	// read here, before the log's opened (the settings themselves are read below)
+	bool log_on = true;
+	if (FILE *sf = fopen((data + "/settings.ini").c_str(), "r")) {
+		char line[256];
+		while (fgets(line, sizeof line, sf)) {
+			int v = 1;
+			if (sscanf(line, " log = %d", &v) == 1) log_on = v != 0;
+		}
+		fclose(sf);
+	}
+	if (!log_on) {
+#ifdef _WIN32
+		if (!freopen("NUL", "w", stderr)) {}
+#else
+		if (!freopen("/dev/null", "w", stderr)) {}
+#endif
+	} else if (!isatty(fileno(stderr))) {
 		std::filesystem::create_directories(data, ec);
 		// the last runs' logs kept (log.1.txt the one before, to log.3.txt): a match's report survives the game being
 		// opened again before its log is sent
@@ -2912,6 +2932,9 @@ int main(int argc, char **argv)
 				"1 vs 1: one fighter each, as in Virtua Fighter 3. 3 vs 3: three fighters a side, Team Battle's own. It's what Start begins (the arcade's own setting): hold Up as you press Start for 3 vs 3 instead, or Down for 1 vs 1. A player joining plays the mode already on. ONLINE: you only meet players who chose the same mode.",
 				[&] { return std::string(cfg.tb_one ? "1 vs 1" : "3 vs 3"); },
 				[&](int) { tb_mode_flip(); }, [&] { tb_mode_flip(); } });
+		p.items.push_back({ "Log file",
+			"log.txt in the data folder: what the game did, a few kilobytes a session, kept for bug reports (send it with one). Off, nothing's written. From the next start.",
+			[&] { return on_off(cfg.log); }, [&](int) { cfg.log = !cfg.log; cfg_dirty = true; }, [&] { cfg.log = !cfg.log; cfg_dirty = true; } });
 		p.items.push_back(back_item());
 		return p;
 	};
