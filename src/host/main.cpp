@@ -164,6 +164,8 @@ __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
 #endif
 #ifdef __APPLE__
 #include <mach-o/dyld.h>   // (_NSGetExecutablePath: relaunch)
+#include <spawn.h>         // (posix_spawn: relaunch, the app opened again by macOS)
+extern char **environ;
 #endif
 
 // Every message box goes through here: a test run (VF3_HIDDEN) never shows one (nor a file picker); the message
@@ -947,11 +949,11 @@ std::vector<std::pair<const m3::Profile *, std::string>> game_zips(const std::st
 }
 
 // The game started again, in place (Game > Version: the other program): the same program file and arguments, after
-// everything's saved and closed. POSIX: this process becomes the new one (execv); Windows: a new process, then this
+// everything's saved and closed. Linux: this process becomes the new one (execv); a Mac app: opened again by macOS (open -n); Windows: a new process, then this
 // one ends. False if it couldn't (the player is told to start it again).
 bool relaunch(int argc, char **argv)
 {
-	(void)argc;
+	(void)argc; (void)argv;
 #ifdef _WIN32
 	wchar_t exe[32768];
 	const DWORD n = GetModuleFileNameW(nullptr, exe, 32768);
@@ -972,6 +974,19 @@ bool relaunch(int argc, char **argv)
 	exe.resize(size);
 	if (_NSGetExecutablePath(exe.data(), &size) != 0) return false;
 	exe.resize(strlen(exe.c_str()));
+	// The app: opened again by macOS as a new instance (open -n), as the Finder opens it, and this one ends. execv
+	// here made a process macOS doesn't take for an app in front: its task policy refused ("Task policy set failed"),
+	// it ran throttled on an M4 Max (a frame 18 ms, not 2; the boot 10 s; the switch some 30 s)
+	if (const size_t app = exe.find(".app/Contents/MacOS/"); app != std::string::npos) {
+		const std::string bundle = exe.substr(0, app + 4);
+		std::vector<std::string> args = { "open", "-n", bundle };
+		if (argc > 1) { args.push_back("--args"); for (int i = 1; i < argc; i++) args.push_back(argv[i]); }
+		std::vector<char *> av;
+		for (auto &a : args) av.push_back(a.data());
+		av.push_back(nullptr);
+		pid_t pid = 0;
+		return posix_spawn(&pid, "/usr/bin/open", nullptr, nullptr, av.data(), environ) == 0;
+	}
 #else
 	std::error_code ec;
 	exe = std::filesystem::read_symlink("/proc/self/exe", ec).string();
