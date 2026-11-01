@@ -133,9 +133,10 @@ const Profile VF3_TB = {
 	// the coin setting: Revision D's (FREE PLAY there shows FREE PLAY and Start needs no credit: checked)
 	{ 0x1E033, 0x1E037, 0x1E03B },
 	// GAME ASSIGNMENTS: Revision D's places (its test menu shows a change there: MATCH COUNT(1P)), a marker 0x2E31 in
-	// the halves Revision D leaves 0; it has more (drink, naked, VS finish, default mode, energy recovery) not here yet.
-	// Its STAGE SELECT: 0 CHALLENGER (Revision D's on)
-	{ 0x1E000, 2, 3, 6, 7, 8, 12, 0x17, 0x1E },
+	// the halves Revision D leaves 0; it has more (drink, naked, VS finish, energy recovery) not here yet. Its STAGE
+	// SELECT: 0 CHALLENGER (Revision D's on). Its default mode at 0x23: 1 a plain Start's 1 vs 1 (Up + Start then 3 vs 3),
+	// 0 3 vs 3 (Down + Start 1 vs 1); read as Start's pressed (found setting each byte there in turn, vf3run's VF3_POKE)
+	{ 0x1E000, 2, 3, 6, 7, 8, 12, 0x17, 0x1E, 0x23 },
 	// the test menu's byte (4 while it's up: checked), the versus count and the score: Revision D's (the same code
 	// refers to them, r13-relative: tools found every reference unchanged); the select's byte is the mode's (5 from
 	// Start through the select and the stage select, as Revision D's: what online's lockstep needs, a frame never

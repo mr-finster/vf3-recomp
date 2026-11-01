@@ -27,6 +27,8 @@ public:
 	bool init(SDL_GPUDevice *device);
 	const std::string &error() const { return err; }
 	const char *driver() const;
+	// The whole texture memory sent with the next picture (its changes were taken elsewhere meanwhile: the CPU drew)
+	void retexture() { texram_full = true; }
 
 	// The output texture (made here, RGBA8, premultiplied), for the renderer to show: the picture drawn w x h, shown
 	// w / ss x h / ss (antialiasing: each pixel the average of ss x ss drawn)

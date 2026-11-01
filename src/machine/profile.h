@@ -65,6 +65,7 @@ struct Profile
 	{
 		uint32_t at;
 		int rounds_cpu, rounds_vs, difficulty, demo_sound, energy_cpu, energy_vs, stage_select, country;
+		int team_mode;   // Team Battle's default mode, 1 the 1 vs 1 (Up + Start the other), 0 3 vs 3 (Down + Start the other); 0: none here
 	} settings;
 
 	// RAM (offsets into Model3::ram, the game's own addresses)
