@@ -389,7 +389,6 @@ dialog .x:hover{background:rgba(255,255,255,.2)}
           <li>Shun's stage water is the game's own low-resolution 2D art, so it's soft up close.</li>
           <li>Direct3D 12 hasn't been tried on real Windows hardware yet. If it draws wrong, the game switches to Vulkan, or the CPU.</li>
           <li>Online play is <b>experimental</b>: both players need the same <code>vf3.zip</code>, and a build from v0.1.7-online-preview on. Report anything odd with both players' <code>log.txt</code>.</li>
-          <li>No Team Battle (<code>vf3tb</code>) yet.</li>
           <li>The Mac and Windows builds are <b>unsigned</b>: see Install for the one-time click-through.</li>
           <li>8BitDo pads on a Mac: use <b>Switch (S) mode</b>.</li>
         </ul>
@@ -398,13 +397,19 @@ dialog .x:hover{background:rgba(255,255,255,.2)}
       <div class="pop" role="dialog" aria-label="Changelog">
         <p><b>%VERSION%</b> &middot; %DATE%</p>
         <ul>
+          <li><b>Arcade sticks that weren&rsquo;t found now work</b> (DirectInput sticks such as HORI&rsquo;s Virtua Stick High Grade and the Astro City Mini): any stick gets a fighting-stick layout, and Menu &gt; Controls &gt; Set up buttons sets its buttons by pressing them. A <code>gamecontrollerdb.txt</code> in the data folder is read too.</li>
+          <li><b>Team Battle 1 vs 1 by default:</b> Menu &gt; Game &gt; Team Battle mode (1 vs 1 or 3 vs 3). Down + Start still always gives 1 vs 1; online, the Start that begins the match decides.</li>
+          <li><b>3D renderer on Auto stays on the GPU:</b> its start-up check is tried on two more scenes before it moves to the CPU (the title&rsquo;s close-ups were failing working graphics cards).</li>
+          <li><b>Fullscreen freezing on AMD with Vulkan:</b> a test, <code>fullscreen_window = 1</code> in settings.ini, makes fullscreen a borderless window instead.</li>
+        </ul>
+        <details><summary>v0.1.12-alpha</summary><ul>
           <li><b>Virtua Fighter 3 Team Battle</b> plays too, online as well (Team Battle with Team Battle): put <code>vf3tb.zip</code> beside <code>vf3.zip</code> and choose it in Menu &gt; Game &gt; Version, or Menu &gt; Game &gt; Add Team Battle. Start in a fight changes the camera; the CPU&rsquo;s teams are new each time.</li>
           <li><b>Play as Dural:</b> Menu &gt; Cheats &gt; Dural on the select, a 13th spot with her own picture, for either player. Online with others who have it on.</li>
           <li><b>Play by address</b> (the same network, or a VPN): Menu &gt; Online &gt; Play by address; <code>--host</code>, <code>--join ADDRESS</code> and <code>--port N</code> on the command line.</li>
           <li><b>Online:</b> a chime when a match is found (the window flashes if it isn&rsquo;t in front), and Random: max ping in Online &gt; Settings. Plays every online build since the preview.</li>
           <li><b>Widescreen:</b> the skies right on every stage (no more stripes), clean sides on the character select and the rankings, Wolf&rsquo;s desert dust no longer flickers at 120 Hz.</li>
           <li><b>No more black triangle</b> on fighters&rsquo; faces on the beach at high render scales (the game&rsquo;s own one-pixel slip, made big).</li>
-        </ul>
+        </ul></details>
         <details><summary>v0.1.11-alpha</summary><ul>
           <li><b>Slower PCs keep the arcade&rsquo;s speed.</b> Where the 3D is drawn on the CPU (a graphics chip the GPU renderer can&rsquo;t use), the game used to slow down to fit its pictures in; now it keeps full speed and shows fewer pictures instead (updated 29 Oct: offline too, where only online did).</li>
           <li><b>Display:</b> brightness and gamma beside CRT colours.</li>
