@@ -2122,7 +2122,8 @@ int main(int argc, char **argv)
 		const bool chosen = r3d_mode == R3D_GPU;
 		const long long ok = std::max(GPU_ROUNDING_PX, (long long)(px * (chosen ? GPU_WRONG_COLOUR_CHOSEN : GPU_WRONG_COLOUR)));
 		const long long ok_cover = std::max(GPU_ROUNDING_PX, (long long)(px * (chosen ? GPU_WRONG_COVER_CHOSEN : GPU_WRONG_COVER)));
-		const bool keep = big <= ok && cover <= ok_cover;
+		static int forced_misses = getenv("VF3_GPU_CHECK_MISS") ? atoi(getenv("VF3_GPU_CHECK_MISS")) : 0;   // (tests: checks taken as missed)
+		const bool keep = big <= ok && cover <= ok_cover && forced_misses-- <= 0;
 		fprintf(stderr, "the 3D on the GPU: its picture (%d x %d, %lld pixels of 3D) against the CPU's: %lld pixels differ (%lld drawn on one only, %lld by more than %d, colours by %d at most; up to %lld and %lld kept): %s\n",
 				cw, ch, drawn, n, cover, big, GPU_ROUNDING_COLOUR, most, ok_cover, ok, keep ? "the GPU's" : "the CPU's");
 		if (getenv("VF3_GPU_CHECK_DIR")) {
@@ -2172,9 +2173,11 @@ int main(int argc, char **argv)
 		bool on_gpu = false;
 		// (not before the first frame's copy: with no sound to wait on, the first picture can come before any frame,
 		// and the GPU's first upload is the whole texture memory, read from that copy)
-		// (a check missed: the CPU's pictures until the next, not the GPU's unchecked ones)
-		const bool g3_waiting = g3.misses > 0 && !g3.checked && game_frame < g3.check_from;
-		if (g3.on && !g3_waiting && g3_texture() && !game.view.tex.empty()) {
+		// (a check missed: the GPU's pictures still, till the next check 5 s on; only the missed check's own picture is
+		// the CPU's. The CPU's 3D in between, at 2x, was too slow for 60 frames a second: the title's first seconds
+		// stuttered on an RX 9060 XT whose first check missed by a hair, issue #15)
+		bool gpu_drew = false;   // (the GPU drew this picture, its texture memory up to date, whether or not it's shown)
+		if (g3.on && g3_texture() && !game.view.tex.empty()) {
 			const auto tg = std::chrono::steady_clock::now();
 			raster.prepare(*s);
 			const auto tp = std::chrono::steady_clock::now();
@@ -2184,7 +2187,7 @@ int main(int argc, char **argv)
 			pace.g3_wall_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - tp).count();
 			if (!rendered) g3_fail(gpu3d.error(), false);
 			else {
-				on_gpu = true;
+				on_gpu = gpu_drew = true;
 				g3.gpu_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - tg).count();
 				// checked once, on a scene with enough in it
 				size_t polys = raster.tris.size();
@@ -2195,7 +2198,7 @@ int main(int argc, char **argv)
 			}
 		}
 		if (!on_gpu) {
-			if (g3.on) gpu3d.retexture();   // (the texture memory's changes dropped here: the GPU's sent whole when it draws again)
+			if (g3.on && !gpu_drew) gpu3d.retexture();   // (the texture memory's changes dropped here: the GPU's sent whole when it draws again)
 			game.view.uploads.clear();
 			raster.render(*s, game.view.tex.data());
 			const uint64_t tu = SDL_GetTicksNS();
