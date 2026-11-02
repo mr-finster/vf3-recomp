@@ -1025,6 +1025,30 @@ bool relaunch(int argc, char **argv)
 // The board and what makes its pictures and sound
 // The game's, the sound's and the pictures' threads: macOS runs a thread that doesn't say on whichever cores it likes,
 // the efficiency cores among them (a frame that took 7 ms there took more: late for the picture that waits on it)
+// Where the game is (issue #26: a joiner's game stopped at a match's start, a core busy, the log saying nothing): each
+// thread's last step, and the main loop's passes; a watchdog says them in the log when the passes stop for 5 s
+static std::atomic<const char *> g_where{ "starting" }, g_emu_where{ "idle" };
+static std::atomic<uint64_t> g_passes{ 0 };
+static void start_watchdog()
+{
+	std::thread([] {
+		uint64_t seen = g_passes.load(), stuck = 0;
+		for (;;) {
+			std::this_thread::sleep_for(std::chrono::seconds(1));
+			const uint64_t now = g_passes.load();
+			if (now != seen) {
+				if (stuck >= 5) fprintf(stderr, "watchdog: going again after %llu s\n", (unsigned long long)stuck);
+				seen = now;
+				stuck = 0;
+				continue;
+			}
+			if (++stuck == 5 || (stuck > 5 && stuck % 30 == 0))
+				fprintf(stderr, "watchdog: no picture for %llu s: the main loop at \"%s\", the game's thread at \"%s\"\n", (unsigned long long)stuck,
+				        g_where.load(), g_emu_where.load());
+		}
+	}).detach();
+}
+
 static void fast_thread()
 {
 #if defined(__APPLE__)
@@ -1405,8 +1429,10 @@ struct Game
 					std::function<void()> job = std::move(emu_job);
 					emu_job = nullptr;
 					lk.unlock();
+					g_emu_where = job ? "a match's step" : "a frame";
 					if (job) job();
 					else run_frame(snd, true);
+					g_emu_where = "idle";
 					lk.lock();
 					emu_busy = false;
 					emu_cv.notify_all();
@@ -3723,8 +3749,8 @@ int main(int argc, char **argv)
 	uint64_t save_t = SDL_GetTicksNS();   // the settings saved every 3 s when changed (the NVRAM once a minute: nvram_t)
 
 	// ---- online play (online.h): the match's frames through the session, its notices over the game ----
-	online.adapter.settle = [&] { if (game.emu_thread.joinable()) game.job_wait(); };
-	online.adapter.program_changed = [&] { game.program_changed(); };
+	online.adapter.settle = [&] { g_where = "a match's start: waiting for the game's thread"; if (game.emu_thread.joinable()) game.job_wait(); };
+	online.adapter.program_changed = [&] { g_where = "a match's start: recompiling"; game.program_changed(); g_where = "a match's start: its boot"; };
 	online.adapter.booting = [] { SDL_PumpEvents(); };   // (the boot's 2 s: the system doesn't take the game for hung)
 	// (tests: VF3_TEST_FRAME_MS="ms[,every s,its ms]" makes each frame of a match cost that much at least, a Steam
 	// Deck's, now and then more, its character select's; a frame run again 40% of it)
@@ -3750,6 +3776,7 @@ int main(int argc, char **argv)
 		}
 	};
 	online.adapter.on_begin = [&] {
+		g_where = "a match's start: the sound and the pictures reset";
 		game.dural_players = online.adapter.dural ? 3 : 0;   // (Dural on the select: the match's, as both sides play it; her cell's picture)
 		if (!nvram_away) {   // (this player's own, given back after the match)
 			own_backup = board.backup;
@@ -3980,16 +4007,22 @@ int main(int argc, char **argv)
 		if (quit_after >= 0 && int64_t(game_frame) >= quit_after) running = false;   // (tests)
 	};
 
+	start_watchdog();
 	while (running) {
 		pass++;
+		g_passes++;
+		g_where = "a pass's start";
 		marker_done(false);
 		// A match: the sound board runs to the real clock on its thread, keeping the queue topped up itself
 		// (Game::set_sound_free): the frames come when the session lets them, and neither their waits nor a slow
 		// frame touch the sound
+		g_where = "the match's sound";
 		game.set_sound_free(audio && online.playing() ? audio : nullptr, int(frame_bytes * MATCH_QUEUED));
 		const uint64_t pass_t0 = SDL_GetTicksNS();
 		int pass_kind = 0;   // (the pace line's: 0 a picture only, 1 a frame's first half, 2 its second, 3 a whole frame)
+		g_where = "waiting for the match's step";
 		take_match_job();
+		g_where = "after the match's step";
 		if (std::exchange(match_job_taken, false)) { pass_kind = 3; new_frame = true; }
 		uint64_t pass_work_ns = 0;
 		const bool menu_was_open = menu.is_open();
@@ -4177,7 +4210,9 @@ int main(int argc, char **argv)
 			gov_grace(2);
 		}
 		if (clock_reset) { clock_reset = false; frames_run = 0; restart_clock_real(); new_frame = true; }
+		g_where = "online";
 		online_pass();
+		g_where = "the frames";
 		const bool stopped = !online.playing() && (paused || menu.is_open() || online.starting());
 		const bool ff = !stopped && !online.playing() && SDL_GetKeyboardState(nullptr)[SDL_SCANCODE_TAB];
 		int due = 0;
@@ -4482,7 +4517,9 @@ int main(int argc, char **argv)
 			const uint64_t td = SDL_GetTicksNS();
 			double t = smooth && !stopped ? std::clamp(frame_clock - double(frames_run), 0.0, 1.0) : 1.0;
 			if (stopped) t = 1.0;
+			g_where = "drawing";
 			draw_picture(t, new_frame);
+			g_where = "drawn";
 			if (test_load_ms > 0 && double(SDL_GetTicksNS() - start_ns) / 1e9 < test_load_s + 5)
 				SDL_DelayNS(uint64_t(test_load_ms * scale * scale * 1e6));
 			const double ms = double(SDL_GetTicksNS() - td) / 1e6;
@@ -4607,7 +4644,9 @@ int main(int argc, char **argv)
 			if (game_frame >= rec.to) running = false;
 		}
 		pass_work_ns = SDL_GetTicksNS() - pass_t0;
+		g_where = "presenting";
 		SDL_RenderPresent(ren);
+		g_where = "presented";
 		{   // the governor's count of refreshes missed (above)
 			static uint64_t last_present = 0;
 			const uint64_t now_p = SDL_GetTicksNS();
