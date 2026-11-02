@@ -18,6 +18,7 @@
 //   A match: {role: "host", code, key, token, name, country} (the room's, opened as theirs, the other already in it)
 //   or {role: "guest", code, name, cands, relay, token, country} (as /v1/join's). Players meet the nearest first.
 //   GET  /v1/ping   -> {ok, protocol}
+//   GET  /v1/online -> who's online now, each game and its variants (counted from what the lobby itself saw; README)
 //
 // Errors are {error: "<what>"} with a status: no_room 404, full 409, game / version / rom 412 (with the host's
 // version), busy 429, bad 400, no_turn 503. The games word them; nothing here is shown as it comes.
@@ -183,6 +184,12 @@ async function limited(env, req, what) {
 	const r = await env[what].limit({ key: sender(req) });
 	return !r.success;
 }
+// A player for the online count: their address (an IPv6 one by its /64) and name, hashed (two tickets, rooms or
+// searches of the same player are one; the address itself is never kept by the count)
+async function player_id(req, name) {
+	const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('vf-online|' + sender(req) + '|' + name));
+	return [...new Uint8Array(d).slice(0, 8)].map((x) => x.toString(16).padStart(2, '0')).join('');
+}
 
 export default {
 	async fetch(req, env) {
@@ -191,6 +198,7 @@ export default {
 		loopback_ok = !!env.TURN_STATIC;
 		try {
 			if (path === '/v1/ping') return json({ ok: true, protocol: PROTOCOL });
+			if (path === '/v1/online' && (req.method === 'GET' || req.method === 'HEAD')) return await online(env, req);
 			if (req.method !== 'POST') return json({ error: 'bad' }, 404);
 			if (await limited(env, req, 'ANY_LIMIT')) return json({ error: 'busy' }, 429);
 
@@ -200,12 +208,13 @@ export default {
 				if (!b) return json({ error: 'bad' }, 400);
 				const me = who(b, req);
 				if (!GAMES.test(me.game) || !me.version) return json({ error: 'bad' }, 400);
+				const sid = await player_id(req, me.name);
 				// (the host's code from before, a match's Play again: kept if no one's taken it meanwhile)
 				// (and only by the host it was: its key from then, so no one else can take the code a guest is waiting on)
 				const want = normal_code(b.want), old_key = clean(b.key, 64);
 				for (let tries = 0; tries < 8; tries++) {   // (a code already in use: another)
 					const code = tries === 0 && code_ok(want) ? want : random_code();
-					const r = await room(env, code).fetch('https://room/open', { method: 'POST', body: JSON.stringify({ code, host: me, old_key: tries === 0 ? old_key : '' }) });
+					const r = await room(env, code).fetch('https://room/open', { method: 'POST', body: JSON.stringify({ code, host: me, old_key: tries === 0 ? old_key : '', sid }) });
 					if (r.status === 200) return r;
 				}
 				return json({ error: 'busy' }, 429);
@@ -217,7 +226,8 @@ export default {
 				if (!b) return json({ error: 'bad' }, 400);
 				const code = normal_code(b.code);
 				if (!code_ok(code)) return json({ error: 'no_room' }, 404);
-				return room(env, code).fetch('https://room/join', { method: 'POST', body: JSON.stringify({ guest: who(b, req) }) });
+				const guest = who(b, req);
+				return room(env, code).fetch('https://room/join', { method: 'POST', body: JSON.stringify({ guest, sid: await player_id(req, guest.name) }) });
 			}
 
 			if (path === '/v1/wait' || path === '/v1/reopen' || path === '/v1/close') {
@@ -268,7 +278,7 @@ export default {
 				}
 				return q.fetch('https://queue' + (path === '/v1/random' ? '/enter' : path.slice(10)), {
 					method: 'POST',
-					body: JSON.stringify({ me, geo: geo_of(req), from: sender(req), ticket: clean(b.ticket, 32), avoid: Array.isArray(b.avoid) ? b.avoid.slice(0, 8).map((c) => clean(c, 8)) : [] }),
+					body: JSON.stringify({ me, geo: geo_of(req), from: sender(req), sid: path === '/v1/random' ? await player_id(req, me.name) : '', ticket: clean(b.ticket, 32), avoid: Array.isArray(b.avoid) ? b.avoid.slice(0, 8).map((c) => clean(c, 8)) : [] }),
 				});
 			}
 
@@ -312,9 +322,19 @@ async function turn(env, country) {
 
 // One room: the host's details and key, the player who joined, and the host's waits
 export class Room {
-	constructor(ctx) {
+	constructor(ctx, env) {
 		this.ctx = ctx;
+		this.env = env;
 		this.waiters = [];
+		this.told = 0;   // (when the online count last heard this room's host is waiting)
+	}
+	// (the online count told of a room code's host waiting, a player joining, the room gone: not a random match's room,
+	// counted by its queue)
+	tell(ev) {
+		const r = this.r;
+		if (!r || r.random) return;
+		if (ev.op === 'host' || ev.op === 'reopen') this.told = Date.now();
+		tell(this, { code: r.code, game: r.host.game, version: r.host.version, ...ev });
 	}
 	async load() {
 		if (this.r === undefined) this.r = (await this.ctx.storage.get('r')) || null;
@@ -335,6 +355,7 @@ export class Room {
 	// again's guest waiting on it; no one else can take it from under them meanwhile
 	async drop() {
 		const r = this.r;
+		if (r) this.tell({ op: 'gone' });
 		this.r = null;
 		await this.ctx.storage.deleteAll();
 		if (r) {
@@ -361,8 +382,9 @@ export class Room {
 				this.gone = null;
 				await this.ctx.storage.delete('gone');
 			}
-			this.r = { code: b.code, host: b.host, key: random_hex(16), token: random_hex(8), guest: null, born: Date.now(), seen: Date.now() };
+			this.r = { code: b.code, host: b.host, key: random_hex(16), token: random_hex(8), guest: null, born: Date.now(), seen: Date.now(), random: !!b.random, sid: clean(b.sid, 16) };
 			await this.save();
+			this.tell({ op: 'host', sids: [this.r.sid] });
 			return json({ code: b.code, key: this.r.key, token: this.r.token });
 		}
 		if (!r) return json({ error: 'no_room' }, 404);
@@ -374,6 +396,7 @@ export class Room {
 			if (r.guest) return json({ error: 'full' }, 409);
 			r.guest = g;
 			await this.save();
+			this.tell({ op: 'join', sids: [r.sid, clean(b.sid, 16)] });
 			for (const w of this.waiters.splice(0)) w(g);
 			return json({ name: h.name, cands: h.cands, relay: h.relay, token: r.token, country: h.country });
 		}
@@ -382,6 +405,7 @@ export class Room {
 		r.seen = Date.now();
 		if (op === '/wait') {
 			await this.save();
+			if (!r.guest && Date.now() - this.told > 60000) this.tell({ op: 'host', sids: [r.sid] });   // (still waiting: a minute at most between)
 			if (r.guest) return json({ guest: r.guest });
 			const g = await new Promise((done) => {
 				for (const w of this.waiters.splice(0)) w(undefined);   // (one wait at a time: an older one answered now)
@@ -404,6 +428,7 @@ export class Room {
 			r.guest = null;
 			r.token = random_hex(8);   // (a new session: the last player's token no good for it)
 			await this.save();
+			this.tell({ op: 'reopen', sids: [r.sid] });   // (the player who joined didn't get going: no match after all)
 			return json({ code: r.code, key: r.key, token: r.token });
 		}
 		if (op === '/close') {
@@ -467,6 +492,7 @@ export class Queue {
 		this.matched = [];          // (when each match was made, the last RANDOM_PLAYING_MS: for the count; kept in storage,
 		                            // the queue being let go of by Cloudflare once no one's searching)
 		this.made = new Map();      // address -> when its matches were made, the last RANDOM_PLAYING_MS
+		this.told = { sig: '', at: 0, busy: false, again: false, events: [] };   // (what the online count last heard: sync)
 		this.pairs = new Map();     // a match's room code -> its two players ({from, name}) and when, the last RANDOM_PLAYING_MS:
 		                            // a player passing the other over (too far for their ping limit) names the room, and the
 		                            // two aren't matched again meanwhile (kept in storage too: the two are connecting, no one
@@ -483,6 +509,30 @@ export class Queue {
 		for (const [a, times] of this.made)
 			if (!times.length || now - times[times.length - 1] > RANDOM_PLAYING_MS) this.made.delete(a);
 		for (const [c, p] of this.pairs) if (now - p.t > RANDOM_PLAYING_MS) this.pairs.delete(c);
+		this.sync();
+	}
+	// The online count told who's searching here (each player once) and the matches made, when that changes, and every
+	// 15 s while anyone searches (its entry lapses a minute after it's last heard: a queue no one asks any more); one
+	// telling at a time, 2 s apart at most often, so a busy queue tells it a few times a minute, not at every request
+	sync() {
+		const t = this.told;
+		if (t.busy) { t.again = true; return; }
+		if (!this.game) return;
+		const now = Date.now();
+		const sids = [...new Set([...this.waiting.values()].filter((w) => !w.result && w.sid).map((w) => w.sid))].sort();
+		const sig = sids.join(',');
+		if (sig === t.sig && !t.events.length && !(sig && now - t.at > 15000)) return;
+		t.sig = sig;
+		t.at = now;
+		t.busy = true;
+		const events = t.events.splice(0);
+		const done = tell(this, { op: 'queue', key: this.ctx.id.toString(), game: this.game, version: this.version, sids: sids.slice(0, 2000), events })
+			.then(() => new Promise((ok) => setTimeout(ok, 2000)))
+			.then(() => {
+				t.busy = false;
+				if (t.again) { t.again = false; this.sync(); }
+			});
+		try { this.ctx.waitUntil(done); } catch (e) {}
 	}
 	// (one of those this one passed over, or was passed over by)
 	apart(w, o) {
@@ -533,16 +583,18 @@ export class Queue {
 		this.pairs.set(m.host.code, { t, players: [host, guest].map((x) => ({ from: x.from, name: x.me.name })) });
 		for (const [c, p] of this.pairs) if (t - p.t > RANDOM_PLAYING_MS) this.pairs.delete(c);
 		this.ctx.storage.put('pairs', [...this.pairs]);   // (not awaited, as matched's)
+		this.told.events.push({ op: 'match', code: m.host.code, sids: [host.sid, guest.sid], t });
 		host.partner = guest;
 		guest.partner = host;
 		host.room = guest.room = { code: m.host.code, key: m.host.key };
 		this.settle(host, m.host);
 		this.settle(guest, m.guest);
+		this.sync();
 	}
 	async open(host, guest) {
 		for (let tries = 0; tries < 8; tries++) {
 			const code = random_code();
-			const r = await room(this.env, code).fetch('https://room/open', { method: 'POST', body: JSON.stringify({ code, host: host.me }) });
+			const r = await room(this.env, code).fetch('https://room/open', { method: 'POST', body: JSON.stringify({ code, host: host.me, random: true }) });
 			if (r.status !== 200) continue;
 			const h = await r.json();
 			const j = await room(this.env, code).fetch('https://room/join', { method: 'POST', body: JSON.stringify({ guest: guest.me }) });
@@ -594,8 +646,10 @@ export class Queue {
 				const p = this.pairs.get(c);
 				if (p) for (const x of p.players) if (x.from !== b.from || x.name !== b.me.name) avoid.push(x);
 			}
-			const w = { me: b.me, geo: b.geo, from: b.from, avoid, since: now, seen: now, result: null, waiters: [], partner: null, room: null, left: false };
+			const w = { me: b.me, geo: b.geo, from: b.from, sid: clean(b.sid, 16), avoid, since: now, seen: now, result: null, waiters: [], partner: null, room: null, left: false };
 			this.waiting.set(ticket, w);
+			if (!this.game) { this.game = b.me.game; this.version = b.me.version; }   // (one game and version a queue)
+			this.sync();
 			await this.try_match(ticket, w);
 			return this.answer(ticket, w);
 		}
@@ -607,12 +661,14 @@ export class Queue {
 			w.left = true;   // (mid-pairing: try_match sees it)
 			const o = w.partner;
 			if (o && !o.left && w.room) {   // (matched already: the room's gone, the other back to searching)
+				this.told.events.push({ op: 'unmatch', code: w.room.code });
 				await this.close(w.room.code, w.room.key);
 				o.result = null;
 				o.partner = o.room = null;
 				o.since = Date.now();
 				for (const done of o.waiters.splice(0)) done();
 			}
+			this.sync();
 			return json({ ok: true });
 		}
 		if (op === '/wait') {
@@ -633,5 +689,145 @@ export class Queue {
 			return this.answer(b.ticket, w);
 		}
 		return json({ error: 'bad' }, 400);
+	}
+}
+
+// Who's online (GET /v1/online): one Durable Object, told by the rooms and the random queues what they saw (a host
+// waiting, a player joining, who's searching, a match made), so a page view costs one read of it, not one of every
+// queue; and that read kept 30 s (Cloudflare's edge, and each copy of the Worker's memory). Only what the lobby saw:
+// the games never say how many there are. Each player once (their address and name, hashed: player_id), in what
+// they're doing now (searching, then hosting, then their latest match), by the variants each game has (VARIANTS:
+// anything else is "other", the version a game sends never shown).
+const ONLINE_KEPT_MS = 30000, ONLINE_PLAYING_MS = 600000, ONLINE_HOST_MS = 100000, ONLINE_QUEUE_MS = 60000;
+// Each game's online versions (its NET_VERSION; a release's build plays as it) and what may follow one ("+dural" ...),
+// in the order the games add them. A game's new NET_VERSION or option: add it here (else its players count as "other").
+const VARIANTS = {
+	vf1: { bases: ['v1.5.0'], flags: [] },
+	vf2: { bases: ['v0.1.16'], flags: ['random'] },
+	vf3: { bases: ['v0.1.7-online-preview'], flags: ['dural', 'stage'] },
+	vf3tb: { bases: ['v0.1.7-online-preview'], flags: ['dural', '1v1', 'stage'] },
+};
+function variant_of(game, version) {
+	const g = VARIANTS[game];
+	if (!g || typeof version !== 'string') return 'other';
+	for (const base of g.bases) {
+		if (version !== base && !version.startsWith(base + '+')) continue;
+		const got = version.slice(base.length).split('+').slice(1);
+		if (got.some((f) => !g.flags.includes(f)) || new Set(got).size !== got.length) return 'other';
+		const on = g.flags.filter((f) => got.includes(f));   // (the games' own order, whatever order it came in)
+		return on.length ? on.join('+') : 'standard';
+	}
+	return 'other';
+}
+
+// (a room's or queue's telling, one after another: a room opened then closed is heard in that order; a telling that
+// fails is let go, the games' play never waits on it)
+function tell(from, ev) {
+	from.telling = (from.telling || Promise.resolve())
+		.then(() => from.env.STATS.get(from.env.STATS.idFromName('all')).fetch('https://stats/tell', { method: 'POST', body: JSON.stringify(ev) }))
+		.then((r) => r.body && r.body.cancel())
+		.catch(() => {});
+	try { from.ctx.waitUntil(from.telling); } catch (e) {}
+	return from.telling;
+}
+
+let online_kept = null;   // ({until, body}: this copy of the Worker's last answer)
+async function online(env, req) {
+	const headers = { 'content-type': 'application/json', 'cache-control': 'public, max-age=30', 'access-control-allow-origin': '*' };
+	if (await limited(env, req, 'ANY_LIMIT')) return new Response('{"error":"busy"}', { status: 429, headers: { ...headers, 'cache-control': 'no-store' } });
+	const kept_ok = !env.TURN_STATIC;   // (not on a test's own lobby: its counts checked as they change)
+	if (kept_ok && online_kept && Date.now() < online_kept.until) return new Response(online_kept.body, { headers });
+	const key = new Request('https://online.vf-lobby/v1');
+	const edge = kept_ok && (await caches.default.match(key));
+	if (edge) return new Response(await edge.text(), { headers });
+	const r = await env.STATS.get(env.STATS.idFromName('all')).fetch('https://stats/online', { method: 'POST', body: '{}' });
+	const body = await r.text();
+	if (r.status !== 200) return new Response('{"error":"server"}', { status: 500, headers: { ...headers, 'cache-control': 'no-store' } });
+	if (kept_ok) {
+		online_kept = { until: Date.now() + ONLINE_KEPT_MS, body };
+		await caches.default.put(key, new Response(body, { headers }));
+	}
+	return new Response(body, { headers });
+}
+
+export class Stats {
+	constructor(ctx) {
+		this.ctx = ctx;
+		this.s = { queues: {}, hosts: {}, matches: [] };
+		ctx.blockConcurrencyWhile(async () => {
+			const s = await ctx.storage.get('s');
+			if (s) this.s = s;
+		});
+	}
+	prune() {
+		const now = Date.now(), s = this.s;
+		for (const [k, q] of Object.entries(s.queues)) if (now > q.until) delete s.queues[k];
+		for (const [k, h] of Object.entries(s.hosts)) if (now - h.seen > ONLINE_HOST_MS || now - h.born > ROOM_LIFE_MS) delete s.hosts[k];
+		s.matches = s.matches.filter((m) => now - m.t < ONLINE_PLAYING_MS).slice(-20000);
+	}
+	async fetch(req) {
+		const op = new URL(req.url).pathname;
+		const b = await req.json();
+		this.prune();
+		if (op === '/online') return json(this.count());
+		const s = this.s, now = Date.now();
+		const ids = (l) => (Array.isArray(l) ? l : []).filter((x) => typeof x === 'string' && /^[0-9a-f]{16}$/.test(x));
+		if (!GAMES.test(b.game) || typeof b.version !== 'string') return json({ error: 'bad' }, 400);
+		const at = { game: b.game, version: b.version.slice(0, 64) };
+		const code = typeof b.code === 'string' ? b.code.slice(0, 8) : '';
+		const unmatch = (c, kind) => (s.matches = s.matches.filter((m) => !(m.code === c && m.kind === kind)));
+		if (b.op === 'queue') {
+			const key = String(b.key).slice(0, 64), sids = [...new Set(ids(b.sids))].slice(0, 2000);
+			if (sids.length) s.queues[key] = { ...at, sids, until: now + ONLINE_QUEUE_MS };
+			else delete s.queues[key];
+			for (const e of Array.isArray(b.events) ? b.events.slice(0, 1000) : []) {
+				const c = typeof e.code === 'string' ? e.code.slice(0, 8) : '';
+				if (e.op === 'match') {
+					unmatch(c, 'random');
+					s.matches.push({ ...at, kind: 'random', code: c, sids: ids(e.sids).slice(0, 2), t: Math.min(now, +e.t || now) });
+				} else if (e.op === 'unmatch') unmatch(c, 'random');
+			}
+		} else if (b.op === 'host' || b.op === 'reopen') {
+			if (b.op === 'reopen') unmatch(code, 'room');
+			const sid = ids(b.sids)[0];
+			if (sid) s.hosts[code] = { ...at, sid, seen: now, born: (s.hosts[code] && s.hosts[code].born) || now };
+		} else if (b.op === 'join') {
+			delete s.hosts[code];
+			unmatch(code, 'room');
+			s.matches.push({ ...at, kind: 'room', code, sids: ids(b.sids).slice(0, 2), t: now });
+		} else if (b.op === 'gone') delete s.hosts[code];
+		else return json({ error: 'bad' }, 400);
+		await this.ctx.storage.put('s', s);
+		return new Response(null, { status: 204 });
+	}
+	// Each game: everyone once, in what they're doing now, by variant
+	count() {
+		const s = this.s, now = Date.now();
+		const best = {};   // game -> sid -> {rank, t, what, variant}
+		const put = (game, version, sid, rank, t, what) => {
+			const g = (best[game] = best[game] || new Map()), o = g.get(sid);
+			if (!o || rank > o.rank || (rank === o.rank && t > o.t)) g.set(sid, { rank, t, what, variant: variant_of(game, version) });
+		};
+		for (const q of Object.values(s.queues)) for (const sid of q.sids) put(q.game, q.version, sid, 3, q.until, 'searching');
+		for (const h of Object.values(s.hosts)) put(h.game, h.version, h.sid, 2, h.seen, 'hosting');
+		for (const m of s.matches) for (const sid of m.sids) put(m.game, m.version, sid, 1, m.t, m.kind === 'random' ? 'random' : 'room');
+		const zero = () => ({ total: 0, searching: 0, random: 0, hosting: 0, room: 0 });
+		const games = {};
+		for (const game of Object.keys(VARIANTS)) {
+			const g = { ...zero(), variants: {} }, names = new Map();
+			for (const p of (best[game] || new Map()).values()) {
+				g.total++;
+				g[p.what]++;
+				const v = names.get(p.variant) || zero();
+				v.total++;
+				v[p.what]++;
+				names.set(p.variant, v);
+			}
+			// (in a fixed order: standard, then the variants by their options, other last)
+			const order = (n) => (n === 'standard' ? '0' : n === 'other' ? '2' : '1' + n);
+			for (const n of [...names.keys()].sort((a, b) => (order(a) < order(b) ? -1 : 1))) g.variants[n] = names.get(n);
+			games[game] = g;
+		}
+		return { updated: Math.floor(now / 1000), games };
 	}
 }

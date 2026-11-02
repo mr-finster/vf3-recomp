@@ -19,6 +19,11 @@ class_name = "Limits"
 name = "QUEUES"
 class_name = "Queue"
 
+# Who's online (GET /v1/online): one, told by the rooms and queues what they see
+[[durable_objects.bindings]]
+name = "STATS"
+class_name = "Stats"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["Room", "Limits"]
@@ -26,6 +31,10 @@ new_sqlite_classes = ["Room", "Limits"]
 [[migrations]]
 tag = "v2"
 new_sqlite_classes = ["Queue"]
+
+[[migrations]]
+tag = "v3"
+new_sqlite_classes = ["Stats"]
 
 # Tries per address (an IPv6 one by its /64) a minute: anything, opening rooms, joining, the relay's logins. Generous
 # for a house, a LAN party or a phone network's shared address; a flood or a code guessed at is stopped.
