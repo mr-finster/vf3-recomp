@@ -81,6 +81,14 @@ h2 { margin: 36px 0 12px; font-size: 30px; line-height: 1.1; font-weight: 700; f
 .note { margin-top: 28px; font-size: 16px; font-weight: 500; color: var(--muted); max-width: 720px; line-height: 1.35; }
 .note a { color: var(--row); }
 .down { color: var(--gold); }
+/* (wide screens: the four games side by side, as the first page had them) */
+@media (min-width: 1360px) {
+	main { max-width: 1680px; }
+	.cards { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+	.states th { font-size: 12px; letter-spacing: 0.02em; }
+	.states col.num { width: 22%; }
+	.countries { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+}
 @media (max-width: 480px) {
 	main { padding-top: 20px; }
 	h1 { font-size: 36px; }
