@@ -532,9 +532,10 @@ void Raster::draw_tri(const Tri &T, int layer, int band0, int band1)
 					float gxp = (px - gx) / xscale, gyp = py / scale;
 					float ex = (gxp - vp.spot_ellipse[0]) / vp.spot_ellipse[2], ey = (gyp - vp.spot_ellipse[1]) / vp.spot_ellipse[3];
 					float ell = std::max(0.0f, 1.0f - (ex * ex + ey * ey));
-					// (the spotlight's distances in Step 1.0's view space / 2048, as the reference's: VF3's lava cave is
-					// lit red across the arena, 9,000 units from the camera, by a spotlight 2,304 deep)
-					const float sz = a[2] * (1.0f / 2048.0f);
+					// (the spotlight's distances in Step 1.0's view space, as the reference's New3D: VF3's lava cave's
+					// red spotlight, 2,304 deep, lights only what is near the camera, the arena brown and orange as on the
+					// arcade's; the reference's Legacy3D's / 2048 lit it red across the arena, 9,000 units away; issue #19)
+					const float sz = a[2];
 					float enable = -sz >= vp.spot_range[0] ? 1.0f : 0.0f;
 					float range = 0;
 					if (vp.spot_range[1] != 0) {

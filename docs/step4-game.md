@@ -40,9 +40,10 @@ differ:
 
 - Mipmap levels: New3D's (the Real3D's LOD from the viewport's cota and the polygon's LOD base). Far textures are
   softer than the reference's.
-- The spotlight: the reference's. Its distances are Step 1.0's view space / 2048, and its colour is added over the
-  clamped sun and ambient light. VF3's lava cave is lit red across the arena by a spotlight 2,304 deep, 9,000 units
-  from the camera; with New3D's units it barely shows.
+- The spotlight: New3D's. Its distances are Step 1.0's view space, and its colour is added to the sun and ambient
+  light, the sum up to full. VF3's lava cave has a red spotlight 2,304 deep: it lights only what is near the camera,
+  the arena brown and orange as in the arcade's video (issue #19). The reference's Legacy3D's distances (view space /
+  2048) lit it red across the arena, 9,000 units away.
 
 ## The sound board (`src/sound/*`)
 

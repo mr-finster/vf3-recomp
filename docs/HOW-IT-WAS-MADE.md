@@ -131,7 +131,9 @@ The AI wrote nearly all the code. A person decided what was right.
 - **The subway stage's floor rasterised wrong** → a polygon reaching the camera projected to millions of pixels,
   beyond what the rasteriser's floats can take → polygons are clipped by the view's sides too, with a guard band.
 - **The lava cave wasn't lit red** → its spotlight is 9,000 units away, and with New3D's units it barely shows →
-  the reference's units (step 1.0's view space / 2048), its colour added over the clamped sun and ambient.
+  the reference's units (step 1.0's view space / 2048), its colour added over the clamped sun and ambient. Wrong:
+  the arcade's video (issue #19) shows the cave brown and orange, not red → New3D's units after all (the spotlight
+  lights only what is near the camera), the sum of the lights up to full.
 - **Kage's stage missing its brick wall, and the pictures darker overall** → the models' meshes were cached by their
   polygons' state, and polygons alike but for their colour took the first one's → a mesh per colour too; 204 of
   the 754 comparison shots came closer to the reference's.

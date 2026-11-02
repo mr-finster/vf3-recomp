@@ -236,7 +236,7 @@ FsOut main(PolyV i)
 		float gxp = (i.pos.x - gx) / xscale, gyp = i.pos.y / yscale;
 		float ex = (gxp - vp.spot_ellipse.x) / vp.spot_ellipse.z, ey = (gyp - vp.spot_ellipse.y) / vp.spot_ellipse.w;
 		float ell = max(0.0, 1.0 - (ex * ex + ey * ey));
-		const float sz = i.view.z * (1.0 / 2048.0);   // (as the CPU's: Step 1.0's spotlight distances / 2048)
+		const float sz = i.view.z;   // (as the CPU's: Step 1.0's spotlight distances in view space, as New3D's)
 		float enable = -sz >= vp.spot_range.x ? 1.0 : 0.0;
 		float range = 0;
 		if (vp.spot_range.y != 0) {
