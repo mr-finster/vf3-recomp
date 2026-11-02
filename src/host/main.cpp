@@ -3157,7 +3157,7 @@ int main(int argc, char **argv)
 		static const char *COUNTRY[] = { "Japan", "USA", "Export", "Asia" };
 		choice("Difficulty", "How hard the computer fights.", set.difficulty, 0, 3, [](int v) { return std::string(DIFFICULTY[v]); });
 		choice("Rounds to win (vs CPU)", "Rounds needed to win a match against the computer.", set.rounds_cpu, 2, 5, [](int v) { return std::to_string(v); });
-		choice("Rounds to win (vs player)", "Rounds needed to win a match between two players.", set.rounds_vs, 2, 5, [](int v) { return std::to_string(v); });
+		choice("Rounds to win (vs player)", "Rounds needed to win a match between two players. Online matches are always first to 3.", set.rounds_vs, 2, 5, [](int v) { return std::to_string(v); });
 		energy("Energy (vs CPU)", "Each fighter's energy in a match against the computer (the arcade's ENERGY MAX).", set.energy_cpu, 160, 360);
 		energy("Energy (vs player)", "Each fighter's energy in a match between two players.", set.energy_vs, 180, 400);
 		// (the test menu's names: Team Battle's four, Revision D's first two; found setting the byte to each)

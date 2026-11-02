@@ -168,7 +168,8 @@ Mini) get a fighting stick's layout; Controls > Player 1 (or 2) > Set up buttons
 - **Sound:** volume, and the music's and the effects' own volumes.
 - **Game:** play style (PC: no boot screen, always free play; Arcade: the boot, coins and credits, its coin settings kept for it), reset, and **Version**: Virtua Fighter 3 or Team Battle (it asks first: the game restarts), or **Add Team Battle** while it has only one.
 - **Arcade settings:** difficulty, rounds to win, energy, stage select between two players, demo sound, country, and
-  the arcade's own service menu (its other settings, sound test, bookkeeping). A change restarts the game.
+  the arcade's own service menu (its other settings, sound test, bookkeeping). A change restarts the game. Online
+  matches are always first to 3, whatever the rounds to win (vs player) here.
   **Stage select** has the arcade's own options by name: **Off** (each two-player match on the game's next stage,
   starting from a random one) or **Challenger** (the challenger picks the stage, so on every rematch
   the loser picks, as Japanese arcades had it; the one picking holds Start until the screen's timer runs out for the
@@ -226,9 +227,9 @@ below). Each player uses their own Player 1 controls.
 (Challenger): the challenger picks the stage, so on every rematch the loser does. You only meet players who have it
 on too (Random, Host and Join alike); it can't change while you're hosting, joining or playing.
 
-**The rounds are the host's.** How many rounds win a match is the host's Menu > Arcade settings >
-**Rounds to win (vs player)** (3 plays first to 3, as SEGA's tournaments and Japan's arcades do).
-Host, and it's yours; join a friend, and it's theirs; with RANDOM, it's whoever the match makes host.
+**Online matches are always first to 3**, as SEGA's tournaments and Japan's arcades play, whatever either player's
+Menu > Arcade settings > **Rounds to win (vs player)**, which is for playing offline. The host's game sets it for the
+match, so it's first to 3 against an older download of v0.1.15-alpha too when this one hosts.
 
 **A random opponent:** Menu > **Online** > **RANDOM**. It finds whoever else is looking, the nearest first (the
 best connection), and widens the search the longer you wait; **Stop** gives up. Play solo while you wait: the match
