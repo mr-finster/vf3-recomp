@@ -681,6 +681,7 @@ struct settings
 		flag("online_hide_ip", online.hide_ip);
 		num("online_max_ping", online.max_ping, 0, 1000);
 		flag("online_chime", online.chime);
+		flag("online_stage_select", online.stage_select);
 		if (auto it = kv.find("gpu_3d_failed"); it != kv.end()) gpu3d_failed = it->second;
 		std::string failed_build;
 		if (auto it = kv.find("gpu_3d_failed_build"); it != kv.end()) failed_build = it->second;
@@ -769,6 +770,7 @@ struct settings
 		if (!online.address.empty()) fprintf(f, "online_address = %s\n", online.address.c_str());
 		if (!online.lobby.empty()) fprintf(f, "online_lobby = %s\n", online.lobby.c_str());
 		fprintf(f, "online_hide_ip = %d\nonline_max_ping = %d\nonline_chime = %d\n", int(online.hide_ip), online.max_ping, int(online.chime));
+		fprintf(f, "online_stage_select = %d\n", int(online.stage_select));
 		for (int p = 0; p < 2; p++) ctl[p].save(f, p);
 		for (const std::string &m : pad_mappings) fprintf(f, "pad_mapping = %s\n", m.c_str());
 		const bool flushed = flush_to_disk(f);
@@ -2991,7 +2993,7 @@ int main(int argc, char **argv)
 		energy("Energy (vs CPU)", "Each fighter's energy in a match against the computer (the arcade's ENERGY MAX).", set.energy_cpu, 160, 360);
 		energy("Energy (vs player)", "Each fighter's energy in a match between two players.", set.energy_vs, 180, 400);
 		choice("Stage select (vs player)", "A match between two players: the challenger picks the stage (the arcade's own screen, 8 seconds; "
-		       "hold Start on one for its Dural version). Off, as most arcades had it, each match goes to the game's next stage. Online matches have it off.",
+		       "hold Start on one for its Dural version). Off, as most arcades had it, each match goes to the game's next stage. Online has its own (Online > Settings).",
 		       set.stage_select, 0, 1, [&](int v) { return on_off(v == 0); });
 		choice("Demo sound", "Sound during the demo that plays between games.", set.demo_sound, 0, 1, [&](int v) { return on_off(v == 0); });
 		choice("Country", "The arcade's region: Japan, USA, Export or Asia. It changes the game's text and what it shows.", set.country, 0, 3,
@@ -3341,16 +3343,26 @@ int main(int argc, char **argv)
 		pg.items.push_back(back_item());
 		return pg;
 	};
+	// The identity for the handshake: the online version with what's added for the options that change a match, in
+	// this order: Dural on the select "+dural", Team Battle 1 vs 1 "+1v1", Online > Settings' stage select "+stage"
+	// (each off, the plain version, as the builds before it: they still meet)
+	auto online_identity = [&] {
+		if (online_ready) return;   // (the ROM's hash for the handshake, once; again after an option changed)
+		if (game.emu_thread.joinable()) game.job_wait();
+		const bool dural = cfg.dural && board.profile->dural;
+		const bool one = board.profile == &m3::VF3_TB && cfg.tb_one;
+		const bool stage = cfg.online.stage_select;
+		online.identity = { board.profile->set, vf3net::online_version(VF3_VERSION) + (dural ? "+dural" : "") + (one ? "+1v1" : "") + (stage ? "+stage" : ""), vf3net::content_hash(board), "" };   // (the online version, not the release's)
+		online.adapter.dural = dural;
+		online.adapter.stage_select_on = stage;
+		online_ready = true;
+	};
 	auto online_page = [&] {
-		if (!online_ready) {   // (the ROM's hash for the handshake, once; again after a cheat changed)
-			if (game.emu_thread.joinable()) game.job_wait();
-			const bool dural = cfg.dural && board.profile->dural;
-			const bool one = board.profile == &m3::VF3_TB && cfg.tb_one;
-			online.identity = { board.profile->set, vf3net::online_version(VF3_VERSION) + (dural ? "+dural" : "") + (one ? "+1v1" : ""), vf3net::content_hash(board), "" };   // (the online version, not the release's)
-			online.adapter.dural = dural;
-			online_ready = true;
-		}
-		return online_menu::page(online, cfg.online, menu, [&] { cfg_dirty = true; });
+		online_identity();
+		return online_menu::page(online, cfg.online, menu, [&] {
+			cfg_dirty = true;
+			if (cfg.online.stage_select != online.adapter.stage_select_on) { online_ready = false; online_identity(); }   // (Settings' stage select: at once)
+		});
 	};
 	auto online_row = [&] { return board.profile->settings.at ? 5 : 4; };   // (the main page's Online row: Arcade settings before it when known)
 	auto main_page = [&] {

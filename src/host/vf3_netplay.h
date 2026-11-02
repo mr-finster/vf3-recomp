@@ -30,7 +30,8 @@ std::string online_version(const std::string &build);
 
 // The addresses below are Revision D's, kept in the board's profile (src/machine/profile.h): the boot, unseen, up
 // to the SEGA logo (as the PC way's, main.cpp): 960 frames, the profile's boot_frames; the arcade's VS stage
-// select in its backup RAM, 0 on, 1 off (found by changing it): 0x1E017, its settings' at + stage_select.
+// select in its backup RAM (found by changing it): 0x1E017, its settings' at + stage_select. Its test menu names
+// 0 CHALLENGER and 1 OFF (Revision D, 2 on not a value); Team Battle's 2 VARIABLE and 3 FULL too.
 inline size_t stage_select(const m3::Model3 &board) { return board.profile->settings.at + size_t(board.profile->settings.stage_select); }
 // The game's count of the matches between two players since it was switched on (a word of RAM, r13 - 0x1f80: the
 // profile's versus_count, 0x106080): each one's stage is the next of a list of 16 in its program (0x76fd6, at
@@ -101,6 +102,10 @@ public:
 	// Dural on the select (Cheats) in this match: both sides the same (their online versions match, "+dural"
 	// on it: the host program sets both), her patches applied at the start (Model3::set_dural)
 	bool dural = false;
+	// The arcade's stage select in this match (Online > Settings: "+stage" on the online version, both sides the
+	// same): on, CHALLENGER (0), the challenger picks and so the loser on every rematch; off (as every build before
+	// it), OFF (1)
+	bool stage_select_on = false;
 	std::function<void()> settle;              // before a save or load: anything running alongside the board waits
 	std::function<void(const std::vector<uint8_t> &)> midi_out;   // bytes for the sound board
 	std::function<void()> on_begin;            // a match's start, before the board is set up for it (keep the player's NVRAM)

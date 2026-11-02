@@ -135,9 +135,10 @@ bool Adapter::begin(const std::vector<uint8_t> &blob)
 		if (booting && i % 60 == 59) booting();
 	}
 	if (board.coin_setting() < 0 || (!board.set_coin_setting(m3::Model3::COIN_FREE_PLAY) && !board.free_play())) return false;
-	// and its stage select off, as most arcades had it (no stage screen: the game's own next stage), starting at
-	// the host's random place in the stages' list, as an arcade on all day would be
-	board.backup[stage_select(board)] = 1;
+	// and its stage select off, as most arcades had it (no stage screen: the game's own next stage), or CHALLENGER
+	// if both chose it (the stage screen for the challenger, the loser on a rematch), starting at the host's random
+	// place in the stages' list, as an arcade on all day would be
+	board.backup[stage_select(board)] = stage_select_on ? 0 : 1;
 	board.power_on();
 	for (int i = 0; i < board.profile->boot_frames; i++) {
 		board.run_frame();

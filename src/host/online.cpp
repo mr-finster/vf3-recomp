@@ -586,9 +586,9 @@ void Online::close_room()
 namespace {
 
 // The lobby's no, in words: what happened and what to do
-// Two versions apart only by what's added on the online version: Dural on the select (Cheats: "+dural") or Team
-// Battle 1 vs 1 (Game > Team Battle mode: "+1v1"): said so
-std::string dural_apart(const std::string &theirs, const std::string &mine)
+// Two versions apart only by what's added on the online version: Dural on the select (Cheats: "+dural"), Team
+// Battle 1 vs 1 (Game > Team Battle mode: "+1v1") or the stage select (Online > Settings: "+stage"): said so
+std::string options_apart(const std::string &theirs, const std::string &mine)
 {
 	const auto plain = [](std::string v) { const size_t at = v.find('+'); return at == std::string::npos ? v : v.substr(0, at); };
 	const auto has = [](const std::string &v, const char *what) { return v.find(what) != std::string::npos; };
@@ -599,17 +599,20 @@ std::string dural_apart(const std::string &theirs, const std::string &mine)
 	if (has(theirs, "+1v1") != has(mine, "+1v1"))
 		return has(theirs, "+1v1") ? "Your opponent plays Team Battle 1 vs 1: switch to it in Game > Team Battle mode to play them."
 		                           : "Your opponent plays Team Battle 3 vs 3: switch to it in Game > Team Battle mode to play them.";
+	if (has(theirs, "+stage") != has(mine, "+stage"))
+		return has(theirs, "+stage") ? "Your opponent has stage select on (Online > Settings): turn it on too to play them, or ask them to turn it off."
+		                             : "Your opponent has stage select off, and you have it on (Online > Settings): turn it off to play them.";
 	return "";
 }
 
-// A refusal's "Your opponent has X, you have Y" or "The host has X, you have Y": the Dural one if that's all it is
-std::string dural_said(const std::string &text, const std::string &mine)
+// A refusal's "Your opponent has X, you have Y" or "The host has X, you have Y": the options' one if that's all it is
+std::string options_said(const std::string &text, const std::string &mine)
 {
 	for (const char *lead : { "Your opponent has ", "The host has " }) {
 		const size_t at = text.find(lead), comma = text.find(", you have ");
 		if (at == std::string::npos || comma == std::string::npos || comma < at) continue;
 		const size_t from = at + strlen(lead);
-		if (const std::string d = dural_apart(text.substr(from, comma - from), mine); !d.empty()) return d;
+		if (const std::string d = options_apart(text.substr(from, comma - from), mine); !d.empty()) return d;
 	}
 	return text;
 }
@@ -628,7 +631,7 @@ std::string lobby_says(const vfnet::http::Reply &r, const std::string &code, con
 		std::string theirs;
 		for (char ch : v["host_version"].str())
 			if (isalnum(uint8_t(ch)) || ch == '.' || ch == '-' || ch == '+' || ch == '_') theirs += ch;
-		if (const std::string d = dural_apart(v["host_version"].str(), mine); !d.empty()) return d;
+		if (const std::string d = options_apart(v["host_version"].str(), mine); !d.empty()) return d;
 		return "The host has " + (theirs.empty() ? std::string("another version") : theirs.substr(0, 40)) + ", you have " + mine +
 		       ": you both need the same version (the newest, from the site).";
 	}
@@ -1038,7 +1041,7 @@ void Online::poll(double t)
 			// before the game started); anything else ends it
 			if (!was_playing && is_host && (why == vfnet::Session::End::rejected || why == vfnet::Session::End::timeout || why == vfnet::Session::End::opponent_quit)) {
 				if (rooms) { host_again(e.text); return; }
-				const std::string said = why == vfnet::Session::End::rejected ? dural_said(e.text, identity.build) : e.text;
+				const std::string said = why == vfnet::Session::End::rejected ? options_said(e.text, identity.build) : e.text;
 				notices.push_back({ Notice::refused, "A player couldn't join: " + said });
 				note = "A player couldn't join: " + said;
 				std::string err;
@@ -1065,7 +1068,7 @@ void Online::poll(double t)
 			}
 			if (!was_playing && !is_host && why != vfnet::Session::End::quit) {
 				failure = e.text;
-				if (why == vfnet::Session::End::rejected) failure = dural_said(failure, identity.build);
+				if (why == vfnet::Session::End::rejected) failure = options_said(failure, identity.build);
 				fail_step = rooms ? st : Step::connecting;
 				if (rooms && room && room->local_blocked())   // (only a Mac's refuses like this)
 					failure = "This Mac blocked the game from the local network: System Settings > Privacy & Security > Local Network, turn on "
@@ -1581,6 +1584,14 @@ menu_page settings_page(Online &o, OnlineSettings &s, game_menu &menu, std::func
 			while (i < 5 && steps[i] != s.max_ping) i++;
 			if (steps[i] != s.max_ping) i = 0;
 			s.max_ping = steps[(i + (d < 0 ? 5 : 1)) % 6];
+			changed();
+		} });
+	p.items.push_back({ "Stage select", "On: the arcade's stage screen, as in Japan's arcades: the challenger picks the stage, so on every rematch "
+		"the loser does. Off: the game's next stage each match. You only meet players who chose the same. Not while hosting, joining or playing.",
+		[&s] { return std::string(s.stage_select ? "On" : "Off"); },
+		[&o, &s, changed](int) {
+			if (o.phase() != Online::Phase::off) return;   // (a room open or a match on: its version stays as it began)
+			s.stage_select = !s.stage_select;
 			changed();
 		} });
 	p.items.push_back({ "Match found chime", "A chime when an online match is found (and the game's window flashes if it isn't the one in front), so "
