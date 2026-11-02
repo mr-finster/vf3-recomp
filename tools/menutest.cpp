@@ -278,6 +278,11 @@ int main(int argc, char **argv)
 	check(s.max_ping == 250, "Any's left is the most, 250 ms");
 	key(SDL_SCANCODE_DOWN);
 	key(SDL_SCANCODE_RIGHT);
+	check(s.stage_select, "Stage select turns on");
+	key(SDL_SCANCODE_RIGHT);
+	check(!s.stage_select, "and off");
+	key(SDL_SCANCODE_DOWN);
+	key(SDL_SCANCODE_RIGHT);
 	check(!s.chime, "the chime turns off");
 	key(SDL_SCANCODE_RIGHT);
 	check(s.chime, "and on");
