@@ -4751,6 +4751,7 @@ int main(int argc, char **argv)
 		if (!stopped && double(SDL_GetTicksNS() - pass_t0) > 1.5e9 / std::max(60.0, screen_hz)) { pace.slow[pass_kind]++; pace.slow_work_ms += double(pass_work_ns) / 1e6; }
 		(void)shown;
 	}
+	g_where = "quitting";   // (the watchdog's: passes stop here for good)
 	if (game.emu_thread.joinable()) game.job_wait();   // (a match's step still running)
 	if (flag_atlas) SDL_DestroySurface(flag_atlas);
 	flag_atlas = nullptr;
