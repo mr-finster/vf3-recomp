@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VF Recomp · Online now</title>
+<meta name="description" content="Players online now in Virtua Fighter, Virtua Fighter 2 and Virtua Fighter 3 Recomp.">
+<link rel="icon" href="icons/vf3.png">
+<style>
+@font-face { font-family: "Barlow Condensed"; font-weight: 500; font-style: normal; font-display: swap; src: url(fonts/barlow-condensed-medium.woff2) format("woff2"); }
+@font-face { font-family: "Barlow Condensed"; font-weight: 600; font-style: normal; font-display: swap; src: url(fonts/barlow-condensed-semibold.woff2) format("woff2"); }
+@font-face { font-family: "Barlow Condensed"; font-weight: 700; font-style: italic; font-display: swap; src: url(fonts/barlow-condensed-bolditalic.woff2) format("woff2"); }
+:root {
+	--ground: #040818;
+	--panel: #0a1230;
+	--line: #1b2a5c;
+	--ink: #dfe7fb;
+	--row: #c3cff0;
+	--muted: #8fa3d6;
+	--gold: #ffd23f;
+}
+* { box-sizing: border-box; }
+html { background: var(--ground); }
+body {
+	margin: 0;
+	min-height: 100vh;
+	background: linear-gradient(90deg, #040818 0%, #0b1438 100%);
+	color: var(--ink);
+	font-family: "Barlow Condensed", "Arial Narrow", sans-serif;
+	font-weight: 600;
+}
+main { max-width: 1080px; margin: 0 auto; padding: 32px 16px 48px; }
+h1 {
+	margin: 0 0 4px;
+	font-size: 46px;
+	line-height: 1.05;
+	font-weight: 700;
+	font-style: italic;
+	color: var(--gold);
+	padding-bottom: 6px;
+	border-bottom: 3px solid var(--gold);
+}
+.lede { margin: 8px 0 28px; font-size: 19px; font-weight: 500; color: var(--muted); }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px; }
+.card {
+	background: var(--panel);
+	border: 1px solid var(--line);
+	border-left: 4px solid var(--gold);
+	padding: 18px 18px 14px;
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+}
+.head { display: flex; align-items: center; gap: 14px; }
+.head img { width: 64px; height: 64px; border-radius: 14px; flex: none; }
+.name { font-size: 24px; line-height: 1.05; font-weight: 700; font-style: italic; color: var(--ink); text-transform: uppercase; }
+.total { margin: 14px 0 0; font-size: 64px; line-height: 1; font-weight: 700; font-style: italic; color: var(--gold); font-variant-numeric: tabular-nums; }
+.unit { font-size: 18px; font-weight: 500; color: var(--muted); margin-bottom: 10px; }
+ul { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
+li { padding: 6px 0; font-size: 19px; color: var(--row); border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+li b { color: var(--ink); font-weight: 600; }
+li.none { color: var(--muted); font-weight: 500; }
+.ago { margin-top: auto; padding-top: 10px; font-size: 15px; font-weight: 500; color: var(--muted); }
+.note { margin-top: 28px; font-size: 16px; font-weight: 500; color: var(--muted); max-width: 720px; line-height: 1.35; }
+.down { color: var(--gold); }
+@media (max-width: 480px) {
+	main { padding-top: 20px; }
+	h1 { font-size: 36px; }
+	.total { font-size: 54px; }
+}
+</style>
+</head>
+<body>
+<main>
+	<h1>VF Recomp · Online now</h1>
+	<p class="lede">Players in the online lobby right now, updated every 30 seconds.</p>
+	<div class="cards" id="cards"></div>
+	<p class="note" id="note">Counted by the lobby from what it sees: players searching in Random, in a Random match made in the last 10 minutes, waiting with a room code, or in a room code match from the last 10 minutes. Each player once. Play by address isn't counted.</p>
+</main>
+<script>
+"use strict";
+const GAMES = [
+	{ id: "vf1", name: "Virtua Fighter", icon: "icons/vf1.png" },
+	{ id: "vf2", name: "Virtua Fighter 2", icon: "icons/vf2.png" },
+	{ id: "vf3", name: "Virtua Fighter 3", icon: "icons/vf3.png" },
+	{ id: "vf3tb", name: "VF3 Team Battle", icon: "icons/vf3.png" },
+];
+const FLAGS = { dural: "Dural", stage: "Stage select", "1v1": "1 vs 1", random: "Random fighters" };
+let data = null, fetched = 0, failed = false;
+
+function label(game, variant) {
+	if (variant === "other") return "Other versions";
+	const flags = variant === "standard" ? [] : variant.split("+");
+	const parts = [];
+	if (game === "vf3tb") parts.push(flags.includes("1v1") ? "1 vs 1" : "3 vs 3");
+	for (const f of flags) if (f !== "1v1" || game !== "vf3tb") parts.push(FLAGS[f] || "Other");
+	return parts.length ? parts.join(" + ") : "Standard";
+}
+function n(x) { return Number.isInteger(x) && x >= 0 ? x : 0; }
+function el(tag, cls, text) {
+	const e = document.createElement(tag);
+	if (cls) e.className = cls;
+	if (text !== undefined) e.textContent = String(text);
+	return e;
+}
+function line(game, variant, c) {
+	const li = el("li");
+	li.appendChild(el("b", "", label(game, variant)));
+	const bits = [];
+	const playing = n(c.random) + n(c.room);
+	if (playing) bits.push(playing + " playing");
+	if (n(c.searching)) bits.push(n(c.searching) + " searching");
+	if (n(c.hosting)) bits.push(n(c.hosting) + " hosting");
+	li.appendChild(document.createTextNode(" · " + (bits.length ? bits.join(" · ") : "0")));
+	return li;
+}
+function ago() {
+	if (!data) return failed ? "can't reach the lobby" : "loading…";
+	const s = Math.max(0, Math.round(Date.now() / 1000 - n(data.updated)));
+	return (failed ? "can't reach the lobby · last " : "updated ") + (s < 5 ? "just now" : s < 120 ? s + "s ago" : Math.round(s / 60) + " min ago");
+}
+function render() {
+	const cards = document.getElementById("cards");
+	cards.replaceChildren();
+	for (const g of GAMES) {
+		const d = (data && data.games && data.games[g.id]) || null;
+		const card = el("section", "card");
+		const head = el("div", "head");
+		const img = el("img");
+		img.src = g.icon;
+		img.alt = "";
+		img.width = 64;
+		img.height = 64;
+		head.appendChild(img);
+		head.appendChild(el("div", "name", g.name));
+		card.appendChild(head);
+		const total = d ? n(d.total) : null;
+		card.appendChild(el("div", "total", total === null ? "–" : total));
+		card.appendChild(el("div", "unit", total === 1 ? "player online" : "players online"));
+		const ul = el("ul");
+		const variants = d && d.variants && typeof d.variants === "object" ? Object.entries(d.variants) : [];
+		for (const [v, c] of variants) if (/^[a-z0-9]+(\+[a-z0-9]+)*$/.test(v) && c && n(c.total)) ul.appendChild(line(g.id, v, c));
+		if (!ul.children.length) ul.appendChild(el("li", "none", d ? "No one right now" : "…"));
+		card.appendChild(ul);
+		card.appendChild(el("div", "ago" + (failed ? " down" : ""), ago()));
+		cards.appendChild(card);
+	}
+}
+async function load() {
+	try {
+		const r = await fetch("/api/online", { cache: "no-store" });
+		if (!r.ok) throw new Error();
+		const d = await r.json();
+		if (!d || typeof d !== "object" || !d.games) throw new Error();
+		data = d;
+		failed = false;
+	} catch (e) {
+		failed = true;
+	}
+	fetched = Date.now();
+	render();
+}
+load();
+setInterval(load, 30000);
+setInterval(() => { for (const a of document.querySelectorAll(".ago")) a.textContent = ago(); }, 1000);
+</script>
+</body>
+</html>

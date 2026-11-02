@@ -1,0 +1,6 @@
+# The "Online now" page (tools/lobby/README.md: The online page), a Pages project of its own, deployed from this
+# folder. The lobby's address isn't here: it's the project's LOBBY_URL secret (wrangler pages secret put LOBBY_URL),
+# read by functions/api/online.js.
+name = "vf-online"   # (the project's name, and its address: vf-online.pages.dev)
+pages_build_output_dir = "site"
+compatibility_date = "2026-10-01"

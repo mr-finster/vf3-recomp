@@ -1,0 +1,4 @@
+# (functions/ is ignored at the repo root, for the site build's generated one: this one is the source)
+!functions/
+.dev.vars
+.wrangler/
