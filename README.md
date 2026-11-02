@@ -175,7 +175,7 @@ Mini) get a fighting stick's layout; Controls > Player 1 (or 2) > Set up buttons
   stage's Dural version). Team Battle also lists **Variable** and **Full**, the arcade's own, not yet known (no stage screen seen between two players).
 - **Controls:** each player's pad, keys and buttons.
 - **Online:** a random opponent, host a match, join one, play by address, your name, input delay, the connection display (see below).
-- **Cheats:** **Dural on the select** (see [Dural](#dural)).
+- **Cheats:** **Dural on the select** and **Dural's stage** (see [Dural](#dural)).
 
 The settings stay as you set them, as in Virtua Fighter 1 and 2 Recomp: if the computer can't keep up at a render
 scale, choose a lower one (F5).
@@ -203,6 +203,13 @@ The arcade froze with her on Akira's stage: fixed here. Changing it restarts the
 
 Online, while it's on, you meet only players who have it on too (Random, Host and Join alike). Turn it off to play
 everyone.
+
+Menu > **Cheats** > **Dural's stage** (issue #22; Off, Guard or Start): on the stage screen (Stage select:
+Challenger), confirm a stage with that button for its Dural version. The arcade gives it only to the picker holding
+Start at the right second of the screen's timer (a count kept since power-on decides which); the cheat holds Start for
+you and makes the pick at that second, at once or up to about 12 s later. Offline it always works. Online it's only
+your inputs, so your opponent needs nothing and sees the same stage, but some picks have no second left for it: the
+stage is then the plain one (a notice says so). Two stages have no Dural version.
 
 ## Online play (experimental)
 

@@ -116,6 +116,7 @@
 #include "../video/parallel.h"
 #include "png.h"
 #include "input_script.h"
+#include "dural_stage.h"
 #include "menu.h"
 #include "crt_colours.h"
 #include "controls.h"
@@ -627,6 +628,7 @@ struct settings
 	int arcade_coin = -2;   // the arcade way's coin setting, while the PC way's FREE PLAY replaces it (-1 none to give back, -2 none kept yet)
 	std::string roms_folder;
 	int dural = 0;      // Dural on the select (a cheat): 0 off, else on (1-3, from when it was per player)
+	int dural_stage = 0;   // Dural's stage (a cheat, issue #22): the stage screen's pick confirmed with 1 Guard, 2 Start (0 off)
 	bool log = true;    // log.txt written (Game > Log file: read before the log's opened, so from the next start)
 	bool tb_one = true; // Team Battle: a Start that begins a game held Down with it, the arcade's way into 1 vs 1 (false: 3 vs 3)
 	std::string game;   // the program played, its set's name ("vf3", "vf3tb"): Game > Version, when the zips hold both
@@ -681,6 +683,7 @@ struct settings
 		if (auto it = kv.find("roms_folder"); it != kv.end()) roms_folder = it->second;
 		if (auto it = kv.find("game"); it != kv.end() && m3::find_profile(it->second.c_str())) game = it->second;
 		num("cheat_dural", dural, 0, 3);
+		num("cheat_dural_stage", dural_stage, 0, 2);
 		if (auto it = kv.find("online_name"); it != kv.end()) online.name = online_menu::clean_name(it->second);
 		if (auto it = kv.find("online_address"); it != kv.end()) online.address = online_menu::clean_address(it->second);
 		if (auto it = kv.find("online_lobby"); it != kv.end() && (it->second.rfind("https://", 0) == 0 || it->second.rfind("http://", 0) == 0))
@@ -775,6 +778,7 @@ struct settings
 		if (!roms_folder.empty()) fprintf(f, "roms_folder = %s\n", roms_folder.c_str());
 		if (!game.empty()) fprintf(f, "game = %s\n", game.c_str());
 		if (dural) fprintf(f, "cheat_dural = %d\n", dural);
+		if (dural_stage) fprintf(f, "cheat_dural_stage = %d\n", dural_stage);
 		fprintf(f, "team_battle_1v1 = %d\n", int(tb_one));
 		if (!log) fprintf(f, "log = 0\n");
 		if (fs_window) fprintf(f, "fullscreen_window = 1\n");
@@ -3020,6 +3024,11 @@ int main(int argc, char **argv)
 				online_ready = false;   // (the online version with it, or without)
 				reset_game();
 			} });
+		// (inputs only, src/host/dural_stage.h: online it's what the other side plays too, so no version of its own)
+		p.items.push_back({ "Dural's stage",
+			"On the stage screen (Stage select: Challenger), confirm a stage with this button for its Dural version: Start is held for you and the pick made at the second the game allows (up to about 12 s). Online too (your inputs only), though some picks can't be Dural's there.",
+			[&] { return std::string(cfg.dural_stage == 1 ? "Guard" : cfg.dural_stage == 2 ? "Start" : "Off"); },
+			[&](int d) { cfg.dural_stage = (cfg.dural_stage + (d < 0 ? 2 : 1)) % 3; cfg_dirty = true; } });
 		p.items.push_back(back_item());
 		return p;
 	};
@@ -3552,7 +3561,7 @@ int main(int argc, char **argv)
 		else
 			p.items.push_back({ "Online", std::string("Online play isn't ready for ") + board.profile->name + " yet: switch to Virtua Fighter 3 in Game > Version to play online.", {}, {}, {} });
 		if (board.profile->dural)   // (issue #12; after Online: online_row's place kept)
-			p.items.push_back({ "Cheats", cfg.dural ? "Dural on the select: ON. Online you'll meet only players who have it on too." : "Dural on the select.", {}, {}, [&] { menu.push(cheats_page()); } });
+			p.items.push_back({ "Cheats", cfg.dural ? "Dural on the select: ON. Online you'll meet only players who have it on too. Dural's stage." : "Dural on the select, Dural's stage.", {}, {}, [&] { menu.push(cheats_page()); } });
 		p.items.push_back({ "Controls", "Each player's controller, keys and buttons.", {}, {}, [&] { menu.push(controls_page()); } });
 		p.items.push_back({ "Quit", "Saves and closes the game.", {}, {}, [&] { running = false; } });
 		return p;
@@ -3936,6 +3945,7 @@ int main(int argc, char **argv)
 	// screen's waited for, taken at the next pass's start, before anything else looks at the game (in a match every
 	// frame ran here before, and its rollback's frames with it, the picture waiting on all of it: on a Steam Deck
 	// passes went past their refresh)
+	dural_stage::Picker stage_pick;   // (Cheats > Dural's stage: the picker's inputs on the stage screen)
 	struct { bool on = false, ok = false; double ms = 0; } match_job;
 	bool match_job_taken = false;
 	auto take_match_job = [&] {
@@ -4240,6 +4250,16 @@ int main(int argc, char **argv)
 			else if (sound_full) { due = 0; frame_clock = std::min(frame_clock, double(frames_run) + 1); }
 			frames_run += due;
 		}
+		// Cheats > Dural's stage: what the pick does, said
+		auto stage_pick_say = [&](dural_stage::Picker::Said said, int wait_s) {
+			if (said) fprintf(stderr, "Dural's stage: %s\n", said == dural_stage::Picker::waiting ? ("the pick in " + std::to_string(wait_s) + " s").c_str() :
+			                  said == dural_stage::Picker::no_version ? "no Dural version of this stage" : "not this time (online: no second left for it)");
+			if (said == dural_stage::Picker::waiting && wait_s > 0)
+				menu.toast("Dural's stage: Start held for you, picked in " + std::to_string(wait_s) + " s (the second the game allows it).");
+			else if (said == dural_stage::Picker::no_version) menu.toast("Dural's stage: this stage has no Dural version.");
+			else if (said == dural_stage::Picker::not_this_time)
+				menu.toast("Dural's stage: not this time online (the game allows it only at certain seconds, and none is left for this pick).", 6);
+		};
 		// the inputs the game reads during a frame, set before it starts (or its first half)
 		auto frame_inputs = [&](hotkey &hk, InputScript::Actions &act, bool &left_test) {
 				// the inputs the game reads during the next frame: the script's, then the player's
@@ -4255,6 +4275,14 @@ int main(int argc, char **argv)
 				mix(c.left, script_ctl.left, live.left); mix(c.right, script_ctl.right, live.right);
 				mix(c.punch, script_ctl.punch, live.punch); mix(c.kick, script_ctl.kick, live.kick);
 				mix(c.guard, script_ctl.guard, live.guard); mix(c.escape, script_ctl.escape, live.escape);
+				stage_pick.trigger = cfg.dural_stage;
+				for (int p = 0; p < 2; p++) {   // (Cheats > Dural's stage: the picker's inputs; offline, the byte set if need be)
+					dural_stage::Picker::Said said;
+					int wait_s;
+					const uint16_t in = dural_stage::word(c, p), out = stage_pick.filter(board, p, in, 0, true, said, wait_s);
+					if (out != in) dural_stage::set(c, p, out);
+					stage_pick_say(said, wait_s);
+				}
 				team_mode_sync();
 				// The arcade's test menu (RAM 0x102002, the profile's test_menu, is 4 while it's up; 0 at the attract, a fight, the boot): Down
 				// moves (the service button) and Start selects (the test button), any pad or key, as VF1's and VF2's;
@@ -4289,7 +4317,14 @@ int main(int argc, char **argv)
 					const uint16_t sb = vf3net::pack(script_ctl, 0);
 					vf3net::unpack(uint16_t(vf3net::pack(live, 0) | sb), 0, live);
 				}
-				const uint16_t bits = menu.is_open() ? 0 : uint16_t(vf3net::pack(live, 0) | vf3net::pack(live, 1) | step_carry);
+				uint16_t bits = menu.is_open() ? 0 : uint16_t(vf3net::pack(live, 0) | vf3net::pack(live, 1) | step_carry);
+				{   // (Cheats > Dural's stage: this player's own input word, from the board as both sides have it; inputs only)
+					stage_pick.trigger = cfg.dural_stage;
+					dural_stage::Picker::Said said;
+					int wait_s;
+					bits = stage_pick.filter(board, online.local_player(), bits, online.delay_now(), false, said, wait_s);
+					stage_pick_say(said, wait_s);
+				}
 				game.builder.widen = std::max(1.0f, float(picture_aspect()) * 0.75f) * 1.05f;
 				const uint64_t te = SDL_GetTicksNS();
 				online.poll(double(te) / 1e6);

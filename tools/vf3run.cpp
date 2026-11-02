@@ -13,11 +13,12 @@
 // VF3_TILE_LAG=1: the tile layers' lines drawn at the frame's end from the registers each line had (the host's tile
 // worker at its latest); VF3_TILE_EVERY=n: the tile layers drawn every n-th frame only (a netplay match's frames run
 // again unseen after a rollback), the sky audit then of those frames.
-// VF3_LOG_BYTES=addr,...: those RAM bytes each frame ("bytes FRAME v..."). VF3_DURAL=1: Dural on the select (as the cheat: the program's patches, and her spot's picture in --shots). VF3_BORROW=backdrops,coin,settings,test_menu,versus_count,scene,score,free_play_text: those addresses from
+// VF3_LOG_BYTES=addr,...: those RAM bytes each frame ("bytes FRAME v..."). VF3_DURAL_STAGE=1 (Guard) or 2 (Start): Cheats > Dural's stage on both players' inputs (VF3_DURAL_STAGE_ONLINE=1: inputs only, as online; VF3_DURAL_STAGE_LEAD=n: n frames' input delay). VF3_DURAL=1: Dural on the select (as the cheat: the program's patches, and her spot's picture in --shots). VF3_BORROW=backdrops,coin,settings,test_menu,versus_count,scene,score,free_play_text: those addresses from
 // VF3_BORROW_FROM's profile (default vf3), to try them on another program; VF3_MAP_IN=file: more entry points (hex, a line each); VF3_MAP_OUT=file: appends every address the interpreter ran
 // from for want of one (--rec; a map's learning: run again with them in until none are new).
 #include <map>
 #include "../src/host/input_script.h"
+#include "../src/host/dural_stage.h"
 #include "../src/machine/model3.h"
 #include "../src/machine/romset.h"
 #include "../src/rec/ppc_rec.h"
@@ -198,6 +199,20 @@ int main(int argc, char **argv)
 		if (frames >= 0 && f >= uint64_t(frames))
 			break;
 		InputScript::Actions act = script.step(board.controls, f);
+		if (static const char *ds = getenv("VF3_DURAL_STAGE"); ds) {   // tests: Cheats > Dural's stage (1 Guard, 2 Start), on both players' inputs
+			static dural_stage::Picker picker;
+			picker.trigger = atoi(ds);
+			static const bool no_write = getenv("VF3_DURAL_STAGE_ONLINE") != nullptr;   // (as online: inputs only)
+			static const int lead = getenv("VF3_DURAL_STAGE_LEAD") ? atoi(getenv("VF3_DURAL_STAGE_LEAD")) : 0;
+			for (int p = 0; p < 2; p++) {
+				dural_stage::Picker::Said said;
+				int wait_s;
+				const uint16_t in = dural_stage::word(board.controls, p), out = picker.filter(board, p, in, lead, !no_write, said, wait_s);
+				if (out != in) dural_stage::set(board.controls, p, out);
+				if (said) fprintf(stderr, "frame %llu: Dural's stage, player %d: %s (%d s)\n", (unsigned long long)f, p + 1,
+				                  said == dural_stage::Picker::waiting ? "waiting" : said == dural_stage::Picker::no_version ? "no Dural version" : "not this time", wait_s);
+			}
+		}
 		for (auto &m : act.marks)
 			if (!quiet) printf("frame %llu: mark %s\n", (unsigned long long)f, m.c_str());
 		static double t_board = 0, t_sound = 0, t_scene = 0;

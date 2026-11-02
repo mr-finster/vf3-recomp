@@ -5,11 +5,13 @@
 // boards must have been in its state at every checkpoint. Reports the rollbacks and what a frame cost each side
 // (the wall time of a session's step: its rollback, its save and its frame).
 //   vf3net <vf3.zip> --script FILE [--frames N] [--latency MS] [--jitter MS] [--loss PERCENT] [--delay D] [--interp]
-//          [--set vf3tb] [--stage] [--dural]
+//          [--set vf3tb] [--stage] [--dural] [--dural-stage host|guest|both]
 // --set: another program (the zip must hold it); --stage: the match's stage select on (the adapter's stage_select_on,
-// Online > Settings); --dural: Dural on the select (the adapter's dural, Cheats). The script's p1 is the host's, p2 the guest's.
+// Online > Settings); --dural: Dural on the select (the adapter's dural, Cheats); --dural-stage: Cheats > Dural's stage
+// (Guard) on that side's own input word, as the game does it online (src/host/dural_stage.h: inputs only, the delay its lead). The script's p1 is the host's, p2 the guest's.
 // VF3NET_WATCH=addr,... (hex): those RAM bytes on the straight run, printed as they change ("bytes FRAME v...").
 #include "../src/host/input_script.h"
+#include "../src/host/dural_stage.h"
 #include "../src/host/vf3_netplay.h"
 #include "../src/machine/model3.h"
 #include "../src/net/session.h"
@@ -68,9 +70,10 @@ int main(int argc, char **argv)
 	int delay = 2;
 	bool use_rec = true, soft = false;   // soft: each side's clock a little slower while ahead, as the game's
 	bool stage = false, dural = false;
+	dural_stage::Picker pick_a, pick_b;   // (--dural-stage: each side's own)
 	const m3::Profile *profile = nullptr;
 	const bool slow = getenv("VF3NET_SLOW") != nullptr;   // (each step over 40 ms, the host's)
-	const char *usage = "usage: vf3net <vf3.zip> --script FILE [--frames N] [--latency MS] [--jitter MS] [--loss PERCENT] [--delay D] [--interp] [--soft] [--set vf3tb] [--stage] [--dural]\n";
+	const char *usage = "usage: vf3net <vf3.zip> --script FILE [--frames N] [--latency MS] [--jitter MS] [--loss PERCENT] [--delay D] [--interp] [--soft] [--set vf3tb] [--stage] [--dural] [--dural-stage host|guest|both]\n";
 	for (int i = 1; i < argc; i++) {
 		std::string a = argv[i];
 		if (a == "--frames" && i + 1 < argc) frames = strtol(argv[++i], nullptr, 10);
@@ -83,6 +86,11 @@ int main(int argc, char **argv)
 		else if (a == "--soft") soft = true;
 		else if (a == "--stage") stage = true;
 		else if (a == "--dural") dural = true;
+		else if (a == "--dural-stage" && i + 1 < argc) {
+			const std::string w = argv[++i];
+			pick_a.trigger = w == "host" || w == "both";
+			pick_b.trigger = w == "guest" || w == "both";
+		}
 		else if (a == "--set" && i + 1 < argc) {
 			if (!(profile = m3::find_profile(argv[++i]))) { fprintf(stderr, "vf3net: no such set %s\n", argv[i]); return 2; }
 		}
@@ -126,6 +134,15 @@ int main(int argc, char **argv)
 	vfnet::Session sa(wire.a(), A.adapter, ia, cfg, true, blob);
 	vfnet::Session sb(wire.b(), B.adapter, ib, cfg, false);
 
+	// a side's input word as its player's game makes it (Cheats > Dural's stage, if on there)
+	auto own_word = [&](dural_stage::Picker &pick, m3::Model3 &m, int player, uint16_t bits) {
+		dural_stage::Picker::Said said;
+		int wait_s;
+		const uint16_t out = pick.filter(m, player, bits, delay, false, said, wait_s);
+		if (said) printf("  Dural's stage, the %s's pick: %s (%d s)\n", player ? "guest" : "host",
+		                 said == dural_stage::Picker::waiting ? "waiting" : said == dural_stage::Picker::no_version ? "no Dural version" : "not this time", wait_s);
+		return out;
+	};
 	Timing ta, tb;
 	size_t na = 0, nb = 0;   // each side's frames run (its next script frame)
 	double t = 1000, next_a = 1000, next_b = 1000 + 23;
@@ -145,7 +162,7 @@ int main(int argc, char **argv)
 		if (t >= next_a) {
 			const auto s0 = Clock::now();
 			const uint64_t rb0 = sa.stats().resim_frames;
-			if (sa.step(vf3net::pack(real[std::min(na, real.size() - 1)], 0))) { na++; score_a.frame(A.m); }
+			if (sa.step(own_word(pick_a, A.m, 0, vf3net::pack(real[std::min(na, real.size() - 1)], 0)))) { na++; score_a.frame(A.m); }
 			const double ms = std::chrono::duration<double, std::milli>(Clock::now() - s0).count();
 			if (connected) ta.add(ms);
 			if (slow && ms > 40) printf("  slow step: host frame %u, %.1f ms, %llu frames run again\n", sa.frame(), ms, (unsigned long long)(sa.stats().resim_frames - rb0));
@@ -153,7 +170,7 @@ int main(int argc, char **argv)
 		}
 		if (t >= next_b) {
 			const auto s0 = Clock::now();
-			if (sb.step(vf3net::pack(real[std::min(nb, real.size() - 1)], 1))) { nb++; score_b.frame(B.m); }
+			if (sb.step(own_word(pick_b, B.m, 1, vf3net::pack(real[std::min(nb, real.size() - 1)], 1)))) { nb++; score_b.frame(B.m); }
 			if (connected) tb.add(std::chrono::duration<double, std::milli>(Clock::now() - s0).count());
 			next_b += fb / (1 - (soft ? std::clamp(sb.stats().lead * 0.02, 0.0, 0.04) : 0.0));
 		}
