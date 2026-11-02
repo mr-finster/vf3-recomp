@@ -135,6 +135,13 @@ void SceneBuilder::build(const m3::Model3 &board, Scene &scene)
 	static std::atomic<uint64_t> next_id{ 1 };
 	scene.id = next_id++;
 	visits = 0;
+	// (issue #19: a red triangle bottom left of the attract, the game's own, under the arcade's notice; hidden with
+	// it, while the program in RAM has the notice's draw call made a no-op: from the boot hide_free_play_text's patch
+	// was copied in, whatever the CROM holds now)
+	const m3::Profile::FreePlayText &fp = board.profile->free_play_text;
+	const bool notice_hidden = fp.draw_call && fp.marker[0] && board.peek32(fp.draw_call) == 0x60000000;
+	hidden_marker[0] = notice_hidden ? fp.marker[0] : 0;
+	hidden_marker[1] = notice_hidden ? fp.marker[1] : 0;
 	if (rom_cache.size() > 20000)
 		rom_cache.clear();
 	if (dyn_cache.size() > 20000)
@@ -444,6 +451,11 @@ void SceneBuilder::draw_model(uint32_t addr)
 	} else {
 		m.meshes = parse(data, true);
 	}
+	// (the marker under the notice: parsed as ever, the vertices it leaves for the next model kept, then left out;
+	// only as known, one untextured triangle)
+	if (hidden_marker[0] && (addr == hidden_marker[0] || addr == hidden_marker[1]) && m.meshes->size() == 1 &&
+		(*m.meshes)[0].verts.size() == 3 && !(*m.meshes)[0].textured)
+		return;
 	if (!m.meshes->empty())
 		vp->models.push_back(std::move(m));
 }

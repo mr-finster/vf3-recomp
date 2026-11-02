@@ -50,12 +50,15 @@ struct Profile
 
 	// The FREE PLAY notices (Model3::hide_free_play_text), as the program image's addresses: the fight's top line
 	// ("     FREE PLAY       ", 21 characters, between "PRESS START BUTTON   " and "CREDIT"), and the attract's
-	// picture (its number in a table) and the call that draws it (a no-op instead)
+	// picture (its number in a table) and the call that draws it (a no-op instead); and the game's own 3D the attract's
+	// notice covers (issue #19: a red triangle bottom left with the notice hidden), two one-triangle models in the
+	// video ROM, left out of the picture while the running program's draw call is the no-op (video::SceneBuilder)
 	struct FreePlayText
 	{
 		uint32_t press_start, free_play, credit;
 		uint32_t picture_table, picture;
 		uint32_t draw_call, draw_word;
+		uint32_t marker[2];
 	} free_play_text;
 
 	// Backup RAM (offsets into Model3::backup, as the code has always used them)

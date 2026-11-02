@@ -127,6 +127,9 @@ private:
 	uint32_t visits = 0;           // nodes visited this scene
 	static constexpr uint32_t NODE_BUDGET = 200000;
 	void node_one(uint32_t addr);
+	// The 3D the attract's FREE PLAY notice covers, left out while the running program doesn't draw the notice (the
+	// profile's free_play_text.marker; 0: none): picture only, the game's memory only read
+	uint32_t hidden_marker[2] = {};
 	const float *matrix_base = nullptr;
 	const float *lod_table = nullptr;
 	uint32_t colour_table = 0;
