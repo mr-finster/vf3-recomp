@@ -76,6 +76,10 @@ struct Profile
 	uint32_t rounds_p1, rounds_p2, playing;   // the score's bytes (vf3_netplay.h's Score)
 	uint32_t select_cursor;   // a byte: player 1's column on the character select (player 2's 0x80 on; the row the byte before)
 	uint32_t mode;            // a byte: the game's mode, 5 from Start through the select (the stage select too)
+	// (within mode 5 the byte at mode + 8, 0x102010 in both programs, tells them apart: 18 the character select, 19
+	// then 20 the stage screen, 22 the VS screen; logged through a challenge and its rematch with the stage select on.
+	// The stage then is the byte at 0x10607C: the dojo 14, its Dural version 30, the picker's Start held till the
+	// screen's timer ran out (only the picker's counts); 46 with Start held and the stage chosen by a button)
 
 	// The stages' backdrops (tilegen.cpp): the stage's number at r13 minus this, the backdrops' descriptors (a word
 	// per stage), the bank table (128 halfwords) and the backdrop's place (+4, +8)

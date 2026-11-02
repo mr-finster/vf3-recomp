@@ -160,9 +160,12 @@ Mini) get a fighting stick's layout; Controls > Player 1 (or 2) > Set up buttons
   16:10, 16:9, 21:9), background filter, distant textures (sharp, or as the arcade's), smooth motion, screen filter (scanlines, CRT), CRT colours (an arcade monitor's, as Supermodel's presets), Show FPS, fullscreen.
 - **Sound:** volume, and the music's and the effects' own volumes.
 - **Game:** play style (PC: no boot screen, always free play; Arcade: the boot, coins and credits, its coin settings kept for it), reset, and **Version**: Virtua Fighter 3 or Team Battle (it asks first: the game restarts), or **Add Team Battle** while it has only one.
-- **Arcade settings:** difficulty, rounds to win, energy, stage select between two players (off as the arcade ships:
-  each two-player match on the game's next stage, starting from a random one), demo sound, country, and the arcade's
-  own service menu (its other settings, sound test, bookkeeping). A change restarts the game.
+- **Arcade settings:** difficulty, rounds to win, energy, stage select between two players, demo sound, country, and
+  the arcade's own service menu (its other settings, sound test, bookkeeping). A change restarts the game.
+  **Stage select** has the arcade's own options by name: **Off** (each two-player match on the game's next stage,
+  starting from a random one) or **Challenger** (the challenger picks the stage, so on every rematch
+  the loser picks, as Japanese arcades had it; the one picking holds Start until the screen's timer runs out for the
+  stage's Dural version). Team Battle also lists **Variable** and **Full**, which show no stage screen between two players.
 - **Controls:** each player's pad, keys and buttons.
 - **Online:** a random opponent, host a match, join one, play by address, your name, input delay, the connection display (see below).
 - **Cheats:** **Dural on the select** (see [Dural](#dural)).
@@ -202,8 +205,12 @@ from v0.1.7-online-preview on plays the others, until one changes the game: its 
 between releases plays only the same build) and **the same
 `vf3.zip`**; it tells you if not. Matches always play the PC way, free play, with the
 host's arcade settings (rounds, difficulty, energy). The stage is the game's own next one, as on an arcade cabinet
-that's been on all day: a random one for the first match, the game's order after it. Each player uses their own
-Player 1 controls.
+that's been on all day: a random one for the first match, the game's order after it (or picked: **Stage select**,
+below). Each player uses their own Player 1 controls.
+
+**Stage select** (Online > Settings): Off (the default) plays as above. On plays the arcade's stage screen
+(Challenger): the challenger picks the stage, so on every rematch the loser does. You only meet players who have it
+on too (Random, Host and Join alike); it can't change while you're hosting, joining or playing.
 
 **The rounds are the host's.** How many rounds win a match is the host's Menu > Arcade settings >
 **Rounds to win (vs player)** (3 plays first to 3, as SEGA's tournaments and Japan's arcades do).

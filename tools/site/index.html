@@ -397,12 +397,16 @@ dialog .x:hover{background:rgba(255,255,255,.2)}
       <div class="pop" role="dialog" aria-label="Changelog">
         <p><b>%VERSION%</b> &middot; %DATE%</p>
         <ul>
+          <li><b>Stage select online</b> (issue #18): Menu &gt; Online &gt; Settings &gt; Stage select. On, the challenger picks the stage on the arcade&rsquo;s own screen, so the loser picks on every rematch, as Japanese arcades had it. You meet only players who have it on too; off, everyone as before.</li>
+          <li><b>Arcade settings &gt; Stage select</b> shows the arcade&rsquo;s own options by name: Challenger or Off (Team Battle&rsquo;s Variable and Full too). The one picking holds Start until the screen&rsquo;s timer runs out for the stage&rsquo;s Dural version.</li>
+        </ul>
+        <details><summary>v0.1.13-alpha</summary><ul>
           <li><b>Arcade sticks that weren&rsquo;t found now work</b> (DirectInput sticks such as HORI&rsquo;s Virtua Stick High Grade and the Astro City Mini): any stick gets a fighting-stick layout, and Menu &gt; Controls &gt; Player 1 (or 2) &gt; Set up buttons sets its buttons by pressing them. A <code>gamecontrollerdb.txt</code> in the data folder is read too.</li>
           <li><b>Team Battle 1 vs 1 by default:</b> Menu &gt; Game &gt; Team Battle mode (1 vs 1 or 3 vs 3). It&rsquo;s the arcade&rsquo;s own setting: Up + Start gives 3 vs 3, Down + Start 1 vs 1. Online you meet only players who chose the same mode.</li>
           <li><b>3D renderer on Auto stays on the GPU:</b> its start-up check is tried on two more scenes before it moves to the CPU (the title&rsquo;s close-ups were failing working graphics cards).</li>
           <li><b>Log file:</b> Menu &gt; Game &gt; Log file turns <code>log.txt</code> off (from the next start). A <code>portable.txt</code> beside the game keeps everything in its own folder.</li>
           <li><b>Fullscreen freezing on AMD with Vulkan:</b> a test, <code>fullscreen_window = 1</code> in settings.ini, makes fullscreen a borderless window instead.</li>
-        </ul>
+        </ul></details>
         <details><summary>v0.1.12-alpha</summary><ul>
           <li><b>Virtua Fighter 3 Team Battle</b> plays too, online as well (Team Battle with Team Battle): put <code>vf3tb.zip</code> beside <code>vf3.zip</code> and choose it in Menu &gt; Game &gt; Version, or Menu &gt; Game &gt; Add Team Battle. Start in a fight changes the camera; the CPU&rsquo;s teams are new each time.</li>
           <li><b>Play as Dural:</b> Menu &gt; Cheats &gt; Dural on the select, a 13th spot with her own picture, for either player. Online with others who have it on.</li>
