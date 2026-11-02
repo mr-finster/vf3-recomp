@@ -24,10 +24,10 @@ VF3_VERSION ?= $(shell git describe --tags --always 2>/dev/null || echo dev)
 VF3_DATE ?= $(shell git log -1 --format=%cd --date=format:'%b %-d %Y' 2>/dev/null)
 # (the commit too: what a GPU failure is remembered by, src/host/main.cpp's BUILD)
 VF3_COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null)
-# and the lobby the room codes use (tools/lobby/README.md): its https address, this one if unset or empty (the Deck's
+# and the lobby the room codes use (tools/lobby/README.md): its https address, .lobby-url's (one line, kept out of git) if unset or empty (the Deck's
 # container is handed it empty), "none" for none (Online then offers only the by-address matches)
 ifeq ($(strip $(VF_LOBBY_URL)),)
-VF_LOBBY_URL = https://<lobby address>
+VF_LOBBY_URL := $(strip $(shell cat .lobby-url 2>/dev/null))
 endif
 ifeq ($(VF_LOBBY_URL),none)
 VF_LOBBY_URL :=

@@ -16,3 +16,5 @@ __pycache__/
 functions/
 .refhit-url
 /*-recomp/
+# the lobby's address (one line): the builds read it, git never has it
+.lobby-url
