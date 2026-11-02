@@ -1689,10 +1689,16 @@ int main(int argc, char **argv)
 		if (!skip_boot()) return;
 		const auto t0 = std::chrono::steady_clock::now();
 		game.tiles_on = false;
-		while (game_frame < BOOT_FRAMES) {
+		// up to the SEGA logo: its first frame + 12 (Revision D's Japan's 948 + 12, boot_frames), wherever the Country
+		// setting's notices put it (profile.h's sega_logo; at most twice boot_frames); boot_frames if it isn't known
+		const uint32_t logo = board.profile->sega_logo;
+		uint64_t until = logo ? BOOT_FRAMES * 2 : BOOT_FRAMES;
+		bool logo_seen = false;
+		while (game_frame < until) {
 			game.run_frame(false, false);
 			game.audio.clear();
 			game_frame++;
+			if (logo && !logo_seen && board.ram[logo ^ 3] == 16) { logo_seen = true; until = game_frame + 12; }
 		}
 		game.tiles_on = true;
 		if (!scripted) vf3net::set_versus_count(board, vf3net::random_versus_count());   // (the profile's versus_count: the first match between two players' stage)

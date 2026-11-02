@@ -103,6 +103,12 @@ struct Profile
 	// skipping the boot, the same teams came but for when Start was pressed: the host sets it at random after the
 	// boot (an arcade on all day had it anywhere)
 	uint32_t random_seed;
+
+	// RAM: a byte 0 through the boot and the region's notices, 16 from the SEGA logo's first frame on (0: not known).
+	// The notices before the logo are the Country setting's (Japan's warning, the US's FBI screen, Team Battle's
+	// parental advisory, none for Export and Asia), so the logo comes from frame 300 to 948: the PC way's unseen boot
+	// stops at it (issue #7), not at boot_frames (Revision D's Japan's: its logo + 12), which online's boot keeps
+	uint32_t sega_logo;
 };
 
 extern const Profile VF3_REV_D, VF3_TB;
