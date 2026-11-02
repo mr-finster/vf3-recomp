@@ -172,8 +172,7 @@ Mini) get a fighting stick's layout; Controls > Player 1 (or 2) > Set up buttons
   matches are always first to 3, whatever the rounds to win (vs player) here.
   **Stage select** has the arcade's own options by name: **Off** (each two-player match on the game's next stage,
   starting from a random one) or **Challenger** (the challenger picks the stage, so on every rematch
-  the loser picks, as Japanese arcades had it; the one picking holds Start until the screen's timer runs out for the
-  stage's Dural version). Team Battle also lists **Variable** and **Full**, the arcade's own, not yet known (no stage screen seen between two players).
+  the loser picks, as Japanese arcades had it; the stage's Dural version is easiest with Menu > Cheats > Dural's stage). Team Battle also lists **Variable** and **Full**, the arcade's own, not yet known (no stage screen seen between two players).
 - **Controls:** each player's pad, keys and buttons.
 - **Online:** a random opponent, host a match, join one, play by address, your name, input delay, the connection display (see below).
 - **Cheats:** **Dural on the select** and **Dural's stage** (see [Dural](#dural)).

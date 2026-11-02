@@ -3164,10 +3164,10 @@ int main(int argc, char **argv)
 		static const char *STAGE_SELECT[] = { "Challenger", "Off", "Variable", "Full" };
 		const bool tb = board.profile == &m3::VF3_TB;
 		choice("Stage select (vs player)", tb ? "Between two players. Challenger: the challenger picks the stage, so on every rematch the loser does, as in "
-		       "Japan's arcades (the picker's Start held till the timer ends: the stage's Dural version). Off: the game's next stage each match. Variable, Full: the "
+		       "Japan's arcades (its Dural version: Cheats > Dural's stage). Off: the game's next stage each match. Variable, Full: the "
 		       "arcade's own, not yet known (no stage screen seen between two players). Online has its own (Online > Settings)."
 		       : "Between two players. Challenger: the challenger picks the stage, so on every rematch the loser does, as in Japan's arcades "
-		       "(the picker's Start held till the timer ends: the stage's Dural version). Off: the game's next stage each match. Online has its own (Online > Settings).",
+		       "(its Dural version: Cheats > Dural's stage). Off: the game's next stage each match. Online has its own (Online > Settings).",
 		       set.stage_select, 0, tb ? 3 : 1, [](int v) { return std::string(STAGE_SELECT[v]); });
 		choice("Demo sound", "Sound during the demo that plays between games.", set.demo_sound, 0, 1, [&](int v) { return on_off(v == 0); });
 		choice("Country", "The arcade's region: Japan, USA, Export or Asia. It changes the game's text and what it shows.", set.country, 0, 3,
