@@ -698,7 +698,7 @@ export class Queue {
 // the games never say how many there are. Each player once (their address and name, hashed: player_id), in what
 // they're doing now (searching, then hosting, then their latest match), by the variants each game has (VARIANTS:
 // anything else is "other", the version a game sends never shown).
-const ONLINE_KEPT_MS = 30000, ONLINE_PLAYING_MS = 600000, ONLINE_HOST_MS = 100000, ONLINE_QUEUE_MS = 60000;
+const ONLINE_FRESH_MS = 15000, ONLINE_PLAYING_MS = 600000, ONLINE_HOST_MS = 100000, ONLINE_QUEUE_MS = 60000;
 // Each game's online versions (its NET_VERSION; a release's build plays as it) and what may follow one ("+dural" ...),
 // in the order the games add them. A game's new NET_VERSION or option: add it here (else its players count as "other").
 const VARIANTS = {
@@ -731,21 +731,27 @@ function tell(from, ev) {
 	return from.telling;
 }
 
-let online_kept = null;   // ({until, body}: this copy of the Worker's last answer)
+let online_kept = null;   // ({t, body}: this copy of the Worker's last answer, t when the counts were made)
+// (every copy, this one's and the edge's, kept only while the counts themselves are under ONLINE_FRESH_MS old: one
+// copy made from another never adds its age to it)
+const fresh_at = (body) => { try { return JSON.parse(body).updated * 1000; } catch (e) { return 0; } };
 async function online(env, req) {
-	const headers = { 'content-type': 'application/json', 'cache-control': 'public, max-age=30', 'access-control-allow-origin': '*' };
+	const headers = { 'content-type': 'application/json', 'cache-control': 'public, max-age=10', 'access-control-allow-origin': '*' };
 	if (await limited(env, req, 'ANY_LIMIT')) return new Response('{"error":"busy"}', { status: 429, headers: { ...headers, 'cache-control': 'no-store' } });
 	const kept_ok = !env.TURN_STATIC;   // (not on a test's own lobby: its counts checked as they change)
-	if (kept_ok && online_kept && Date.now() < online_kept.until) return new Response(online_kept.body, { headers });
+	if (kept_ok && online_kept && Date.now() - online_kept.t < ONLINE_FRESH_MS) return new Response(online_kept.body, { headers });
 	const key = new Request('https://online.vf-lobby/v1');
 	const edge = kept_ok && (await caches.default.match(key));
-	if (edge) return new Response(await edge.text(), { headers });
+	if (edge) {
+		const body = await edge.text(), t = fresh_at(body);
+		if (Date.now() - t < ONLINE_FRESH_MS) { online_kept = { t, body }; return new Response(body, { headers }); }
+	}
 	const r = await env.STATS.get(env.STATS.idFromName('all')).fetch('https://stats/online', { method: 'POST', body: '{}' });
 	const body = await r.text();
 	if (r.status !== 200) return new Response('{"error":"server"}', { status: 500, headers: { ...headers, 'cache-control': 'no-store' } });
 	if (kept_ok) {
-		online_kept = { until: Date.now() + ONLINE_KEPT_MS, body };
-		await caches.default.put(key, new Response(body, { headers }));
+		online_kept = { t: fresh_at(body) || Date.now(), body };
+		await caches.default.put(key, new Response(body, { headers: { ...headers, 'cache-control': 'public, max-age=30' } }));
 	}
 	return new Response(body, { headers });
 }

@@ -1,11 +1,14 @@
 // GET /api/online: the lobby's who's-online counts (its GET /v1/online), for the page beside it. The lobby's address
 // is the Pages project's LOBBY_URL variable (Settings > Variables and Secrets), never in the site's files; and nothing
 // from the lobby's answer passes through as it came: only the counts, read and written out again here, so its
-// address can't reach a browser in a header, an error or a field. Kept 30 s (this place's cache, and this copy's memory).
+// address can't reach a browser in a header, an error or a field. Kept while the counts are under FRESH_S old (this
+// place's cache, and this copy's memory: by the counts' own time, so the lobby's copies and these never add up).
 const GAMES = ['vf1', 'vf2', 'vf3', 'vf3tb'];
 const STATES = ['total', 'searching', 'random', 'hosting', 'room'];
-const KEPT_S = 30;
-let kept = null;   // ({until, body}: this copy's last answer)
+const FRESH_S = 15, MAX_AGE = 10;
+let kept = null;   // ({t, body}: this copy's last answer, t when the counts were made)
+const fresh = (t) => Date.now() - t < FRESH_S * 1000;
+const made_at = (body) => { try { return JSON.parse(body).updated * 1000; } catch (e) { return 0; } };
 
 const out = (body, status, cache) =>
 	new Response(body, { status, headers: { 'content-type': 'application/json', 'cache-control': cache } });
@@ -30,23 +33,26 @@ function clean(d) {
 }
 
 export async function onRequestGet({ request, env, waitUntil }) {
-	if (kept && Date.now() < kept.until) return out(kept.body, 200, `public, max-age=${KEPT_S}`);
+	const ok = (body) => out(body, 200, `public, max-age=${MAX_AGE}`);
+	if (kept && fresh(kept.t)) return ok(kept.body);
 	const key = new Request(new URL('/api/online', request.url).toString());
 	const cache = caches.default;
 	const hit = await cache.match(key).catch(() => null);
-	if (hit) return out(await hit.text(), 200, `public, max-age=${KEPT_S}`);
+	if (hit) {
+		const body = await hit.text(), t = made_at(body);
+		if (fresh(t)) { kept = { t, body }; return ok(body); }
+	}
 	const base = typeof env.LOBBY_URL === 'string' ? env.LOBBY_URL.trim().replace(/\/+$/, '') : '';
 	if (!/^https?:\/\/[^/?#\s]+$/.test(base)) return unavailable();
 	let body;
 	try {
-		const r = await fetch(base + '/v1/online', { headers: { accept: 'application/json' } });
+		const r = await fetch(base + '/v1/online', { headers: { accept: 'application/json' }, cf: { cacheTtl: 0 } });
 		if (r.status !== 200) return unavailable();
 		body = JSON.stringify(clean(await r.json()));
 	} catch (e) {
 		return unavailable();   // (never the error's text: it could name the lobby)
 	}
-	kept = { until: Date.now() + KEPT_S * 1000, body };
-	const res = out(body, 200, `public, max-age=${KEPT_S}`);
-	waitUntil(cache.put(key, res.clone()).catch(() => {}));
-	return res;
+	kept = { t: made_at(body) || Date.now(), body };
+	waitUntil(cache.put(key, out(body, 200, 'public, max-age=30')).catch(() => {}));
+	return ok(body);
 }
