@@ -2411,9 +2411,14 @@ int main(int argc, char **argv)
 	static const char *FILTER_NAMES[] = { "Off", "Scanlines", "CRT" };
 	SDL_Texture *glass = nullptr;
 	int glass_w = 0, glass_h = 0, glass_kind = 0;
-	auto draw_filter = [&](const SDL_FRect &r) {
+	auto draw_filter = [&](const SDL_FRect &picture) {
 		if (!cfg.filter) return;
-		const int w = int(std::lround(r.w)), h = int(std::lround(r.h));
+		// on whole pixels, one of the glass's to each: the picture's edges can fall between them (fullscreen_window's
+		// 1920 x 1081, 4:3: 1441.33 wide from 239.33), and the glass stretched by a fraction, sampled to the nearest,
+		// drew one column twice in the middle (issue #7: a vertical line there, on the GPU's renderers)
+		const float x0 = std::round(picture.x), y0 = std::round(picture.y);
+		const SDL_FRect r{ x0, y0, std::round(picture.x + picture.w) - x0, std::round(picture.y + picture.h) - y0 };
+		const int w = int(r.w), h = int(r.h);
 		if (w < 1 || h < 1) return;
 		if (!glass || w != glass_w || h != glass_h || cfg.filter != glass_kind) {
 			if (glass) SDL_DestroyTexture(glass);
