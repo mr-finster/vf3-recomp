@@ -10,6 +10,8 @@
 @font-face { font-family: "Barlow Condensed"; font-weight: 500; font-style: normal; font-display: swap; src: url(fonts/barlow-condensed-medium.woff2) format("woff2"); }
 @font-face { font-family: "Barlow Condensed"; font-weight: 600; font-style: normal; font-display: swap; src: url(fonts/barlow-condensed-semibold.woff2) format("woff2"); }
 @font-face { font-family: "Barlow Condensed"; font-weight: 700; font-style: italic; font-display: swap; src: url(fonts/barlow-condensed-bolditalic.woff2) format("woff2"); }
+/* (country flags: Twemoji's, the font only for the flags' letters, so they're flags on Windows too; fonts/TwemojiCountryFlags-LICENSE.md) */
+@font-face { font-family: "Twemoji Country Flags"; unicode-range: U+1F1E6-1F1FF, U+1F3F4, U+E0062-E007F; font-display: swap; src: url(fonts/TwemojiCountryFlags.woff2) format("woff2"); }
 :root {
 	--ground: #040818;
 	--panel: #0a1230;
@@ -41,7 +43,7 @@ h1 {
 	border-bottom: 3px solid var(--gold);
 }
 .lede { margin: 8px 0 28px; font-size: 19px; font-weight: 500; color: var(--muted); }
-.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px; }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr)); gap: 16px; }
 .card {
 	background: var(--panel);
 	border: 1px solid var(--line);
@@ -56,17 +58,34 @@ h1 {
 .name { font-size: 24px; line-height: 1.05; font-weight: 700; font-style: italic; color: var(--ink); text-transform: uppercase; }
 .total { margin: 14px 0 0; font-size: 64px; line-height: 1; font-weight: 700; font-style: italic; color: var(--gold); font-variant-numeric: tabular-nums; }
 .unit { font-size: 18px; font-weight: 500; color: var(--muted); margin-bottom: 10px; }
-ul { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
-li { padding: 6px 0; font-size: 19px; color: var(--row); border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
-li b { color: var(--ink); font-weight: 600; }
-li.none { color: var(--muted); font-weight: 500; }
+table.states { width: 100%; border-collapse: collapse; table-layout: fixed; font-variant-numeric: tabular-nums; }
+.states th { padding: 0 0 4px; font-size: 13px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); text-align: right; border-bottom: 1px solid var(--line); }
+.states th:first-child { text-align: left; }
+.states col.num { width: 21%; }
+.states td { padding: 6px 0; font-size: 19px; color: var(--ink); text-align: right; border-bottom: 1px solid var(--line); vertical-align: top; }
+.states td:first-child { text-align: left; color: var(--row); font-size: 18px; line-height: 1.15; padding-right: 6px; overflow-wrap: anywhere; }
+.states td.zero { color: var(--line); }
+.states td.none { text-align: left; color: var(--muted); font-weight: 500; }
+.lands { margin-top: 10px; font-size: 17px; color: var(--row); display: flex; flex-wrap: wrap; gap: 2px 12px; font-variant-numeric: tabular-nums; }
+.lands .more { color: var(--muted); font-weight: 500; }
+.flag { font-family: "Twemoji Country Flags", "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif; font-style: normal; margin-right: 5px; }
+.legend { margin: 14px 0 0; display: flex; flex-wrap: wrap; gap: 4px 22px; font-size: 16px; font-weight: 500; color: var(--muted); }
+.legend b { color: var(--ink); font-weight: 600; }
+h2 { margin: 36px 0 12px; font-size: 30px; line-height: 1.1; font-weight: 700; font-style: italic; color: var(--gold); padding-bottom: 4px; border-bottom: 2px solid var(--line); }
+.countries { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 0 24px; }
+.countries li { display: flex; align-items: baseline; gap: 4px; padding: 7px 0; font-size: 20px; color: var(--ink); border-bottom: 1px solid var(--line); min-width: 0; }
+.countries .cname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.countries .cnum { color: var(--gold); font-variant-numeric: tabular-nums; }
+.countries li.rest { color: var(--muted); font-weight: 500; font-size: 18px; }
 .ago { margin-top: auto; padding-top: 10px; font-size: 15px; font-weight: 500; color: var(--muted); }
 .note { margin-top: 28px; font-size: 16px; font-weight: 500; color: var(--muted); max-width: 720px; line-height: 1.35; }
+.note a { color: var(--row); }
 .down { color: var(--gold); }
 @media (max-width: 480px) {
 	main { padding-top: 20px; }
 	h1 { font-size: 36px; }
 	.total { font-size: 54px; }
+	h2 { font-size: 26px; }
 }
 </style>
 </head>
@@ -75,7 +94,10 @@ li.none { color: var(--muted); font-weight: 500; }
 	<h1>VF Recomp · Online now</h1>
 	<p class="lede">Players in the online lobby right now, updated every 30 seconds.</p>
 	<div class="cards" id="cards"></div>
-	<p class="note" id="note">Counted by the lobby from what it sees: players searching in Random, in a Random match made in the last 10 minutes, waiting with a room code, or in a room code match from the last 10 minutes. Each player once. Play by address isn't counted.</p>
+	<p class="legend"><span><b>Searching</b>: in Random, looking for an opponent</span><span><b>Waiting</b>: hosting a room code, waiting for a friend to join</span><span><b>Playing</b>: in a match, Random or room code</span></p>
+	<h2>By country</h2>
+	<ul class="countries" id="countries"></ul>
+	<p class="note" id="note">Counted by the lobby from what it sees: players searching in Random, in a Random match made in the last 10 minutes, waiting with a room code, or in a room code match from the last 10 minutes. Each player once. Play by address isn't counted. A player's country is where the lobby sees them connect from; only the totals are kept, never names or addresses. Random already matches you with the nearest players first.<br>Flags: <a href="https://github.com/twitter/twemoji">Twemoji</a> by Twitter, Inc. and contributors, <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>.</p>
 </main>
 <script>
 "use strict";
@@ -90,6 +112,7 @@ let data = null, fetched = 0, failed = false;
 
 function label(game, variant) {
 	if (variant === "other") return "Other versions";
+	if (game === "vf1" && variant === "standard") return "All fighters";   // (VF1's Normal, Random and Seed play as one version)
 	const flags = variant === "standard" ? [] : variant.split("+");
 	const parts = [];
 	if (game === "vf3tb") parts.push(flags.includes("1v1") ? "1 vs 1" : "3 vs 3");
@@ -103,16 +126,90 @@ function el(tag, cls, text) {
 	if (text !== undefined) e.textContent = String(text);
 	return e;
 }
-function line(game, variant, c) {
-	const li = el("li");
-	li.appendChild(el("b", "", label(game, variant)));
-	const bits = [];
-	const playing = n(c.random) + n(c.room);
-	if (playing) bits.push(playing + " playing");
-	if (n(c.searching)) bits.push(n(c.searching) + " searching");
-	if (n(c.hosting)) bits.push(n(c.hosting) + " hosting");
-	li.appendChild(document.createTextNode(" · " + (bits.length ? bits.join(" · ") : "0")));
-	return li;
+// A country: its flag and its name (the browser's own, else the code). "" is a player whose country isn't known.
+const CC = /^[A-Z]{2}$/;
+let names = null;
+try { names = new Intl.DisplayNames([navigator.language || "en", "en"], { type: "region" }); } catch (e) {}
+function country_name(cc) {
+	if (!cc) return "Unknown";
+	try { const s = names && names.of(cc); if (s && s !== cc) return s; } catch (e) {}
+	return cc;
+}
+function flag(cc) {   // (the code's two regional indicator letters: a flag, by the Twemoji font where the system has none)
+	const f = el("span", "flag", String.fromCodePoint(...[...cc].map((ch) => 0x1f1a5 + ch.charCodeAt(0))));
+	f.setAttribute("aria-hidden", "true");
+	return f;
+}
+// (a game's or all games' countries, checked, most first; "" last)
+function lands(c) {
+	const list = c && typeof c === "object" ? Object.entries(c) : [];
+	return list.filter(([k, v]) => (k === "" || CC.test(k)) && n(v) > 0).map(([k, v]) => [k, n(v)])
+		.sort((a, b) => (a[0] === "") - (b[0] === "") || b[1] - a[1] || (a[0] < b[0] ? -1 : 1));
+}
+const STATES = [["Searching", (c) => n(c.searching)], ["Waiting", (c) => n(c.hosting)], ["Playing", (c) => n(c.random) + n(c.room)]];
+function table(game, variants) {
+	const t = el("table", "states");
+	const cols = el("colgroup");
+	cols.appendChild(el("col"));
+	for (let i = 0; i < STATES.length; i++) cols.appendChild(el("col", "num"));
+	t.appendChild(cols);
+	const head = el("tr");
+	head.appendChild(el("th", "", "Variant"));
+	for (const [name] of STATES) head.appendChild(el("th", "", name));
+	t.appendChild(el("thead")).appendChild(head);
+	const body = t.appendChild(el("tbody"));
+	for (const [v, c] of variants) {
+		const tr = el("tr");
+		tr.appendChild(el("td", "", label(game, v)));
+		for (const [, get] of STATES) {
+			const x = get(c);
+			tr.appendChild(el("td", x ? "" : "zero", x || "–"));
+		}
+		if (n(c.random) && n(c.room)) tr.lastChild.title = n(c.random) + " Random, " + n(c.room) + " room code";
+		body.appendChild(tr);
+	}
+	if (!variants.length) {
+		const tr = el("tr"), td = el("td", "none", "No one right now");
+		td.colSpan = 1 + STATES.length;
+		tr.appendChild(td);
+		body.appendChild(tr);
+	}
+	return t;
+}
+// (a game card's line: its top countries, flag and count)
+function card_lands(c) {
+	const known = lands(c).filter(([k]) => k), top = known.slice(0, 5);
+	const div = el("div", "lands");
+	for (const [cc, x] of top) {
+		const s = el("span");
+		s.title = country_name(cc);
+		s.appendChild(flag(cc));
+		s.appendChild(document.createTextNode(x));
+		div.appendChild(s);
+	}
+	const rest = known.length - top.length;
+	if (rest > 0) div.appendChild(el("span", "more", "+" + rest + (rest === 1 ? " country" : " countries")));
+	return top.length ? div : null;
+}
+const TOP_COUNTRIES = 12;
+function render_countries() {
+	const ul = document.getElementById("countries");
+	ul.replaceChildren();
+	const list = lands(data && data.countries), known = list.filter(([k]) => k), unknown = list.find(([k]) => !k);
+	for (const [cc, x] of known.slice(0, TOP_COUNTRIES)) {
+		const li = el("li");
+		li.appendChild(flag(cc));
+		li.appendChild(el("span", "cname", country_name(cc)));
+		li.appendChild(el("span", "cnum", x));
+		ul.appendChild(li);
+	}
+	const more = known.slice(TOP_COUNTRIES);
+	if (more.length) {
+		const players = more.reduce((a, [, x]) => a + x, 0);
+		ul.appendChild(el("li", "rest", "and " + more.length + " more " + (more.length === 1 ? "country" : "countries") + " · " + players + (players === 1 ? " player" : " players")));
+	}
+	if (unknown) ul.appendChild(el("li", "rest", "Country not known · " + unknown[1] + (unknown[1] === 1 ? " player" : " players")));
+	if (!ul.children.length) ul.appendChild(el("li", "rest", data ? "No one right now" : "…"));
 }
 function ago() {
 	if (!data) return failed ? "can't reach the lobby" : "loading…";
@@ -137,14 +234,16 @@ function render() {
 		const total = d ? n(d.total) : null;
 		card.appendChild(el("div", "total", total === null ? "–" : total));
 		card.appendChild(el("div", "unit", total === 1 ? "player online" : "players online"));
-		const ul = el("ul");
-		const variants = d && d.variants && typeof d.variants === "object" ? Object.entries(d.variants) : [];
-		for (const [v, c] of variants) if (/^[a-z0-9]+(\+[a-z0-9]+)*$/.test(v) && c && n(c.total)) ul.appendChild(line(g.id, v, c));
-		if (!ul.children.length) ul.appendChild(el("li", "none", d ? "No one right now" : "…"));
-		card.appendChild(ul);
+		const variants = (d && d.variants && typeof d.variants === "object" ? Object.entries(d.variants) : [])
+			.filter(([v, c]) => /^[a-z0-9]+(\+[a-z0-9]+)*$/.test(v) && c && n(c.total));
+		if (d) card.appendChild(table(g.id, variants));
+		else card.appendChild(el("div", "unit", "…"));
+		const cl = d && card_lands(d.countries);
+		if (cl) card.appendChild(cl);
 		card.appendChild(el("div", "ago" + (failed ? " down" : ""), ago()));
 		cards.appendChild(card);
 	}
+	render_countries();
 }
 async function load() {
 	try {

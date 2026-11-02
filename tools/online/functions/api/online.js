@@ -20,16 +20,23 @@ function counts(c) {
 	for (const k of STATES) o[k] = count(c && c[k]);
 	return o;
 }
+// (players by country: a country's two letters, or "" not known; at most MAX_COUNTRIES, most first)
+const MAX_COUNTRIES = 250;
+function lands(c) {
+	const list = c && typeof c === 'object' && !Array.isArray(c) ? Object.entries(c) : [];
+	const ok = list.filter(([k, n]) => (k === '' || /^[A-Z]{2}$/.test(k)) && count(n) > 0).map(([k, n]) => [k, count(n)]);
+	return Object.fromEntries(ok.sort((x, y) => y[1] - x[1] || (x[0] < y[0] ? -1 : 1)).slice(0, MAX_COUNTRIES));
+}
 function clean(d) {
 	const games = {};
 	for (const g of GAMES) {
 		const src = (d && d.games && d.games[g]) || {}, variants = {};
 		const list = src.variants && typeof src.variants === 'object' ? Object.entries(src.variants).slice(0, 32) : [];
 		for (const [name, c] of list) if (/^[a-z0-9]+(\+[a-z0-9]+)*$/.test(name) && name.length <= 32) variants[name] = counts(c);
-		games[g] = { ...counts(src), variants };
+		games[g] = { ...counts(src), variants, countries: lands(src.countries) };
 	}
 	const t = d && d.updated;
-	return { updated: Number.isInteger(t) && t > 0 && t < 1e11 ? t : 0, games };
+	return { updated: Number.isInteger(t) && t > 0 && t < 1e11 ? t : 0, games, countries: lands(d && d.countries) };
 }
 
 export async function onRequestGet({ request, env, waitUntil }) {

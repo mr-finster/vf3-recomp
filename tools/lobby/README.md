@@ -106,7 +106,8 @@ After changing anything here, `npx wrangler deploy` again.
 
 ```
 {"updated": 1793594882, "games": {"vf3tb": {"total": 3, "searching": 1, "random": 2, "hosting": 0, "room": 0,
-  "variants": {"1v1": {"total": 3, "searching": 1, "random": 2, "hosting": 0, "room": 0}}}, ...}}
+  "variants": {"1v1": {"total": 3, "searching": 1, "random": 2, "hosting": 0, "room": 0}},
+  "countries": {"JP": 2, "FR": 1}}, ...}, "countries": {"JP": 5, "US": 3, "FR": 1, "": 1}}
 ```
 
 - `searching`: in the Random queue now; `random`: in a Random match made in the last 10 minutes (as the RANDOM
@@ -120,12 +121,23 @@ After changing anything here, `npx wrangler deploy` again.
   a build between releases, an option this doesn't know) is `other`. The versions and options known are `VARIANTS`
   in `src/index.js`: **when a game's `NET_VERSION` changes or it gets a new online option, add it there** and deploy,
   or its players count as `other`. (An older release that plays as the same online version is the same variant.)
+- VF1 has no variants yet: its Normal, Random and Seed fighters all play as one online version (and play each
+  other), so the lobby can't tell them apart; its players are all `standard` (the page's "All fighters"). VF2's
+  random fighters are a version of their own (`+random`), so they show apart.
+- `countries`: each game's players by country (two capital letters, ISO 3166; `""` where it isn't known), most
+  first, each player once as in `total` (a game's countries add up to its total); and the same for all the games
+  together at the top (adding up to the games' totals). A player's country is where the lobby sees them connect
+  from: Cloudflare's for the request (`country_of` in `src/index.js`, the same one Random's nearest-first matching
+  and the TURN login use), never anything a game says of itself. Cloudflare's unknown (`XX`) and Tor (`T1`) and
+  anything not two letters count as `""`. Only these totals are given out: no names, addresses, room codes or
+  places finer than a country. (Older clients of `/v1/online` ignore the field.)
 - **Not counted:** Play by address (the lobby never sees it), and a match whose players went on past 10 minutes
   (it's the matches *made* in the last 10 minutes: a long session counts while it's young, as the RANDOM card).
 
 **How it's counted, and why it can't be pushed up:** the games never say how many there are. The count is only what
 the lobby itself saw happen: a search it took (a ticket it gave out), a room it opened, a join it let in, a match it
-made. One Durable Object (`Stats`) is told by the rooms and random queues as these happen; a version string is only
+made. One Durable Object (`Stats`) is told by the rooms and random queues as these happen, each player with the
+country the lobby itself had for them; a version string is only
 compared against `VARIANTS`, never shown (an unknown one is `other`); each player counts once (hashed address and
 name), so asking again doesn't add anything, and a flood from one address is held by the rate limits as anything
 else. Entries go on the lobby's own timeouts: a host gone quiet 30 s (its room dropped), a queue not heard from in a
@@ -141,7 +153,13 @@ everything else (`ANY_LIMIT`, 600 a minute).
 
 `online.html` (and its icons, and the game's own Barlow Condensed font) fetches `/api/online` on its own site every
 30 s; `functions/api/online.js` there asks the lobby's `/v1/online` and passes on only the counts, read and written
-again (no header, error text or field of the lobby's answer reaches the browser), kept 30 s. The lobby's address is
+again (no header, error text or field of the lobby's answer reaches the browser; the countries only as two capital
+letters or `""` with a whole number, 250 at most), kept 30 s. Under the cards, each game's variants as a table
+(Searching: in Random's queue; Waiting: hosting a room code; Playing: in a match, Random or room code) with its top
+countries, and "By country": all the games together, flag and name (the browser's own name for it), the top 12
+and how many more. The flags are the Twemoji Country Flags font in `site/fonts` (flags only, so Windows, which
+has none, shows them too; from the npm package country-flag-emoji-polyfill 0.1.10; the art Twemoji's, by Twitter,
+Inc. and contributors, CC BY 4.0, credited on the page; `fonts/TwemojiCountryFlags-LICENSE.md`). The lobby's address is
 the Pages project's `LOBBY_URL` secret, never in the files; the page's content security policy allows only its own
 site. If the lobby can't be reached it answers `{"error":"unavailable"}` (502) and the page says so.
 
@@ -168,7 +186,8 @@ dashboard's way to the same: Workers & Pages > vf-online > Settings > Variables 
 `LOBBY_URL`.
 
 Testing on one's own computer: the lobby with `npx wrangler dev --port 8787` (with `TURN_STATIC` set, as above,
-nothing is kept 30 s: each read is fresh), then `tools/online/.dev.vars` (untracked) with
+nothing is kept 30 s: each read is fresh, and a request's `x-test-country: JP` header stands in for Cloudflare's
+country, never read without `TURN_STATIC`), then `tools/online/.dev.vars` (untracked) with
 `LOBBY_URL=http://127.0.0.1:8787` and `../lobby/node_modules/.bin/wrangler pages dev --port 8788` from
 `tools/online`: the page at `http://127.0.0.1:8788/online`.
 
@@ -180,7 +199,8 @@ alone can open the code again). The random queue, in memory only: each searcher'
 rough location (Cloudflare's, for the nearest; never sent to anyone), while they search and a minute after; how
 many matches each address had in the last 10 minutes; and when recent matches were made (for the count). Who's
 online (`Stats`): each player searching, hosting or in a match made in the last 10 minutes as a hash of their address
-and name (not the address), with their game, version and room code, until the timeouts above. The
+and name (not the address), with their game, version, room code and country (the lobby's own, two letters), until
+the timeouts above; only the counts by country are given out. The
 relay's logins counted for the day, all told and per address (the address itself kept as the count's key, wiped
 each day). Requests are limited per IP address (Cloudflare's rate limiting, kept for a minute). No logs are
 written by the Worker.

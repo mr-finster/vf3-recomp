@@ -106,10 +106,15 @@ function addr_ok(a) {
 	if (b[0] === 0xfe && (b[1] & 0xc0) === 0x80) return false;                          // (link-local: no use without its interface)
 	return true;
 }
-// Where a request comes from, as Cloudflare has it: the country (two letters) and roughly where
+// Where a request comes from, as Cloudflare has it: the country (two letters) and roughly where. (Testing on one's own
+// computer, TURN_STATIC set: an x-test-country header stands in for Cloudflare's; never read on the real one.)
+function country_ok(c) {   // (a country's two letters, else "": not known)
+	return typeof c === 'string' && /^[A-Z]{2}$/.test(c) && c !== 'XX' && c !== 'T1' ? c : '';
+}
 function country_of(req) {
-	const c = req.cf && typeof req.cf.country === 'string' ? req.cf.country.toUpperCase() : '';
-	return /^[A-Z]{2}$/.test(c) && c !== 'XX' && c !== 'T1' ? c : '';
+	const t = loopback_ok ? req.headers.get('x-test-country') : null;
+	if (t !== null) return country_ok(t.toUpperCase());
+	return country_ok(req.cf && typeof req.cf.country === 'string' ? req.cf.country.toUpperCase() : '');
 }
 function geo_of(req) {
 	const lat = req.cf ? parseFloat(req.cf.latitude) : NaN, lon = req.cf ? parseFloat(req.cf.longitude) : NaN;
@@ -384,7 +389,7 @@ export class Room {
 			}
 			this.r = { code: b.code, host: b.host, key: random_hex(16), token: random_hex(8), guest: null, born: Date.now(), seen: Date.now(), random: !!b.random, sid: clean(b.sid, 16) };
 			await this.save();
-			this.tell({ op: 'host', sids: [this.r.sid] });
+			this.tell({ op: 'host', sids: [this.r.sid], countries: [b.host.country] });
 			return json({ code: b.code, key: this.r.key, token: this.r.token });
 		}
 		if (!r) return json({ error: 'no_room' }, 404);
@@ -396,7 +401,7 @@ export class Room {
 			if (r.guest) return json({ error: 'full' }, 409);
 			r.guest = g;
 			await this.save();
-			this.tell({ op: 'join', sids: [r.sid, clean(b.sid, 16)] });
+			this.tell({ op: 'join', sids: [r.sid, clean(b.sid, 16)], countries: [h.country, g.country] });
 			for (const w of this.waiters.splice(0)) w(g);
 			return json({ name: h.name, cands: h.cands, relay: h.relay, token: r.token, country: h.country });
 		}
@@ -405,7 +410,7 @@ export class Room {
 		r.seen = Date.now();
 		if (op === '/wait') {
 			await this.save();
-			if (!r.guest && Date.now() - this.told > 60000) this.tell({ op: 'host', sids: [r.sid] });   // (still waiting: a minute at most between)
+			if (!r.guest && Date.now() - this.told > 60000) this.tell({ op: 'host', sids: [r.sid], countries: [r.host.country] });   // (still waiting: a minute at most between)
 			if (r.guest) return json({ guest: r.guest });
 			const g = await new Promise((done) => {
 				for (const w of this.waiters.splice(0)) w(undefined);   // (one wait at a time: an older one answered now)
@@ -428,7 +433,7 @@ export class Room {
 			r.guest = null;
 			r.token = random_hex(8);   // (a new session: the last player's token no good for it)
 			await this.save();
-			this.tell({ op: 'reopen', sids: [r.sid] });   // (the player who joined didn't get going: no match after all)
+			this.tell({ op: 'reopen', sids: [r.sid], countries: [r.host.country] });   // (the player who joined didn't get going: no match after all)
 			return json({ code: r.code, key: r.key, token: r.token });
 		}
 		if (op === '/close') {
@@ -519,14 +524,16 @@ export class Queue {
 		if (t.busy) { t.again = true; return; }
 		if (!this.game) return;
 		const now = Date.now();
-		const sids = [...new Set([...this.waiting.values()].filter((w) => !w.result && w.sid).map((w) => w.sid))].sort();
-		const sig = sids.join(',');
+		const of = new Map();   // (each searching once, with their country: the lobby's own)
+		for (const w of this.waiting.values()) if (!w.result && w.sid && !of.get(w.sid)) of.set(w.sid, country_ok(w.me.country));
+		const sids = [...of.keys()].sort(), countries = sids.map((x) => of.get(x));
+		const sig = sids.map((x, i) => x + countries[i]).join(',');
 		if (sig === t.sig && !t.events.length && !(sig && now - t.at > 15000)) return;
 		t.sig = sig;
 		t.at = now;
 		t.busy = true;
 		const events = t.events.splice(0);
-		const done = tell(this, { op: 'queue', key: this.ctx.id.toString(), game: this.game, version: this.version, sids: sids.slice(0, 2000), events })
+		const done = tell(this, { op: 'queue', key: this.ctx.id.toString(), game: this.game, version: this.version, sids: sids.slice(0, 2000), countries: countries.slice(0, 2000), events })
 			.then(() => new Promise((ok) => setTimeout(ok, 2000)))
 			.then(() => {
 				t.busy = false;
@@ -583,7 +590,7 @@ export class Queue {
 		this.pairs.set(m.host.code, { t, players: [host, guest].map((x) => ({ from: x.from, name: x.me.name })) });
 		for (const [c, p] of this.pairs) if (t - p.t > RANDOM_PLAYING_MS) this.pairs.delete(c);
 		this.ctx.storage.put('pairs', [...this.pairs]);   // (not awaited, as matched's)
-		this.told.events.push({ op: 'match', code: m.host.code, sids: [host.sid, guest.sid], t });
+		this.told.events.push({ op: 'match', code: m.host.code, sids: [host.sid, guest.sid], countries: [host.me.country, guest.me.country], t });
 		host.partner = guest;
 		guest.partner = host;
 		host.room = guest.room = { code: m.host.code, key: m.host.key };
@@ -777,30 +784,34 @@ export class Stats {
 		this.prune();
 		if (op === '/online') return json(this.count());
 		const s = this.s, now = Date.now();
-		const ids = (l) => (Array.isArray(l) ? l : []).filter((x) => typeof x === 'string' && /^[0-9a-f]{16}$/.test(x));
+		// (each player told of, with their country beside them: [sid, country], a country not well formed "")
+		const pairs = (l, cs) => (Array.isArray(l) ? l : []).map((x, i) => [x, country_ok(Array.isArray(cs) ? cs[i] : '')]).filter(([x]) => typeof x === 'string' && /^[0-9a-f]{16}$/.test(x));
 		if (!GAMES.test(b.game) || typeof b.version !== 'string') return json({ error: 'bad' }, 400);
 		const at = { game: b.game, version: b.version.slice(0, 64) };
 		const code = typeof b.code === 'string' ? b.code.slice(0, 8) : '';
 		const unmatch = (c, kind) => (s.matches = s.matches.filter((m) => !(m.code === c && m.kind === kind)));
 		if (b.op === 'queue') {
-			const key = String(b.key).slice(0, 64), sids = [...new Set(ids(b.sids))].slice(0, 2000);
-			if (sids.length) s.queues[key] = { ...at, sids, until: now + ONLINE_QUEUE_MS };
+			const key = String(b.key).slice(0, 64), sids = [], countries = [];
+			for (const [sid, c] of pairs(b.sids, b.countries)) if (!sids.includes(sid) && sids.length < 2000) { sids.push(sid); countries.push(c); }
+			if (sids.length) s.queues[key] = { ...at, sids, countries, until: now + ONLINE_QUEUE_MS };
 			else delete s.queues[key];
 			for (const e of Array.isArray(b.events) ? b.events.slice(0, 1000) : []) {
 				const c = typeof e.code === 'string' ? e.code.slice(0, 8) : '';
 				if (e.op === 'match') {
 					unmatch(c, 'random');
-					s.matches.push({ ...at, kind: 'random', code: c, sids: ids(e.sids).slice(0, 2), t: Math.min(now, +e.t || now) });
+					const p = pairs(e.sids, e.countries).slice(0, 2);
+					s.matches.push({ ...at, kind: 'random', code: c, sids: p.map((x) => x[0]), countries: p.map((x) => x[1]), t: Math.min(now, +e.t || now) });
 				} else if (e.op === 'unmatch') unmatch(c, 'random');
 			}
 		} else if (b.op === 'host' || b.op === 'reopen') {
 			if (b.op === 'reopen') unmatch(code, 'room');
-			const sid = ids(b.sids)[0];
-			if (sid) s.hosts[code] = { ...at, sid, seen: now, born: (s.hosts[code] && s.hosts[code].born) || now };
+			const [p] = pairs(b.sids, b.countries);
+			if (p) s.hosts[code] = { ...at, sid: p[0], country: p[1], seen: now, born: (s.hosts[code] && s.hosts[code].born) || now };
 		} else if (b.op === 'join') {
 			delete s.hosts[code];
 			unmatch(code, 'room');
-			s.matches.push({ ...at, kind: 'room', code, sids: ids(b.sids).slice(0, 2), t: now });
+			const p = pairs(b.sids, b.countries).slice(0, 2);
+			s.matches.push({ ...at, kind: 'room', code, sids: p.map((x) => x[0]), countries: p.map((x) => x[1]), t: now });
 		} else if (b.op === 'gone') delete s.hosts[code];
 		else return json({ error: 'bad' }, 400);
 		await this.ctx.storage.put('s', s);
@@ -809,20 +820,27 @@ export class Stats {
 	// Each game: everyone once, in what they're doing now, by variant
 	count() {
 		const s = this.s, now = Date.now();
-		const best = {};   // game -> sid -> {rank, t, what, variant}
-		const put = (game, version, sid, rank, t, what) => {
+		const best = {};   // game -> sid -> {rank, t, what, variant, country}
+		const put = (game, version, sid, rank, t, what, country) => {
 			const g = (best[game] = best[game] || new Map()), o = g.get(sid);
-			if (!o || rank > o.rank || (rank === o.rank && t > o.t)) g.set(sid, { rank, t, what, variant: variant_of(game, version) });
+			country = country_ok(country) || (o ? o.country : '');   // (a player's country: what any of theirs had, if this one hasn't)
+			if (!o || rank > o.rank || (rank === o.rank && t > o.t)) g.set(sid, { rank, t, what, variant: variant_of(game, version), country });
+			else if (!o.country) o.country = country;
 		};
-		for (const q of Object.values(s.queues)) for (const sid of q.sids) put(q.game, q.version, sid, 3, q.until, 'searching');
-		for (const h of Object.values(s.hosts)) put(h.game, h.version, h.sid, 2, h.seen, 'hosting');
-		for (const m of s.matches) for (const sid of m.sids) put(m.game, m.version, sid, 1, m.t, m.kind === 'random' ? 'random' : 'room');
+		const c_at = (l, i) => (Array.isArray(l) ? l[i] : '');   // (kept before countries were: none, so "")
+		for (const q of Object.values(s.queues)) q.sids.forEach((sid, i) => put(q.game, q.version, sid, 3, q.until, 'searching', c_at(q.countries, i)));
+		for (const h of Object.values(s.hosts)) put(h.game, h.version, h.sid, 2, h.seen, 'hosting', h.country);
+		for (const m of s.matches) m.sids.forEach((sid, i) => put(m.game, m.version, sid, 1, m.t, m.kind === 'random' ? 'random' : 'room', c_at(m.countries, i)));
 		const zero = () => ({ total: 0, searching: 0, random: 0, hosting: 0, room: 0 });
-		const games = {};
+		// (players by country, most first: a country's two letters, "" not known)
+		const by_country = (m) => Object.fromEntries([...m].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)));
+		const games = {}, all = new Map();
 		for (const game of Object.keys(VARIANTS)) {
-			const g = { ...zero(), variants: {} }, names = new Map();
+			const g = { ...zero(), variants: {} }, names = new Map(), lands = new Map();
 			for (const p of (best[game] || new Map()).values()) {
 				g.total++;
+				lands.set(p.country, (lands.get(p.country) || 0) + 1);
+				all.set(p.country, (all.get(p.country) || 0) + 1);
 				g[p.what]++;
 				const v = names.get(p.variant) || zero();
 				v.total++;
@@ -832,8 +850,9 @@ export class Stats {
 			// (in a fixed order: standard, then the variants by their options, other last)
 			const order = (n) => (n === 'standard' ? '0' : n === 'other' ? '2' : '1' + n);
 			for (const n of [...names.keys()].sort((a, b) => (order(a) < order(b) ? -1 : 1))) g.variants[n] = names.get(n);
+			g.countries = by_country(lands);
 			games[game] = g;
 		}
-		return { updated: Math.floor(now / 1000), games };
+		return { updated: Math.floor(now / 1000), games, countries: by_country(all) };
 	}
 }
