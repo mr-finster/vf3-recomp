@@ -553,11 +553,13 @@ void Raster::draw_tri(const Tri &T, int layer, int band0, int band1)
 					else sun = vp.sun[0] * a[3] + vp.sun[1] * a[4] + vp.sun[2] * a[5];
 					sun = std::clamp(sun, -1.0f, 1.0f);
 					if (sun_clamp || c.a < 0.999f) sun = std::max(sun, 0.0f);
-					// the sun and ambient light up to full, the spotlight's colour on top
+					// the sun and ambient light up to full, the spotlight's colour on top, the sum up to full too (Step
+					// 1.0's, as the reference's New3D: Team Battle's sumo ring, lit by a red spotlight over the whole
+					// screen, and VF3's lava cave were twice as red; issue #19). r3d.hlsl's the same
 					float li = std::min(sun * vp.sun_intensity + vp.ambient, 1.0f);
-					float lr = li + vp.spot_colour[0] * lobe;
-					float lg = li + vp.spot_colour[1] * lobe;
-					float lb = li + vp.spot_colour[2] * lobe;
+					float lr = std::min(li + vp.spot_colour[0] * lobe, 1.0f);
+					float lg = std::min(li + vp.spot_colour[1] * lobe, 1.0f);
+					float lb = std::min(li + vp.spot_colour[2] * lobe, 1.0f);
 					c.r *= lr; c.g *= lg; c.b *= lb;
 					if (mesh.specular) {
 						float s;

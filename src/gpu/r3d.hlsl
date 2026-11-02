@@ -255,7 +255,7 @@ FsOut main(PolyV i)
 		sun = clamp(sun, -1.0, 1.0);
 		if (vp.light.y > 0 || c.a < 0.999) sun = max(sun, 0.0);
 		float li = min(sun * vp.sun.w + vp.light.x, 1.0);
-		float3 l3 = li + vp.spot_colour.rgb * lobe;
+		float3 l3 = min(li + vp.spot_colour.rgb * lobe, 1.0);   // (the sum up to full: Step 1.0's, as r3d_raster's)
 		c.rgb *= l3;
 		if (d.flags & F_SPECULAR) {
 			float s;
