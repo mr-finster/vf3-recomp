@@ -2992,9 +2992,15 @@ int main(int argc, char **argv)
 		choice("Rounds to win (vs player)", "Rounds needed to win a match between two players.", set.rounds_vs, 2, 5, [](int v) { return std::to_string(v); });
 		energy("Energy (vs CPU)", "Each fighter's energy in a match against the computer (the arcade's ENERGY MAX).", set.energy_cpu, 160, 360);
 		energy("Energy (vs player)", "Each fighter's energy in a match between two players.", set.energy_vs, 180, 400);
-		choice("Stage select (vs player)", "A match between two players: the challenger picks the stage (the arcade's own screen, 8 seconds; "
-		       "hold Start on one for its Dural version). Off, as most arcades had it, each match goes to the game's next stage. Online has its own (Online > Settings).",
-		       set.stage_select, 0, 1, [&](int v) { return on_off(v == 0); });
+		// (the test menu's names: Team Battle's four, Revision D's first two; found setting the byte to each)
+		static const char *STAGE_SELECT[] = { "Challenger", "Off", "Variable", "Full" };
+		const bool tb = board.profile == &m3::VF3_TB;
+		choice("Stage select (vs player)", tb ? "Between two players. Challenger: the challenger picks the stage, so on every rematch the loser does, as in "
+		       "Japan's arcades (the picker's Start held till the timer ends: the stage's Dural version). Off: the game's next stage each match. Variable, Full: no "
+		       "stage screen between two players. Online has its own (Online > Settings)."
+		       : "Between two players. Challenger: the challenger picks the stage, so on every rematch the loser does, as in Japan's arcades "
+		       "(the picker's Start held till the timer ends: the stage's Dural version). Off: the game's next stage each match. Online has its own (Online > Settings).",
+		       set.stage_select, 0, tb ? 3 : 1, [](int v) { return std::string(STAGE_SELECT[v]); });
 		choice("Demo sound", "Sound during the demo that plays between games.", set.demo_sound, 0, 1, [&](int v) { return on_off(v == 0); });
 		choice("Country", "The arcade's region: Japan, USA, Export or Asia. It changes the game's text and what it shows.", set.country, 0, 3,
 			[](int v) { return std::string(COUNTRY[v]); });
@@ -3380,7 +3386,7 @@ int main(int argc, char **argv)
 		p.items.push_back({ "Sound", "The overall, music and effects volumes.", {}, {}, [&] { menu.push(sound_page()); } });
 		p.items.push_back({ "Game", "Play style and reset.", {}, {}, [&] { menu.push(game_page()); } });
 		if (board.profile->settings.at)   // (where the program keeps them known)
-			p.items.push_back({ "Arcade settings", "Difficulty, rounds, energy, demo sound, country and the service menu. Changing them restarts the game.", {}, {},
+			p.items.push_back({ "Arcade settings", "Difficulty, rounds, energy, stage select, demo sound, country and the service menu. Changing them restarts the game.", {}, {},
 								[&] { if (arcade_before.empty()) arcade_before = arcade_bytes(); menu.push(arcade_page()); } });
 		if (board.profile->online)
 			p.items.push_back({ "Online", "Play someone over the network: host a match, or join one.", {}, {}, [&] { menu.push(online_page()); } });
