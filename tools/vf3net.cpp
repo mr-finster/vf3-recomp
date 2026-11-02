@@ -5,6 +5,10 @@
 // boards must have been in its state at every checkpoint. Reports the rollbacks and what a frame cost each side
 // (the wall time of a session's step: its rollback, its save and its frame).
 //   vf3net <vf3.zip> --script FILE [--frames N] [--latency MS] [--jitter MS] [--loss PERCENT] [--delay D] [--interp]
+//          [--set vf3tb] [--stage] [--dural]
+// --set: another program (the zip must hold it); --stage: the match's stage select on (the adapter's stage_select_on,
+// Online > Settings); --dural: Dural on the select (the adapter's dural, Cheats). The script's p1 is the host's, p2 the guest's.
+// VF3NET_WATCH=addr,... (hex): those RAM bytes on the straight run, printed as they change ("bytes FRAME v...").
 #include "../src/host/input_script.h"
 #include "../src/host/vf3_netplay.h"
 #include "../src/machine/model3.h"
@@ -31,8 +35,9 @@ struct Board
 	bool use_rec = true;
 	std::vector<uint32_t> image;
 	vf3net::Adapter adapter{ m };
-	bool open(const std::string &rom, std::string &error)
+	bool open(const std::string &rom, const m3::Profile *profile, std::string &error)
 	{
+		if (profile) m.profile = profile;
 		if (!m.load(rom, error)) return false;
 		adapter.program_changed = [this] {
 			if (!use_rec) return;
@@ -62,8 +67,10 @@ int main(int argc, char **argv)
 	vfnet::SimWire::Params p{ 40, 8, 0 };
 	int delay = 2;
 	bool use_rec = true, soft = false;   // soft: each side's clock a little slower while ahead, as the game's
+	bool stage = false, dural = false;
+	const m3::Profile *profile = nullptr;
 	const bool slow = getenv("VF3NET_SLOW") != nullptr;   // (each step over 40 ms, the host's)
-	const char *usage = "usage: vf3net <vf3.zip> --script FILE [--frames N] [--latency MS] [--jitter MS] [--loss PERCENT] [--delay D] [--interp] [--soft]\n";
+	const char *usage = "usage: vf3net <vf3.zip> --script FILE [--frames N] [--latency MS] [--jitter MS] [--loss PERCENT] [--delay D] [--interp] [--soft] [--set vf3tb] [--stage] [--dural]\n";
 	for (int i = 1; i < argc; i++) {
 		std::string a = argv[i];
 		if (a == "--frames" && i + 1 < argc) frames = strtol(argv[++i], nullptr, 10);
@@ -74,6 +81,11 @@ int main(int argc, char **argv)
 		else if (a == "--delay" && i + 1 < argc) delay = atoi(argv[++i]);
 		else if (a == "--interp") use_rec = false;
 		else if (a == "--soft") soft = true;
+		else if (a == "--stage") stage = true;
+		else if (a == "--dural") dural = true;
+		else if (a == "--set" && i + 1 < argc) {
+			if (!(profile = m3::find_profile(argv[++i]))) { fprintf(stderr, "vf3net: no such set %s\n", argv[i]); return 2; }
+		}
 		else if (a[0] != '-' && rom.empty()) rom = a;
 		else { fprintf(stderr, "vf3net: unknown argument %s\n%s", a.c_str(), usage); return 2; }
 	}
@@ -83,7 +95,7 @@ int main(int argc, char **argv)
 	Board &A = *pa, &B = *pb;
 	std::string error;
 	A.use_rec = B.use_rec = use_rec;
-	if (!A.open(rom, error) || !B.open(rom, error)) { fprintf(stderr, "vf3net: %s\n", error.c_str()); return 1; }
+	if (!A.open(rom, profile, error) || !B.open(rom, profile, error)) { fprintf(stderr, "vf3net: %s\n", error.c_str()); return 1; }
 
 	// the script's inputs for every frame (each side plays its own player's)
 	InputScript script;
@@ -109,6 +121,8 @@ int main(int argc, char **argv)
 	cfg.handshake_ms = 120000;   // (both boots run here one after the other, on the one clock)
 	const vfnet::Identity ia{ "vf3", "test", content, "HOST" }, ib{ "vf3", "test", content, "GUEST" };
 	A.adapter.checkpoint_every = B.adapter.checkpoint_every = 300;
+	A.adapter.stage_select_on = B.adapter.stage_select_on = stage;
+	A.adapter.dural = B.adapter.dural = dural;
 	vfnet::Session sa(wire.a(), A.adapter, ia, cfg, true, blob);
 	vfnet::Session sb(wire.b(), B.adapter, ib, cfg, false);
 
@@ -157,13 +171,25 @@ int main(int argc, char **argv)
 		auto pc = std::make_unique<Board>();
 		Board &C = *pc;
 		C.use_rec = use_rec;
-		if (!C.open(rom, error) || !C.adapter.begin(blob)) { fprintf(stderr, "vf3net: the straight board didn't start\n"); return 1; }
+		C.adapter.stage_select_on = stage;
+		C.adapter.dural = dural;
+		if (!C.open(rom, profile, error) || !C.adapter.begin(blob)) { fprintf(stderr, "vf3net: the straight board didn't start\n"); return 1; }
 		C.adapter.checkpoint_every = 300;
+		std::vector<uint32_t> watch;
+		std::string watched;
+		if (const char *w = getenv("VF3NET_WATCH"))   // tests: "addr,addr,..." (hex, the game's RAM addresses)
+			for (const char *q = w; *q;) { char *e; watch.push_back(uint32_t(strtoul(q, &e, 16))); q = *e ? e + 1 : e; }
 		for (uint32_t f = 0; f < n; f++) {
 			const uint16_t in[2] = { sa.inputs(0)[f], sa.inputs(1)[f] };
 			if (in[0] != sb.inputs(0)[f] || in[1] != sb.inputs(1)[f]) { printf("the two sides' inputs differ at frame %u\n", f); failed = true; break; }
 			C.adapter.advance(in, false);
 			score_c.frame(C.m);
+			if (!watch.empty()) {   // (VF3NET_WATCH: those bytes on the straight run, each time they change)
+				std::string now;
+				for (uint32_t w : watch) now += " " + std::to_string(C.m.ram[w ^ 3]);
+				if (now != watched) printf("bytes %u%s\n", f + 1, now.c_str());
+				watched = now;
+			}
 		}
 		// the score each side's detector kept, through its rollbacks, against the straight run's
 		printf("the score: host %d-%d, guest %d-%d, straight %d-%d (rounds %d-%d)\n", score_a.matches[0], score_a.matches[1], score_b.matches[0],
