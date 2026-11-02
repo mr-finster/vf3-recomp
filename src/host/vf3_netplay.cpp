@@ -88,6 +88,11 @@ std::vector<uint8_t> start_blob(const m3::Model3 &b)
 	std::vector<uint8_t> out(4);
 	memcpy(out.data(), &BLOB_MAGIC, 4);
 	out.insert(out.end(), b.backup.begin(), b.backup.end());
+	// (Rounds to win (vs player) ONLINE_VS_ROUNDS in the blob's copy, when the game has written its settings: 2-5 there)
+	if (const m3::Profile::Settings &set = b.profile->settings; set.at && set.at + size_t(set.rounds_vs) < b.backup.size()) {
+		uint8_t &rounds = out[4 + set.at + size_t(set.rounds_vs)];
+		if (rounds >= 2 && rounds <= 5) rounds = uint8_t(ONLINE_VS_ROUNDS);
+	}
 	const uint8_t *e = reinterpret_cast<const uint8_t *>(b.eeprom.regs);
 	out.insert(out.end(), e, e + sizeof b.eeprom.regs);
 	out.push_back(uint8_t(random_versus_count()));

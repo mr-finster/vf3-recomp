@@ -59,7 +59,13 @@ constexpr bool SELECT_LOCKSTEP = false;
 
 // A hash of the ROM's contents as loaded (the FREE PLAY notices as they are in the ROM, hidden or not)
 uint64_t content_hash(m3::Model3 &board);
-// The host's starting blob: its backup RAM and EEPROM, and where the stages' list starts (random_versus_count)
+// Every online match first to 3 rounds: the blob's copy of the host's backup RAM has Rounds to win (vs player) (the
+// profile's settings.rounds_vs, a plain byte: no checksum, the Arcade settings menu writes it as it is) at this, the
+// host's own setting untouched. A guest plays the blob's backup RAM as it is (Adapter::begin), so a guest of any
+// version plays it, in step; an older host's blob has its own setting
+inline constexpr int ONLINE_VS_ROUNDS = 3;
+// The host's starting blob: its backup RAM (Rounds to win (vs player) ONLINE_VS_ROUNDS) and EEPROM, and where the
+// stages' list starts (random_versus_count)
 std::vector<uint8_t> start_blob(const m3::Model3 &board);
 constexpr uint16_t START_BUTTON = 256;   // (the input word's Start: pack's)
 // The character select on screen: a byte of RAM (the profile's scene, 0xe4046) 5 from the first frame after Start

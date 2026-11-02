@@ -5,10 +5,14 @@
 // boards must have been in its state at every checkpoint. Reports the rollbacks and what a frame cost each side
 // (the wall time of a session's step: its rollback, its save and its frame).
 //   vf3net <vf3.zip> --script FILE [--frames N] [--latency MS] [--jitter MS] [--loss PERCENT] [--delay D] [--interp]
-//          [--set vf3tb] [--stage] [--dural] [--dural-stage host|guest|both]
+//          [--set vf3tb] [--stage] [--dural] [--dural-stage host|guest|both] [--vs-rounds N] [--hashes FILE] [--blob-out FILE] [--blob-in FILE]
 // --set: another program (the zip must hold it); --stage: the match's stage select on (the adapter's stage_select_on,
 // Online > Settings); --dural: Dural on the select (the adapter's dural, Cheats); --dural-stage: Cheats > Dural's stage
 // (Guard) on that side's own input word, as the game does it online (src/host/dural_stage.h: inputs only, the delay its lead). The script's p1 is the host's, p2 the guest's.
+// --vs-rounds N: the host's own Rounds to win (vs player), set in its backup RAM before the match, as the Arcade settings
+// menu does (the match plays the blob's); --hashes FILE: the straight board's state hash every 30 frames ("frame hash",
+// hex); --blob-out FILE: the host's start blob written to FILE; --blob-in FILE: the match started from FILE's blob instead
+// of this build's (a cross-version test: another build's host, this build's guest and straight board, the hashes compared)
 // VF3NET_WATCH=addr,... (hex): those RAM bytes on the straight run, printed as they change ("bytes FRAME v...").
 #include "../src/host/input_script.h"
 #include "../src/host/dural_stage.h"
@@ -73,7 +77,9 @@ int main(int argc, char **argv)
 	dural_stage::Picker pick_a, pick_b;   // (--dural-stage: each side's own)
 	const m3::Profile *profile = nullptr;
 	const bool slow = getenv("VF3NET_SLOW") != nullptr;   // (each step over 40 ms, the host's)
-	const char *usage = "usage: vf3net <vf3.zip> --script FILE [--frames N] [--latency MS] [--jitter MS] [--loss PERCENT] [--delay D] [--interp] [--soft] [--set vf3tb] [--stage] [--dural] [--dural-stage host|guest|both]\n";
+	const char *usage = "usage: vf3net <vf3.zip> --script FILE [--frames N] [--latency MS] [--jitter MS] [--loss PERCENT] [--delay D] [--interp] [--soft] [--set vf3tb] [--stage] [--dural] [--dural-stage host|guest|both] [--vs-rounds N] [--hashes FILE] [--blob-out FILE] [--blob-in FILE]\n";
+	int vs_rounds = 0;
+	const char *hashes_path = nullptr, *blob_out = nullptr, *blob_in = nullptr;
 	for (int i = 1; i < argc; i++) {
 		std::string a = argv[i];
 		if (a == "--frames" && i + 1 < argc) frames = strtol(argv[++i], nullptr, 10);
@@ -91,6 +97,10 @@ int main(int argc, char **argv)
 			pick_a.trigger = w == "host" || w == "both";
 			pick_b.trigger = w == "guest" || w == "both";
 		}
+		else if (a == "--vs-rounds" && i + 1 < argc) vs_rounds = atoi(argv[++i]);
+		else if (a == "--hashes" && i + 1 < argc) hashes_path = argv[++i];
+		else if (a == "--blob-out" && i + 1 < argc) blob_out = argv[++i];
+		else if (a == "--blob-in" && i + 1 < argc) blob_in = argv[++i];
 		else if (a == "--set" && i + 1 < argc) {
 			if (!(profile = m3::find_profile(argv[++i]))) { fprintf(stderr, "vf3net: no such set %s\n", argv[i]); return 2; }
 		}
@@ -118,7 +128,28 @@ int main(int argc, char **argv)
 
 	A.m.reset();   // (the host's NVRAM: a fresh board's, as on a first run)
 	for (int i = 0; i < 300 && A.m.coin_setting() < 0; i++) A.m.run_frame();
-	const std::vector<uint8_t> blob = vf3net::start_blob(A.m);
+	const m3::Profile::Settings &set = A.m.profile->settings;
+	const size_t rounds_at = set.at + size_t(set.rounds_vs);
+	printf("the host's settings as its game wrote them: Rounds to win (vs player) %d\n", set.at ? int(A.m.backup[rounds_at]) : -1);
+	if (vs_rounds && set.at) {   // (the host's own, as the Arcade settings menu sets it)
+		A.m.backup[rounds_at] = uint8_t(vs_rounds);
+		printf("the host's Rounds to win (vs player): %d\n", int(A.m.backup[rounds_at]));
+	}
+	std::vector<uint8_t> blob = vf3net::start_blob(A.m);
+	if (blob_in) {
+		FILE *f = fopen(blob_in, "rb");
+		if (!f) { fprintf(stderr, "vf3net: can't read %s\n", blob_in); return 1; }
+		blob.clear();
+		for (int ch; (ch = fgetc(f)) != EOF;) blob.push_back(uint8_t(ch));
+		fclose(f);
+		printf("the start blob from %s (%zu bytes)\n", blob_in, blob.size());
+	}
+	if (blob_out) {
+		FILE *f = fopen(blob_out, "wb");
+		if (!f || fwrite(blob.data(), 1, blob.size(), f) != blob.size()) { fprintf(stderr, "vf3net: can't write %s\n", blob_out); return 1; }
+		fclose(f);
+	}
+	if (set.at && blob.size() > 4 + rounds_at) printf("the blob's Rounds to win (vs player): %d\n", int(blob[4 + rounds_at]));
 	const uint64_t content = vf3net::content_hash(A.m);
 	if (content != vf3net::content_hash(B.m)) { fprintf(stderr, "vf3net: the two boards' ROM hashes differ\n"); return 1; }
 
@@ -191,16 +222,22 @@ int main(int argc, char **argv)
 		C.adapter.stage_select_on = stage;
 		C.adapter.dural = dural;
 		if (!C.open(rom, profile, error) || !C.adapter.begin(blob)) { fprintf(stderr, "vf3net: the straight board didn't start\n"); return 1; }
-		C.adapter.checkpoint_every = 300;
+		C.adapter.checkpoint_every = hashes_path ? 30 : 300;
 		std::vector<uint32_t> watch;
 		std::string watched;
 		if (const char *w = getenv("VF3NET_WATCH"))   // tests: "addr,addr,..." (hex, the game's RAM addresses)
 			for (const char *q = w; *q;) { char *e; watch.push_back(uint32_t(strtoul(q, &e, 16))); q = *e ? e + 1 : e; }
+		int won[2] = {}, by[2] = {};   // (each versus match as it ends: its rounds)
 		for (uint32_t f = 0; f < n; f++) {
 			const uint16_t in[2] = { sa.inputs(0)[f], sa.inputs(1)[f] };
 			if (in[0] != sb.inputs(0)[f] || in[1] != sb.inputs(1)[f]) { printf("the two sides' inputs differ at frame %u\n", f); failed = true; break; }
 			C.adapter.advance(in, false);
 			score_c.frame(C.m);
+			if (score_c.matches[0] + score_c.matches[1] != won[0] + won[1]) {
+				printf("a versus match over at frame %u: player %d won it, rounds %d-%d\n", f, score_c.matches[0] != won[0] ? 1 : 2,
+				       score_c.rounds[0] - by[0], score_c.rounds[1] - by[1]);
+				for (int q = 0; q < 2; q++) won[q] = score_c.matches[q], by[q] = score_c.rounds[q];
+			}
 			if (!watch.empty()) {   // (VF3NET_WATCH: those bytes on the straight run, each time they change)
 				std::string now;
 				for (uint32_t w : watch) now += " " + std::to_string(C.m.ram[w ^ 3]);
@@ -217,8 +254,15 @@ int main(int argc, char **argv)
 				failed = true;
 				break;
 			}
+		if (hashes_path) {
+			FILE *hf = fopen(hashes_path, "w");
+			if (!hf) { fprintf(stderr, "vf3net: can't write %s\n", hashes_path); return 1; }
+			for (auto &[f, h] : C.adapter.checkpoints) if (f <= n) fprintf(hf, "%u %016llx\n", f, (unsigned long long)h);
+			fclose(hf);
+		}
 		for (auto &[f, h] : C.adapter.checkpoints) {
 			if (f > n) break;
+			if (f % 300) continue;
 			if (A.adapter.checkpoints[f] != h) { printf("the host's board differs from a straight run after frame %u\n", f); failed = true; break; }
 			if (B.adapter.checkpoints[f] != h) { printf("the guest's board differs from a straight run after frame %u\n", f); failed = true; break; }
 			checked++;
