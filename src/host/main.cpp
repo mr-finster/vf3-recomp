@@ -42,7 +42,7 @@
 // scale when the computer couldn't keep up runs only in tests (VF3_GOVERN).
 //
 // --aspect sets the picture's shape; F6 steps through them. The default, fit, follows the window's shape (between
-// 4:3 and 48:9). Wider than 4:3, the 3D's view opens out to the sides (the same vertical view) where it covers the
+// 4:3 and 80:9). Wider than 4:3, the 3D's view opens out to the sides (the same vertical view) where it covers the
 // whole screen (the fights); the 2D stays in the middle 4:3.
 //
 // Keys:  player 1: arrows, Z guard, X punch, C kick, V escape, 1 start
@@ -2042,11 +2042,13 @@ int main(int argc, char **argv)
 	// Display > Window size (issue #20): while the window is the size it set (in a window, not resized since), a wider
 	// shape's picture fills it exactly (its width the shape's rounded to even pixels)
 	bool exact_px = false;
-	// The picture's shape: the chosen one, or the window's (fit: between 4:3 and 48:9, three screens side by side)
+	// The picture's shape: the chosen one, or the window's (fit: between 4:3 and 80:9, five 16:9 screens side by side: a
+	// safety limit for absurd shapes, a little past three 4K screens' 48:9, whose window, its frame or taskbar taking a few
+	// lines, is wider than 48:9 itself)
 	auto window_aspect = [&] {
 		int w = 0, h = 0;
 		SDL_GetWindowSizeInPixels(win, &w, &h);
-		return h > 0 ? std::clamp(float(w) / float(h), 4.0f / 3.0f, 48.0f / 9.0f) : 16.0f / 9.0f;
+		return h > 0 ? std::clamp(float(w) / float(h), 4.0f / 3.0f, 80.0f / 9.0f) : 16.0f / 9.0f;
 	};
 	// (a wider shape's window made by Window size: the window's own, its width the shape's rounded to even pixels, so
 	// the picture fills its 384 x k lines exactly)
@@ -2169,7 +2171,9 @@ int main(int argc, char **argv)
 	int gov_aa_cut = 0;   // the governor's: steps below the player's antialiasing (cut before the scale)
 	auto aa_now = [&] {
 		int k = std::clamp(cfg.aa - gov_aa_cut, 1, 3);
-		while (k > 1 && scale * k > 8) k--;
+		// (and no wider than 16384, a GPU's usual largest texture: past 48:9 at 4x the GPU's 2x would fail and go
+		// to the CPU's 3D; 48:9 and narrower never reach it)
+		while (k > 1 && (scale * k > 8 || 384.0 * scale * k * picture_aspect() > 16384.5)) k--;
 		return k;
 	};
 	// the picture's size as shown (the 3D's drawn aa_now() times that each way)
