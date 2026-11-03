@@ -630,6 +630,7 @@ struct settings
 	std::string roms_folder;
 	int dural = 0;      // Dural on the select (a cheat): 0 off, else on (1-3, from when it was per player)
 	int dural_stage = 0;   // Dural's stage (a cheat, issue #22): the stage screen's pick confirmed with 1 Guard, 2 Start (0 off)
+	bool random_order = false;   // Revision D's CPU opponents in a random order (issue #30; offline only)
 	bool log = true;    // log.txt written (Game > Log file: read before the log's opened, so from the next start)
 	bool tb_one = true; // Team Battle: a Start that begins a game held Down with it, the arcade's way into 1 vs 1 (false: 3 vs 3)
 	std::string game;   // the program played, its set's name ("vf3", "vf3tb"): Game > Version, when the zips hold both
@@ -685,6 +686,7 @@ struct settings
 		if (auto it = kv.find("game"); it != kv.end() && m3::find_profile(it->second.c_str())) game = it->second;
 		num("cheat_dural", dural, 0, 3);
 		num("cheat_dural_stage", dural_stage, 0, 2);
+		flag("arcade_random_order", random_order);
 		if (auto it = kv.find("online_name"); it != kv.end()) online.name = online_menu::clean_name(it->second);
 		if (auto it = kv.find("online_address"); it != kv.end()) online.address = online_menu::clean_address(it->second);
 		if (auto it = kv.find("online_lobby"); it != kv.end() && (it->second.rfind("https://", 0) == 0 || it->second.rfind("http://", 0) == 0))
@@ -780,6 +782,7 @@ struct settings
 		if (!game.empty()) fprintf(f, "game = %s\n", game.c_str());
 		if (dural) fprintf(f, "cheat_dural = %d\n", dural);
 		if (dural_stage) fprintf(f, "cheat_dural_stage = %d\n", dural_stage);
+		if (random_order) fprintf(f, "arcade_random_order = 1\n");
 		fprintf(f, "team_battle_1v1 = %d\n", int(tb_one));
 		if (!log) fprintf(f, "log = 0\n");
 		if (fs_window) fprintf(f, "fullscreen_window = 1\n");
@@ -3246,6 +3249,12 @@ int main(int argc, char **argv)
 		       : "Between two players. Challenger: the challenger picks the stage, so on every rematch the loser does, as in Japan's arcades "
 		       "(its Dural version: Cheats > Dural's stage). Off: the game's next stage each match. Online has its own (Online > Settings).",
 		       set.stage_select, 0, tb ? 3 : 1, [](int v) { return std::string(STAGE_SELECT[v]); });
+		if (board.profile == &m3::VF3_REV_D)
+			p.items.push_back({ "CPU opponents' order", "Against the computer: the order the game shuffles its fighters into when a game starts. "
+				"The game's: from the frame Start was pressed, but its clock stands still on the title screen, so a Start there gives the same "
+				"order every time. Random: a new order every game, as Team Battle's. Offline only (online never plays the computer).",
+				[&] { return std::string(cfg.random_order ? "Random" : "The game's"); },
+				[&](int) { cfg.random_order = !cfg.random_order; cfg_dirty = true; } });
 		choice("Demo sound", "Sound during the demo that plays between games.", set.demo_sound, 0, 1, [&](int v) { return on_off(v == 0); });
 		choice("Country", "The arcade's region: Japan, USA, Export or Asia. It changes the game's text and what it shows.", set.country, 0, 3,
 			[](int v) { return std::string(COUNTRY[v]); });
@@ -4480,6 +4489,18 @@ int main(int argc, char **argv)
 			if (game_frame == BOOT_FRAMES && scripted) if (const char *vc = getenv("VF3_VERSUS_COUNT")) vf3net::set_versus_count(board, uint32_t(atoi(vc)));   // (tests: that stage)
 			if (game_frame == BOOT_FRAMES && !scripted && !skip_boot()) vf3net::set_random_seed(board, std::random_device{}());   // (as after an unseen boot)
 			if (game_frame == BOOT_FRAMES && scripted) if (const char *rs = getenv("VF3_SEED")) vf3net::set_random_seed(board, uint32_t(strtoul(rs, nullptr, 0)));
+			// Arcade settings > CPU opponents' order: Random (issue #30; offline, Revision D). A Start that begins a game
+			// seeds the game's random numbers from its frame clock (0x1ECC0: a word of the program at the clock's
+			// 0x100000 low half), which stands still on the title screen, then marks the order to be shuffled (0x288E8:
+			// bit 0x04000000 of 0x106008); the select's end shuffles it (0x2C028, 32 swaps from the seed 0x1060B0). So
+			// when that mark appears the seed is set at random, before the shuffle uses it
+			{
+				static bool order_mark = false;
+				const bool mark = board.profile == &m3::VF3_REV_D && board.ram.size() > 0x106008 && (board.ram[0x106008 ^ 3] & 4);
+				if (mark && !order_mark && cfg.random_order && online.phase() == Online::Phase::off && !match_on && !nvram_away)
+					vf3net::set_random_seed(board, scripted && getenv("VF3_SEED") ? uint32_t(strtoul(getenv("VF3_SEED"), nullptr, 0) * 0x9E3779B9u) : std::random_device{}());
+				order_mark = mark;
+			}
 			pace.frames++;
 			pace.emu_ms += double(SDL_GetTicksNS() - te) / 1e6;
 			t9.frames++;
