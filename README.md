@@ -186,6 +186,8 @@ Virtua Fighter 3 Team Battle (MAME's `vf3tb`, 1997), three fighters a side, play
 
 - **Have both?** Put `vf3tb.zip` beside your `vf3.zip`. Menu > Game > **Version** switches between them (it asks
   first: the game saves and starts again in the other). Each keeps its own rankings and arcade settings.
+- **From a command line or a launcher:** `--game vf3` or `--game tb` starts Revision D or Team Battle for that run,
+  whatever Menu > Game > Version remembers (it isn't saved: the next start without it plays the remembered one).
 - **Only `vf3.zip`?** Menu > Game > **Add Team Battle** asks for your `vf3tb.zip`, copies it beside `vf3.zip` and
   starts Team Battle. A split `vf3tb.zip` (only Team Battle's own ROMs) works beside `vf3.zip`; MAME's full one works
   on its own.

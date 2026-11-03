@@ -6,6 +6,7 @@
 //   vf3 [vf3.zip] [--arcade] [--fullscreen | --window] [--no-sound] [--volume N] [--music N] [--effects N]
 //       [--scale N] [--aspect fit|4:3|16:10|16:9|21:9] [--show-boot] [--interp] [--roms <folder>]
 //       [--host [--port N] | --join ADDRESS[:PORT]]   (online by address: a LAN or a VPN, as Online > Play by address)
+//       [--game vf3|tb]   (this run's version, Revision D or Team Battle: Game > Version's choice kept as it was)
 //
 // --volume, --music and --effects (0-100) as the menu's Sound page: the overall volume, and the music's and the
 // effects' and voices' within it.
@@ -978,6 +979,16 @@ std::vector<std::pair<const m3::Profile *, std::string>> game_zips(const std::st
 // one ends. False if it couldn't (the player is told to start it again).
 bool relaunch(int argc, char **argv)
 {
+	// (without --game: the version just chosen in the menu is the one the next start plays)
+	std::vector<char *> kept;
+	for (int i = 0; i < argc; i++) {
+		if (i > 0 && !strcmp(argv[i], "--game")) { i++; continue; }
+		if (i > 0 && !strncmp(argv[i], "--game=", 7)) continue;
+		kept.push_back(argv[i]);
+	}
+	argc = int(kept.size());
+	kept.push_back(nullptr);
+	argv = kept.data();
 	(void)argc; (void)argv;
 #ifdef _WIN32
 	wchar_t exe[32768];
@@ -987,6 +998,9 @@ bool relaunch(int argc, char **argv)
 	si.cb = sizeof si;
 	PROCESS_INFORMATION pi{};
 	std::wstring cmd = GetCommandLineW();
+	for (const wchar_t *g : { L" --game=vf3", L" --game=tb", L" --game=vf3tb", L" --game vf3", L" --game tb", L" --game vf3tb" })
+		for (size_t at; (at = cmd.find(g)) != std::wstring::npos && (at + wcslen(g) == cmd.size() || cmd[at + wcslen(g)] == L' ');)
+			cmd.erase(at, wcslen(g));
 	if (!CreateProcessW(exe, cmd.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi)) return false;
 	CloseHandle(pi.hThread);
 	CloseHandle(pi.hProcess);
@@ -1477,9 +1491,19 @@ int main(int argc, char **argv)
 	bool arg_host = false;
 	std::string arg_join;
 	int arg_port = 0;
+	// --game vf3|tb (issue #27): this run's version, whatever Game > Version remembers (not saved: the next start
+	// without it plays the remembered one)
+	std::string arg_game;
 	for (int i = 1; i < argc; i++) {
 		const std::string a = argv[i];
-		if (a == "--arcade") arg_arcade = true;
+		if (a == "--help" || a == "-h") {
+			printf("usage: vf3 [vf3.zip] [--arcade] [--fullscreen | --window] [--no-sound] [--volume N] [--music N] [--effects N]\n"
+			       "           [--scale N] [--aspect fit|4:3|16:10|16:9|21:9] [--show-boot] [--interp] [--roms <folder>]\n"
+			       "           [--host [--port N] | --join ADDRESS[:PORT]] [--game vf3|tb]\n"
+			       "  --game vf3|tb   play Revision D (vf3) or Team Battle (tb) this time, whatever Game > Version remembers\n");
+			return 0;
+		}
+		else if (a == "--arcade") arg_arcade = true;
 		else if (a == "--roms" && i + 1 < argc) arg_roms = argv[++i];
 		else if (a.rfind("--roms=", 0) == 0) arg_roms = a.substr(7);
 		else if (a == "--interp") arg_interp = true;
@@ -1501,6 +1525,13 @@ int main(int argc, char **argv)
 		else if (a.rfind("--join=", 0) == 0) arg_join = a.substr(7);
 		else if (a == "--port" && i + 1 < argc) arg_port = std::clamp(atoi(argv[++i]), 1024, 65535);
 		else if (a.rfind("--port=", 0) == 0) arg_port = std::clamp(atoi(a.c_str() + 7), 1024, 65535);
+		else if (a == "--game" || a.rfind("--game=", 0) == 0) {
+			if (a == "--game" && i + 1 >= argc) { fprintf(stderr, "--game: vf3 (Revision D) or tb (Team Battle)\n"); return 2; }
+			const std::string v = a == "--game" ? argv[++i] : a.substr(7);
+			if (v == "vf3") arg_game = m3::VF3_REV_D.set;
+			else if (v == "tb" || v == "vf3tb") arg_game = m3::VF3_TB.set;
+			else { fprintf(stderr, "--game %s: vf3 (Revision D) or tb (Team Battle)\n", v.c_str()); return 2; }
+		}
 		else if (a.rfind("--", 0) == 0) { fprintf(stderr, "unknown option %s\n", a.c_str()); return 2; }
 		else if (a.rfind("-psn_", 0) == 0) {}
 		else {
@@ -1630,7 +1661,12 @@ int main(int argc, char **argv)
 	const std::vector<std::pair<const m3::Profile *, std::string>> programs = game_zips(zip);
 	if (!programs.empty()) {
 		auto pick = programs.front();
-		for (const auto &pz : programs) if (cfg.game == pz.first->set) pick = pz;
+		const std::string &want = arg_game.empty() ? cfg.game : arg_game;
+		bool found = false;
+		for (const auto &pz : programs) if (want == pz.first->set) pick = pz, found = true;
+		if (!arg_game.empty() && !found)
+			fprintf(stderr, "--game: %s isn't in the ROM folder's zips: playing %s\n", arg_game == m3::VF3_TB.set ? "Team Battle" : "Revision D", pick.first->title);
+		else if (!arg_game.empty()) fprintf(stderr, "--game: %s for this run (Game > Version kept as it was)\n", pick.first->title);
 		game.board.profile = pick.first;
 		zip = pick.second;
 	}
