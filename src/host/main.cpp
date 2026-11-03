@@ -1720,7 +1720,7 @@ int main(int argc, char **argv)
 		else if (board.hide_free_play_text() != 2) fprintf(stderr, "not the data known: the FREE PLAY notices stay\n");
 		// Play as Dural's patches (her portrait, the dojo's model checked: the arcade froze there with her), for it only
 		const bool dural = cfg.dural && board.profile->dural && !nvram_away;
-		if (dural && board.set_dural(true) == 0) fprintf(stderr, "not the program known: no Dural on the select\n");
+		if (dural && board.set_dural(true, true) == 0) fprintf(stderr, "not the program known: no Dural on the select\n");   // (offline: her boss stages varied too)
 		if (!dural) board.set_dural(false);
 		game.dural_players = dural && board.dural_on() ? 3 : 0;
 		game.program_changed();

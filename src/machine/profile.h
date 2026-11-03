@@ -29,6 +29,10 @@ struct DuralPatch
 	size_t known_count;
 	const uint32_t (*patch)[3];   // the patches: address, the word known there, the new word
 	size_t patch_count;
+	// offline only (set_dural's `offline`): the arcade's Dural boss stages for a player who is Dural (ids 9, 22), as
+	// the program's own list for most fighters (Revision D's is always Taka-Arashi's Dural version for her: issue #30)
+	const uint32_t (*offline)[3];
+	size_t offline_count;
 	uint32_t ram_from, ram_to;    // RAM the patched code keeps its copies in (cleared when the patches go)
 	// her picture, the FINAL MATCH screen's (the tile generator's pictures: a descriptor (in the fixed CROM) of chunk
 	// count, width and height in tiles and the map, then chunks of palette and patterns in the banked CROM)

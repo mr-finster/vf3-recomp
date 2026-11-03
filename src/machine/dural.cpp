@@ -174,11 +174,27 @@ const uint32_t TB_PATCH[][3] = {
 	{ 0x306B0, 0x2C110005, 0x2C110006 }, { 0x306CC, 0x3A200005, 0x3A200006 }, { 0x79F6C, 0x483F4540, 0x484B4540 },
 };
 
+// The arcade's Dural boss (offline only: a 1P game vs the CPU, never online). When the CPU's next opponent is Dural
+// (index 9 of the order), the routine at 0x2BDF8 picks her stage from the list at 0x7702C[the player's fighter]
+// (16 bytes, a random number & 15): most fighters' is 0x770EE (the Dural versions of stages 1, 2, 7, 8, 9, 11, 12, 13,
+// 14, 15), but Jeffry's, Aoi's and Dural's own (4, 9, 11 and their second costumes 17, 22, 24) are 0x77094, sixteen
+// times stage 31 (Taka-Arashi's stage's Dural version). The game's choice for those it could pick; she had no reason
+// to be among them, so for her (9, 22) the list is most fighters' (each stage played Dural against Dural, CPU and
+// GPU: none freezes). Team Battle's 1 vs 1 has the same lists at 0x7DB14 (0x7DB7C, 0x7DBD6), and its 3 vs 3 takes
+// the least of the team's stage counts (bytes at 0x7DBF0 by fighter: hers 1) from the list at 0x7DC0A: hers made 10.
+const uint32_t REV_D_OFFLINE[][3] = { { 0x77050, 0x00077094, 0x000770EE }, { 0x77084, 0x00077094, 0x000770EE } };
+const uint32_t TB_OFFLINE[][3] = {
+	{ 0x7DB38, 0x0007DB7C, 0x0007DBD6 }, { 0x7DB6C, 0x0007DB7C, 0x0007DBD6 },
+	{ 0x7DBF8, 0x0A010A01, 0x0A0A0A01 }, { 0x7DC04, 0x0A0A0109, 0x0A0A0A09 },
+};
+
 } // namespace
 
 const DuralPatch REV_D_DURAL = { REV_D_KNOWN, sizeof REV_D_KNOWN / sizeof REV_D_KNOWN[0], REV_D_PATCH, sizeof REV_D_PATCH / sizeof REV_D_PATCH[0],
+	REV_D_OFFLINE, sizeof REV_D_OFFLINE / sizeof REV_D_OFFLINE[0],
 	0x7E0000, 0x7E8000, 0x4C, 0xFFB30004, 0xFF300000, 7 };
 const DuralPatch TB_DURAL = { TB_KNOWN, sizeof TB_KNOWN / sizeof TB_KNOWN[0], TB_PATCH, sizeof TB_PATCH / sizeof TB_PATCH[0],
+	TB_OFFLINE, sizeof TB_OFFLINE / sizeof TB_OFFLINE[0],
 	0x7E0000, 0x7E8000, 0x4C, 0xFFB30004, 0xFF300000, 7 };
 
 } // namespace m3

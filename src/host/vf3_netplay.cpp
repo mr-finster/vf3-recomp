@@ -57,14 +57,14 @@ std::string online_version(const std::string &b)
 
 uint64_t content_hash(m3::Model3 &b)
 {
-	const bool hidden = !b.free_play_text.empty(), dural = b.dural_on();
+	const bool hidden = !b.free_play_text.empty(), dural = b.dural_on(), offline = b.dural_offline;
 	if (hidden) b.show_free_play_text();
 	if (dural) b.set_dural(false);   // (Play as Dural's patches aside: online plays without them)
 	uint64_t h = 0;
 	for (const std::vector<uint8_t> *v : { &b.crom, &b.banked, &b.vrom, &b.sound_rom, &b.samples })
 		h = h * 0x100000001B3ull ^ vfnet::hash64(v->data(), v->size());
 	if (hidden) b.hide_free_play_text();
-	if (dural) b.set_dural(true);
+	if (dural) b.set_dural(true, offline);
 	return h;
 }
 
@@ -130,7 +130,7 @@ bool Adapter::begin(const std::vector<uint8_t> &blob)
 	// the PC way on both sides, whatever each plays offline: the FREE PLAY notices hidden in the CROM the boot
 	// copies the program from, free play in the settings, the boot run unseen, the same clock
 	if (!dural) board.set_dural(false);   // (Dural on the select: the match's, the same on both sides)
-	else if (board.set_dural(true) == 0) return false;
+	else if (board.set_dural(true) == 0) return false;   // (without the offline patches: the arcade's own boss stages)
 	if (board.hide_free_play_text() != 2) return false;
 	if (program_changed) program_changed();
 	board.rtc_time = 0;

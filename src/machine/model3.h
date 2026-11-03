@@ -178,8 +178,11 @@ public:
 	// arcade's freeze); her select portrait loads her own head, made chrome as a fight makes it; and either player's
 	// cursor can move onto her, a seventh column of the grid. On: returns how many words changed (0: not the program
 	// known, nothing changed). Off: puts them back.
-	int set_dural(bool on);
+	// `offline` (the PC's own games only, never online, where the other side's build plays without them): the
+	// arcade's Dural boss stages for her as a player too (the DuralPatch's offline list; issue #30)
+	int set_dural(bool on, bool offline = false);
 	bool dural_on() const { return !dural_words.empty(); }
+	bool dural_offline = false;   // the offline patches are among dural_words
 	std::vector<std::pair<size_t, uint32_t>> dural_words;   // what set_dural replaced (the program's word addresses)
 	std::vector<uint8_t> security;   // 128 KB, host-order words
 	std::vector<std::pair<size_t, std::vector<uint8_t>>> free_play_text;   // what hide_free_play_text replaced
