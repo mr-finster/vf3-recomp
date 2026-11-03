@@ -999,14 +999,15 @@ int main(int argc, char **argv)
 				fclose(tf);
 			}
 		}
-		if (getenv("VF3_TEXDUMP") && long(board.frame) == atol(getenv("VF3_TEXDUMP"))) {   // texture RAM's first sheet as 16-bit ARGB1555
-			std::vector<uint32_t> px(2048 * 1024);
-			for (int i = 0; i < 2048 * 1024; i++) {
+		if (getenv("VF3_TEXDUMP") && long(board.frame) == atol(getenv("VF3_TEXDUMP"))) {   // the texture RAM (both sheets, sheet 1 below) as 16-bit ARGB1555, to texram.png
+			const int rows = int(board.tex_ram.size() / 2048);
+			std::vector<uint32_t> px(size_t(2048) * rows);
+			for (size_t i = 0; i < px.size(); i++) {
 				const uint16_t t = board.tex_ram[i];
 				const uint32_t r = (t >> 10) & 31, g = (t >> 5) & 31, b = t & 31;
 				px[i] = 0xFF000000u | (b * 255 / 31) << 16 | (g * 255 / 31) << 8 | (r * 255 / 31);
 			}
-			write_png("texram.png", px.data(), 2048, 1024);
+			write_png("texram.png", px.data(), 2048, rows);
 		}
 		if (long(board.frame) == ram_at) {
 			std::string p = "ram_" + std::to_string(board.frame) + ".bin";

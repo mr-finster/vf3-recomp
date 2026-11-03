@@ -38,6 +38,17 @@ namespace {
 //   row a few frames after hers): when the texture loader (0x13C800) is idle and its last load was another
 //   fighter's in her row, 0x46 of her side's select object asks for hers again (once). Every other fighter's draw
 //   runs 6 more instructions, the same pictures.
+// - her reflection's place (issue #23): 0x450F8 puts her pieces' texture at 0x126460's place (sheet 1's (256,0))
+//   for id 9 and at 0x126468's ((256,256)) for any other, so for 22, her second costume: by her costume. But her
+//   picture is uploaded by side (the loader's request at 0x2CC40 takes the side, byte 4 of the side's object, at
+//   0x13C828): 1P's row (256,0), 2P's (256,256). They agree for 1P's 9 and 2P's 22 (and the arcade's boss, 9 on the
+//   1P side, 22 on the 2P side); with Start held on the pick (her second costume on 1P: gold 1P, so chrome 2P) or a
+//   lone 1P in gold, each side drew the other row: the other Dural's picture, or the CPU's portrait's (another
+//   fighter's face and hair in her legs, the select's gold head 1P a face). Now for 9 and 22 the place is her side's
+//   (0x451C8-0x451E0 and 0x9F144-0x9F150: id 22 joins 9's test, then the side picks 0x126460 or 0x126468): the
+//   same place as before for 1P's 9 and 2P's 22, and nothing changes for another fighter (or the dojo's model, which
+//   goes through 0x450F8 too). Team Battle's own 0x4A650 already picks it by side (lbz r3,4(r14): Sega's fix), so
+//   its patches stay as they were.
 // - her spot on the select: the cursor's routine (0x2C7C4) keeps the column (r17, 0x45 of the player's select object
 //   0x108000 + 0x80 * player) in 0-5, wrapping, and reads the fighter from the grid's rows (0x70400: 0x70408 and
 //   0x7040F), whose seventh byte is already 9, Dural, in both rows. Now the column goes to 6: right from the sixth
@@ -106,6 +117,10 @@ const uint32_t REV_D_PATCH[][3] = {
 	{ 0x9F12C, 0xFFFFFFFF, 0x7FC3F378 }, { 0x9F130, 0xFFFFFFFF, 0xBB210008 }, { 0x9F134, 0xFFFFFFFF, 0x8001003C },
 	{ 0x9F138, 0xFFFFFFFF, 0x7C0803A6 }, { 0x9F13C, 0xFFFFFFFF, 0x38210040 }, { 0x9F140, 0xFFFFFFFF, 0x4E800020 },
 	{ 0x2C8A8, 0x2C110005, 0x2C110006 }, { 0x2C8C4, 0x3A200005, 0x3A200006 }, { 0x73674, 0x483F4540, 0x484B4540 },
+	{ 0x451C8, 0x40820010, 0x2C820016 }, { 0x451CC, 0x3F600012, 0x4C423382 }, { 0x451D0, 0x3B7B6460, 0x3F600012 },
+	{ 0x451D4, 0x48000018, 0x3B7B6468 }, { 0x451D8, 0x3F600012, 0x40820014 }, { 0x451DC, 0x3B7B6468, 0x880E0004 },
+	{ 0x451E0, 0x4800000C, 0x48059F64 }, { 0x9F144, 0xFFFFFFFF, 0x2C000000 }, { 0x9F148, 0xFFFFFFFF, 0x40820008 },
+	{ 0x9F14C, 0xFFFFFFFF, 0x3B7BFFF8 }, { 0x9F150, 0xFFFFFFFF, 0x4BFA609C },
 };
 
 const uint32_t TB_KNOWN[][2] = {

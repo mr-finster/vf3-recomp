@@ -3591,15 +3591,15 @@ int main(int argc, char **argv)
 		return pg;
 	};
 	// The identity for the handshake: the online version with what's added for the options that change a match, in
-	// this order: Dural on the select "+dural", Team Battle 1 vs 1 "+1v1", Online > Settings' stage select "+stage"
-	// (each off, the plain version, as the builds before it: they still meet)
+	// this order: Dural on the select "+dural2" (Team Battle's "+dural": vf3_netplay.h's DURAL_FLAG), Team Battle 1 vs 1
+	// "+1v1", Online > Settings' stage select "+stage" (each off, the plain version, as the builds before it: they still meet)
 	auto online_identity = [&] {
 		if (online_ready) return;   // (the ROM's hash for the handshake, once; again after an option changed)
 		if (game.emu_thread.joinable()) game.job_wait();
 		const bool dural = cfg.dural && board.profile->dural;
 		const bool one = board.profile == &m3::VF3_TB && cfg.tb_one;
 		const bool stage = cfg.online.stage_select;
-		online.identity = { board.profile->set, vf3net::online_version(VF3_VERSION) + (dural ? "+dural" : "") + (one ? "+1v1" : "") + (stage ? "+stage" : ""), vf3net::content_hash(board), "" };   // (the online version, not the release's)
+		online.identity = { board.profile->set, vf3net::online_version(VF3_VERSION) + (dural ? (board.profile == &m3::VF3_TB ? "+dural" : vf3net::DURAL_FLAG) : "") + (one ? "+1v1" : "") + (stage ? "+stage" : ""), vf3net::content_hash(board), "" };   // (the online version, not the release's)
 		online.adapter.dural = dural;
 		online.adapter.stage_select_on = stage;
 		online_ready = true;

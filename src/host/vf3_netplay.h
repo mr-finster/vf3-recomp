@@ -22,6 +22,11 @@ namespace vf3net {
 // (220c2e7), whose builds send exactly this. (A wrong one ends a match as a desync: vf3soak --hashes against the last
 // release's file says whether the game changed. A new one is named after the release that brings it.)
 inline constexpr const char *NET_VERSION = "v0.1.7-online-preview";
+// Dural on the select's flag on Revision D's online version: "+dural2" since her patches changed (issue #23: her
+// reflection's place by her side; Team Battle's didn't change, its flag is still "+dural"), so a match never mixes
+// them (the program's words are in RAM, in the desync check's state: a "+dural" build of v0.1.15 or before and this
+// one would go out of step at the first check)
+inline constexpr const char *DURAL_FLAG = "+dural2";
 // The online version a build plays as: NET_VERSION for a release (its version a release's name, as the release kit
 // builds it, or a build at a tag: "v0.1.8-alpha"), else the build's own version (git describe's "v0.1.8-alpha-3-gabc1234"
 // between releases, a bare commit, "dev"), so a test build, which may carry a change to the game, never meets the

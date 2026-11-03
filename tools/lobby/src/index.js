@@ -711,7 +711,7 @@ const ONLINE_FRESH_MS = 15000, ONLINE_PLAYING_MS = 600000, ONLINE_HOST_MS = 1000
 const VARIANTS = {
 	vf1: { bases: ['v1.5.0'], flags: [] },
 	vf2: { bases: ['v0.1.16'], flags: ['random'] },
-	vf3: { bases: ['v0.1.7-online-preview'], flags: ['dural', 'stage'] },
+	vf3: { bases: ['v0.1.7-online-preview'], flags: ['dural', 'dural2', 'stage'] },
 	vf3tb: { bases: ['v0.1.7-online-preview'], flags: ['dural', '1v1', 'stage'] },
 };
 function variant_of(game, version) {
