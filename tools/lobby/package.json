@@ -1,6 +1,6 @@
 {
   "name": "vf-lobby",
   "private": true,
-  "scripts": { "dev": "wrangler dev", "deploy": "wrangler deploy" },
+  "scripts": { "dev": "wrangler dev", "deploy": "wrangler deploy", "test": "node test/pairing.test.mjs src/index.js" },
   "devDependencies": { "wrangler": "4.151.3" }
 }

@@ -17,6 +17,11 @@
 //   POST /v1/random/count {game, version, content} -> {players}: searching, or in a random match made in the last 10 minutes
 //   A match: {role: "host", code, key, token, name, country} (the room's, opened as theirs, the other already in it)
 //   or {role: "guest", code, name, cands, relay, token, country} (as /v1/join's). Players meet the nearest first.
+//   Any of these may carry {pool, accepts} as well (a game that plays across settings: its version's base and a flag,
+//   "v0.1.7-online-preview+host1", and the flags of an older version's it can play that version's way, ["stage", ...]).
+//   Two players meet when terms() finds what their match plays as: the same pool (the host's settings), the same
+//   version (as ever), or one's version the other can play; that's said to both as "as" (the join's answer, the guest
+//   in the host's wait, a random match's either side). A game sending no pool is matched as before, by its version.
 //   GET  /v1/ping   -> {ok, protocol}
 //   GET  /v1/online -> who's online now, each game and its variants (counted from what the lobby itself saw; README)
 //
@@ -130,7 +135,31 @@ function who(b, req) {
 		name: clean(b.name, 10),
 		cands: addrs(b.cands),
 		relay: relay && addr_ok(relay) ? relay : '',   // (not checked against Cloudflare's ranges: its TURN relays from others too, 104.30.x)
+		pool: clean(b.pool, 64),
+		accepts: Array.isArray(b.accepts) ? b.accepts.slice(0, 8).filter((f) => typeof f === 'string' && /^[a-z0-9]{1,16}$/.test(f)) : [],
 	};
+}
+// What a match between two players plays as (the game and the ROM checked apart), or null: they can't meet.
+// The same pool: the pool's (the host's settings). The same version: it (every game before pools). Else one's
+// version that the other can play its way (the same base, every flag of it one the other accepts): an older build's
+// terms, so it meets the newer as it meets its own.
+function base_of(v) {
+	const at = v.indexOf('+');
+	return at < 0 ? v : v.slice(0, at);
+}
+function adopts(n, v) {   // (player n can play version v's match)
+	if (!n.pool || !Array.isArray(n.accepts) || base_of(v) !== base_of(n.version)) return false;
+	const flags = v.slice(base_of(v).length).split('+').slice(1);
+	return new Set(flags).size === flags.length && flags.every((f) => n.accepts.includes(f));
+}
+function terms(a, b) {
+	if (a.pool && a.pool === b.pool) return a.pool;
+	if (a.version === b.version) return a.version;
+	if (!b.pool && adopts(a, b.version)) return b.version;
+	if (!a.pool && adopts(b, a.version)) return a.version;
+	const ab = adopts(a, b.version), ba = adopts(b, a.version);   // (two pools apart: either's version, the same whichever asks)
+	if (ab && ba) return a.version < b.version ? a.version : b.version;
+	return ab ? b.version : ba ? a.version : null;
 }
 function code_ok(c) {
 	return typeof c === 'string' && c.length === CODE_LENGTH && [...c].every((ch) => LETTERS.includes(ch));
@@ -262,7 +291,7 @@ export default {
 				return t;
 			}
 
-			// a random opponent: the nearest of those searching, the same game, version and ROM
+			// a random opponent: the nearest of those searching, the same game, ROM and version's base, whose match terms() finds
 			if (path === '/v1/random' || path === '/v1/random/wait' || path === '/v1/random/leave' || path === '/v1/random/count') {
 				if (path === '/v1/random' && (await limited(env, req, 'HOST_LIMIT'))) return json({ error: 'busy' }, 429);
 				if (path === '/v1/random/wait' && (await limited(env, req, 'WAIT_LIMIT'))) return json({ error: 'busy' }, 429);
@@ -270,13 +299,13 @@ export default {
 				if (!b) return json({ error: 'bad' }, 400);
 				const me = who(b, req);
 				if (!GAMES.test(me.game) || !me.version) return json({ error: 'bad' }, 400);
-				const q = env.QUEUES.get(env.QUEUES.idFromName('q|' + me.game + '|' + me.version + '|' + me.content));
+				const q = env.QUEUES.get(env.QUEUES.idFromName('q|' + me.game + '|' + base_of(me.version) + '|' + me.content));
 				if (path === '/v1/random/count') {   // (asked by everyone on the Online screen: kept 30 s at the edge, the queue asked once a place)
-					const key = new Request('https://count.vf-lobby/' + encodeURIComponent(me.game + '|' + me.version + '|' + me.content));
+					const key = new Request('https://count.vf-lobby/' + encodeURIComponent(me.game + '|' + me.version + '|' + me.content + '|' + me.pool + '|' + me.accepts.join(',')));
 					const edge = !env.TURN_STATIC;   // (not on a test's own lobby: its count's checked as it changes)
 					const kept = edge && (await caches.default.match(key));
 					if (kept) return kept;
-					const r = await q.fetch('https://queue/count', { method: 'POST', body: '{}' });
+					const r = await q.fetch('https://queue/count', { method: 'POST', body: JSON.stringify({ me }) });
 					const out = new Response(await r.text(), { status: r.status, headers: { 'content-type': 'application/json', 'cache-control': 'max-age=30' } });
 					if (edge && r.status === 200) await caches.default.put(key, out.clone());
 					return out;
@@ -396,14 +425,15 @@ export class Room {
 		if (op === '/join') {
 			const g = b.guest, h = r.host;
 			if (g.game !== h.game) return json({ error: 'game' }, 412);
-			if (g.version !== h.version) return json({ error: 'version', host_version: h.version }, 412);
+			const as = terms(g, h);
+			if (as === null) return json({ error: 'version', host_version: h.version }, 412);
 			if (g.content !== h.content) return json({ error: 'rom' }, 412);
 			if (r.guest) return json({ error: 'full' }, 409);
-			r.guest = g;
+			r.guest = { ...g, as };
 			await this.save();
 			this.tell({ op: 'join', sids: [r.sid, clean(b.sid, 16)], countries: [h.country, g.country] });
-			for (const w of this.waiters.splice(0)) w(g);
-			return json({ name: h.name, cands: h.cands, relay: h.relay, token: r.token, country: h.country });
+			for (const w of this.waiters.splice(0)) w(r.guest);   // (with the match's terms)
+			return json({ name: h.name, cands: h.cands, relay: h.relay, token: r.token, country: h.country, as });
 		}
 		// the host's own: its key
 		if (b.key !== r.key) return json({ error: 'no_room' }, 404);
@@ -473,8 +503,8 @@ export class Limits {
 	}
 }
 
-// Those searching for a random opponent (one queue per game, version and ROM: only those who can play each other
-// meet). Each is matched with the nearest other, by where Cloudflare has them: close at first, further the longer
+// Those searching for a random opponent (one queue per game, version's base and ROM; in it, only those terms()
+// finds a match for meet). Each is matched with the nearest other, by where Cloudflare has them: close at first, further the longer
 // either has waited, anyone after 40 s. The one who waited longer hosts: a room's opened as theirs, the other
 // joined into it, and from there it's a room's match like any other (its code kept for Play again). Kept in memory
 // only: those searching ask every 20 s, and one gone quiet 25 s is dropped.
@@ -524,17 +554,33 @@ export class Queue {
 		if (t.busy) { t.again = true; return; }
 		if (!this.game) return;
 		const now = Date.now();
-		const of = new Map();   // (each searching once, with their country: the lobby's own)
-		for (const w of this.waiting.values()) if (!w.result && w.sid && !of.get(w.sid)) of.set(w.sid, country_ok(w.me.country));
-		const sids = [...of.keys()].sort(), countries = sids.map((x) => of.get(x));
-		const sig = sids.map((x, i) => x + countries[i]).join(',');
-		if (sig === t.sig && !t.events.length && !(sig && now - t.at > 15000)) return;
+		// (each searching once, with their country: the lobby's own; by version, a queue having all of a base's: the
+		// count's variants are the versions')
+		const by = new Map();
+		for (const w of this.waiting.values()) {
+			if (w.result || !w.sid) continue;
+			const of = by.get(w.me.version) || new Map();
+			if (!of.get(w.sid)) of.set(w.sid, country_ok(w.me.country));
+			by.set(w.me.version, of);
+		}
+		const lists = new Map();
+		for (const [v, of] of by) { const sids = [...of.keys()].sort(); lists.set(v, { sids, countries: sids.map((x) => of.get(x)) }); }
+		for (const v of t.versions || []) if (!lists.has(v)) lists.set(v, { sids: [], countries: [] });   // (one gone: its entry cleared)
+		const sig = [...lists].map(([v, l]) => v + ':' + l.sids.map((x, i) => x + l.countries[i]).join(',')).sort().join(';');
+		const anyone = [...by.keys()].length > 0;
+		if (sig === t.sig && !t.events.length && !(anyone && now - t.at > 15000)) return;
 		t.sig = sig;
 		t.at = now;
 		t.busy = true;
-		const events = t.events.splice(0);
-		const done = tell(this, { op: 'queue', key: this.ctx.id.toString(), game: this.game, version: this.version, sids: sids.slice(0, 2000), countries: countries.slice(0, 2000), events })
-			.then(() => new Promise((ok) => setTimeout(ok, 2000)))
+		t.versions = [...by.keys()];
+		let events = t.events.splice(0);
+		if (!lists.size) lists.set(this.version, { sids: [], countries: [] });
+		let done = Promise.resolve();
+		for (const [v, l] of lists) {   // (the events with the first: a match's own version beside it)
+			done = tell(this, { op: 'queue', key: this.ctx.id.toString() + '|' + v, game: this.game, version: v, sids: l.sids.slice(0, 2000), countries: l.countries.slice(0, 2000), events });
+			events = [];
+		}
+		done = done.then(() => new Promise((ok) => setTimeout(ok, 2000)))
 			.then(() => {
 				t.busy = false;
 				if (t.again) { t.again = false; this.sync(); }
@@ -546,9 +592,9 @@ export class Queue {
 		const is = (x, y) => x.from === y.from && x.me.name === y.name;
 		return w.avoid.some((p) => is(o, p)) || o.avoid.some((p) => is(w, p));
 	}
-	searching() {
+	searching(me) {   // (those me could be matched with, if said: else all)
 		let n = 0;
-		for (const w of this.waiting.values()) if (!w.result) n++;
+		for (const w of this.waiting.values()) if (!w.result && (!me || terms(me, w.me) !== null)) n++;
 		return n;
 	}
 	// The nearest other one searching that this one may be matched with now: only one waiting on an answer this
@@ -557,7 +603,7 @@ export class Queue {
 		const now = Date.now();
 		let pick = null, best = Infinity;
 		for (const [t, o] of this.waiting) {
-			if (t === ticket || o.result || o.waiters.length === 0 || this.apart(w, o)) continue;
+			if (t === ticket || o.result || o.waiters.length === 0 || this.apart(w, o) || terms(w.me, o.me) === null) continue;
 			const d = km(w.geo, o.geo), waited = Math.max(now - w.since, now - o.since) / 1000;
 			if (d <= reach_km(waited) && d < best) { pick = o; best = d; }
 		}
@@ -608,8 +654,8 @@ export class Queue {
 			if (j.status !== 200) { await this.close(code, h.key); return null; }
 			const g = await j.json();
 			return {
-				host: { role: 'host', code, key: h.key, token: h.token, name: guest.me.name, country: guest.me.country },
-				guest: { role: 'guest', code, name: g.name, cands: g.cands, relay: g.relay, token: g.token, country: g.country },
+				host: { role: 'host', code, key: h.key, token: h.token, name: guest.me.name, country: guest.me.country, as: g.as },
+				guest: { role: 'guest', code, name: g.name, cands: g.cands, relay: g.relay, token: g.token, country: g.country, as: g.as },
 			};
 		}
 		return null;
@@ -627,7 +673,7 @@ export class Queue {
 	// (a match is kept till RANDOM_KEPT_MS, not dropped once said: an answer lost on the way is asked for again)
 	answer(ticket, w) {
 		if (w.result && w.result !== 'pairing') return json(w.result);
-		return json({ ticket, waiting: true, players: this.searching() });
+		return json({ ticket, waiting: true, players: this.searching(w.me) });
 	}
 	async fetch(req) {
 		const op = new URL(req.url).pathname;
@@ -636,7 +682,7 @@ export class Queue {
 		const now = Date.now();
 		if (op === '/count') {
 			this.matched = this.matched.filter((t) => now - t < RANDOM_PLAYING_MS);
-			return json({ players: this.searching() + 2 * this.matched.length });
+			return json({ players: this.searching(b.me) + 2 * this.matched.length });
 		}
 		if (op === '/enter') {
 			let mine = 0;   // (a few tickets an address at most: no one place soaks up everyone searching)
@@ -655,7 +701,7 @@ export class Queue {
 			}
 			const w = { me: b.me, geo: b.geo, from: b.from, sid: clean(b.sid, 16), avoid, since: now, seen: now, result: null, waiters: [], partner: null, room: null, left: false };
 			this.waiting.set(ticket, w);
-			if (!this.game) { this.game = b.me.game; this.version = b.me.version; }   // (one game and version a queue)
+			if (!this.game) { this.game = b.me.game; this.version = b.me.version; }   // (one game and version's base a queue: the version first seen, for the count)
 			this.sync();
 			await this.try_match(ticket, w);
 			return this.answer(ticket, w);

@@ -66,7 +66,14 @@ and the games started with `VF_LOBBY=http://127.0.0.1:8787`.
   matches in 10 minutes; and 200 relay logins a day (an IPv4 address, or an IPv6 /48). High enough for a phone
   network's or a school's shared address (many players behind one); a flood, or a room code guessed at (31^6,
   about 900 million codes), is stopped.
-- **The random queue**: one Durable Object a game version, in memory (a restart or a deploy drops those searching:
+- **Who meets whom** (issues #25, #32): a game that plays across settings sends a `pool` (its online version's
+  base with a flag: VF3's `+host1`, VF2's `+mix1`) and `accepts` (the flags of an older version it can play that
+  version's way). Two players meet if `terms()` finds what their match plays as: the same pool (VF3: the host's stage
+  select, Dural and Team Battle mode; VF2: each player's own fighter), the same version (every game before pools,
+  and VF1), or one's version the other can play (an older build's, played its way). Both are told it (`as`), and the
+  games' handshake compares it, so two that would play different games never start. Old games send no pool and are
+  matched as before, by their version; new ones still meet them where they can play the old one's terms.
+- **The random queue**: one Durable Object a game, version base (its version up to a `+`) and ROM, in memory (a restart or a deploy drops those searching:
   their games enter again by themselves). Only a player with a wait open is matched (a game closed without saying
   so isn't); one who leaves mid-match-making closes the room made. The count on the Random card is those searching
   plus two a random match made in the last 10 minutes, kept 30 s at Cloudflare's edge (everyone on the Online
