@@ -13,6 +13,8 @@ enum : uint16_t { UP = 1, DOWN = 2, LEFT = 4, RIGHT = 8, PUNCH = 16, KICK = 32, 
 static_assert(START == START_BUTTON);
 
 constexpr uint32_t BLOB_MAGIC = 0x42334656;   // "VF3B"
+constexpr uint32_t TERMS_MAGIC = 0x48334656;   // "VF3H": the host's settings after the blob (a pool match's)
+constexpr size_t TERMS_SIZE = 8;               // (magic, then: 1, stage select, Dural, 0)
 
 } // namespace
 
@@ -99,6 +101,42 @@ std::vector<uint8_t> start_blob(const m3::Model3 &b)
 	return out;
 }
 
+std::string pool_version(const std::string &online)
+{
+	return online.substr(0, online.find('+')) + HOST_TERMS_FLAG;
+}
+
+bool terms_of(const std::string &terms, const std::string &own, const std::string &pool, bool tb, Terms &out)
+{
+	out = {};
+	if (terms == pool) { out.host_terms = true; return true; }
+	const std::string base = own.substr(0, own.find('+'));
+	if (terms.compare(0, base.size(), base) != 0 || (terms.size() > base.size() && terms[base.size()] != '+')) return false;
+	for (size_t at = base.size(); at < terms.size();) {   // (each "+flag": only those a build of this one's has)
+		const size_t next = terms.find('+', at + 1);
+		const std::string f = terms.substr(at, next == std::string::npos ? std::string::npos : next - at);
+		if (f == (tb ? "+dural" : DURAL_FLAG) && !out.dural) out.dural = true;
+		else if (f == "+stage" && !out.stage) out.stage = true;
+		else if (!(tb && f == "+1v1")) return false;   // (Team Battle's 1 vs 1: the host's blob has it, either way)
+		at = next == std::string::npos ? terms.size() : next;
+	}
+	return true;
+}
+
+std::vector<uint8_t> Adapter::host_blob() const
+{
+	std::vector<uint8_t> out = start_blob(board);
+	if (!host_terms) return out;
+	const size_t n = out.size();
+	out.resize(n + TERMS_SIZE);
+	memcpy(out.data() + n, &TERMS_MAGIC, 4);
+	out[n + 4] = 1;
+	out[n + 5] = stage_select_on ? 1 : 0;
+	out[n + 6] = dural ? 1 : 0;
+	out[n + 7] = 0;
+	return out;
+}
+
 // (a frame's MIDI bytes go at once, a guessed frame's as much as a certain one's, so no sound waits for the other
 // side's input)
 void Adapter::take_midi(std::vector<uint8_t> &out)
@@ -120,9 +158,17 @@ void Adapter::take_midi(std::vector<uint8_t> &out)
 bool Adapter::begin(const std::vector<uint8_t> &blob)
 {
 	uint32_t magic = 0;
-	if (blob.size() != 4 + board.backup.size() + sizeof board.eeprom.regs + 1) return false;
+	const size_t base = 4 + board.backup.size() + sizeof board.eeprom.regs + 1;
+	if (blob.size() != base + (host_terms ? TERMS_SIZE : 0)) return false;
 	memcpy(&magic, blob.data(), 4);
 	if (magic != BLOB_MAGIC) return false;
+	if (host_terms) {   // (the host's stage select and Dural, this side's own aside for the match)
+		memcpy(&magic, blob.data() + base, 4);
+		if (magic != TERMS_MAGIC || blob[base + 4] != 1 || blob[base + 5] > 1 || blob[base + 6] > 1) return false;
+		stage_select_on = blob[base + 5] != 0;
+		dural = blob[base + 6] != 0;
+		if (dural && !board.profile->dural) return false;
+	}
 	if (settle) settle();
 	if (on_begin) on_begin();
 	memcpy(board.backup.data(), blob.data() + 4, board.backup.size());
@@ -149,7 +195,7 @@ bool Adapter::begin(const std::vector<uint8_t> &blob)
 		board.run_frame();
 		if (booting && i % 60 == 59) booting();
 	}
-	set_versus_count(board, blob.back() % 16);
+	set_versus_count(board, blob[base - 1] % 16);
 	board.midi.clear();
 	frame = 0;
 	midi_sent.clear();

@@ -74,10 +74,12 @@ int main(int argc, char **argv)
 	int delay = 2;
 	bool use_rec = true, soft = false;   // soft: each side's clock a little slower while ahead, as the game's
 	bool stage = false, dural = false;
+	bool host_terms = false;   // --host-terms: a pool match (the host's settings in its blob's trailer, the guest's own aside)
+	int guest_stage = -1, guest_dural = -1, team = -1;   // (the guest's own, before the match: -1 the host's; team: the host's Team Battle mode byte)
 	dural_stage::Picker pick_a, pick_b;   // (--dural-stage: each side's own)
 	const m3::Profile *profile = nullptr;
 	const bool slow = getenv("VF3NET_SLOW") != nullptr;   // (each step over 40 ms, the host's)
-	const char *usage = "usage: vf3net <vf3.zip> --script FILE [--frames N] [--latency MS] [--jitter MS] [--loss PERCENT] [--delay D] [--interp] [--soft] [--set vf3tb] [--stage] [--dural] [--dural-stage host|guest|both] [--vs-rounds N] [--hashes FILE] [--blob-out FILE] [--blob-in FILE]\n";
+	const char *usage = "usage: vf3net <vf3.zip> --script FILE [--frames N] [--latency MS] [--jitter MS] [--loss PERCENT] [--delay D] [--interp] [--soft] [--set vf3tb] [--stage] [--dural] [--dural-stage host|guest|both] [--vs-rounds N] [--hashes FILE] [--blob-out FILE] [--blob-in FILE] [--host-terms] [--guest-stage 0|1] [--guest-dural 0|1] [--team 1v1|3v3]\n";
 	int vs_rounds = 0;
 	const char *hashes_path = nullptr, *blob_out = nullptr, *blob_in = nullptr;
 	for (int i = 1; i < argc; i++) {
@@ -92,6 +94,10 @@ int main(int argc, char **argv)
 		else if (a == "--soft") soft = true;
 		else if (a == "--stage") stage = true;
 		else if (a == "--dural") dural = true;
+		else if (a == "--host-terms") host_terms = true;
+		else if (a == "--guest-stage" && i + 1 < argc) guest_stage = atoi(argv[++i]);
+		else if (a == "--guest-dural" && i + 1 < argc) guest_dural = atoi(argv[++i]);
+		else if (a == "--team" && i + 1 < argc) team = std::string(argv[++i]) == "1v1" ? 1 : 0;
 		else if (a == "--dural-stage" && i + 1 < argc) {
 			const std::string w = argv[++i];
 			pick_a.trigger = w == "host" || w == "both";
@@ -135,7 +141,14 @@ int main(int argc, char **argv)
 		A.m.backup[rounds_at] = uint8_t(vs_rounds);
 		printf("the host's Rounds to win (vs player): %d\n", int(A.m.backup[rounds_at]));
 	}
-	std::vector<uint8_t> blob = vf3net::start_blob(A.m);
+	if (team >= 0 && set.team_mode && set.at) {   // (the host's own Team Battle mode, as Game > Team Battle mode writes it)
+		A.m.backup[set.at + size_t(set.team_mode)] = uint8_t(team);
+		printf("the host's Team Battle mode: %s\n", team ? "1 vs 1" : "3 vs 3");
+	}
+	A.adapter.stage_select_on = stage;
+	A.adapter.dural = dural;
+	A.adapter.host_terms = B.adapter.host_terms = host_terms;
+	std::vector<uint8_t> blob = A.adapter.host_blob();
 	if (blob_in) {
 		FILE *f = fopen(blob_in, "rb");
 		if (!f) { fprintf(stderr, "vf3net: can't read %s\n", blob_in); return 1; }
@@ -160,8 +173,10 @@ int main(int argc, char **argv)
 	cfg.handshake_ms = 120000;   // (both boots run here one after the other, on the one clock)
 	const vfnet::Identity ia{ "vf3", "test", content, "HOST" }, ib{ "vf3", "test", content, "GUEST" };
 	A.adapter.checkpoint_every = B.adapter.checkpoint_every = 300;
-	A.adapter.stage_select_on = B.adapter.stage_select_on = stage;
-	A.adapter.dural = B.adapter.dural = dural;
+	B.adapter.stage_select_on = guest_stage < 0 ? stage : guest_stage != 0;
+	B.adapter.dural = guest_dural < 0 ? dural : guest_dural != 0;
+	printf("host: stage select %d, Dural %d; the guest's own: stage select %d, Dural %d%s\n", int(stage), int(dural), int(B.adapter.stage_select_on),
+	       int(B.adapter.dural), host_terms ? " (a pool match: the host's)" : "");
 	vfnet::Session sa(wire.a(), A.adapter, ia, cfg, true, blob);
 	vfnet::Session sb(wire.b(), B.adapter, ib, cfg, false);
 
@@ -211,6 +226,7 @@ int main(int argc, char **argv)
 	bool failed = false;
 	while (sa.next_event(e)) if (e.kind == e.ended) { printf("host: %s\n", e.text.c_str()); failed = true; }
 	while (sb.next_event(e)) if (e.kind == e.ended) { printf("guest: %s\n", e.text.c_str()); failed = true; }
+	printf("the guest played: stage select %d, Dural %d\n", int(B.adapter.stage_select_on), int(B.adapter.dural));
 
 	// the same inputs straight through, on a third board, against both players' checkpoints
 	const uint32_t n = std::min(sa.confirmed(), sb.confirmed());
@@ -221,6 +237,7 @@ int main(int argc, char **argv)
 		C.use_rec = use_rec;
 		C.adapter.stage_select_on = stage;
 		C.adapter.dural = dural;
+		C.adapter.host_terms = host_terms;
 		if (!C.open(rom, profile, error) || !C.adapter.begin(blob)) { fprintf(stderr, "vf3net: the straight board didn't start\n"); return 1; }
 		C.adapter.checkpoint_every = hashes_path ? 30 : 300;
 		std::vector<uint32_t> watch;

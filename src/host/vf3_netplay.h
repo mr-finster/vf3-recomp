@@ -32,6 +32,18 @@ inline constexpr const char *DURAL_FLAG = "+dural2";
 // between releases, a bare commit, "dev"), so a test build, which may carry a change to the game, never meets the
 // release's players: only the same build
 std::string online_version(const std::string &build);
+// Random and room matches across settings (issues #25, #32): a build that has these sends the lobby, besides its own
+// online version, a pool (the online version with HOST_TERMS_FLAG: everyone on it plays the host's settings) and the
+// flags it can play an older build's way (its accepts). The lobby answers with the match's terms ("as"): the pool, a
+// match on the host's stage select, Dural and Team Battle mode (the start blob's trailer, below), or one side's own
+// online version, played exactly as a build of that version plays it (its flags). The handshake compares the terms.
+// A change to what a pool match plays (Dural's patches, the trailer) is a new flag here ("+host2")
+inline constexpr const char *HOST_TERMS_FLAG = "+host1";
+std::string pool_version(const std::string &online);   // (online's base, before any "+", with HOST_TERMS_FLAG)
+// What a build plays a match as, from the lobby's terms: host_terms (the pool's), else that version's flags (a
+// version with another base, or a flag this build hasn't got: false, not played)
+struct Terms { bool host_terms = false, dural = false, stage = false; };
+bool terms_of(const std::string &terms, const std::string &own, const std::string &pool, bool tb, Terms &out);
 
 // The addresses below are Revision D's, kept in the board's profile (src/machine/profile.h): the boot, unseen, up
 // to the SEGA logo (as the PC way's, main.cpp): 960 frames, the profile's boot_frames; the arcade's VS stage
@@ -117,6 +129,10 @@ public:
 	// same): on, CHALLENGER (0), the challenger picks and so the loser on every rematch; off (as every build before
 	// it), OFF (1)
 	bool stage_select_on = false;
+	// The match plays the host's settings (the pool's terms): the host's blob with its stage select and Dural after
+	// it (host_blob), the guest's own dural and stage_select_on set from it at the start; off, the blob as ever
+	bool host_terms = false;
+	std::vector<uint8_t> host_blob() const;
 	std::function<void()> settle;              // before a save or load: anything running alongside the board waits
 	std::function<void(const std::vector<uint8_t> &)> midi_out;   // bytes for the sound board
 	std::function<void()> on_begin;            // a match's start, before the board is set up for it (keep the player's NVRAM)
