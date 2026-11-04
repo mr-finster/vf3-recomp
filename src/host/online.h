@@ -32,7 +32,8 @@ struct OnlineSettings
 	bool hide_ip = false;         // a room code's matches always through the relay: the other player never sees this address
 	int max_ping = 0;             // Random's: an opponent further than this (the ping, ms) passed over for another; 0 any
 	bool chime = true;            // a chime when a match is found (and the window flashing, if it's not the one in front)
-	bool stage_select = false;    // the arcade's stage select in a match (CHALLENGER: the loser picks on a rematch); "+stage" on the online version
+	bool stage_select = true;     // the arcade's stage select in a match (CHALLENGER: the loser picks on a rematch); "+stage" on the online version
+	                              // (on by default since it no longer splits Random, issue #32: a match plays the host's)
 };
 
 class Online

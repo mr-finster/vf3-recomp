@@ -203,8 +203,9 @@ Menu > **Cheats** > **Dural on the select**: the boss, in a 13th spot past Kage,
 or left from Akira; Start held for her other colours). Her own picture on the grid and her profile, in both games.
 The arcade froze with her on Akira's stage: fixed here. Changing it restarts the game.
 
-Online, while it's on, you meet only players who have it on too (Random, Host and Join alike). Turn it off to play
-everyone.
+Online, a match plays the host's choice: Dural is on the select for both players when the host has her on, off when
+the host has her off (said as the match starts), so it no longer splits players. Against an older version, only a
+player with the same choice.
 
 Menu > **Cheats** > **Dural's stage** (issue #22; Off, Guard or Start): on the stage screen (Stage select:
 Challenger), confirm a stage with that button for its Dural version. The arcade gives it only to the picker holding
@@ -224,9 +225,11 @@ host's arcade settings (rounds, difficulty, energy). The stage is the game's own
 that's been on all day: a random one for the first match, the game's order after it (or picked: **Stage select**,
 below). Each player uses their own Player 1 controls.
 
-**Stage select** (Online > Settings): Off (the default) plays as above. On plays the arcade's stage screen
-(Challenger): the challenger picks the stage, so on every rematch the loser does. You only meet players who have it
-on too (Random, Host and Join alike); it can't change while you're hosting, joining or playing.
+**Stage select** (Online > Settings): On (the default) plays the arcade's stage screen (Challenger): the challenger
+picks the stage, so on every rematch the loser does. Off plays as above. It no longer splits players: a match plays
+the host's choice, and so do Cheats > Dural on the select and Team Battle's 1 vs 1 or 3 vs 3 (each player is told the
+match's settings as it starts). Against an older version the match plays that version's settings, when this one has
+them. It can't change while you're hosting, joining or playing.
 
 **Online matches are always first to 3**, as SEGA's tournaments and Japan's arcades play, whatever either player's
 Menu > Arcade settings > **Rounds to win (vs player)**, which is for playing offline. The host's game sets it for the
