@@ -13,6 +13,9 @@
 // menu does (the match plays the blob's); --hashes FILE: the straight board's state hash every 30 frames ("frame hash",
 // hex); --blob-out FILE: the host's start blob written to FILE; --blob-in FILE: the match started from FILE's blob instead
 // of this build's (a cross-version test: another build's host, this build's guest and straight board, the hashes compared)
+// --terms VERSION: the match played on the lobby's terms as Online::use_terms plays them, an older version's
+// ("v0.1.7-online-preview+1v1": its stage select, Dural and Team Battle mode, whatever --stage, --dural and --team) or
+// the pool's (VERSION's base with +host1: as --host-terms)
 // VF3NET_WATCH=addr,... (hex): those RAM bytes on the straight run, printed as they change ("bytes FRAME v...").
 #include "../src/host/input_script.h"
 #include "../src/host/dural_stage.h"
@@ -79,9 +82,9 @@ int main(int argc, char **argv)
 	dural_stage::Picker pick_a, pick_b;   // (--dural-stage: each side's own)
 	const m3::Profile *profile = nullptr;
 	const bool slow = getenv("VF3NET_SLOW") != nullptr;   // (each step over 40 ms, the host's)
-	const char *usage = "usage: vf3net <vf3.zip> --script FILE [--frames N] [--latency MS] [--jitter MS] [--loss PERCENT] [--delay D] [--interp] [--soft] [--set vf3tb] [--stage] [--dural] [--dural-stage host|guest|both] [--vs-rounds N] [--hashes FILE] [--blob-out FILE] [--blob-in FILE] [--host-terms] [--guest-stage 0|1] [--guest-dural 0|1] [--team 1v1|3v3]\n";
+	const char *usage = "usage: vf3net <vf3.zip> --script FILE [--frames N] [--latency MS] [--jitter MS] [--loss PERCENT] [--delay D] [--interp] [--soft] [--set vf3tb] [--stage] [--dural] [--dural-stage host|guest|both] [--vs-rounds N] [--hashes FILE] [--blob-out FILE] [--blob-in FILE] [--host-terms] [--guest-stage 0|1] [--guest-dural 0|1] [--team 1v1|3v3] [--terms VERSION]\n";
 	int vs_rounds = 0;
-	const char *hashes_path = nullptr, *blob_out = nullptr, *blob_in = nullptr;
+	const char *hashes_path = nullptr, *blob_out = nullptr, *blob_in = nullptr, *terms = nullptr;
 	for (int i = 1; i < argc; i++) {
 		std::string a = argv[i];
 		if (a == "--frames" && i + 1 < argc) frames = strtol(argv[++i], nullptr, 10);
@@ -107,6 +110,7 @@ int main(int argc, char **argv)
 		else if (a == "--hashes" && i + 1 < argc) hashes_path = argv[++i];
 		else if (a == "--blob-out" && i + 1 < argc) blob_out = argv[++i];
 		else if (a == "--blob-in" && i + 1 < argc) blob_in = argv[++i];
+		else if (a == "--terms" && i + 1 < argc) terms = argv[++i];
 		else if (a == "--set" && i + 1 < argc) {
 			if (!(profile = m3::find_profile(argv[++i]))) { fprintf(stderr, "vf3net: no such set %s\n", argv[i]); return 2; }
 		}
@@ -144,6 +148,16 @@ int main(int argc, char **argv)
 	if (team >= 0 && set.team_mode && set.at) {   // (the host's own Team Battle mode, as Game > Team Battle mode writes it)
 		A.m.backup[set.at + size_t(set.team_mode)] = uint8_t(team);
 		printf("the host's Team Battle mode: %s\n", team ? "1 vs 1" : "3 vs 3");
+	}
+	if (terms) {   // (the lobby's terms, played as Online::use_terms plays them: the pool's, or an older version's flags)
+		const std::string t = terms, own = t.substr(0, t.find('+'));
+		vf3net::Terms m;
+		if (!vf3net::terms_of(t, own, vf3net::pool_version(own), set.team_mode != 0, m)) { fprintf(stderr, "vf3net: terms %s not played by this build\n", terms); return 2; }
+		host_terms = m.host_terms;
+		if (!host_terms) { stage = m.stage; dural = m.dural; guest_stage = guest_dural = -1; }
+		A.adapter.team_one = B.adapter.team_one = m.team_one;
+		printf("the match's terms: %s (%s; Team Battle's mode %s)\n", terms, host_terms ? "the pool's: the host's settings" : "an older version's",
+		       m.team_one < 0 ? "the host's" : m.team_one ? "1 vs 1" : "3 vs 3");
 	}
 	A.adapter.stage_select_on = stage;
 	A.adapter.dural = dural;
