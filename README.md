@@ -210,10 +210,11 @@ patches, still only meets the same version).
 
 Menu > **Cheats** > **Dural's stage** (issue #22; Off, Guard or Start): on the stage screen (Stage select:
 Challenger), confirm a stage with that button for its Dural version. The arcade gives it only to the picker holding
-Start at the right second of the screen's timer (a count kept since power-on decides which); the cheat holds Start for
-you and makes the pick at that second, at once or up to about 12 s later. Offline it always works. Online it's only
-your inputs, so your opponent needs nothing and sees the same stage, but some picks have no second left for it: the
-stage is then the plain one (a notice says so). Two stages have no Dural version.
+Start at the right second of the screen's timer (a count kept since power-on decides which), so holding Start till the
+timer runs out yourself, the arcade's own trick, works only about 1 time in 17 after the first match. The cheat holds
+Start for you and makes the pick at that second, at once or up to about 12 s later. Offline it always works. Online
+it's only your inputs, so your opponent needs nothing and sees the same stage, but about a third of the picks have no
+second left for it: the stage is then the plain one (a notice says so). Two stages have no Dural version.
 
 ## Online play (experimental)
 
