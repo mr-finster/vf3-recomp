@@ -570,6 +570,7 @@ bool Online::use_terms(const std::string &as)
 	if (!vf3net::terms_of(t, identity.build, pool, tb, m)) return false;
 	terms = t;
 	adapter.host_terms = m.host_terms;
+	adapter.team_one = m.team_one;
 	adapter.dural = m.host_terms ? own_dural : m.dural;   // (a guest's from the host's blob, at the start)
 	adapter.stage_select_on = m.host_terms ? own_stage : m.stage;
 	if (t != identity.build) log_line("the match's terms: " + t + (m.host_terms ? " (the host's settings)" : " (the other player's version)"));
@@ -583,7 +584,8 @@ std::string Online::match_said() const
 	if (adapter.dural || own_dural) s += std::string(", Dural ") + (adapter.dural ? "on" : "off");
 	if (tb) {
 		const size_t o = size_t(board.profile->settings.team_mode), at = board.profile->settings.at + o;
-		if (o && board.backup.size() > at && board.backup[at] <= 1) s += board.backup[at] ? ", 1 vs 1" : ", 3 vs 3";
+		const int one = adapter.team_one >= 0 ? adapter.team_one : o && board.backup.size() > at && board.backup[at] <= 1 ? board.backup[at] : -1;
+		if (one >= 0) s += one ? ", 1 vs 1" : ", 3 vs 3";
 	}
 	return s + whose;
 }

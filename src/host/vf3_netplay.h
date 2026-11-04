@@ -42,7 +42,8 @@ inline constexpr const char *HOST_TERMS_FLAG = "+host1";
 std::string pool_version(const std::string &online);   // (online's base, before any "+", with HOST_TERMS_FLAG)
 // What a build plays a match as, from the lobby's terms: host_terms (the pool's), else that version's flags (a
 // version with another base, or a flag this build hasn't got: false, not played)
-struct Terms { bool host_terms = false, dural = false, stage = false; };
+// (team_one: Team Battle's mode an older version's terms play, 1 vs 1 with "+1v1", else 3 vs 3; -1 the host's own, a pool's)
+struct Terms { bool host_terms = false, dural = false, stage = false; int team_one = -1; };
 bool terms_of(const std::string &terms, const std::string &own, const std::string &pool, bool tb, Terms &out);
 
 // The addresses below are Revision D's, kept in the board's profile (src/machine/profile.h): the boot, unseen, up
@@ -132,6 +133,9 @@ public:
 	// The match plays the host's settings (the pool's terms): the host's blob with its stage select and Dural after
 	// it (host_blob), the guest's own dural and stage_select_on set from it at the start; off, the blob as ever
 	bool host_terms = false;
+	// Team Battle's mode in the host's blob: an older version's terms' (1 vs 1 with "+1v1", 0 for 3 vs 3), as that
+	// version's host sends it; -1 the host's own (a pool match, or no Team Battle)
+	int team_one = -1;
 	std::vector<uint8_t> host_blob() const;
 	std::function<void()> settle;              // before a save or load: anything running alongside the board waits
 	std::function<void(const std::vector<uint8_t> &)> midi_out;   // bytes for the sound board

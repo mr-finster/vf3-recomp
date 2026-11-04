@@ -117,15 +117,21 @@ bool terms_of(const std::string &terms, const std::string &own, const std::strin
 		const std::string f = terms.substr(at, next == std::string::npos ? std::string::npos : next - at);
 		if (f == (tb ? "+dural" : DURAL_FLAG) && !out.dural) out.dural = true;
 		else if (f == "+stage" && !out.stage) out.stage = true;
-		else if (!(tb && f == "+1v1")) return false;   // (Team Battle's 1 vs 1: the host's blob has it, either way)
+		else if (tb && f == "+1v1" && out.team_one < 0) out.team_one = 1;   // (Team Battle's 1 vs 1: the host's blob sets it)
+		else return false;
 		at = next == std::string::npos ? terms.size() : next;
 	}
+	if (tb && out.team_one < 0) out.team_one = 0;   // (without "+1v1": 3 vs 3, as that version's host has it)
 	return true;
 }
 
 std::vector<uint8_t> Adapter::host_blob() const
 {
 	std::vector<uint8_t> out = start_blob(board);
+	// (an older version's terms: its Team Battle mode, as its host's NVRAM has it, whatever this host's own)
+	if (const m3::Profile::Settings &set = board.profile->settings; team_one >= 0 && set.team_mode && set.at &&
+		set.at + size_t(set.team_mode) < board.backup.size())
+		out[4 + set.at + size_t(set.team_mode)] = uint8_t(team_one);
 	if (!host_terms) return out;
 	const size_t n = out.size();
 	out.resize(n + TERMS_SIZE);
