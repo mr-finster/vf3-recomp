@@ -203,9 +203,10 @@ Menu > **Cheats** > **Dural on the select**: the boss, in a 13th spot past Kage,
 or left from Akira; Start held for her other colours). Her own picture on the grid and her profile, in both games.
 The arcade froze with her on Akira's stage: fixed here. Changing it restarts the game.
 
-Online, a match plays the host's choice: Dural is on the select for both players when the host has her on, off when
-the host has her off (said as the match starts), so it no longer splits players. Against an older version, only a
-player with the same choice.
+Online, Dural is on the select for both players when either of them has her on (the other just sees her spot and
+needn't pick her; said as the match starts: Dural on, yours, theirs or both), so it no longer splits players. Against
+an older version, the match plays that version's choice (Revision D's from before v0.1.15-alpha's 2 Nov update, with her older
+patches, still only meets the same version).
 
 Menu > **Cheats** > **Dural's stage** (issue #22; Off, Guard or Start): on the stage screen (Stage select:
 Challenger), confirm a stage with that button for its Dural version. The arcade gives it only to the picker holding
@@ -228,8 +229,9 @@ below). Each player uses their own Player 1 controls.
 **Stage select** (Online > Settings): On (the default) plays the arcade's stage screen (Challenger): the challenger
 picks the stage, so on every rematch the loser does. Off plays as above. This version turns it on once for everyone,
 at its first start; turned off after that, it stays off. It no longer splits players: a match plays
-the host's choice, and so do Cheats > Dural on the select and Team Battle's 1 vs 1 or 3 vs 3 (each player is told the
-match's settings as it starts). Against an older version the match plays that version's settings, when this one has
+the host's choice, and so does Team Battle's 1 vs 1 or 3 vs 3 (Dural: on when either player has her on; each player
+is told the match's settings as it starts). Random and room codes meet everyone on this version whatever their
+settings, and older versions' players this one can play their way. Against an older version the match plays that version's settings, when this one has
 them. It can't change while you're hosting, joining or playing.
 
 **Online matches are always first to 3**, as SEGA's tournaments and Japan's arcades play, whatever either player's

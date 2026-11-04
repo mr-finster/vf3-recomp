@@ -397,6 +397,15 @@ dialog .x:hover{background:rgba(255,255,255,.2)}
       <div class="pop" role="dialog" aria-label="Changelog">
         <p><b>%VERSION%</b> &middot; %DATE%</p>
         <ul>
+          <li><b>Online: everyone meets everyone</b> (issues #25, #32). Random and room codes no longer split players by stage select, Dural or Team Battle&rsquo;s 1 vs 1 or 3 vs 3: a match plays the host&rsquo;s stage select and mode, Dural is on the select when either player has her on, and both players are told the match&rsquo;s settings as it starts. Players on older versions are still met, played their version&rsquo;s way.</li>
+          <li><b>Stage select online is on</b>, turned on once for everyone; turned off after that, it stays off.</li>
+          <li><b>When the 3D falls back to the CPU</b> during play (a graphics device lost, or a GPU picture that isn&rsquo;t right), it draws at 1x without antialiasing for that run, so the game stays playable; your Display settings are kept (issue #26).</li>
+          <li><b>Fit the window up to 80:9</b>: three or five screens side by side get the whole picture.</li>
+          <li><b>Play as Dural</b>: her arcade boss fight on any of ten stages, not always Taka-Arashi&rsquo;s; her reflection right in a mirror match and as gold player 1 (issue #23).</li>
+          <li><b>Arcade settings &rarr; CPU opponents&rsquo; order: Random</b> (Revision D, offline; issue #30).</li>
+          <li><b><code>--game vf3</code> or <code>--game tb</code></b> picks the version at startup (issue #27).</li>
+        </ul>
+        <details><summary>v0.1.15-alpha</summary><ul>
           <li><b>Window size</b> (issue #20): Menu &gt; Display &gt; Window size makes the window a whole multiple of the arcade&rsquo;s 384 lines (1x is 512 &times; 384 for the 4:3 picture, up to 4x, as many as your screen holds). Render scale 1x with Window size 1x shows the arcade&rsquo;s 384 lines one to one; Window size 2x doubles each of them. Resizing the window by hand sets it back to Free.</li>
           <li><b>The window is remembered</b> (issue #21): its size, place, maximised and fullscreen stay as you left them from one start to the next, so an OBS capture keeps working.</li>
           <li><b>No red triangle</b> bottom left of the attract (issue #19): the game&rsquo;s own mark that the arcade&rsquo;s Free Play notice covers is hidden with the notice.</li>
@@ -404,7 +413,7 @@ dialog .x:hover{background:rgba(255,255,255,.2)}
           <li><b>Stage lighting fixed</b> (issue #19): Team Battle&rsquo;s sumo ring and VF3&rsquo;s lava cave are no longer too red (their red spotlight now stops at full light, as on the arcade&rsquo;s hardware).</li>
           <li>VF3&rsquo;s lava cave lit as the arcade&rsquo;s: brown and orange, not red.</li>
           <li><b>Online matches are always first to 3</b> (updated 2 Nov), whatever either player&rsquo;s Arcade settings &rarr; Rounds to win (vs player), which is for playing offline: against an older v0.1.15-alpha download too when this one hosts.</li>
-        </ul>
+        </ul></details>
         <details><summary>v0.1.14-alpha</summary><ul>
           <li><b>Stage select online</b> (issue #18): Menu &gt; Online &gt; Settings &gt; Stage select. On, the challenger picks the stage on the arcade&rsquo;s own screen, so the loser picks on every rematch, as Japanese arcades had it. You meet only players who have it on too; off, everyone as before.</li>
           <li><b>Arcade settings &gt; Stage select</b> shows the arcade&rsquo;s own options by name: Challenger or Off (Team Battle&rsquo;s Variable and Full too). The one picking holds Start until the screen&rsquo;s timer runs out for the stage&rsquo;s Dural version.</li>
