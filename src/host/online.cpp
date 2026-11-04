@@ -485,7 +485,8 @@ int Online::players_online(const OnlineSettings &s)
 			online_asked = now;
 			online_asking->store(true);
 			const std::string url = where + "/v1/random/count", body = "{\"game\":" + vfnet::json::quote(identity.game) + ",\"version\":" +
-				vfnet::json::quote(identity.build) + ",\"content\":" + vfnet::json::quote(hex64(identity.content)) + "}";
+				vfnet::json::quote(identity.build) + ",\"content\":" + vfnet::json::quote(hex64(identity.content)) +
+				(pool.empty() ? std::string() : ",\"pool\":" + vfnet::json::quote(pool) + ",\"accepts\":" + vfnet::json::list(accepts)) + "}";   // (the count: those this side can meet)
 			std::thread([url, body, count = online_count, asking = online_asking] {
 				const vfnet::http::Reply r = vfnet::http::request("POST", url, body, 5000);
 				vfnet::json::Value v;
