@@ -698,6 +698,14 @@ struct settings
 		num("online_max_ping", online.max_ping, 0, 1000);
 		flag("online_chime", online.chime);
 		flag("online_stage_select", online.stage_select);
+		// Stage select online turned on once for everyone (issue #32, as VF1's vs_rounds_3): a settings.ini without the
+		// online_stage_select_on marker has it on at this build's first start (saved at once, the marker with it; not
+		// written, tried again later and on again at the next start), the player's Off kept after it
+		if (!kv.empty() && !kv.count("online_stage_select_on")) {
+			if (!online.stage_select) fprintf(stderr, "settings: stage select online turned on (once: Online > Settings turns it off)\n");
+			online.stage_select = true;
+			upgraded = true;
+		}
 		if (auto it = kv.find("gpu_3d_failed"); it != kv.end()) gpu3d_failed = it->second;
 		std::string failed_build;
 		if (auto it = kv.find("gpu_3d_failed_build"); it != kv.end()) failed_build = it->second;
@@ -797,7 +805,7 @@ struct settings
 		if (!online.address.empty()) fprintf(f, "online_address = %s\n", online.address.c_str());
 		if (!online.lobby.empty()) fprintf(f, "online_lobby = %s\n", online.lobby.c_str());
 		fprintf(f, "online_hide_ip = %d\nonline_max_ping = %d\nonline_chime = %d\n", int(online.hide_ip), online.max_ping, int(online.chime));
-		fprintf(f, "online_stage_select = %d\n", int(online.stage_select));
+		fprintf(f, "online_stage_select = %d\nonline_stage_select_on = 1\n", int(online.stage_select));
 		for (int p = 0; p < 2; p++) ctl[p].save(f, p);
 		for (const std::string &m : pad_mappings) fprintf(f, "pad_mapping = %s\n", m.c_str());
 		const bool flushed = flush_to_disk(f);
@@ -1638,7 +1646,7 @@ int main(int argc, char **argv)
 	bool cfg_dirty = false;
 	if (deck) { cfg.fullscreen = true; cfg.aspect = 2; cfg.scale = 2; }
 	cfg.load(settings_path);
-	if (cfg.upgraded && !getenv("VF3_QUIT_AFTER")) cfg.save(settings_path);
+	if (cfg.upgraded && !getenv("VF3_QUIT_AFTER") && !cfg.save(settings_path)) cfg_dirty = true;   // (not written: tried again later)
 	if (arg_scale) cfg.scale = arg_scale;
 	if (arg_aspect >= 0) cfg.aspect = arg_aspect;
 	if (arg_full >= 0) cfg.fullscreen = arg_full;

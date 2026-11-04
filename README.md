@@ -226,7 +226,8 @@ that's been on all day: a random one for the first match, the game's order after
 below). Each player uses their own Player 1 controls.
 
 **Stage select** (Online > Settings): On (the default) plays the arcade's stage screen (Challenger): the challenger
-picks the stage, so on every rematch the loser does. Off plays as above. It no longer splits players: a match plays
+picks the stage, so on every rematch the loser does. Off plays as above. This version turns it on once for everyone,
+at its first start; turned off after that, it stays off. It no longer splits players: a match plays
 the host's choice, and so do Cheats > Dural on the select and Team Battle's 1 vs 1 or 3 vs 3 (each player is told the
 match's settings as it starts). Against an older version the match plays that version's settings, when this one has
 them. It can't change while you're hosting, joining or playing.
