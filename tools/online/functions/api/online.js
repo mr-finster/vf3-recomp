@@ -11,7 +11,7 @@ const fresh = (t) => Date.now() - t < FRESH_S * 1000;
 const made_at = (body) => { try { return JSON.parse(body).updated * 1000; } catch (e) { return 0; } };
 
 const out = (body, status, cache) =>
-	new Response(body, { status, headers: { 'content-type': 'application/json', 'cache-control': cache } });
+	new Response(body, { status, headers: { 'content-type': 'application/json', 'cache-control': cache, 'access-control-allow-origin': '*' } });   // (any page may read the counts: the download sites' Online now button)
 const unavailable = () => out('{"error":"unavailable"}', 502, 'no-store');
 
 const count = (n) => (Number.isInteger(n) && n >= 0 && n < 1e7 ? n : 0);

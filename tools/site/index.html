@@ -87,6 +87,9 @@ main{--s:1; position:relative; z-index:1; width:100%; min-width:0; margin-block:
 .get small{font-weight:600; font-size:.78rem; opacity:.62}
 .get.alt{background:transparent; color:var(--ink); box-shadow:inset 0 0 0 1.5px var(--line)}
 .get.alt:hover{box-shadow:inset 0 0 0 1.5px var(--ink); background:transparent}
+/* Online now: beside Download, the live count when the page can read it */
+#onl{line-height:normal}
+#onl .live{width:.55em; height:.55em; border-radius:50%; background:#3DDC84; flex:none; box-shadow:0 0 0 3px rgba(61,220,132,.18)}
 .get .os{width:1.05em; height:1.05em; fill:currentColor; flex:none; margin-top:-.1em}
 /* the downloads: one button, its platforms in a list under it (the visitor's own first) */
 .dlw .get{border:0; cursor:pointer; font-family:inherit}
@@ -319,6 +322,7 @@ dialog .x:hover{background:rgba(255,255,255,.2)}
         </ul>
         <p>Needs your own <code>vf3.zip</code>. <a href="https://github.com/mr-finster/vf3-recomp/releases/latest" target="_blank" rel="noopener">Release notes</a></p>
       </div></span>
+    <a class="get alt" id="onl" href="https://vf-online.pages.dev/online" target="_blank" rel="noopener noreferrer"><span class="live" aria-hidden="true"></span><span id="onl-t">Online now</span></a>
   </div>
 
   <nav class="more" aria-label="More about it">
@@ -607,5 +611,11 @@ document.querySelectorAll('.pop details').forEach(d => {
 });
 </script>
 <script data-name="BMC-Widget" data-cfasync="false" src="https://cdnjs.buymeacoffee.com/1.0.0/widget.prod.min.js" data-id="mrfinster" data-description="Support me on Buy me a coffee!" data-message="" data-color="#BD5FFF" data-position="Right" data-x_margin="18" data-y_margin="18" defer></script>
+<script>/* Online now: how many are playing, read from the public page's counts; plain text if not (no cookies, no referrer) */
+(function(){var t=document.getElementById("onl-t"),G=["vf3", "vf3tb"];if(!t||!window.fetch)return;
+fetch("https://vf-online.pages.dev/api/online",{cache:"no-store",credentials:"omit",referrerPolicy:"no-referrer"})
+.then(function(r){return r.ok?r.json():null}).then(function(d){var g=d&&d.games,n=0,k=0;if(!g)return;
+G.forEach(function(x){var c=g[x]&&g[x].total;if(typeof c==="number"&&c>=0&&c%1===0){n+=c;k++}});
+if(k)t.textContent="Online now: "+n+" playing"}).catch(function(){})})();</script>
 </body>
 </html>
