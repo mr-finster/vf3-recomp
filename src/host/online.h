@@ -68,6 +68,7 @@ public:
 	// what it tells the lobby besides its own version (vf3_netplay.h's HOST_TERMS_FLAG): the pool, and the flags it
 	// can play another's way. A match plays the lobby's terms (use_terms), by address its own.
 	bool own_dural = false, own_stage = false, tb = false;
+	int their_dural = -1;   // the other player's own Dural on the select (its version, the lobby's "them"): 1 on, 0 off, -1 not known
 	std::string pool;
 	std::vector<std::string> accepts;
 	std::string terms;            // (the match's, as the session's identity has it)
@@ -235,7 +236,7 @@ private:
 	void room_poll();
 	void host_again(const std::string &why);
 	void room_session(bool host);       // the session, with the lobby's token, on the room's link
-	bool use_terms(const std::string &as);   // the match's terms (the lobby's "as", or "": this side's own): the adapter set for them
+	bool use_terms(const std::string &as, const std::string &them = "");   // the match's terms (the lobby's "as", or "": this side's own): the adapter set for them
 	vfnet::Identity match_identity() const { vfnet::Identity i = identity; i.build = terms; return i; }
 	std::string match_said() const;     // (what the match plays, said to both players: the stage select and the rest)
 	void room_failed(const std::string &why);

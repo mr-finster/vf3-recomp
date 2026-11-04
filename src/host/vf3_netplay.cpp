@@ -109,7 +109,9 @@ std::string pool_version(const std::string &online)
 bool terms_of(const std::string &terms, const std::string &own, const std::string &pool, bool tb, Terms &out)
 {
 	out = {};
+	// (the pool's: the host's settings, Dural on the select when the lobby marks it, either player having her on)
 	if (terms == pool) { out.host_terms = true; return true; }
+	if (terms == pool + (tb ? "+dural" : DURAL_FLAG)) { out.host_terms = out.dural = true; return true; }
 	const std::string base = own.substr(0, own.find('+'));
 	if (terms.compare(0, base.size(), base) != 0 || (terms.size() > base.size() && terms[base.size()] != '+')) return false;
 	for (size_t at = base.size(); at < terms.size();) {   // (each "+flag": only those a build of this one's has)

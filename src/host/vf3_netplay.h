@@ -42,6 +42,7 @@ inline constexpr const char *HOST_TERMS_FLAG = "+host1";
 std::string pool_version(const std::string &online);   // (online's base, before any "+", with HOST_TERMS_FLAG)
 // What a build plays a match as, from the lobby's terms: host_terms (the pool's), else that version's flags (a
 // version with another base, or a flag this build hasn't got: false, not played)
+// (host_terms with dural: the pool's marked "+dural2" / Team Battle's "+dural", either player's Play as Dural)
 // (team_one: Team Battle's mode an older version's terms play, 1 vs 1 with "+1v1", else 3 vs 3; -1 the host's own, a pool's)
 struct Terms { bool host_terms = false, dural = false, stage = false; int team_one = -1; };
 bool terms_of(const std::string &terms, const std::string &own, const std::string &pool, bool tb, Terms &out);

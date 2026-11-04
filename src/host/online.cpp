@@ -563,15 +563,23 @@ void Online::room_session(bool host)
 	session->trace = log_line;
 }
 
-bool Online::use_terms(const std::string &as)
+bool Online::use_terms(const std::string &as, const std::string &them)
 {
+	// (the other player's own Dural, from its version as the lobby sends it, "them": only for what the match says)
+	const std::string flag = tb ? "+dural" : vf3net::DURAL_FLAG;
+	their_dural = -1;
+	if (!them.empty()) {
+		their_dural = 0;
+		for (size_t at = them.find('+'); at != std::string::npos; at = them.find('+', at + 1))
+			if (them.compare(at, flag.size(), flag) == 0 && (at + flag.size() == them.size() || them[at + flag.size()] == '+')) their_dural = 1;
+	}
 	const std::string t = as.empty() ? identity.build : as;
 	vf3net::Terms m;
 	if (!vf3net::terms_of(t, identity.build, pool, tb, m)) return false;
 	terms = t;
 	adapter.host_terms = m.host_terms;
 	adapter.team_one = m.team_one;
-	adapter.dural = m.host_terms ? own_dural : m.dural;   // (a guest's from the host's blob, at the start)
+	adapter.dural = m.dural;   // (the terms': a pool's marked when either player has Dural on; a guest's from the host's blob, at the start)
 	adapter.stage_select_on = m.host_terms ? own_stage : m.stage;
 	if (t != identity.build) log_line("the match's terms: " + t + (m.host_terms ? " (the host's settings)" : " (the other player's version)"));
 	return true;
@@ -581,7 +589,10 @@ std::string Online::match_said() const
 {
 	const std::string whose = adapter.host_terms ? (is_host ? " (yours, as host)" : " (the host's)") : "";
 	std::string s = std::string("Stage select ") + (adapter.stage_select_on ? "on" : "off");
-	if (adapter.dural || own_dural) s += std::string(", Dural ") + (adapter.dural ? "on" : "off");
+	if (adapter.dural) {   // (whose: a pool's Dural is on when either player has her on)
+		const char *by = own_dural && their_dural == 1 ? " (both)" : own_dural ? " (yours)" : their_dural == 1 ? " (theirs)" : "";
+		s += std::string(", Dural on") + by;
+	} else if (own_dural) s += ", Dural off";
 	if (tb) {
 		const size_t o = size_t(board.profile->settings.team_mode), at = board.profile->settings.at + o;
 		const int one = adapter.team_one >= 0 ? adapter.team_one : o && board.backup.size() > at && board.backup[at] <= 1 ? board.backup[at] : -1;
@@ -805,7 +816,7 @@ void Online::room_poll()
 					peer_name = g["name"].str();
 					country_peer = country(g["country"].str());   // (the guest's flag: the lobby sends it, as it does the host's to the guest)
 					const std::string was = terms;
-					if (!use_terms(g["as"].str())) { host_again("their version's settings can't be played here."); return; }
+					if (!use_terms(g["as"].str(), g["them"].str())) { host_again("their version's settings can't be played here."); return; }
 					if (terms != was) room_session(true);   // (the session for the two's terms: the pool's, or the player's version)
 					room->set_peer(g["cands"].strings(), g["relay"].str(), true);
 					st = Step::connecting;
@@ -883,7 +894,7 @@ void Online::room_poll()
 				peer_name = v["name"].str();
 				country_peer = country(v["country"].str());
 				ticket.clear();
-				if (!use_terms(v["as"].str())) { room_failed("The online service matched you with a version this one can't play: update the game."); return; }
+				if (!use_terms(v["as"].str(), v["them"].str())) { room_failed("The online service matched you with a version this one can't play: update the game."); return; }
 				room_session(true);
 				st = Step::waiting;
 				retry_at = 0;
@@ -928,7 +939,7 @@ void Online::joined(const vfnet::json::Value &v)
 	room_token = strtoull(v["token"].str().c_str(), nullptr, 16);
 	peer_name = v["name"].str();
 	country_peer = country(v["country"].str());
-	if (!use_terms(v["as"].str())) { room_failed("The online service matched you with a version this one can't play: update the game."); return; }
+	if (!use_terms(v["as"].str(), v["them"].str())) { room_failed("The online service matched you with a version this one can't play: update the game."); return; }
 	room->set_peer(v["cands"].strings(), v["relay"].str(), false);
 	room_session(false);
 	st = Step::connecting;
