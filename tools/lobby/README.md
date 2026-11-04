@@ -109,12 +109,12 @@ After changing anything here, `npx wrangler deploy` again.
 
 `GET /v1/online` (JSON, read only, `access-control-allow-origin: *`) says how many play each game now, and the
 **Online now** page (`tools/online`, a Pages site of its own) shows it. For each game (`vf1`, `vf2`, `vf3`,
-`vf3tb`) and each of its variants:
+`vf3tb`): everyone, one count a game, since players meet whatever their settings (a match plays the host's), and
+of them those on an older version:
 
 ```
 {"updated": 1793594882, "games": {"vf3tb": {"total": 3, "searching": 1, "random": 2, "hosting": 0, "room": 0,
-  "variants": {"1v1": {"total": 3, "searching": 1, "random": 2, "hosting": 0, "room": 0}},
-  "countries": {"JP": 2, "FR": 1}}, ...}, "countries": {"JP": 5, "US": 3, "FR": 1, "": 1}}
+  "older": 1, "countries": {"JP": 2, "FR": 1}}, ...}, "countries": {"JP": 5, "US": 3, "FR": 1, "": 1}}
 ```
 
 - `searching`: in the Random queue now; `random`: in a Random match made in the last 10 minutes (as the RANDOM
@@ -123,14 +123,11 @@ After changing anything here, `npx wrangler deploy` again.
 - Each player once, in what they're doing now: searching, else hosting, else their latest match. A player is their
   address (an IPv6 one by its /64) and name, hashed (two searches, two rooms or a search again are one player; two
   players at one address with the same name count as one).
-- A variant is what follows the game's online version: `standard` (none), `dural`, `stage`, `dural+stage`; Team
-  Battle's `1v1` (without it, 3 vs 3) with those; VF2's `random` (random fighters). Anything else (another version,
-  a build between releases, an option this doesn't know) is `other`. The versions and options known are `VARIANTS`
-  in `src/index.js`: **when a game's `NET_VERSION` changes or it gets a new online option, add it there** and deploy,
-  or its players count as `other`. (An older release that plays as the same online version is the same variant.)
-- VF1 has no variants yet: its Normal, Random and Seed fighters all play as one online version (and play each
-  other), so the lobby can't tell them apart; its players are all `standard` (the page's "All fighters"). VF2's
-  random fighters are a version of their own (`+random`), so they show apart.
+- `older`: of `total`, those on an older version (a version without the game's pool: before matchmaking across
+  settings, or another version's), who meet only the players who can play their version's way. A game's pool is
+  `POOLS` in `src/index.js` (its `NET_VERSION`'s base with `+host1`, VF2's `+mix1`): **when a game's `NET_VERSION`
+  or pool changes, change it there** and deploy, or its players count as `older`. VF1 has no pool and nothing
+  that splits players: its players are older only on a version other than `VF1_BASES`'.
 - `countries`: each game's players by country (two capital letters, ISO 3166; `""` where it isn't known), most
   first, each player once as in `total` (a game's countries add up to its total); and the same for all the games
   together at the top (adding up to the games' totals). A player's country is where the lobby sees them connect
@@ -145,7 +142,7 @@ After changing anything here, `npx wrangler deploy` again.
 the lobby itself saw happen: a search it took (a ticket it gave out), a room it opened, a join it let in, a match it
 made. One Durable Object (`Stats`) is told by the rooms and random queues as these happen, each player with the
 country the lobby itself had for them; a version string is only
-compared against `VARIANTS`, never shown (an unknown one is `other`); each player counts once (hashed address and
+(a pool's player: its pool) compared against `POOLS`, never shown; each player counts once (hashed address and
 name), so asking again doesn't add anything, and a flood from one address is held by the rate limits as anything
 else. Entries go on the lobby's own timeouts: a host gone quiet 30 s (its room dropped), a queue not heard from in a
 minute, a match after 10 minutes. The endpoint only reads.
@@ -161,7 +158,7 @@ everything else (`ANY_LIMIT`, 600 a minute).
 `online.html` (and its icons, and the game's own Barlow Condensed font) fetches `/api/online` on its own site every
 30 s; `functions/api/online.js` there asks the lobby's `/v1/online` and passes on only the counts, read and written
 again (no header, error text or field of the lobby's answer reaches the browser; the countries only as two capital
-letters or `""` with a whole number, 250 at most), kept 30 s. Under the cards, each game's variants as a table
+letters or `""` with a whole number, 250 at most), kept 30 s. Under each card's count, one row
 (Searching: in Random's queue; Waiting: hosting a room code; Playing: in a match, Random or room code) with its top
 countries, and "By country": all the games together, flag and name (the browser's own name for it), the top 12
 and how many more. The flags are the Twemoji Country Flags font in `site/fonts` (flags only, so Windows, which

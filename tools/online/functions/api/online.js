@@ -30,10 +30,8 @@ function lands(c) {
 function clean(d) {
 	const games = {};
 	for (const g of GAMES) {
-		const src = (d && d.games && d.games[g]) || {}, variants = {};
-		const list = src.variants && typeof src.variants === 'object' ? Object.entries(src.variants).slice(0, 32) : [];
-		for (const [name, c] of list) if (/^[a-z0-9]+(\+[a-z0-9]+)*$/.test(name) && name.length <= 32) variants[name] = counts(c);
-		games[g] = { ...counts(src), variants, countries: lands(src.countries) };
+		const src = (d && d.games && d.games[g]) || {};
+		games[g] = { ...counts(src), older: count(src.older), countries: lands(src.countries) };   // (one count a game: who one can meet; older: of them, on an older version)
 	}
 	const t = d && d.updated;
 	return { updated: Number.isInteger(t) && t > 0 && t < 1e11 ? t : 0, games, countries: lands(d && d.countries) };

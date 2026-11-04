@@ -23,7 +23,7 @@
 //   version (as ever), or one's version the other can play; that's said to both as "as" (the join's answer, the guest
 //   in the host's wait, a random match's either side). A game sending no pool is matched as before, by its version.
 //   GET  /v1/ping   -> {ok, protocol}
-//   GET  /v1/online -> who's online now, each game and its variants (counted from what the lobby itself saw; README)
+//   GET  /v1/online -> who's online now: each game's count (everyone one can meet) and those on an older version (README)
 //
 // Errors are {error: "<what>"} with a status: no_room 404, full 409, game / version / rom 412 (with the host's
 // version), busy 429, bad 400, no_turn 503. The games word them; nothing here is shown as it comes.
@@ -152,8 +152,18 @@ function adopts(n, v) {   // (player n can play version v's match)
 	const flags = v.slice(base_of(v).length).split('+').slice(1);
 	return new Set(flags).size === flags.length && flags.every((f) => n.accepts.includes(f));
 }
+// Two in the same pool: the pool's, with Dural on the select when either player has her on (VF3's issue: either
+// side's Play as Dural unlocks her for both; the other only sees her spot): the game's own Dural flag, the one in its
+// accepts (Revision D's "dural2", Team Battle's "dural"), in either's version, marks the pool "+<flag>"
+function has_flag(v, f) {
+	return v.slice(base_of(v).length).split('+').slice(1).includes(f);
+}
+function pool_terms(a, b) {
+	const f = a.accepts.find((x) => /^dural/.test(x));
+	return f && b.accepts.includes(f) && (has_flag(a.version, f) || has_flag(b.version, f)) ? a.pool + '+' + f : a.pool;
+}
 function terms(a, b) {
-	if (a.pool && a.pool === b.pool) return a.pool;
+	if (a.pool && a.pool === b.pool) return pool_terms(a, b);
 	if (a.version === b.version) return a.version;
 	if (!b.pool && adopts(a, b.version)) return b.version;
 	if (!a.pool && adopts(b, a.version)) return a.version;
@@ -368,7 +378,7 @@ export class Room {
 		const r = this.r;
 		if (!r || r.random) return;
 		if (ev.op === 'host' || ev.op === 'reopen') this.told = Date.now();
-		tell(this, { code: r.code, game: r.host.game, version: r.host.version, ...ev });
+		tell(this, { code: r.code, game: r.host.game, version: r.host.pool || r.host.version, ...ev });   // (a pool's player counted as the pool's)
 	}
 	async load() {
 		if (this.r === undefined) this.r = (await this.ctx.storage.get('r')) || null;
@@ -429,11 +439,11 @@ export class Room {
 			if (as === null) return json({ error: 'version', host_version: h.version }, 412);
 			if (g.content !== h.content) return json({ error: 'rom' }, 412);
 			if (r.guest) return json({ error: 'full' }, 409);
-			r.guest = { ...g, as };
+			r.guest = { ...g, as, them: g.version };   // (them: the other player's own version, for what the match says: whose Dural)
 			await this.save();
 			this.tell({ op: 'join', sids: [r.sid, clean(b.sid, 16)], countries: [h.country, g.country] });
 			for (const w of this.waiters.splice(0)) w(r.guest);   // (with the match's terms)
-			return json({ name: h.name, cands: h.cands, relay: h.relay, token: r.token, country: h.country, as });
+			return json({ name: h.name, cands: h.cands, relay: h.relay, token: r.token, country: h.country, as, them: h.version });
 		}
 		// the host's own: its key
 		if (b.key !== r.key) return json({ error: 'no_room' }, 404);
@@ -559,9 +569,10 @@ export class Queue {
 		const by = new Map();
 		for (const w of this.waiting.values()) {
 			if (w.result || !w.sid) continue;
-			const of = by.get(w.me.version) || new Map();
+			const v = w.me.pool || w.me.version;   // (a pool's player counted as the pool's: who it meets, not its own settings)
+			const of = by.get(v) || new Map();
 			if (!of.get(w.sid)) of.set(w.sid, country_ok(w.me.country));
-			by.set(w.me.version, of);
+			by.set(v, of);
 		}
 		const lists = new Map();
 		for (const [v, of] of by) { const sids = [...of.keys()].sort(); lists.set(v, { sids, countries: sids.map((x) => of.get(x)) }); }
@@ -654,8 +665,8 @@ export class Queue {
 			if (j.status !== 200) { await this.close(code, h.key); return null; }
 			const g = await j.json();
 			return {
-				host: { role: 'host', code, key: h.key, token: h.token, name: guest.me.name, country: guest.me.country, as: g.as },
-				guest: { role: 'guest', code, name: g.name, cands: g.cands, relay: g.relay, token: g.token, country: g.country, as: g.as },
+				host: { role: 'host', code, key: h.key, token: h.token, name: guest.me.name, country: guest.me.country, as: g.as, them: guest.me.version },
+				guest: { role: 'guest', code, name: g.name, cands: g.cands, relay: g.relay, token: g.token, country: g.country, as: g.as, them: g.them },
 			};
 		}
 		return null;
@@ -749,28 +760,18 @@ export class Queue {
 // waiting, a player joining, who's searching, a match made), so a page view costs one read of it, not one of every
 // queue; and that read kept 30 s (Cloudflare's edge, and each copy of the Worker's memory). Only what the lobby saw:
 // the games never say how many there are. Each player once (their address and name, hashed: player_id), in what
-// they're doing now (searching, then hosting, then their latest match), by the variants each game has (VARIANTS:
-// anything else is "other", the version a game sends never shown).
+// they're doing now (searching, then hosting, then their latest match), one count a game (who one can
+// meet: its pool, POOLS), and of them those on an older version ("older"; the version a game sends never shown).
 const ONLINE_FRESH_MS = 15000, ONLINE_PLAYING_MS = 600000, ONLINE_HOST_MS = 100000, ONLINE_QUEUE_MS = 60000;
-// Each game's online versions (its NET_VERSION; a release's build plays as it) and what may follow one ("+dural" ...),
-// in the order the games add them. A game's new NET_VERSION or option: add it here (else its players count as "other").
-const VARIANTS = {
-	vf1: { bases: ['v1.5.0'], flags: [] },
-	vf2: { bases: ['v0.1.16'], flags: ['random'] },
-	vf3: { bases: ['v0.1.7-online-preview'], flags: ['dural', 'dural2', 'stage'] },
-	vf3tb: { bases: ['v0.1.7-online-preview'], flags: ['dural', '1v1', 'stage'] },
-};
+// Each game's pool (its NET_VERSION's base with its pool flag): its players meet everyone of it, whatever their
+// settings, and those older versions they can play; anyone else (an older version's player) counted as "older". VF1
+// has no pool and nothing that splits: all its players are its current ones. A game's new NET_VERSION or pool: here.
+const POOLS = { vf1: null, vf2: 'v0.1.16+mix1', vf3: 'v0.1.7-online-preview+host1', vf3tb: 'v0.1.7-online-preview+host1' };
+const VF1_BASES = ['v1.5.0'];
 function variant_of(game, version) {
-	const g = VARIANTS[game];
-	if (!g || typeof version !== 'string') return 'other';
-	for (const base of g.bases) {
-		if (version !== base && !version.startsWith(base + '+')) continue;
-		const got = version.slice(base.length).split('+').slice(1);
-		if (got.some((f) => !g.flags.includes(f)) || new Set(got).size !== got.length) return 'other';
-		const on = g.flags.filter((f) => got.includes(f));   // (the games' own order, whatever order it came in)
-		return on.length ? on.join('+') : 'standard';
-	}
-	return 'other';
+	if (!(game in POOLS) || typeof version !== 'string') return 'older';
+	if (game === 'vf1') return VF1_BASES.includes(version) ? 'current' : 'older';
+	return version === POOLS[game] ? 'current' : 'older';
 }
 
 // (a room's or queue's telling, one after another: a room opened then closed is heard in that order; a telling that
@@ -881,21 +882,15 @@ export class Stats {
 		// (players by country, most first: a country's two letters, "" not known)
 		const by_country = (m) => Object.fromEntries([...m].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)));
 		const games = {}, all = new Map();
-		for (const game of Object.keys(VARIANTS)) {
-			const g = { ...zero(), variants: {} }, names = new Map(), lands = new Map();
+		for (const game of Object.keys(POOLS)) {
+			const g = { ...zero(), older: 0 }, lands = new Map();
 			for (const p of (best[game] || new Map()).values()) {
 				g.total++;
 				lands.set(p.country, (lands.get(p.country) || 0) + 1);
 				all.set(p.country, (all.get(p.country) || 0) + 1);
 				g[p.what]++;
-				const v = names.get(p.variant) || zero();
-				v.total++;
-				v[p.what]++;
-				names.set(p.variant, v);
+				if (p.variant === 'older') g.older++;
 			}
-			// (in a fixed order: standard, then the variants by their options, other last)
-			const order = (n) => (n === 'standard' ? '0' : n === 'other' ? '2' : '1' + n);
-			for (const n of [...names.keys()].sort((a, b) => (order(a) < order(b) ? -1 : 1))) g.variants[n] = names.get(n);
 			g.countries = by_country(lands);
 			games[game] = g;
 		}

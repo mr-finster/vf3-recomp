@@ -52,7 +52,10 @@ function check(what, got, want) {
 }
 const cases = [
 	['new 3v3 stage off vs new 1v1 stage on: the pool', neu('A', B), neu('B', B + '+1v1+stage'), B + '+host1'],
-	['new Dural on vs new Dural off: the pool', neu('A', B + '+dural+stage'), neu('B', B), B + '+host1'],
+	['new Dural on vs new Dural off: the pool, Dural on (either\'s)', neu('A', B + '+dural+stage'), neu('B', B), B + '+host1+dural'],
+	['new Dural off vs new Dural on: the same', neu('A', B), neu('B', B + '+dural'), B + '+host1+dural'],
+	['new Dural on vs new Dural on: the pool, Dural on', neu('A', B + '+dural'), neu('B', B + '+dural+1v1'), B + '+host1+dural'],
+	['Rev D new Dural off vs new Dural on: the pool, +dural2', neu('A', B, 'vf3', ['stage', 'dural2']), neu('B', B + '+dural2', 'vf3', ['stage', 'dural2']), B + '+host1+dural2'],
 	['old plain vs old plain: as ever', old('A', B), old('B', B), B],
 	['old +stage vs old plain: apart, as ever', old('A', B + '+stage'), old('B', B), null],
 	['old +1v1+stage vs new (own plain): the old one\'s', old('A', B + '+1v1+stage'), neu('B', B), B + '+1v1+stage'],
@@ -65,8 +68,8 @@ const cases = [
 	['vf2 new Random vs new Normal: the pool', neu('A', 'v0.1.16+random', 'vf2', ['random']), neu('B', 'v0.1.16', 'vf2', ['random']), 'v0.1.16+host1'],
 	['vf2 old +random vs new Normal: the old one\'s', old('A', 'v0.1.16+random', 'vf2'), neu('B', 'v0.1.16', 'vf2', ['random']), 'v0.1.16+random'],
 ];
-cases[11][1].pool = cases[11][2].pool = cases[12][2].pool = 'v0.1.16+mix1';
-cases[11][3] = 'v0.1.16+mix1';
+for (const c of cases) for (const x of [c[1], c[2]]) if (x.game === 'vf2' && x.pool) x.pool = 'v0.1.16+mix1';   // (VF2's pool flag)
+for (const c of cases) if (c[3] === 'v0.1.16+host1') c[3] = 'v0.1.16+mix1';
 for (const [what, a, b, want] of cases) {
 	const r = await random_pair(a, b);
 	if (r.error) { check('random, ' + what, r.error, want); continue; }
@@ -82,6 +85,79 @@ for (const [what, a, b, want] of cases) {
 	check('room,   ' + what, got, want);
 	await post('/v1/close', { code: h.body.code, key: h.body.key }, b.from);
 }
+// Every combination (reno's ask): vf3 (Revision D) and vf3tb, each side new or old (the v0.1.15 builds' version
+// strings, as they send them: base, then +dural2 / Team Battle's +dural, +1v1, +stage), stage on or off, Dural on or
+// off, Team Battle's 1 vs 1 or 3 vs 3; Revision D's pre-v0.1.16 "+dural" too; and vf2's Normal, Random and Seed. Both
+// orders, Random and room codes. What each pair should play, worked out here on its own (not with terms()):
+//   new-new: the pool (+ the game's Dural flag when either has her on, vf3); new-old: the old one's version, if the
+//   new build plays every flag of it (not Revision D's old "+dural"); old-old: only the same version, as today
+{
+	const games = {
+		vf3: { flag: 'dural2', accepts: ['stage', 'dural2'], tb: false },
+		vf3tb: { flag: 'dural', accepts: ['stage', '1v1', 'dural'], tb: true },
+	};
+	const sides = [];
+	for (const [game, g] of Object.entries(games))
+		for (const kind of ['new', 'old'])
+			for (const dural of [0, 1]) for (const one of g.tb ? [0, 1] : [0]) for (const stage of [0, 1]) {
+				const v = B + (dural ? '+' + g.flag : '') + (one ? '+1v1' : '') + (stage ? '+stage' : '');
+				sides.push({ game, kind, v, dural, label: kind + (dural ? ' D' : ' -') + (g.tb ? (one ? ' 1v1' : ' 3v3') : '') + (stage ? ' S' : ' -') });
+			}
+	for (const stage of [0, 1]) sides.push({ game: 'vf3', kind: 'old', v: B + '+dural' + (stage ? '+stage' : ''), dural: 1, pre: true, label: 'old D(pre-0.1.16)' + (stage ? ' S' : ' -') });
+	for (const kind of ['new', 'old'])
+		for (const f of ['', 'R', 'S99']) sides.push({ game: 'vf2', kind, v: 'v0.1.16' + (f ? '+random' : ''), dural: 0, label: kind + ' ' + (f ? (f === 'R' ? 'Random' : 'Seed') : 'Normal') });
+	const make = (x, name) => {
+		if (x.game === 'vf2') return x.kind === 'new' ? { ...neu(name, x.v, 'vf2', ['random']), pool: 'v0.1.16+mix1' } : old(name, x.v, 'vf2');
+		return x.kind === 'new' ? neu(name, x.v, x.game, games[x.game].accepts) : old(name, x.v, x.game);
+	};
+	const want_of = (a, b) => {
+		if (a.kind === 'new' && b.kind === 'new') {
+			if (a.game === 'vf2') return 'v0.1.16+mix1';
+			return B + '+host1' + (a.dural || b.dural ? '+' + games[a.game].flag : '');
+		}
+		if (a.kind === 'old' && b.kind === 'old') return a.v === b.v ? a.v : null;
+		const o = a.kind === 'old' ? a : b;
+		return o.pre ? null : o.v;
+	};
+	const tally = { matched: 0, refused: 0, failed: 0 };
+	const table = [];
+	for (const game of ['vf3', 'vf3tb', 'vf2']) {
+		const here = sides.filter((x) => x.game === game);
+		for (const x of here) for (const y of here) {
+			const want = want_of(x, y);
+			const a = make(x, 'A'), b = make(y, 'B');
+			const r = await random_pair(a, b);
+			const rnd = r.error ? 'error' : r.none ? null : r.a.as === r.b.as && (r.a.role === 'host') !== (r.b.role === 'host') ? r.a.as : 'disagree';
+			const h = await post('/v1/host', b, b.from);   // (b hosts, a joins)
+			const wait = post('/v1/wait', { code: h.body.code, key: h.body.key }, b.from);
+			const j = await post('/v1/join', { ...a, code: h.body.code }, a.from);
+			let room_as = null;
+			if (j.status === 200) { const w = await wait; room_as = w.body.guest && w.body.guest.as === j.body.as ? j.body.as : 'disagree'; }
+			await post('/v1/close', { code: h.body.code, key: h.body.key }, b.from);
+			const ok = rnd === want && room_as === want;
+			if (!ok) { tally.failed++; fails++; console.log('FAIL matrix ' + game + ' ' + x.label + ' vs ' + y.label + ': random ' + rnd + ', room ' + room_as + ' (wanted ' + want + ')'); }
+			else if (want === null) tally.refused++;
+			else tally.matched++;
+			table.push([game, x.label, y.label, want === null ? 'apart' : want.slice(want.indexOf('+') < 0 ? want.length : want.indexOf('+')) || '(base)', ok ? '' : 'FAIL']);
+		}
+	}
+	// a different ROM: apart, whatever the settings
+	{
+		const a = neu('A', B + '+stage'), b = { ...neu('B', B + '+stage'), content: 'ffffffffffffffff' };
+		const r = await random_pair(a, b);
+		const h = await post('/v1/host', b, b.from);
+		const j = await post('/v1/join', { ...a, code: h.body.code }, a.from);
+		await post('/v1/close', { code: h.body.code, key: h.body.key }, b.from);
+		check('matrix, a different ROM: apart (random, room)', (r.none ? 'apart' : 'met') + ', ' + j.body.error, 'apart, rom');
+	}
+	console.log('matrix (A vs B, both orders, Random and room codes the same): the terms (after the base)');
+	let last = '';
+	for (const [game, x, y, t, f] of table) {
+		if (game + x !== last) { process.stdout.write((last ? '\n' : '') + (game + ' ' + x).padEnd(30) + ' | '); last = game + x; }
+		process.stdout.write(y + ': ' + t + (f ? ' FAIL' : '') + '; ');
+	}
+	console.log('\nmatrix: ' + table.length + ' pairs: ' + tally.matched + ' matched, ' + tally.refused + ' apart as they should be, ' + tally.failed + ' failed');
+}
 // an old lobby's way, a new game: no pool sent at all is today's (version) rule: covered by the old/old cases
 // the count: those one can be matched with
 {
@@ -93,6 +169,21 @@ for (const [what, a, b, want] of cases) {
 	check('count, a new player sees the old players it can play (not +bogus)', n.body.players, 2);
 	const m = await post('/v1/random/count', a, a.from);
 	check('count, an old +stage player sees only its own (none else)', m.body.players, 1);
+}
+// /v1/online: one count a game (who one can meet), the older versions' players among them, no variants
+{
+	const n = neu('N', B + '+dural+stage'), o = old('O', B + '+1v1'), v = { ...neu('V', 'v0.1.16+random', 'vf2', ['random']), pool: 'v0.1.16+mix1' };
+	const get = async () => (await worker.fetch(new Request('http://lobby/v1/online', { headers: { 'cf-connecting-ip': '192.0.2.9' } }), env)).json();
+	const d0 = await get();   // (the matrix's matches still counted, as playing: the change is what's checked)
+	const h1 = await post('/v1/host', n, n.from), h2 = await post('/v1/host', o, o.from), h3 = await post('/v1/host', v, v.from);
+	await new Promise((ok) => setTimeout(ok, 50));
+	const d = await get();
+	const tb = d.games.vf3tb, tb0 = d0.games.vf3tb, g2 = d.games.vf2, g20 = d0.games.vf2;
+	check('online, the games counted', Object.keys(d.games || {}).sort().join(','), 'vf1,vf2,vf3,vf3tb');
+	check('online, the shape: total, searching, random, hosting, room, older, countries; no variants', Object.keys(tb).sort().join(','), 'countries,hosting,older,random,room,searching,total');
+	check('online, Team Battle: a new and an old host, the old one older', (tb.hosting - tb0.hosting) + ' hosting, ' + (tb.older - tb0.older) + ' older', '2 hosting, 1 older');
+	check('online, VF2: a Random player is a current one', (g2.hosting - g20.hosting) + ' hosting, ' + (g2.older - g20.older) + ' older', '1 hosting, 0 older');
+	for (const [h, x] of [[h1, n], [h2, o], [h3, v]]) await post('/v1/close', { code: h.body.code, key: h.body.key }, x.from);
 }
 console.log(fails ? fails + ' FAILED' : 'all passed');
 process.exit(fails ? 1 : 0);
