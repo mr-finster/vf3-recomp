@@ -2115,7 +2115,19 @@ int main(int argc, char **argv)
 	// remember: the driver kept as failed for the next start (its start-up check, its textures); a picture failing
 	// in play (a command buffer refused around a sleep or a GPU reset, once) only for this run: kept, a Steam Deck's
 	// one bad moment put the 3D on the CPU at every start after, until the player changed it back
-	auto g3_fail = [&](const std::string &why, bool remember = true) {
+	int gov_aa_cut = 0;   // the governor's: steps below the player's antialiasing (cut before the scale)
+	// The 3D gone to the CPU in play: the scale the player chose for the GPU, 3x with 2x antialiasing, was 0.5 pictures
+	// a second there (issue #26's device lost). 1x without antialiasing for this run, said with the notice; the
+	// settings saved stay the player's (a graphics setting changed puts them back). Drawing only: the game's the same
+	std::string cpu_cut_said;
+	auto cpu_cut = [&] {
+		if (scale <= 1 && std::clamp(cfg.aa - gov_aa_cut, 1, 3) <= 1) return;
+		scale = 1;
+		gov_aa_cut = cfg.aa - 1;
+		cpu_cut_said = " Drawn at 1x without antialiasing for this run, as the CPU can keep up (Display's settings are kept).";
+		fprintf(stderr, "the 3D on the CPU: drawn at 1x without antialiasing for this run (the settings kept)\n");
+	};
+	auto g3_fail_why = [&](const std::string &why, bool remember) {
 		fprintf(stderr, "the 3D on the GPU: %s: on the CPU from now on%s\n", why.c_str(), remember ? "" : " (this run)");
 		g3.on = false;
 		g3.failed = true;
@@ -2138,6 +2150,12 @@ int main(int argc, char **argv)
 		on_cpu_because(why.find("aren't the CPU's") != std::string::npos ? "the GPU drew the 3D wrongly here" : "the GPU's 3D failed here",
 		               other_next ? "The next start tries the GPU on Windows' other graphics driver." : UPDATE);
 	};
+	auto g3_fail = [&](const std::string &why, bool remember = true) {
+		cpu_cut();
+		g3_fail_why(why, remember);
+		if (cpu_why_new && !cpu_cut_said.empty() && cpu_why.find(cpu_cut_said) == std::string::npos) cpu_why += cpu_cut_said;   // (with the notice)
+	};
+
 	static video::Scene between;
 	SDL_Texture *tex3d = nullptr, *tex_below = nullptr, *tex_above = nullptr;
 	bool g3_shown = false;   // the picture on show is the GPU's
@@ -2179,7 +2197,6 @@ int main(int argc, char **argv)
 	};
 	// the 3D's size: 384 lines a scale, as wide as the picture's shape
 	// antialiasing in use: the player's, less where the picture drawn would be over 8 times the arcade's each way
-	int gov_aa_cut = 0;   // the governor's: steps below the player's antialiasing (cut before the scale)
 	auto aa_now = [&] {
 		int k = std::clamp(cfg.aa - gov_aa_cut, 1, 3);
 		// (and no wider than 16384, a GPU's usual largest texture: past 48:9 at 4x the GPU's 2x would fail and go
@@ -2979,7 +2996,7 @@ int main(int argc, char **argv)
 			"Smooths jagged edges on the 3D: 2x and 3x draw it twice or three times as large each way and average it down. Cleaner, but four or nine times the work.",
 			[&] {
 				const int k = aa_now();
-				if (cfg.aa > 1 && k < cfg.aa) return std::to_string(cfg.aa) + "x (" + (k > 1 ? std::to_string(k) + "x" : std::string("off")) + (gov_aa_cut ? " for now: the computer is busy)" : " at this render scale)");
+				if (cfg.aa > 1 && k < cfg.aa) return std::to_string(cfg.aa) + "x (" + (k > 1 ? std::to_string(k) + "x" : std::string("off")) + (gov_aa_cut ? (cpu_cut_said.empty() ? " for now: the computer is busy)" : " for now: the 3D's on the CPU)") : " at this render scale)");
 				return k > 1 ? std::to_string(k) + "x" : std::string("Off");
 			},
 			[&](int d) { cfg.aa = std::clamp(cfg.aa + d, 1, 3); cfg_dirty = true; gov_fresh(); } });
