@@ -63,6 +63,13 @@ public:
 	~Online();
 	vf3net::Adapter adapter;      // (its run, settle and program_changed set by main)
 	vfnet::Identity identity;     // the game, build and ROM hash (main's); the name from the settings
+	// This side's own settings for a match (main's, with identity): Dural on the select, the stage select, Team Battle;
+	// what it tells the lobby besides its own version (vf3_netplay.h's HOST_TERMS_FLAG): the pool, and the flags it
+	// can play another's way. A match plays the lobby's terms (use_terms), by address its own.
+	bool own_dural = false, own_stage = false, tb = false;
+	std::string pool;
+	std::vector<std::string> accepts;
+	std::string terms;            // (the match's, as the session's identity has it)
 
 	// With a room code: open a room (the code comes in a moment: room_code()), or join one
 	// (want: the room's code from before, kept if it's free: a match's Play again; patient: no room yet is waited for,
@@ -227,6 +234,9 @@ private:
 	void room_poll();
 	void host_again(const std::string &why);
 	void room_session(bool host);       // the session, with the lobby's token, on the room's link
+	bool use_terms(const std::string &as);   // the match's terms (the lobby's "as", or "": this side's own): the adapter set for them
+	vfnet::Identity match_identity() const { vfnet::Identity i = identity; i.build = terms; return i; }
+	std::string match_said() const;     // (what the match plays, said to both players: the stage select and the rest)
 	void room_failed(const std::string &why);
 	void joined(const vfnet::json::Value &v);   // (the room found: connecting to its host)
 	void search();                      // (into the queue for a random opponent)

@@ -3095,7 +3095,7 @@ int main(int argc, char **argv)
 	auto cheats_page = [&] {
 		menu_page p{ "Cheats", "", {} };
 		p.items.push_back({ "Dural on the select",
-			"Dural, the boss, in a 13th spot past Kage on the select, for either player. Changing it restarts the game. ONLINE: while it's on, you only meet players who have it on too. Turn it off to play everyone.",
+			"Dural, the boss, in a 13th spot past Kage on the select, for either player. Changing it restarts the game. ONLINE: a match plays the host's choice (said as it starts), so you meet everyone; against an older version, only one with the same.",
 			[&] { return std::string(cfg.dural ? "On" : "Off"); },
 			[&](int) {
 				if (nvram_away || online.phase() != Online::Phase::off) return;
@@ -3194,7 +3194,7 @@ int main(int argc, char **argv)
 		}
 		if (board.profile == &m3::VF3_TB)
 			p.items.push_back({ "Team Battle mode",
-				"1 vs 1: one fighter each, as in Virtua Fighter 3. 3 vs 3: three fighters a side, Team Battle's own. It's what Start begins (the arcade's own setting): hold Up as you press Start for 3 vs 3 instead, or Down for 1 vs 1. A player joining plays the mode already on. The intro follows it, as the arcade's does: its sunset in 3 vs 3. ONLINE: you only meet players who chose the same mode.",
+				"1 vs 1: one fighter each, as in Virtua Fighter 3. 3 vs 3: three fighters a side, Team Battle's own. It's what Start begins (the arcade's own setting): hold Up as you press Start for 3 vs 3 instead, or Down for 1 vs 1. A player joining plays the mode already on. The intro follows it, as the arcade's does: its sunset in 3 vs 3. ONLINE: a match plays the host's mode (said as it starts), so you meet everyone.",
 				[&] { return std::string(cfg.tb_one ? "1 vs 1" : "3 vs 3"); },
 				[&](int) { tb_mode_flip(); }, [&] { tb_mode_flip(); } });
 		p.items.push_back({ "Log file",
@@ -3613,15 +3613,22 @@ int main(int argc, char **argv)
 		const bool one = board.profile == &m3::VF3_TB && cfg.tb_one;
 		const bool stage = cfg.online.stage_select;
 		online.identity = { board.profile->set, vf3net::online_version(VF3_VERSION) + (dural ? (board.profile == &m3::VF3_TB ? "+dural" : vf3net::DURAL_FLAG) : "") + (one ? "+1v1" : "") + (stage ? "+stage" : ""), vf3net::content_hash(board), "" };   // (the online version, not the release's)
-		online.adapter.dural = dural;
-		online.adapter.stage_select_on = stage;
+		online.own_dural = online.adapter.dural = dural;
+		online.own_stage = online.adapter.stage_select_on = stage;
+		// (Random and rooms across settings: the pool, the host's settings; and the flags of an older build's version
+		// this one plays its way: Dural's only with this build's patches, Revision D's "+dural2", Team Battle's "+dural")
+		online.tb = board.profile == &m3::VF3_TB;
+		online.pool = vf3net::pool_version(vf3net::online_version(VF3_VERSION));
+		online.accepts = { "stage" };
+		if (online.tb) online.accepts.push_back("1v1");
+		if (board.profile->dural) online.accepts.push_back(online.tb ? "dural" : std::string(vf3net::DURAL_FLAG).substr(1));
 		online_ready = true;
 	};
 	auto online_page = [&] {
 		online_identity();
 		return online_menu::page(online, cfg.online, menu, [&] {
 			cfg_dirty = true;
-			if (cfg.online.stage_select != online.adapter.stage_select_on) { online_ready = false; online_identity(); }   // (Settings' stage select: at once)
+			if (cfg.online.stage_select != online.own_stage) { online_ready = false; online_identity(); }   // (Settings' stage select: at once)
 		});
 	};
 	auto online_row = [&] { return board.profile->settings.at ? 5 : 4; };   // (the main page's Online row: Arcade settings before it when known)

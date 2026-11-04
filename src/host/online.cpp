@@ -156,7 +156,8 @@ bool Online::open_host(std::string &error)
 	if (!link->bind(uint16_t(port), error)) { link.reset(); return false; }
 	if (adapter.settle) adapter.settle();
 	identity.name = started_with.name;
-	session = std::make_unique<vfnet::Session>(lagged(*link), adapter, identity, config(started_with), true, vf3net::start_blob(board));
+	use_terms("");
+	session = std::make_unique<vfnet::Session>(lagged(*link), adapter, match_identity(), config(started_with), true, adapter.host_blob());
 	session->trace = log_line;
 	ph = Phase::hosting;
 	return true;
@@ -262,7 +263,8 @@ bool Online::join(const OnlineSettings &s, std::string &error)
 	link = std::make_unique<vfnet::UdpLink>();
 	if (!link->connect(host, uint16_t(p), error)) { link.reset(); return false; }
 	identity.name = s.name;
-	session = std::make_unique<vfnet::Session>(lagged(*link), adapter, identity, config(s), false);
+	use_terms("");
+	session = std::make_unique<vfnet::Session>(lagged(*link), adapter, match_identity(), config(s), false);
 	session->trace = log_line;
 	joining_to = host + (p != 7700 ? ":" + std::to_string(p) : "");
 	ph = Phase::joining;
@@ -538,7 +540,8 @@ std::string Online::me_json(const std::string &extra) const
 	}
 	return "{\"game\":" + vfnet::json::quote(identity.game) + ",\"version\":" + vfnet::json::quote(identity.build) + ",\"content\":" +
 	       vfnet::json::quote(hex64(identity.content)) + ",\"name\":" + vfnet::json::quote(identity.name) + ",\"cands\":" + vfnet::json::list(cands) +
-	       ",\"relay\":" + vfnet::json::quote(room ? room->relay_address() : "") + extra + "}";
+	       ",\"relay\":" + vfnet::json::quote(room ? room->relay_address() : "") +
+	       (pool.empty() ? std::string() : ",\"pool\":" + vfnet::json::quote(pool) + ",\"accepts\":" + vfnet::json::list(accepts)) + extra + "}";
 }
 
 vfnet::Link &Online::lagged(vfnet::Link &l)
@@ -555,8 +558,33 @@ void Online::room_session(bool host)
 	if (adapter.settle) adapter.settle();
 	vfnet::Config c = config(started_with);
 	c.token = room_token;
-	session = std::make_unique<vfnet::Session>(lagged(*room), adapter, identity, c, host, host ? vf3net::start_blob(board) : std::vector<uint8_t>());
+	session = std::make_unique<vfnet::Session>(lagged(*room), adapter, match_identity(), c, host, host ? adapter.host_blob() : std::vector<uint8_t>());
 	session->trace = log_line;
+}
+
+bool Online::use_terms(const std::string &as)
+{
+	const std::string t = as.empty() ? identity.build : as;
+	vf3net::Terms m;
+	if (!vf3net::terms_of(t, identity.build, pool, tb, m)) return false;
+	terms = t;
+	adapter.host_terms = m.host_terms;
+	adapter.dural = m.host_terms ? own_dural : m.dural;   // (a guest's from the host's blob, at the start)
+	adapter.stage_select_on = m.host_terms ? own_stage : m.stage;
+	if (t != identity.build) log_line("the match's terms: " + t + (m.host_terms ? " (the host's settings)" : " (the other player's version)"));
+	return true;
+}
+
+std::string Online::match_said() const
+{
+	const std::string whose = adapter.host_terms ? (is_host ? " (yours, as host)" : " (the host's)") : "";
+	std::string s = std::string("Stage select ") + (adapter.stage_select_on ? "on" : "off");
+	if (adapter.dural || own_dural) s += std::string(", Dural ") + (adapter.dural ? "on" : "off");
+	if (tb) {
+		const size_t o = size_t(board.profile->settings.team_mode), at = board.profile->settings.at + o;
+		if (o && board.backup.size() > at && board.backup[at] <= 1) s += board.backup[at] ? ", 1 vs 1" : ", 3 vs 3";
+	}
+	return s + whose;
 }
 
 void Online::room_failed(const std::string &why)
@@ -749,6 +777,7 @@ void Online::room_poll()
 			key = v["key"].str();
 			room_token = strtoull(v["token"].str().c_str(), nullptr, 16);
 			job.reset();
+			use_terms("");   // (its own till a player comes: then the lobby's terms for the two)
 			room_session(true);
 			st = Step::waiting;
 			wait_errors = 0;
@@ -772,6 +801,9 @@ void Online::room_poll()
 				if (g.kind == vfnet::json::Value::object) {
 					peer_name = g["name"].str();
 					country_peer = country(g["country"].str());   // (the guest's flag: the lobby sends it, as it does the host's to the guest)
+					const std::string was = terms;
+					if (!use_terms(g["as"].str())) { host_again("their version's settings can't be played here."); return; }
+					if (terms != was) room_session(true);   // (the session for the two's terms: the pool's, or the player's version)
 					room->set_peer(g["cands"].strings(), g["relay"].str(), true);
 					st = Step::connecting;
 					step_at = now;
@@ -848,6 +880,7 @@ void Online::room_poll()
 				peer_name = v["name"].str();
 				country_peer = country(v["country"].str());
 				ticket.clear();
+				if (!use_terms(v["as"].str())) { room_failed("The online service matched you with a version this one can't play: update the game."); return; }
 				room_session(true);
 				st = Step::waiting;
 				retry_at = 0;
@@ -892,6 +925,7 @@ void Online::joined(const vfnet::json::Value &v)
 	room_token = strtoull(v["token"].str().c_str(), nullptr, 16);
 	peer_name = v["name"].str();
 	country_peer = country(v["country"].str());
+	if (!use_terms(v["as"].str())) { room_failed("The online service matched you with a version this one can't play: update the game."); return; }
 	room->set_peer(v["cands"].strings(), v["relay"].str(), false);
 	room_session(false);
 	st = Step::connecting;
@@ -985,6 +1019,8 @@ void Online::begin_match(const std::string &who)
 		close_room();   // (the code's done its job)
 	}
 	notices.push_back({ Notice::joined, "Playing " + who + ": press Start" });
+	notices.push_back({ Notice::tip, "This match: " + match_said() });   // (both players: the settings it plays, the host's in a pool match)
+	log_line("this match: " + match_said());
 	// (on one network through the relay, only because this Mac may not reach it: slower than need be, said on the
 	// versus screen)
 	local_slow = rooms && room && room->via_relay() && room->local_blocked();
@@ -1590,7 +1626,7 @@ menu_page settings_page(Online &o, OnlineSettings &s, game_menu &menu, std::func
 			changed();
 		} });
 	p.items.push_back({ "Stage select", "On: the arcade's stage screen, as in Japan's arcades: the challenger picks the stage, so on every rematch "
-		"the loser does. Off: the game's next stage each match. You only meet players who chose the same. Not while hosting, joining or playing.",
+		"the loser does. Off: the game's next stage each match. A match plays the host's choice (said as it starts), so you meet everyone; against an older version, the same as theirs. Not while hosting, joining or playing.",
 		[&s] { return std::string(s.stage_select ? "On" : "Off"); },
 		[&o, &s, changed](int) {
 			if (o.phase() != Online::Phase::off) return;   // (a room open or a match on: its version stays as it began)
