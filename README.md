@@ -211,7 +211,9 @@ The arcade froze with her on Akira's stage: fixed here. Changing it restarts the
 Online, Dural is on the select for both players when either of them has her on (the other just sees her spot and
 needn't pick her; said as the match starts: Dural on, yours, theirs or both), so it no longer splits players. Against
 an older version, the match plays that version's choice (Revision D's from before v0.1.15-alpha's 2 Nov update, with her older
-patches, still only meets the same version).
+patches, still only meets the same version). Against v0.1.16-alpha she's on too, played that version's way on both
+sides (said as "Dural on (older version's)"): two Durals' reflection as it was there, the gold 1P / chrome 2P glitch
+fixed in v0.1.17-alpha (issue #23) only between two players of v0.1.17-alpha or later.
 
 Menu > **Cheats** > **Dural's stage** (issue #22; Off or Guard: Start stays the game's own, so in Team Battle holding Start and picking with Punch or Kick still gives a stage's VF3 version, issue #36): on the stage screen (Stage select:
 Challenger), confirm a stage with that button for its Dural version. The arcade gives it only to the picker holding
