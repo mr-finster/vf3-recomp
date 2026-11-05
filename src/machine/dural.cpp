@@ -57,6 +57,11 @@ namespace {
 //   one off screen, at a win, the halves took turns again and drew right). Now the half is the frame counter's
 //   (0x100070) low bit xor her side (0x4450C: b 0x9F154; 0x9F154-0x9F170), so each takes turns, the two on opposite
 //   halves (the same work a frame as before); the byte is still flipped. Team Battle's at 0x4999C (+0x5490), the same.
+//   That's the chrome one (her first costume, 9). The gold one (22) has her own, 0x448E8, which reads the same byte
+//   and flips it too unless 1P's fighter (-0x5EF8(r13), +0x70) is 9: Sega's way for the arcade's chrome 1P, so the
+//   byte flipped once a frame. With the gold one on 1P (22) both flip it, so the gold one's half never changed either
+//   (the reporter's: only gold 1P and chrome 2P is wrong). Her half now the same way (0x44944: b 0x9F174;
+//   0x9F174-0x9F190), whoever's on 1P; Team Battle's at 0x49DD4, the same.
 // - her spot on the select: the cursor's routine (0x2C7C4) keeps the column (r17, 0x45 of the player's select object
 //   0x108000 + 0x80 * player) in 0-5, wrapping, and reads the fighter from the grid's rows (0x70400: 0x70408 and
 //   0x7040F), whose seventh byte is already 9, Dural, in both rows. Now the column goes to 6: right from the sixth
@@ -132,6 +137,9 @@ const uint32_t REV_D_PATCH[][3] = {
 	{ 0x4450C, 0x40A20078, 0x4805AC48 }, { 0x9F154, 0xFFFFFFFF, 0x3C600010 }, { 0x9F158, 0xFFFFFFFF, 0x80630070 },
 	{ 0x9F15C, 0xFFFFFFFF, 0x888E0004 }, { 0x9F160, 0xFFFFFFFF, 0x7C632278 }, { 0x9F164, 0xFFFFFFFF, 0x70630001 },
 	{ 0x9F168, 0xFFFFFFFF, 0x41820008 }, { 0x9F16C, 0xFFFFFFFF, 0x4BFA5418 }, { 0x9F170, 0xFFFFFFFF, 0x4BFA53A0 },
+	{ 0x44944, 0x41820078, 0x4805A830 }, { 0x9F174, 0xFFFFFFFF, 0x3C600010 }, { 0x9F178, 0xFFFFFFFF, 0x80630070 },
+	{ 0x9F17C, 0xFFFFFFFF, 0x888E0004 }, { 0x9F180, 0xFFFFFFFF, 0x7C632278 }, { 0x9F184, 0xFFFFFFFF, 0x70630001 },
+	{ 0x9F188, 0xFFFFFFFF, 0x41820008 }, { 0x9F18C, 0xFFFFFFFF, 0x4BFA5830 }, { 0x9F190, 0xFFFFFFFF, 0x4BFA57B8 },
 };
 
 const uint32_t TB_KNOWN[][2] = {
@@ -186,6 +194,9 @@ const uint32_t TB_PATCH[][3] = {
 	{ 0x4999C, 0x40A20078, 0x480557B8 }, { 0x9F154, 0xFFFFFFFF, 0x3C600010 }, { 0x9F158, 0xFFFFFFFF, 0x80630070 },
 	{ 0x9F15C, 0xFFFFFFFF, 0x888E0004 }, { 0x9F160, 0xFFFFFFFF, 0x7C632278 }, { 0x9F164, 0xFFFFFFFF, 0x70630001 },
 	{ 0x9F168, 0xFFFFFFFF, 0x41820008 }, { 0x9F16C, 0xFFFFFFFF, 0x4BFAA8A8 }, { 0x9F170, 0xFFFFFFFF, 0x4BFAA830 },
+	{ 0x49DD4, 0x41820078, 0x480553A0 }, { 0x9F174, 0xFFFFFFFF, 0x3C600010 }, { 0x9F178, 0xFFFFFFFF, 0x80630070 },
+	{ 0x9F17C, 0xFFFFFFFF, 0x888E0004 }, { 0x9F180, 0xFFFFFFFF, 0x7C632278 }, { 0x9F184, 0xFFFFFFFF, 0x70630001 },
+	{ 0x9F188, 0xFFFFFFFF, 0x41820008 }, { 0x9F18C, 0xFFFFFFFF, 0x4BFAACC0 }, { 0x9F190, 0xFFFFFFFF, 0x4BFAAC48 },
 };
 
 // The arcade's Dural boss (offline only: a 1P game vs the CPU, never online). When the CPU's next opponent is Dural
