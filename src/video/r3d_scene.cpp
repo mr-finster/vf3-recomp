@@ -681,6 +681,8 @@ Meshes SceneBuilder::parse(const uint32_t *src, bool dynamic)
 				mesh->verts.push_back(p[2]);
 				mesh->verts.push_back(p[3]);
 			}
+			mesh->quads.resize(mesh->verts.size() / 3);
+			if (count == 4) mesh->quads[mesh->verts.size() / 3 - 2] = 1;
 		};
 		const bool discard = (h[0] & 0x300) == 0x300;
 		if ((h[1] & 0x10) && !discard) {

@@ -12,11 +12,13 @@ mkdir -p $OUT
 DXC=${DXC:-dxc}
 SPIRV_CROSS=${SPIRV_CROSS:-spirv-cross}
 NAMES=""
-for s in vs_poly fs_opq fs_tr vs_quad fs_fog fs_out fs_colour; do
+for s in vs_poly fs_opq fs_tr fs_opq_q fs_tr_q vs_quad fs_fog fs_out fs_colour; do
 	case $s in
 		vs_poly) D="-D VS_POLY"; P=vs_6_0;;
 		fs_opq) D="-D FS_POLY -D FS_LAYER=0"; P=ps_6_0;;
 		fs_tr) D="-D FS_POLY -D FS_LAYER=1"; P=ps_6_0;;
+		fs_opq_q) D="-D FS_POLY -D FS_LAYER=0 -D FS_QUADS"; P=ps_6_0;;
+		fs_tr_q) D="-D FS_POLY -D FS_LAYER=1 -D FS_QUADS"; P=ps_6_0;;
 		vs_quad) D="-D VS_QUAD"; P=vs_6_0;;
 		fs_fog) D="-D FS_FOG"; P=ps_6_0;;
 		fs_out) D="-D FS_OUT"; P=ps_6_0;;

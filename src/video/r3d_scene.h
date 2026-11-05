@@ -48,6 +48,9 @@ struct Mesh
 	float flip = 0;
 	int flip_x = 0, flip_y = 0;
 	std::vector<Vertex> verts;    // triangles
+	// per triangle, 1: it and the next are a quad's halves (its corners 0 1 2 and 0 2 3), drawn as one quad when
+	// Raster::quad_rendering is on (as the Real3D draws them: a quad that isn't flat is one surface, not two)
+	std::vector<uint8_t> quads;
 	uint64_t key = 0;             // the polygon header bits that made it
 	// Which of the passes draws it: 0 the opaque layer, 1 and 2 the two translucent layers
 	bool in_layer(int layer, float node_alpha) const

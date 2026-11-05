@@ -5,7 +5,9 @@
 // Entry points (one per -D):
 //   VS_POLY   the polygons: their clip positions and attributes worked out by the CPU (r3d_gpu.cpp)
 //   FS_POLY   their pixels: FS_LAYER 0 the opaque layer (base, the two translucent layers cleared, its depth as
-//             a colour too), 1 or 2 a translucent layer (only in front of the opaque layer's depth)
+//             a colour too), 1 or 2 a translucent layer (only in front of the opaque layer's depth); FS_QUADS
+//             too: a whole quad's pixels from its four corners (quad rendering, as the CPU's draw_tri), its depth
+//             written
 //   VS_QUAD   a rectangle in clip space (the uniforms')
 //   FS_FOG    the fog layers: a colour, with the spotlight on fog's ellipse
 //   FS_OUT    the three layers put together into one premultiplied picture
@@ -58,6 +60,7 @@ struct PolyV
 	float4 misc : TEXCOORD2;    // u, v, fixed shade, back-face test
 	float lodbase : TEXCOORD3;
 	nointerpolation uint draw : TEXCOORD4;
+	nointerpolation uint quad : TEXCOORD5;   // a whole quad's in the quads buffer (FS_QUADS), or ~0
 };
 #endif
 
@@ -70,6 +73,7 @@ struct VsIn
 	float4 misc : TEXCOORD3;
 	float lodbase : TEXCOORD4;
 	uint draw : TEXCOORD5;
+	uint quad : TEXCOORD6;
 };
 PolyV main(VsIn i)
 {
@@ -80,6 +84,7 @@ PolyV main(VsIn i)
 	o.misc = i.misc;
 	o.lodbase = i.lodbase;
 	o.draw = i.draw;
+	o.quad = i.quad;
 	return o;
 }
 #endif
@@ -96,6 +101,46 @@ BIND(0, 3) cbuffer Frame : register(b0, space3)
 {
 	float gx, xscale, yscale, frame_pad;
 };
+#ifdef FS_QUADS
+// the whole quads: each 256 bytes, its corners' x, y (the target's pixels), 1/w and a pad, then each corner's 11
+// attributes over w (view position, normal, u, v, fixed shade, back-face test, LOD base) and a pad
+BIND(4, 2) ByteAddressBuffer quads : register(t4, space2);
+static const float NEAR = 1e-3;   // (r3d_gpu.cpp's: a polygon's depth is NEAR / w)
+
+// a point's mean value coordinates in a quad, as the CPU's quad_weights (r3d_raster.cpp)
+void quad_weights(float2 c[4], float2 p, out float l[4])
+{
+	float2 s[4];
+	float r[4];
+	[unroll] for (int k = 0; k < 4; k++) {
+		s[k] = c[k] - p;
+		r[k] = length(s[k]);
+	}
+	[unroll] for (int k2 = 0; k2 < 4; k2++) l[k2] = 0;
+	[unroll] for (int k3 = 0; k3 < 4; k3++)
+		if (r[k3] < 1e-5) { l[k3] = 1; return; }   // on a corner
+	float th[4];
+	[unroll] for (int k4 = 0; k4 < 4; k4++) {
+		const int n = (k4 + 1) & 3;
+		const float cr = s[k4].x * s[n].y - s[k4].y * s[n].x, dt = dot(s[k4], s[n]);
+		const float den = r[k4] * r[n] + dt;
+		if (den <= 1e-6 * r[k4] * r[n]) {   // on the edge from k4 to n
+			const float t = r[k4] / (r[k4] + r[n]);
+			l[k4] = 1 - t;
+			l[n] = t;
+			return;
+		}
+		th[k4] = cr / den;
+	}
+	float sum = 0;
+	[unroll] for (int k5 = 0; k5 < 4; k5++) {
+		l[k5] = (th[(k5 + 3) & 3] + th[k5]) / r[k5];
+		sum += l[k5];
+	}
+	if (!(abs(sum) > 1e-20)) { [unroll] for (int k6 = 0; k6 < 4; k6++) l[k6] = 0.25; return; }
+	[unroll] for (int k7 = 0; k7 < 4; k7++) l[k7] /= sum;
+}
+#endif
 
 float4 decode(int type, uint v)
 {
@@ -181,14 +226,50 @@ struct FsOut
 #else
 	float4 t : SV_Target0;
 #endif
+#ifdef FS_QUADS
+	float z : SV_Depth;
+#endif
 };
 
 FsOut main(PolyV i)
 {
 	FsOut o;
+	float wi = 1.0 / i.pos.w;   // (SV_Position.w is w: the reciprocal of GLSL's gl_FragCoord.w)
+#ifdef FS_QUADS
+	o.z = i.pos.z;
+	if (i.quad != 0xFFFFFFFFu) {
+		// a whole quad: depth and attributes from its four corners by the pixel's mean value coordinates
+		const uint at = i.quad * 256;
+		float2 c[4];
+		float iw[4];
+		[unroll] for (int k = 0; k < 4; k++) {
+			const float4 q = asfloat(quads.Load4(at + k * 16));
+			c[k] = q.xy;
+			iw[k] = q.z;
+		}
+		float l[4];
+		quad_weights(c, i.pos.xy, l);
+		wi = l[0] * iw[0] + l[1] * iw[1] + l[2] * iw[2] + l[3] * iw[3];
+		if (!(wi > 0))
+			discard;
+		float4 a0 = 0, a1 = 0, a2 = 0;
+		[unroll] for (int k2 = 0; k2 < 4; k2++) {
+			const uint b = at + 64 + k2 * 48;
+			a0 += l[k2] * asfloat(quads.Load4(b));
+			a1 += l[k2] * asfloat(quads.Load4(b + 16));
+			a2 += l[k2] * asfloat(quads.Load4(b + 32));
+		}
+		const float wv = 1.0 / wi;
+		a0 *= wv; a1 *= wv; a2 *= wv;
+		i.view = a0.xyz;
+		i.normal = float3(a0.w, a1.x, a1.y);
+		i.misc = float4(a1.z, a1.w, a2.x, a2.y);
+		i.lodbase = a2.z;
+		o.z = NEAR * wi;
+	}
+#endif
 	if (i.misc.w > 0)
 		discard;   // facing away
-	const float wi = 1.0 / i.pos.w;   // (SV_Position.w is w: the reciprocal of GLSL's gl_FragCoord.w)
 #if FS_LAYER != 0
 	// translucent: only in front of the opaque layer
 	if (wi <= odepth.Load(int3(int2(i.pos.xy), 0)).r)

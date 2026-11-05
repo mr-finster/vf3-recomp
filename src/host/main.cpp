@@ -646,6 +646,7 @@ struct settings
 	bool timings = false;    // F9: the timings in the title bar
 	bool smooth_bg = true;   // the 2D backgrounds (the layers below the 3D) scaled smoothly, not as blocks
 	bool sharp_textures = true;   // the 3D's textures' mipmap levels for the picture's size (false: the arcade's, video::Raster::arcade_lod)
+	bool quads = true;       // the 3D's quads drawn as quads, as the Real3D does (false: each as two triangles, video::Raster::quad_rendering)
 	int filter = 0;          // the screen filter: 0 off, 1 scanlines, 2 CRT
 	OnlineSettings online;   // the Online page's
 	int crt_colours = 0;     // an arcade monitor's colours: 0 off, 1-5 as Supermodel's (crt::PRESETS)
@@ -723,6 +724,7 @@ struct settings
 		flag("smooth_backgrounds", smooth_bg);
 		flag("background_filter", smooth_bg);   // (VF1's and VF2's name)
 		flag("sharp_textures", sharp_textures);
+		flag("quad_rendering", quads);
 		num("screen_filter", filter, 0, 2);
 		num("crt_colours", crt_colours, 0, crt::N_PRESETS - 1);
 		num("brightness", brightness, crt::BRIGHT_MIN, crt::BRIGHT_MAX);
@@ -805,6 +807,7 @@ struct settings
 		if (fs_exclusive) fprintf(f, "fullscreen_exclusive = 1\n");
 		if (!gpu3d_failed.empty()) fprintf(f, "gpu_3d_failed = %s\ngpu_3d_failed_build = %s\n", gpu3d_failed.c_str(), BUILD);
 		fprintf(f, "crt_colours = %d\nbrightness = %d\ngamma = %d\nsharp_textures = %d\n", crt_colours, brightness, gamma, int(sharp_textures));
+		fprintf(f, "quad_rendering = %d\n", int(quads));
 		if (graphics) fprintf(f, "graphics = %d\n", graphics);
 		fprintf(f, "window_scale = %d\n", window_scale);
 		if (window_w > 0) fprintf(f, "window_w = %d\nwindow_h = %d\nwindow_x = %d\nwindow_y = %d\nwindow_maximised = %d\n", window_w, window_h, window_x, window_y, int(window_max));
@@ -2200,6 +2203,7 @@ int main(int argc, char **argv)
 	make_2d(tex_below, video::WW);
 	SDL_SetTextureScaleMode(tex_below, cfg.smooth_bg ? SDL_SCALEMODE_LINEAR : SDL_SCALEMODE_NEAREST);
 	video::Raster::arcade_lod = !cfg.sharp_textures;
+	video::Raster::quad_rendering = cfg.quads;
 	make_2d(tex_above, video::W);
 	// A picture into a streaming texture: on Direct3D 11 into the texture itself, mapped (d3d11_map.h: SDL's
 	// lock and update would make a new staging texture each time), else locked; write(pixels, pitch)
@@ -3091,6 +3095,10 @@ int main(int argc, char **argv)
 			"Sharp picks the textures' detail for the picture's size, so things in the distance stay as crisp as the render scale allows. Arcade picks it as the arcade did for its own screen: softer in the distance at higher render scales. The same at 1x.",
 			[&] { return std::string(cfg.sharp_textures ? "Sharp" : "Arcade"); },
 			[&](int) { cfg.sharp_textures = !cfg.sharp_textures; video::Raster::arcade_lod = !cfg.sharp_textures; cfg_dirty = true; } });
+		p.items.push_back({ "Quad rendering",
+			"On draws the characters' and stages' four-sided polygons as the arcade's graphics board did, each one surface. Off splits each into two triangles, as most renderers do: where clothes and skin bend at the joints, the pieces underneath can then poke through (Pai's waist).",
+			[&] { return on_off(cfg.quads); },
+			[&](int) { cfg.quads = !cfg.quads; video::Raster::quad_rendering = cfg.quads; cfg_dirty = true; } });
 		p.items.push_back({ "Smooth motion",
 			"On: a picture for each refresh of your screen (up to 120 a second), placed between the arcade's 57.5 frames a second, a frame behind them. Off: only the arcade's own frames, as on the cabinet (uneven on most screens).",
 			[&] { return on_off(cfg.smooth) + (cfg.smooth && gov.smooth_off ? " (60 a second for now: the computer is busy)" : ""); },

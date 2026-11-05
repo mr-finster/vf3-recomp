@@ -13,6 +13,8 @@
 // VF3_TILE_LAG=1: the tile layers' lines drawn at the frame's end from the registers each line had (the host's tile
 // worker at its latest); VF3_TILE_EVERY=n: the tile layers drawn every n-th frame only (a netplay match's frames run
 // again unseen after a rollback), the sky audit then of those frames.
+// VF3_VERSUS_COUNT=n: the versus count set after the boot (the first match's stage, as the host's). VF3_QUADS=0: the quads drawn as two triangles (Display > Quad rendering Off).
+// VF3_RENDER_TIME=n: with VF3_BIGSHOT, n more renders of each shot's 3D at its scale, timed.
 // VF3_LOG_BYTES=addr,...: those RAM bytes each frame ("bytes FRAME v..."). VF3_DURAL_STAGE=1 (Guard) or 2 (Start): Cheats > Dural's stage on both players' inputs (VF3_DURAL_STAGE_ONLINE=1: inputs only, as online; VF3_DURAL_STAGE_LEAD=n: n frames' input delay). VF3_DEBUG_MODE=1: Arcade settings > Debug mode (Model3::debug_mode). VF3_DURAL=1: Dural on the select (as the cheat: the program's patches, and her spot's picture in --shots). (VF3_DURAL_ONLINE=1: without the offline patches, as online) VF3_BORROW=backdrops,coin,settings,test_menu,versus_count,scene,score,free_play_text: those addresses from
 // VF3_BORROW_FROM's profile (default vf3), to try them on another program; VF3_MAP_IN=file: more entry points (hex, a line each); VF3_MAP_OUT=file: appends every address the interpreter ran
 // from for want of one (--rec; a map's learning: run again with them in until none are new).
@@ -134,6 +136,7 @@ int main(int argc, char **argv)
 	static double tile_ms = 0;
 	static std::vector<uint32_t> picture(video::W * video::H);
 	static video::SceneBuilder scene_builder;
+	if (getenv("VF3_QUADS")) video::Raster::quad_rendering = atoi(getenv("VF3_QUADS")) != 0;   // (tests: 0 the quads as two triangles)
 	if (getenv("VF3_WIDEN")) scene_builder.widen = float(atof(getenv("VF3_WIDEN")));
 	static video::Scene scene;
 	static video::Raster raster;
@@ -218,6 +221,10 @@ int main(int argc, char **argv)
 			if (!quiet) printf("frame %llu: mark %s\n", (unsigned long long)f, m.c_str());
 		static double t_board = 0, t_sound = 0, t_scene = 0;
 		static const bool prof = getenv("VF3_PROF") != nullptr;
+		if (static const char *vc = getenv("VF3_VERSUS_COUNT"); vc && board.profile->versus_count && long(f) == long(board.profile->boot_frames)) {
+			const uint32_t c = uint32_t(atoi(vc));   // tests: the versus count after the boot, as the host's VF3_VERSUS_COUNT (that stage)
+			memcpy(board.ram.data() + board.profile->versus_count, &c, 4);
+		}
 		if (static const char *pk = getenv("VF3_POKE"); pk) {   // tests: "addr=value,..." (bytes, as --ram-at's dump holds them) before every frame
 			static const char *range = getenv("VF3_POKE_FRAMES");   // "from-to": only then
 			long from = 0, to = -1;
@@ -968,6 +975,13 @@ int main(int argc, char **argv)
 					const int k = std::clamp(atoi(bs), 1, 8);
 					big.resize(video::W * k, video::H * k);
 					big.render(scene, board.tex_ram.data());
+					if (const char *rt = getenv("VF3_RENDER_TIME")) {   // (tests: that many more renders at this scale, timed)
+						const int n = std::max(1, atoi(rt));
+						const auto t0 = std::chrono::steady_clock::now();
+						for (int i = 0; i < n; i++) big.render(scene, board.tex_ram.data());
+						printf("render %llu: %.3f ms at %dx%d\n", (unsigned long long)board.frame,
+							std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count() / n, big.width(), big.height());
+					}
 					std::vector<uint32_t> o(size_t(big.width()) * big.height(), 0xFF808080u);
 					big.compose(o.data(), o.data());
 					char p[64];

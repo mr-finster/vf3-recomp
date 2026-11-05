@@ -47,14 +47,16 @@ void R3dGpu::shutdown()
 	if (!dev) return;
 	SDL_WaitForGPUIdle(dev);
 	free_targets();
-	for (SDL_GPUGraphicsPipeline *p : { p_opq, p_opq_l, p_tr, p_tr_l, p_fog, p_out })
+	for (SDL_GPUGraphicsPipeline *p : { p_opq, p_opq_l, p_tr, p_tr_l, p_fog, p_out, p_opq_q, p_opq_lq, p_tr_q, p_tr_lq })
 		if (p) SDL_ReleaseGPUGraphicsPipeline(dev, p);
-	for (SDL_GPUBuffer *b : { vbuf, dbuf, pbuf, texram })
+	for (SDL_GPUBuffer *b : { vbuf, dbuf, pbuf, qbuf, texram })
 		if (b) SDL_ReleaseGPUBuffer(dev, b);
 	if (tb) SDL_ReleaseGPUTransferBuffer(dev, tb);
 	if (sampler) SDL_ReleaseGPUSampler(dev, sampler);
 	p_opq = p_opq_l = p_tr = p_tr_l = p_fog = p_out = nullptr;
-	vbuf = dbuf = pbuf = texram = nullptr;
+	p_opq_q = p_opq_lq = p_tr_q = p_tr_lq = nullptr;
+	vbuf = dbuf = pbuf = qbuf = texram = nullptr;
+	vbuf_size = dbuf_size = pbuf_size = qbuf_size = 0;
 	tb = nullptr;
 	sampler = nullptr;
 	dev = nullptr;
@@ -106,15 +108,17 @@ bool R3dGpu::init(SDL_GPUDevice *device)
 	SDL_GPUShader *vs_poly = shader(SH(vs_poly), SDL_GPU_SHADERSTAGE_VERTEX, 0, 0, 0);
 	SDL_GPUShader *fs_opq = shader(SH(fs_opq), SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 3, 1);
 	SDL_GPUShader *fs_tr = shader(SH(fs_tr), SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 3, 1);
+	SDL_GPUShader *fs_opq_q = shader(SH(fs_opq_q), SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 4, 1);
+	SDL_GPUShader *fs_tr_q = shader(SH(fs_tr_q), SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 4, 1);
 	SDL_GPUShader *vs_quad = shader(SH(vs_quad), SDL_GPU_SHADERSTAGE_VERTEX, 0, 0, 1);
 	SDL_GPUShader *fs_fog = shader(SH(fs_fog), SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 0, 1);
 	SDL_GPUShader *fs_out = shader(SH(fs_out), SDL_GPU_SHADERSTAGE_FRAGMENT, 3, 0, 1);
 #undef SH
 	auto release = [&] {
-		for (SDL_GPUShader *s : { vs_poly, fs_opq, fs_tr, vs_quad, fs_fog, fs_out })
+		for (SDL_GPUShader *s : { vs_poly, fs_opq, fs_tr, fs_opq_q, fs_tr_q, vs_quad, fs_fog, fs_out })
 			if (s) SDL_ReleaseGPUShader(dev, s);
 	};
-	if (!vs_poly || !fs_opq || !fs_tr || !vs_quad || !fs_fog || !fs_out) { release(); return false; }
+	if (!vs_poly || !fs_opq || !fs_tr || !fs_opq_q || !fs_tr_q || !vs_quad || !fs_fog || !fs_out) { release(); return false; }
 
 	// the depth and stencil format: 32-bit float depth if it's here, else 24-bit
 	for (SDL_GPUTextureFormat f : { SDL_GPU_TEXTUREFORMAT_D32_FLOAT_S8_UINT, SDL_GPU_TEXTUREFORMAT_D24_UNORM_S8_UINT })
@@ -122,13 +126,14 @@ bool R3dGpu::init(SDL_GPUDevice *device)
 	if (ds_format == SDL_GPU_TEXTUREFORMAT_INVALID) { release(); err = "no depth and stencil format"; return false; }
 
 	SDL_GPUVertexBufferDescription vb = { 0, sizeof(GV), SDL_GPU_VERTEXINPUTRATE_VERTEX, 0 };
-	SDL_GPUVertexAttribute va[6] = {
+	SDL_GPUVertexAttribute va[7] = {
 		{ 0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(GV, clip) },
 		{ 1, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(GV, view) },
 		{ 2, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(GV, normal) },
 		{ 3, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(GV, misc) },
 		{ 4, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT, offsetof(GV, lodbase) },
 		{ 5, 0, SDL_GPU_VERTEXELEMENTFORMAT_UINT, offsetof(GV, draw) },
+		{ 6, 0, SDL_GPU_VERTEXELEMENTFORMAT_UINT, offsetof(GV, quad) },
 	};
 	const SDL_GPUTextureFormat F16 = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT, F32 = SDL_GPU_TEXTUREFORMAT_R32_FLOAT;
 	auto pipeline = [&](SDL_GPUShader *vs, SDL_GPUShader *fs, std::initializer_list<SDL_GPUTextureFormat> targets, bool poly,
@@ -140,7 +145,7 @@ bool R3dGpu::init(SDL_GPUDevice *device)
 			ci.vertex_input_state.vertex_buffer_descriptions = &vb;
 			ci.vertex_input_state.num_vertex_buffers = 1;
 			ci.vertex_input_state.vertex_attributes = va;
-			ci.vertex_input_state.num_vertex_attributes = 6;
+			ci.vertex_input_state.num_vertex_attributes = 7;
 		}
 		ci.primitive_type = strip ? SDL_GPU_PRIMITIVETYPE_TRIANGLESTRIP : SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
 		ci.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
@@ -181,10 +186,14 @@ bool R3dGpu::init(SDL_GPUDevice *device)
 	p_opq_l = pipeline(vs_poly, fs_opq, { F16, F16, F16, F32 }, true, true, SDL_GPU_COMPAREOP_GREATER_OR_EQUAL, true, false);
 	p_tr = pipeline(vs_poly, fs_tr, { F16 }, true, true, SDL_GPU_COMPAREOP_GREATER, false, false);
 	p_tr_l = pipeline(vs_poly, fs_tr, { F16 }, true, true, SDL_GPU_COMPAREOP_GREATER, true, false);
+	p_opq_q = pipeline(vs_poly, fs_opq_q, { F16, F16, F16, F32 }, true, true, SDL_GPU_COMPAREOP_GREATER_OR_EQUAL, false, false);
+	p_opq_lq = pipeline(vs_poly, fs_opq_q, { F16, F16, F16, F32 }, true, true, SDL_GPU_COMPAREOP_GREATER_OR_EQUAL, true, false);
+	p_tr_q = pipeline(vs_poly, fs_tr_q, { F16 }, true, true, SDL_GPU_COMPAREOP_GREATER, false, false);
+	p_tr_lq = pipeline(vs_poly, fs_tr_q, { F16 }, true, true, SDL_GPU_COMPAREOP_GREATER, true, false);
 	p_fog = pipeline(vs_quad, fs_fog, { F16, F16, F16 }, false, false, SDL_GPU_COMPAREOP_ALWAYS, false, true);
 	p_out = pipeline(vs_quad, fs_out, { SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM }, false, false, SDL_GPU_COMPAREOP_ALWAYS, false, true);
 	release();
-	if (!p_opq || !p_opq_l || !p_tr || !p_tr_l || !p_fog || !p_out) return false;
+	if (!p_opq || !p_opq_l || !p_tr || !p_tr_l || !p_fog || !p_out || !p_opq_q || !p_opq_lq || !p_tr_q || !p_tr_lq) return false;
 	SDL_GPUSamplerCreateInfo si = {};
 	si.min_filter = si.mag_filter = SDL_GPU_FILTER_NEAREST;
 	si.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_NEAREST;
@@ -308,8 +317,10 @@ bool R3dGpu::render(const video::Scene &scene, const video::Raster &prep, const 
 		o.flip = m.flip; o.flip_x = m.flip_x; o.flip_y = m.flip_y;
 	}
 	// each polygon (a triangle, or four sides after the near plane) as triangles; their raw attributes (the
-	// prepared ones are over w) and clip positions in their viewport's projection
+	// prepared ones are over w) and clip positions in their viewport's projection. A whole quad (quad rendering)
+	// also in the quads buffer, its corners as prepared, for its pixels (FS_QUADS)
 	verts.clear();
+	quads.clear();
 	struct Range { size_t first, count; int draw; };
 	std::vector<Range> ranges;
 	size_t batch_first[24], batch_end[24];
@@ -328,6 +339,16 @@ bool R3dGpu::render(const video::Scene &scene, const video::Raster &prep, const 
 				o.misc[0] = t.a[k][6] * wv; o.misc[1] = t.a[k][7] * wv; o.misc[2] = t.a[k][8] * wv; o.misc[3] = t.a[k][9] * wv;
 				o.lodbase = t.a[k][10] * wv;
 				o.draw = uint32_t(t.draw);
+				o.quad = 0xFFFFFFFFu;
+			}
+			if (t.quad) {
+				GQuad q = {};
+				for (int k = 0; k < 4; k++) {
+					q.corner[k][0] = t.sx[k]; q.corner[k][1] = t.sy[k]; q.corner[k][2] = t.iw[k];
+					memcpy(q.a[k], t.a[k], sizeof(float) * 11);
+					g[k].quad = uint32_t(quads.size());
+				}
+				quads.push_back(q);
 			}
 			if (ranges.size() == batch_first[b] || ranges.back().draw != t.draw)
 				ranges.push_back({ verts.size(), 0, t.draw });
@@ -344,6 +365,10 @@ bool R3dGpu::render(const video::Scene &scene, const video::Raster &prep, const 
 	const uint32_t vbytes = uint32_t(std::max<size_t>(1, verts.size()) * sizeof(GV));
 	const uint32_t dbytes = uint32_t(std::max<size_t>(1, gd.size()) * sizeof(GDraw));
 	const uint32_t pbytes = uint32_t(gv.size() * sizeof(GVp));
+	const bool quad_rendering = Raster::quad_rendering;
+	if (quad_rendering && quads.empty()) quads.push_back({});   // (the buffer bound has something in it)
+	static_assert(sizeof(GQuad) == 256, "as the shader's quads");
+	const uint32_t qbytes = uint32_t(quads.size() * sizeof(GQuad));
 	// texture RAM: whole rows of the areas written (all of it the first time, or after many changes)
 	std::vector<std::pair<uint32_t, uint32_t>> rows;   // first row, count
 	if (texram_full || tex_uploads.size() > 256) {
@@ -367,9 +392,10 @@ bool R3dGpu::render(const video::Scene &scene, const video::Raster &prep, const 
 	for (auto &r : rows) tbytes += r.second * 4096;
 	if (!ensure_buffer(vbuf, vbuf_size, vbytes, SDL_GPU_BUFFERUSAGE_VERTEX) ||
 		!ensure_buffer(dbuf, dbuf_size, dbytes, SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ) ||
-		!ensure_buffer(pbuf, pbuf_size, pbytes, SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ))
+		!ensure_buffer(pbuf, pbuf_size, pbytes, SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ) ||
+		(qbytes && !ensure_buffer(qbuf, qbuf_size, qbytes, SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ)))
 		return false;
-	const uint32_t total = vbytes + dbytes + pbytes + tbytes;
+	const uint32_t total = vbytes + dbytes + pbytes + qbytes + tbytes;
 	if (!tb || tb_size < total) {
 		if (tb) SDL_ReleaseGPUTransferBuffer(dev, tb);
 		SDL_GPUTransferBufferCreateInfo ti = {};
@@ -384,8 +410,9 @@ bool R3dGpu::render(const video::Scene &scene, const video::Raster &prep, const 
 	if (!verts.empty()) memcpy(map, verts.data(), verts.size() * sizeof(GV));
 	if (!gd.empty()) memcpy(map + vbytes, gd.data(), gd.size() * sizeof(GDraw));
 	memcpy(map + vbytes + dbytes, gv.data(), pbytes);
+	if (qbytes) memcpy(map + vbytes + dbytes + pbytes, quads.data(), qbytes);
 	{
-		uint32_t at = vbytes + dbytes + pbytes;
+		uint32_t at = vbytes + dbytes + pbytes + qbytes;
 		for (auto &r : rows) {
 			memcpy(map + at, tex_ram.data() + size_t(r.first) * 2048, size_t(r.second) * 4096);
 			at += r.second * 4096;
@@ -405,7 +432,8 @@ bool R3dGpu::render(const video::Scene &scene, const video::Raster &prep, const 
 		up(0, vbuf, 0, vbytes);
 		up(vbytes, dbuf, 0, dbytes);
 		up(vbytes + dbytes, pbuf, 0, pbytes);
-		uint32_t at = vbytes + dbytes + pbytes;
+		if (qbytes) up(vbytes + dbytes + pbytes, qbuf, 0, qbytes);
+		uint32_t at = vbytes + dbytes + pbytes + qbytes;
 		for (auto &r : rows) { up(at, texram, r.first * 4096, r.second * 4096); at += r.second * 4096; }
 		SDL_EndGPUCopyPass(cp);
 	}
@@ -508,7 +536,8 @@ bool R3dGpu::render(const video::Scene &scene, const video::Raster &prep, const 
 	}
 	if (!scene.blank) {
 		SDL_GPUBufferBinding vb = { vbuf, 0 };
-		SDL_GPUBuffer *storage[3] = { texram, dbuf, pbuf };
+		SDL_GPUBuffer *storage[4] = { texram, dbuf, pbuf, qbuf };
+		const uint32_t nstorage = quad_rendering ? 4 : 3;
 		auto draw_batch = [&](SDL_GPURenderPass *rp, int b, SDL_GPUGraphicsPipeline *plain, SDL_GPUGraphicsPipeline *layered, SDL_GPUTexture *od) {
 			SDL_BindGPUVertexBuffers(rp, 0, &vb, 1);
 			SDL_GPUTextureSamplerBinding sb = { od, sampler };
@@ -521,7 +550,7 @@ bool R3dGpu::render(const video::Scene &scene, const video::Raster &prep, const 
 				if (p != bound) {
 					SDL_BindGPUGraphicsPipeline(rp, p);
 					SDL_BindGPUFragmentSamplers(rp, 0, &sb, 1);
-					SDL_BindGPUFragmentStorageBuffers(rp, 0, storage, 3);
+					SDL_BindGPUFragmentStorageBuffers(rp, 0, storage, nstorage);
 					SDL_PushGPUFragmentUniformData(cmd, 0, frame_u, sizeof(frame_u));
 					SDL_SetGPUStencilReference(rp, 0);
 					bound = p;
@@ -546,7 +575,8 @@ bool R3dGpu::render(const video::Scene &scene, const video::Raster &prep, const 
 					SDL_GPUDepthStencilTargetInfo dt = depth_target();
 					SDL_GPURenderPass *rp = SDL_BeginGPURenderPass(cmd, c, 4, &dt);
 					// (the sampled texture must not be a target of this pass: the translucent layer's, unused here)
-					draw_batch(rp, b, p_opq, p_opq_l, out);
+					if (quad_rendering) draw_batch(rp, b, p_opq_q, p_opq_lq, out);
+					else draw_batch(rp, b, p_opq, p_opq_l, out);
 					SDL_EndGPURenderPass(rp);
 				}
 				for (int layer = 1; layer <= 2; layer++) {
@@ -554,7 +584,8 @@ bool R3dGpu::render(const video::Scene &scene, const video::Raster &prep, const 
 					SDL_GPUColorTargetInfo c = colour(layer == 1 ? t1 : t2, false);
 					SDL_GPUDepthStencilTargetInfo dt = depth_target();
 					SDL_GPURenderPass *rp = SDL_BeginGPURenderPass(cmd, &c, 1, &dt);
-					draw_batch(rp, b + layer, p_tr, p_tr_l, odepth);
+					if (quad_rendering) draw_batch(rp, b + layer, p_tr_q, p_tr_lq, odepth);
+					else draw_batch(rp, b + layer, p_tr, p_tr_l, odepth);
 					SDL_EndGPURenderPass(rp);
 				}
 				if (!prep.prio[pri].has_overlay) break;
