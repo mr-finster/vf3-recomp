@@ -22,11 +22,12 @@ namespace vf3net {
 // (220c2e7), whose builds send exactly this. (A wrong one ends a match as a desync: vf3soak --hashes against the last
 // release's file says whether the game changed. A new one is named after the release that brings it.)
 inline constexpr const char *NET_VERSION = "v0.1.7-online-preview";
-// Dural on the select's flag on Revision D's online version: "+dural2" since her patches changed (issue #23: her
-// reflection's place by her side; Team Battle's didn't change, its flag is still "+dural"), so a match never mixes
+// Dural on the select's flag on the online version, Revision D's and Team Battle's: "+dural3" since her patches
+// changed again (issue #23: each Dural's half of her reflection redone in turn, so two on screen both get theirs;
+// before it Revision D's "+dural2", her reflection's place by her side, and Team Battle's "+dural"), so a match never mixes
 // them (the program's words are in RAM, in the desync check's state: a "+dural" build of v0.1.15 or before and this
 // one would go out of step at the first check)
-inline constexpr const char *DURAL_FLAG = "+dural2";
+inline constexpr const char *DURAL_FLAG = "+dural3";
 // The online version a build plays as: NET_VERSION for a release (its version a release's name, as the release kit
 // builds it, or a build at a tag: "v0.1.8-alpha"), else the build's own version (git describe's "v0.1.8-alpha-3-gabc1234"
 // between releases, a bare commit, "dev"), so a test build, which may carry a change to the game, never meets the
@@ -42,7 +43,7 @@ inline constexpr const char *HOST_TERMS_FLAG = "+host1";
 std::string pool_version(const std::string &online);   // (online's base, before any "+", with HOST_TERMS_FLAG)
 // What a build plays a match as, from the lobby's terms: host_terms (the pool's), else that version's flags (a
 // version with another base, or a flag this build hasn't got: false, not played)
-// (host_terms with dural: the pool's marked "+dural2" / Team Battle's "+dural", either player's Play as Dural)
+// (host_terms with dural: the pool's marked "+dural3" (both games), either player's Play as Dural)
 // (team_one: Team Battle's mode an older version's terms play, 1 vs 1 with "+1v1", else 3 vs 3; -1 the host's own, a pool's)
 struct Terms { bool host_terms = false, dural = false, stage = false; int team_one = -1; };
 bool terms_of(const std::string &terms, const std::string &own, const std::string &pool, bool tb, Terms &out);

@@ -111,13 +111,13 @@ bool terms_of(const std::string &terms, const std::string &own, const std::strin
 	out = {};
 	// (the pool's: the host's settings, Dural on the select when the lobby marks it, either player having her on)
 	if (terms == pool) { out.host_terms = true; return true; }
-	if (terms == pool + (tb ? "+dural" : DURAL_FLAG)) { out.host_terms = out.dural = true; return true; }
+	if (terms == pool + DURAL_FLAG) { out.host_terms = out.dural = true; return true; }
 	const std::string base = own.substr(0, own.find('+'));
 	if (terms.compare(0, base.size(), base) != 0 || (terms.size() > base.size() && terms[base.size()] != '+')) return false;
 	for (size_t at = base.size(); at < terms.size();) {   // (each "+flag": only those a build of this one's has)
 		const size_t next = terms.find('+', at + 1);
 		const std::string f = terms.substr(at, next == std::string::npos ? std::string::npos : next - at);
-		if (f == (tb ? "+dural" : DURAL_FLAG) && !out.dural) out.dural = true;
+		if (f == DURAL_FLAG && !out.dural) out.dural = true;
 		else if (f == "+stage" && !out.stage) out.stage = true;
 		else if (tb && f == "+1v1" && out.team_one < 0) out.team_one = 1;   // (Team Battle's 1 vs 1: the host's blob sets it)
 		else return false;

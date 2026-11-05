@@ -3687,7 +3687,7 @@ int main(int argc, char **argv)
 		return pg;
 	};
 	// The identity for the handshake: the online version with what's added for the options that change a match, in
-	// this order: Dural on the select "+dural2" (Team Battle's "+dural": vf3_netplay.h's DURAL_FLAG), Team Battle 1 vs 1
+	// this order: Dural on the select "+dural3" (vf3_netplay.h's DURAL_FLAG, both games), Team Battle 1 vs 1
 	// "+1v1", Online > Settings' stage select "+stage" (each off, the plain version, as the builds before it: they still meet)
 	auto online_identity = [&] {
 		if (online_ready) return;   // (the ROM's hash for the handshake, once; again after an option changed)
@@ -3695,16 +3695,16 @@ int main(int argc, char **argv)
 		const bool dural = cfg.dural && board.profile->dural;
 		const bool one = board.profile == &m3::VF3_TB && cfg.tb_one;
 		const bool stage = cfg.online.stage_select;
-		online.identity = { board.profile->set, vf3net::online_version(VF3_VERSION) + (dural ? (board.profile == &m3::VF3_TB ? "+dural" : vf3net::DURAL_FLAG) : "") + (one ? "+1v1" : "") + (stage ? "+stage" : ""), vf3net::content_hash(board), "" };   // (the online version, not the release's)
+		online.identity = { board.profile->set, vf3net::online_version(VF3_VERSION) + (dural ? vf3net::DURAL_FLAG : "") + (one ? "+1v1" : "") + (stage ? "+stage" : ""), vf3net::content_hash(board), "" };   // (the online version, not the release's)
 		online.own_dural = online.adapter.dural = dural;
 		online.own_stage = online.adapter.stage_select_on = stage;
 		// (Random and rooms across settings: the pool, the host's settings; and the flags of an older build's version
-		// this one plays its way: Dural's only with this build's patches, Revision D's "+dural2", Team Battle's "+dural")
+		// this one plays its way: Dural's only with this build's patches, "+dural3")
 		online.tb = board.profile == &m3::VF3_TB;
 		online.pool = vf3net::pool_version(vf3net::online_version(VF3_VERSION));
 		online.accepts = { "stage" };
 		if (online.tb) online.accepts.push_back("1v1");
-		if (board.profile->dural) online.accepts.push_back(online.tb ? "dural" : std::string(vf3net::DURAL_FLAG).substr(1));
+		if (board.profile->dural) online.accepts.push_back(std::string(vf3net::DURAL_FLAG).substr(1));
 		online_ready = true;
 	};
 	auto online_page = [&] {

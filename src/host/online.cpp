@@ -566,7 +566,7 @@ void Online::room_session(bool host)
 bool Online::use_terms(const std::string &as, const std::string &them)
 {
 	// (the other player's own Dural, from its version as the lobby sends it, "them": only for what the match says)
-	const std::string flag = tb ? "+dural" : vf3net::DURAL_FLAG;
+	const std::string flag = vf3net::DURAL_FLAG;
 	their_dural = -1;
 	if (!them.empty()) {
 		their_dural = 0;
@@ -639,8 +639,8 @@ std::string options_apart(const std::string &theirs, const std::string &mine)
 		return has(theirs, "+dural") ? "Your opponent has Dural on the select (Cheats): turn it on too to play them, or ask them to turn it off."
 		                             : "Your opponent has Dural on the select off, and you have it on (Cheats): turn it off to play them.";
 	if (has(theirs, "+dural") && has(mine, "+dural") && has(theirs, vf3net::DURAL_FLAG) != has(mine, vf3net::DURAL_FLAG))
-		return has(theirs, vf3net::DURAL_FLAG) ? "Your opponent's Dural on the select is newer than yours (her patches changed after v0.1.15): update to play them with it on, or both turn it off."
-		                                       : "Your opponent's Dural on the select is older than yours (her patches changed after v0.1.15): they need to update to play you with it on, or both turn it off.";
+		return has(theirs, vf3net::DURAL_FLAG) ? "Your opponent's Dural on the select is newer than yours (her patches changed after v0.1.16): update to play them with it on, or both turn it off."
+		                                       : "Your opponent's Dural on the select is older than yours (her patches changed after v0.1.16): they need to update to play you with it on, or both turn it off.";
 	if (has(theirs, "+1v1") != has(mine, "+1v1"))
 		return has(theirs, "+1v1") ? "Your opponent plays Team Battle 1 vs 1: switch to it in Game > Team Battle mode to play them."
 		                           : "Your opponent plays Team Battle 3 vs 3: switch to it in Game > Team Battle mode to play them.";

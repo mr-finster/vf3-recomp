@@ -15,7 +15,7 @@
 // of this build's (a cross-version test: another build's host, this build's guest and straight board, the hashes compared)
 // --terms VERSION: the match played on the lobby's terms as Online::use_terms plays them, an older version's
 // ("v0.1.7-online-preview+1v1": its stage select, Dural and Team Battle mode, whatever --stage, --dural and --team) or
-// the pool's (VERSION's base with +host1: as --host-terms; "+host1+dural2", Team Battle's "+host1+dural": Dural on)
+// the pool's (VERSION's base with +host1: as --host-terms; "+host1+dural3": Dural on)
 // VF3NET_WATCH=addr,... (hex): those RAM bytes on the straight run, printed as they change ("bytes FRAME v...").
 #include "../src/host/input_script.h"
 #include "../src/host/dural_stage.h"

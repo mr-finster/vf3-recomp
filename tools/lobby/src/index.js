@@ -154,7 +154,7 @@ function adopts(n, v) {   // (player n can play version v's match)
 }
 // Two in the same pool: the pool's, with Dural on the select when either player has her on (VF3's issue: either
 // side's Play as Dural unlocks her for both; the other only sees her spot): the game's own Dural flag, the one in its
-// accepts (Revision D's "dural2", Team Battle's "dural"), in either's version, marks the pool "+<flag>"
+// accepts (both games' "dural3" now; older builds' "dural2", "dural"), in either's version, marks the pool "+<flag>"
 function has_flag(v, f) {
 	return v.slice(base_of(v).length).split('+').slice(1).includes(f);
 }
