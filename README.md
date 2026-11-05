@@ -178,9 +178,10 @@ Mini) get a fighting stick's layout; Controls > Player 1 (or 2) > Set up buttons
   **Stage select** has the arcade's own options by name: **Off** (each two-player match on the game's next stage,
   starting from a random one) or **Challenger** (the challenger picks the stage, so on every rematch
   the loser picks, as Japanese arcades had it; the stage's Dural version is easiest with Menu > Cheats > Dural's stage). Team Battle also lists **Variable** and **Full**, the arcade's own, not yet known (no stage screen seen between two players).
+  **Debug mode** (issue #37, offline only): the arcade's hidden debug mode without its code: the CPU load, polygons, hits and damage on the screen; in a fight, P2 Guard held and P2 Start pause the game, P1 Start then runs a frame at a time, P1 Start with P2 Start held goes on.
 - **Controls:** each player's pad, keys and buttons.
 - **Online:** a random opponent, host a match, join one, play by address, your name, input delay, the connection display (see below).
-- **Cheats:** **Dural on the select** and **Dural's stage** (see [Dural](#dural)), and **Debug mode** (issue #37, offline only): the arcade's hidden debug mode without its code: the CPU load, polygons, hits and damage on the screen; in a fight, P2 Guard held and P2 Start pause the game, P1 Start then runs a frame at a time, P1 Start with P2 Start held goes on.
+- **Cheats:** **Dural on the select** and **Dural's stage** (see [Dural](#dural)).
 
 The settings stay as you set them, as in Virtua Fighter 1 and 2 Recomp: if the computer can't keep up at a render
 scale, choose a lower one (F5).

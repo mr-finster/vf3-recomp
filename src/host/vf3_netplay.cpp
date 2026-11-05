@@ -181,7 +181,7 @@ bool Adapter::begin(const std::vector<uint8_t> &blob)
 	}
 	if (settle) settle();
 	if (on_begin) on_begin();
-	board.debug_mode = false;   // (Cheats > Debug mode: never online, the match's boot neither)
+	board.debug_mode = false;   // (Arcade settings > Debug mode: never online, the match's boot neither)
 	memcpy(board.backup.data(), blob.data() + 4, board.backup.size());
 	memcpy(board.eeprom.regs, blob.data() + 4 + board.backup.size(), sizeof board.eeprom.regs);
 	// the PC way on both sides, whatever each plays offline: the FREE PLAY notices hidden in the CROM the boot
@@ -242,7 +242,7 @@ void Adapter::advance(const uint16_t input[2], bool resim)
 {
 	unpack(input[0], 0, board.controls);
 	unpack(input[1], 1, board.controls);
-	board.debug_mode = false;   // (Cheats > Debug mode: never online)
+	board.debug_mode = false;   // (Arcade settings > Debug mode: never online)
 	midi_taken = false;
 	if (run) run(resim);
 	else board.run_frame();

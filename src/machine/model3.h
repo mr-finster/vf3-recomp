@@ -183,7 +183,7 @@ public:
 	// `legacy`: v0.1.16-alpha's set (the DuralPatch's legacy_count: without issue #23's fix), for an online match on
 	// an older version's Dural flag, so both sides' program words are the same
 	int set_dural(bool on, bool offline = false, bool legacy = false);
-	// Cheats > Debug mode (offline only, never on an online match's board): the arcade's own, as its secret code gives
+	// Arcade settings > Debug mode (offline only, never on an online match's board): the arcade's own, as its secret code gives
 	// it (the profile's debug_flags, set before each frame) with DIP switch 7 on (8 is: the board's 0x7F), which lets
 	// it read all eight: the CPU load, polygons, hits and damage on the screen. P2 Guard held and P2 Start pause the
 	// game (0x4250), P1 Start then runs a frame, P1 Start with P2 Start held goes on. A setting, not in the saved
