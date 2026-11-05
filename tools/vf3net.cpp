@@ -15,7 +15,8 @@
 // of this build's (a cross-version test: another build's host, this build's guest and straight board, the hashes compared)
 // --terms VERSION: the match played on the lobby's terms as Online::use_terms plays them, an older version's
 // ("v0.1.7-online-preview+1v1": its stage select, Dural and Team Battle mode, whatever --stage, --dural and --team) or
-// the pool's (VERSION's base with +host1: as --host-terms; "+host1+dural3": Dural on)
+// the pool's (VERSION's base with +host1: as --host-terms; "+host1+dural3": Dural on; "+host1+dural2", Team Battle's
+// "+host1+dural": Dural on with v0.1.16-alpha's patches, as an older build plays it)
 // VF3NET_WATCH=addr,... (hex): those RAM bytes on the straight run, printed as they change ("bytes FRAME v...").
 #include "../src/host/input_script.h"
 #include "../src/host/dural_stage.h"
@@ -154,6 +155,7 @@ int main(int argc, char **argv)
 		vf3net::Terms m;
 		if (!vf3net::terms_of(t, own, vf3net::pool_version(own), set.team_mode != 0, m)) { fprintf(stderr, "vf3net: terms %s not played by this build\n", terms); return 2; }
 		host_terms = m.host_terms;
+		A.adapter.dural_legacy = B.adapter.dural_legacy = m.dural_legacy;   // (an older version's Dural flag: its patches)
 		dural = m.dural;   // (a pool's: marked when either player has Dural on, the guest's own aside, --guest-dural)
 		if (!host_terms) { stage = m.stage; guest_stage = guest_dural = -1; }
 		A.adapter.team_one = B.adapter.team_one = m.team_one;
@@ -252,6 +254,7 @@ int main(int argc, char **argv)
 		C.use_rec = use_rec;
 		C.adapter.stage_select_on = stage;
 		C.adapter.dural = dural;
+		C.adapter.dural_legacy = A.adapter.dural_legacy;
 		C.adapter.host_terms = host_terms;
 		if (!C.open(rom, profile, error) || !C.adapter.begin(blob)) { fprintf(stderr, "vf3net: the straight board didn't start\n"); return 1; }
 		C.adapter.checkpoint_every = hashes_path ? 30 : 300;

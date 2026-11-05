@@ -37,6 +37,9 @@ struct DuralPatch
 	// her picture, the FINAL MATCH screen's (the tile generator's pictures: a descriptor (in the fixed CROM) of chunk
 	// count, width and height in tiles and the map, then chunks of palette and patterns in the banked CROM)
 	uint32_t picture, descriptors, data, data_bank;
+	// the patches v0.1.16-alpha applied: the first legacy_count of patch (set_dural's `legacy`: an older version's
+	// online match, "+dural2" / Team Battle's "+dural", plays her as it did, the same words on both sides)
+	size_t legacy_count;
 };
 
 struct Profile

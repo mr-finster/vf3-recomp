@@ -3699,12 +3699,15 @@ int main(int argc, char **argv)
 		online.own_dural = online.adapter.dural = dural;
 		online.own_stage = online.adapter.stage_select_on = stage;
 		// (Random and rooms across settings: the pool, the host's settings; and the flags of an older build's version
-		// this one plays its way: Dural's only with this build's patches, "+dural3")
+		// this one plays its way: Dural's "+dural3", and v0.1.16-alpha's "+dural2" / Team Battle's "+dural" with that version's patches)
 		online.tb = board.profile == &m3::VF3_TB;
 		online.pool = vf3net::pool_version(vf3net::online_version(VF3_VERSION));
 		online.accepts = { "stage" };
 		if (online.tb) online.accepts.push_back("1v1");
-		if (board.profile->dural) online.accepts.push_back(std::string(vf3net::DURAL_FLAG).substr(1));
+		if (board.profile->dural) {   // (this one's flag first; then v0.1.16-alpha's, played with its patches: legacy_dural_flag)
+			online.accepts.push_back(std::string(vf3net::DURAL_FLAG).substr(1));
+			online.accepts.push_back(std::string(vf3net::legacy_dural_flag(online.tb)).substr(1));
+		}
 		online_ready = true;
 	};
 	auto online_page = [&] {

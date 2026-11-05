@@ -180,9 +180,12 @@ public:
 	// known, nothing changed). Off: puts them back.
 	// `offline` (the PC's own games only, never online, where the other side's build plays without them): the
 	// arcade's Dural boss stages for her as a player too (the DuralPatch's offline list; issue #30)
-	int set_dural(bool on, bool offline = false);
+	// `legacy`: v0.1.16-alpha's set (the DuralPatch's legacy_count: without issue #23's fix), for an online match on
+	// an older version's Dural flag, so both sides' program words are the same
+	int set_dural(bool on, bool offline = false, bool legacy = false);
 	bool dural_on() const { return !dural_words.empty(); }
 	bool dural_offline = false;   // the offline patches are among dural_words
+	bool dural_legacy = false;    // v0.1.16-alpha's set
 	std::vector<std::pair<size_t, uint32_t>> dural_words;   // what set_dural replaced (the program's word addresses)
 	std::vector<uint8_t> security;   // 128 KB, host-order words
 	std::vector<std::pair<size_t, std::vector<uint8_t>>> free_play_text;   // what hide_free_play_text replaced

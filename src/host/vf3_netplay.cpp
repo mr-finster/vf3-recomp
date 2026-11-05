@@ -59,14 +59,14 @@ std::string online_version(const std::string &b)
 
 uint64_t content_hash(m3::Model3 &b)
 {
-	const bool hidden = !b.free_play_text.empty(), dural = b.dural_on(), offline = b.dural_offline;
+	const bool hidden = !b.free_play_text.empty(), dural = b.dural_on(), offline = b.dural_offline, legacy = b.dural_legacy;
 	if (hidden) b.show_free_play_text();
 	if (dural) b.set_dural(false);   // (Play as Dural's patches aside: online plays without them)
 	uint64_t h = 0;
 	for (const std::vector<uint8_t> *v : { &b.crom, &b.banked, &b.vrom, &b.sound_rom, &b.samples })
 		h = h * 0x100000001B3ull ^ vfnet::hash64(v->data(), v->size());
 	if (hidden) b.hide_free_play_text();
-	if (dural) b.set_dural(true, offline);
+	if (dural) b.set_dural(true, offline, legacy);
 	return h;
 }
 
@@ -112,12 +112,14 @@ bool terms_of(const std::string &terms, const std::string &own, const std::strin
 	// (the pool's: the host's settings, Dural on the select when the lobby marks it, either player having her on)
 	if (terms == pool) { out.host_terms = true; return true; }
 	if (terms == pool + DURAL_FLAG) { out.host_terms = out.dural = true; return true; }
+	if (terms == pool + legacy_dural_flag(tb)) { out.host_terms = out.dural = out.dural_legacy = true; return true; }   // (an older version's)
 	const std::string base = own.substr(0, own.find('+'));
 	if (terms.compare(0, base.size(), base) != 0 || (terms.size() > base.size() && terms[base.size()] != '+')) return false;
 	for (size_t at = base.size(); at < terms.size();) {   // (each "+flag": only those a build of this one's has)
 		const size_t next = terms.find('+', at + 1);
 		const std::string f = terms.substr(at, next == std::string::npos ? std::string::npos : next - at);
 		if (f == DURAL_FLAG && !out.dural) out.dural = true;
+		else if (f == legacy_dural_flag(tb) && !out.dural) out.dural = out.dural_legacy = true;
 		else if (f == "+stage" && !out.stage) out.stage = true;
 		else if (tb && f == "+1v1" && out.team_one < 0) out.team_one = 1;   // (Team Battle's 1 vs 1: the host's blob sets it)
 		else return false;
@@ -184,7 +186,7 @@ bool Adapter::begin(const std::vector<uint8_t> &blob)
 	// the PC way on both sides, whatever each plays offline: the FREE PLAY notices hidden in the CROM the boot
 	// copies the program from, free play in the settings, the boot run unseen, the same clock
 	if (!dural) board.set_dural(false);   // (Dural on the select: the match's, the same on both sides)
-	else if (board.set_dural(true) == 0) return false;   // (without the offline patches: the arcade's own boss stages)
+	else if (board.set_dural(true, false, dural_legacy) == 0) return false;   // (without the offline patches: the arcade's own boss stages; an older version's terms, its set)
 	if (board.hide_free_play_text() != 2) return false;
 	if (program_changed) program_changed();
 	board.rtc_time = 0;

@@ -153,14 +153,23 @@ function adopts(n, v) {   // (player n can play version v's match)
 	return new Set(flags).size === flags.length && flags.every((f) => n.accepts.includes(f));
 }
 // Two in the same pool: the pool's, with Dural on the select when either player has her on (VF3's issue: either
-// side's Play as Dural unlocks her for both; the other only sees her spot): the game's own Dural flag, the one in its
-// accepts (both games' "dural3" now; older builds' "dural2", "dural"), in either's version, marks the pool "+<flag>"
-function has_flag(v, f) {
-	return v.slice(base_of(v).length).split('+').slice(1).includes(f);
+// side's Play as Dural unlocks her for both; the other only sees her spot), marked "+<flag>" with the newest Dural
+// flag both accept: a game's accepts hold its own Dural flag ("dural3" now) and, from v0.1.17-alpha, the older
+// version's it plays with that version's patches (Revision D's "dural2", Team Battle's "dural": v0.1.16-alpha's), so
+// a new build and a v0.1.16 one play her the older way, two new ones "dural3". Both sides load the flag's patches,
+// the same words; no flag both accept: the pool's without her. (v0.1.16's builds accept one Dural flag each, so
+// between them this is the rule as it was: either's version carrying it, both accepting it.)
+const DURAL = /^dural\d*$/;
+function dural_rank(f) {
+	return f === 'dural' ? 1 : parseInt(f.slice(5), 10);
+}
+function dural_on(n) {   // (a Dural flag of its own, one it accepts, in its version)
+	return n.version.slice(base_of(n.version).length).split('+').slice(1).some((f) => DURAL.test(f) && n.accepts.includes(f));
 }
 function pool_terms(a, b) {
-	const f = a.accepts.find((x) => /^dural/.test(x));
-	return f && b.accepts.includes(f) && (has_flag(a.version, f) || has_flag(b.version, f)) ? a.pool + '+' + f : a.pool;
+	if (!dural_on(a) && !dural_on(b)) return a.pool;
+	const both = a.accepts.filter((f) => DURAL.test(f) && b.accepts.includes(f)).sort((x, y) => dural_rank(y) - dural_rank(x));
+	return both.length ? a.pool + '+' + both[0] : a.pool;
 }
 function terms(a, b) {
 	if (a.pool && a.pool === b.pool) return pool_terms(a, b);

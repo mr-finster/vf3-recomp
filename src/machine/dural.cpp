@@ -213,13 +213,17 @@ const uint32_t TB_OFFLINE[][3] = {
 	{ 0x7DBF8, 0x0A010A01, 0x0A0A0A01 }, { 0x7DC04, 0x0A0A0109, 0x0A0A0A09 },
 };
 
+// The words issue #23's fix added at the end of each patch list (two Durals' halves: 0x4450C and 0x44944, Team
+// Battle's 0x4999C and 0x49DD4, with their code at 0x9F154-0x9F190): without them, v0.1.16-alpha's set (`legacy`)
+constexpr size_t ISSUE23_WORDS = 18;
+
 } // namespace
 
 const DuralPatch REV_D_DURAL = { REV_D_KNOWN, sizeof REV_D_KNOWN / sizeof REV_D_KNOWN[0], REV_D_PATCH, sizeof REV_D_PATCH / sizeof REV_D_PATCH[0],
 	REV_D_OFFLINE, sizeof REV_D_OFFLINE / sizeof REV_D_OFFLINE[0],
-	0x7E0000, 0x7E8000, 0x4C, 0xFFB30004, 0xFF300000, 7 };
+	0x7E0000, 0x7E8000, 0x4C, 0xFFB30004, 0xFF300000, 7, sizeof REV_D_PATCH / sizeof REV_D_PATCH[0] - ISSUE23_WORDS };
 const DuralPatch TB_DURAL = { TB_KNOWN, sizeof TB_KNOWN / sizeof TB_KNOWN[0], TB_PATCH, sizeof TB_PATCH / sizeof TB_PATCH[0],
 	TB_OFFLINE, sizeof TB_OFFLINE / sizeof TB_OFFLINE[0],
-	0x7E0000, 0x7E8000, 0x4C, 0xFFB30004, 0xFF300000, 7 };
+	0x7E0000, 0x7E8000, 0x4C, 0xFFB30004, 0xFF300000, 7, sizeof TB_PATCH / sizeof TB_PATCH[0] - ISSUE23_WORDS };
 
 } // namespace m3

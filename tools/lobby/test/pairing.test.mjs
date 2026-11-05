@@ -65,18 +65,24 @@ const cases = [
 	['Rev D old +dural2+stage vs new: the old one\'s', old('A', B + '+dural2+stage', 'vf3'), neu('B', B, 'vf3', ['stage', 'dural2']), B + '+dural2+stage'],
 	['another base (a test build) vs new: apart', old('A', 'v0.1.8-alpha-3-gabc1234'), neu('B', B), null],
 	['a new pool vs another pool (a later +host2): either one\'s version, the same both ways', { ...neu('A', B + '+stage'), pool: B + '+host2' }, neu('B', B), B],
-	// v0.1.16's builds (a pool, their Dural flag "dural2", Team Battle's "dural") and this one's ("dural3"): the same pool,
-	// no Dural flag both accept, so the pool's without her (never a match with her patches on one side only)
+	// v0.1.16's builds (a pool, their Dural flag "dural2", Team Battle's "dural") and this one's (its own "dural3", and
+	// v0.1.16's, played with that version's patches): the same pool, Dural on when either has her on, on v0.1.16's flag
+	// (both load v0.1.16's patches); two of this one's on "dural3"
 	...(() => {
 		const out = [];
 		const v16 = (n, v, g) => neu(n, v, g, g === 'vf3' ? ['stage', 'dural2'] : ['stage', '1v1', 'dural']);
-		const n3 = (n, v, g) => neu(n, v, g, g === 'vf3' ? ['stage', 'dural3'] : ['stage', '1v1', 'dural3']);
+		const n3 = (n, v, g) => neu(n, v, g, g === 'vf3' ? ['stage', 'dural3', 'dural2'] : ['stage', '1v1', 'dural3', 'dural']);
 		for (const g of ['vf3', 'vf3tb']) {
 			const f = g === 'vf3' ? '+dural2' : '+dural';
-			for (const od of [0, 1]) for (const nd of [0, 1])
-				out.push([g + ' v0.1.16 Dural ' + (od ? 'on' : 'off') + ' vs new Dural ' + (nd ? 'on' : 'off') + ': the pool, Dural off', v16('A', B + (od ? f : ''), g), n3('B', B + (nd ? '+dural3' : ''), g), B + '+host1']);
+			for (const od of [0, 1]) for (const nd of [0, 1]) {
+				const want = B + '+host1' + (od || nd ? f : '');
+				out.push([g + ' v0.1.16 Dural ' + (od ? 'on' : 'off') + ' vs new Dural ' + (nd ? 'on' : 'off') + ': the pool' + (od || nd ? ', ' + f + ' (v0.1.16\'s patches)' : ''), v16('A', B + (od ? f : ''), g), n3('B', B + (nd ? '+dural3' : ''), g), want]);
+				out.push([g + ' new Dural ' + (nd ? 'on' : 'off') + ' vs v0.1.16 Dural ' + (od ? 'on' : 'off') + ': the same', n3('A', B + (nd ? '+dural3+stage' : '+stage'), g), v16('B', B + (od ? f : ''), g), want]);
+			}
 			out.push([g + ' new Dural on vs new Dural off: the pool, +dural3', n3('A', B + '+dural3', g), n3('B', B, g), B + '+host1+dural3']);
-			out.push([g + ' pre-pool old ' + f + ' vs new (accepts dural3): apart', old('A', B + f, g), n3('B', B, g), null]);
+			out.push([g + ' new Dural off vs new Dural on: the pool, +dural3', n3('A', B, g), n3('B', B + '+dural3+stage', g), B + '+host1+dural3']);
+			out.push([g + ' new Dural off vs new Dural off: the pool', n3('A', B, g), n3('B', B, g), B + '+host1']);
+			out.push([g + ' pre-pool old ' + f + ' vs new: the old one\'s, as v0.1.16 plays it', old('A', B + f, g), n3('B', B, g), g === 'vf3' ? B + f : B + f]);
 		}
 		return out;
 	})(),
@@ -108,14 +114,14 @@ for (const [what, a, b, want] of cases) {
 //   new build plays every flag of it (not Revision D's old "+dural"); old-old: only the same version, as today
 {
 	const games = {
-		vf3: { flag: 'dural3', old: 'dural2', accepts: ['stage', 'dural3'], tb: false },
-		vf3tb: { flag: 'dural3', old: 'dural', accepts: ['stage', '1v1', 'dural3'], tb: true },
+		vf3: { flag: 'dural3', old: 'dural2', accepts: ['stage', 'dural3', 'dural2'], v16: ['stage', 'dural2'], tb: false },
+		vf3tb: { flag: 'dural3', old: 'dural', accepts: ['stage', '1v1', 'dural3', 'dural'], v16: ['stage', '1v1', 'dural'], tb: true },
 	};
 	const sides = [];
 	for (const [game, g] of Object.entries(games))
-		for (const kind of ['new', 'old'])
+		for (const kind of ['new', 'v16', 'old'])
 			for (const dural of [0, 1]) for (const one of g.tb ? [0, 1] : [0]) for (const stage of [0, 1]) {
-				const v = B + (dural ? '+' + (kind === 'old' ? g.old : g.flag) : '') + (one ? '+1v1' : '') + (stage ? '+stage' : '');
+				const v = B + (dural ? '+' + (kind === 'new' ? g.flag : g.old) : '') + (one ? '+1v1' : '') + (stage ? '+stage' : '');
 				sides.push({ game, kind, v, dural, label: kind + (dural ? ' D' : ' -') + (g.tb ? (one ? ' 1v1' : ' 3v3') : '') + (stage ? ' S' : ' -') });
 			}
 	for (const stage of [0, 1]) sides.push({ game: 'vf3', kind: 'old', v: B + '+dural' + (stage ? '+stage' : ''), dural: 1, pre: true, label: 'old D(pre-0.1.16)' + (stage ? ' S' : ' -') });
@@ -123,16 +129,23 @@ for (const [what, a, b, want] of cases) {
 		for (const f of ['', 'R', 'S99']) sides.push({ game: 'vf2', kind, v: 'v0.1.16' + (f ? '+random' : ''), dural: 0, label: kind + ' ' + (f ? (f === 'R' ? 'Random' : 'Seed') : 'Normal') });
 	const make = (x, name) => {
 		if (x.game === 'vf2') return x.kind === 'new' ? { ...neu(name, x.v, 'vf2', ['random']), pool: 'v0.1.16+mix1' } : old(name, x.v, 'vf2');
-		return x.kind === 'new' ? neu(name, x.v, x.game, games[x.game].accepts) : old(name, x.v, x.game);
+		return x.kind === 'new' ? neu(name, x.v, x.game, games[x.game].accepts) : x.kind === 'v16' ? neu(name, x.v, x.game, games[x.game].v16) : old(name, x.v, x.game);
 	};
+	//   v16 (v0.1.16-alpha: a pool, its one Dural flag "dural2" / Team Battle's "dural") with new or v16: the pool, with
+	//   v0.1.16's flag when either has her on (its patches on both sides); new-new: "dural3"; a pre-pool old one with a
+	//   pool build: the old one's version, if the pool build plays every flag of it (not Revision D's pre-v0.1.16
+	//   "+dural"), v0.1.16's Dural flag with its patches
 	const want_of = (a, b) => {
-		if (a.kind === 'new' && b.kind === 'new') {
+		const pooled = (x) => x.kind !== 'old';
+		if (pooled(a) && pooled(b)) {
 			if (a.game === 'vf2') return 'v0.1.16+mix1';
-			return B + '+host1' + (a.dural || b.dural ? '+' + games[a.game].flag : '');
+			const g = games[a.game];
+			if (!(a.dural || b.dural)) return B + '+host1';
+			return B + '+host1+' + (a.kind === 'new' && b.kind === 'new' ? g.flag : g.old);
 		}
 		if (a.kind === 'old' && b.kind === 'old') return a.v === b.v ? a.v : null;
 		const o = a.kind === 'old' ? a : b;
-		return o.pre || o.dural ? null : o.v;   // (an old one's Dural: her patches before "dural3", not played)
+		return o.pre ? null : o.v;
 	};
 	const tally = { matched: 0, refused: 0, failed: 0 };
 	const table = [];

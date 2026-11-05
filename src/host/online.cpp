@@ -566,12 +566,13 @@ void Online::room_session(bool host)
 bool Online::use_terms(const std::string &as, const std::string &them)
 {
 	// (the other player's own Dural, from its version as the lobby sends it, "them": only for what the match says)
-	const std::string flag = vf3net::DURAL_FLAG;
+	// (any build's Dural flag: this one's, or an older version's, legacy_dural_flag)
 	their_dural = -1;
 	if (!them.empty()) {
 		their_dural = 0;
-		for (size_t at = them.find('+'); at != std::string::npos; at = them.find('+', at + 1))
-			if (them.compare(at, flag.size(), flag) == 0 && (at + flag.size() == them.size() || them[at + flag.size()] == '+')) their_dural = 1;
+		for (const std::string &flag : { std::string(vf3net::DURAL_FLAG), std::string(vf3net::legacy_dural_flag(tb)) })
+			for (size_t at = them.find('+'); at != std::string::npos; at = them.find('+', at + 1))
+				if (them.compare(at, flag.size(), flag) == 0 && (at + flag.size() == them.size() || them[at + flag.size()] == '+')) their_dural = 1;
 	}
 	const std::string t = as.empty() ? identity.build : as;
 	vf3net::Terms m;
@@ -580,6 +581,7 @@ bool Online::use_terms(const std::string &as, const std::string &them)
 	adapter.host_terms = m.host_terms;
 	adapter.team_one = m.team_one;
 	adapter.dural = m.dural;   // (the terms': a pool's marked when either player has Dural on; a guest's from the host's blob, at the start)
+	adapter.dural_legacy = m.dural_legacy;   // (an older version's Dural flag: its patches, as it plays them)
 	adapter.stage_select_on = m.host_terms ? own_stage : m.stage;
 	if (t != identity.build) log_line("the match's terms: " + t + (m.host_terms ? " (the host's settings)" : " (the other player's version)"));
 	return true;
@@ -591,7 +593,7 @@ std::string Online::match_said() const
 	std::string s = std::string("Stage select ") + (adapter.stage_select_on ? "on" : "off");
 	if (adapter.dural) {   // (whose: a pool's Dural is on when either player has her on)
 		const char *by = own_dural && their_dural == 1 ? " (both)" : own_dural ? " (yours)" : their_dural == 1 ? " (theirs)" : "";
-		s += std::string(", Dural on") + by;
+		s += std::string(", Dural on") + (adapter.dural_legacy ? " (older version's)" : "") + by;
 	} else if (own_dural) s += ", Dural off";
 	if (tb) {
 		const size_t o = size_t(board.profile->settings.team_mode), at = board.profile->settings.at + o;

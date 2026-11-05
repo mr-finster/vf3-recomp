@@ -1397,7 +1397,7 @@ int Model3::hide_free_play_text()
 	return int(free_play_text.size());
 }
 
-int Model3::set_dural(bool on, bool offline)
+int Model3::set_dural(bool on, bool offline, bool legacy)
 {
 	const size_t CROM_AT = profile->program_at;
 	auto at = [&](size_t a) -> uint8_t & { return crom[(a + CROM_AT) ^ 3]; };
@@ -1408,20 +1408,22 @@ int Model3::set_dural(bool on, bool offline)
 		for (auto it = dural_words.rbegin(); it != dural_words.rend(); ++it) put(it->first, it->second);
 		if (!dural_words.empty() && d && ram.size() >= d->ram_to) std::fill(ram.begin() + d->ram_from, ram.begin() + d->ram_to, 0);   // (her heads' copies: as the game leaves that RAM)
 		dural_words.clear();
-		dural_offline = false;
+		dural_offline = dural_legacy = false;
 		return 0;
 	}
-	if (!dural_words.empty() && dural_offline != offline) set_dural(false);   // (the other set: from the start)
+	if (!dural_words.empty() && (dural_offline != offline || dural_legacy != legacy)) set_dural(false);   // (the other set: from the start)
 	if (!dural_words.empty()) return int(dural_words.size());   // (on already)
 	if (!d || crom.size() < CROM_AT + profile->program_size) return 0;
 	for (size_t i = 0; i < d->known_count; i++)
 		if (word(d->known[i][0]) != d->known[i][1]) return 0;
-	for (size_t i = 0; i < d->patch_count; i++)
+	const size_t count = legacy ? d->legacy_count : d->patch_count;
+	for (size_t i = 0; i < count; i++)
 		if (word(d->patch[i][0]) != d->patch[i][1]) return 0;
-	for (size_t i = 0; i < d->patch_count; i++) {
+	for (size_t i = 0; i < count; i++) {
 		dural_words.push_back({ d->patch[i][0], d->patch[i][1] });
 		put(d->patch[i][0], d->patch[i][2]);
 	}
+	dural_legacy = legacy;
 	if (offline) {
 		bool known = true;
 		for (size_t i = 0; i < d->offline_count; i++) known = known && word(d->offline[i][0]) == d->offline[i][1];
