@@ -3135,8 +3135,8 @@ int main(int argc, char **argv)
 			[&](int) { set_fullscreen(!is_fullscreen()); } });
 #ifdef _WIN32
 		p.items.push_back({ "Fullscreen mode",
-			"Borderless covers the screen with a window without a frame, which every graphics driver handles. Exclusive gives the screen to the graphics driver itself, the old way: some AMD cards froze in it.",
-			[&] { return std::string(fs_borderless() ? "Borderless" : "Exclusive"); },
+			"Borderless covers the screen with a window without a frame, which every graphics driver handles. Standard is the system's own fullscreen, the old way: some graphics drivers (AMD's on Vulkan) take it over and froze.",
+			[&] { return std::string(fs_borderless() ? "Borderless" : "Standard"); },
 			[&](int) {
 				const bool was = is_fullscreen();
 				if (was) set_fullscreen(false);

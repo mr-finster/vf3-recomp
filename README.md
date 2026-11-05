@@ -167,7 +167,7 @@ Mini) get a fighting stick's layout; Controls > Player 1 (or 2) > Set up buttons
   next (handy for capturing it in OBS).
   On Windows, fullscreen is a borderless window over the screen (a line taller than it, so no graphics driver takes
   it for a game's own fullscreen): switching to fullscreen froze on AMD cards in the driver's exclusive fullscreen
-  (issue #7). **Fullscreen mode** (Windows only) switches to **Exclusive**, the old way, as does
+  (issue #7). **Fullscreen mode** (Windows only) switches to **Standard**, the old way, as does
   `fullscreen_exclusive = 1` in settings.ini. A Mac (its green button too), Linux and the Steam Deck keep the system's
   own fullscreen (`fullscreen_window = 1` gives them the borderless window).
 - **Sound:** volume, and the music's and the effects' own volumes.
