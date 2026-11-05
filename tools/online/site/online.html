@@ -59,10 +59,11 @@ h1 {
 .total { margin: 14px 0 0; font-size: 64px; line-height: 1; font-weight: 700; font-style: italic; color: var(--gold); font-variant-numeric: tabular-nums; }
 .unit { font-size: 18px; font-weight: 500; color: var(--muted); margin-bottom: 10px; }
 table.states { width: 100%; border-collapse: collapse; table-layout: fixed; font-variant-numeric: tabular-nums; }
-.states th { padding: 0 0 4px; font-size: 13px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); text-align: right; border-bottom: 1px solid var(--line); }
-.states th:first-child { text-align: left; }
-.states col.num { width: 21%; }
-.states td { padding: 6px 0; font-size: 19px; color: var(--ink); text-align: right; border-bottom: 1px solid var(--line); vertical-align: top; }
+.states th { padding: 0 0 4px; font-size: 13px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); text-align: center; border-bottom: 1px solid var(--line); }
+.states col.num { width: 33.333%; }
+.states th:first-child, .states td:first-child { text-align: left; }
+.states th:last-child, .states td:last-child { text-align: right; }
+.states td { padding: 6px 0; font-size: 19px; color: var(--ink); text-align: center; border-bottom: 1px solid var(--line); vertical-align: top; }
 .states td.vlabel { text-align: left; color: var(--row); font-size: 18px; line-height: 1.15; padding-right: 6px; overflow-wrap: anywhere; }
 .states td.zero { color: var(--line); }
 .states td.none { text-align: left; color: var(--muted); font-weight: 500; }
@@ -225,7 +226,7 @@ function render() {
 		else card.appendChild(el("div", "unit", "…"));
 		// (of them, those on an older version: they meet only the players who can play their version's way)
 		const older = d ? Math.min(n(d.older), n(d.total)) : 0;
-		if (older) card.appendChild(el("div", "older", older + " of them on an older version: updating meets everyone"));
+		if (older) card.appendChild(el("div", "older", (older === n(d.total) ? (older === 1 ? "On an older version" : "All on older versions") : older + " of them on an older version") + ": the latest version meets everyone"));
 		const cl = d && card_lands(d.countries);
 		if (cl) card.appendChild(cl);
 		card.appendChild(el("div", "ago" + (failed ? " down" : ""), ago()));
