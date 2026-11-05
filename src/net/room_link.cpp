@@ -224,6 +224,7 @@ struct RoomLink::Impl
 	bool host = false, have_peer = false, relay_only = false, loopback_ok = false;
 	std::vector<std::string> peer;   // their addresses, the relay's among them
 	std::string peer_relay;
+	int learned = 0;                 // (a guest's: the host's addresses learnt from its knocks, not the lobby's)
 	struct Way { std::string to; bool relay = false; bool operator==(const Way &o) const { return to == o.to && relay == o.relay; } };
 	bool have_last = false, is_locked = false;
 	Way last, way;
@@ -405,6 +406,26 @@ struct RoomLink::Impl
 		return false;
 	}
 
+	// A guest: the host's knock (or datagram) from its own IP but a port the lobby didn't give, the host's router
+	// having made a new mapping for this side (a symmetric NAT: a mapping per destination, the lobby's port being the
+	// one made for the STUN server). That address is the host's way back, so it's tried as one of the host's: hellos go
+	// there too. Only the lobby's host's IP, and a few: the session still lets in only the host's welcome with this
+	// game's token, as it does at any address. (A host needs none of this: it answers whoever sent a good hello.)
+	void learn(const Way &came)
+	{
+		if (host || !have_peer || is_locked || learned >= 4) return;
+		if (relay_only && !came.relay) return;
+		// (the IP of an address of the host's own, not its relay's: a relay's IP is shared by everyone on it)
+		bool theirs = false;
+		for (const std::string &a : peer)
+			if (a != peer_relay && ip_of(a) == ip_of(came.to) && ip_of(a) != ip_of(peer_relay)) theirs = true;
+		if (!theirs) return;
+		if (std::find(peer.begin(), peer.end(), came.to) != peer.end()) return;
+		peer.push_back(came.to);
+		learned++;
+		perm_dirty = true;
+	}
+
 	void tick()
 	{
 		const double t = now_ms();
@@ -575,6 +596,7 @@ void RoomLink::set_peer(const std::vector<std::string> &cands, const std::string
 	m->have_peer = !m->peer.empty();
 	m->is_locked = false;
 	m->have_last = false;
+	m->learned = 0;
 	m->perm_dirty = true;
 	m->punch_until = now_ms() + 30000;
 	m->punch_next = 0;
@@ -642,6 +664,7 @@ bool RoomLink::recv(std::vector<uint8_t> &out)
 			Impl::Count &c = m->counts[(came.relay ? "r " : "d ") + came.to];
 			if (data[3] == 'Q') c.knocks++;
 			else c.got++;
+			m->learn(came);
 		} else {
 			m->strangers++;
 			if (m->stranger_from.size() < 3 && std::find(m->stranger_from.begin(), m->stranger_from.end(), came.to) == m->stranger_from.end())

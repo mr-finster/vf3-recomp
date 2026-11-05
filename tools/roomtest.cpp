@@ -5,7 +5,8 @@
 // addresses (STUN) and a relay (TURN), is given the other's, and the first way that answers is the match's.
 //   roomtest [--server 127.0.0.1:3478] [--user test --pass secret]
 // The ways tried: direct (both sides' real addresses); both relays (the real addresses unreachable: only the relays
-// get through); the host's relay only (the guest has none); and a guest with the wrong lobby token (never let in).
+// get through); the host's relay only (the guest has none); a guest with the wrong lobby token (never let in); and a
+// host without a relay whose knocks come from a port the lobby didn't give (a symmetric NAT), to a guest through its relay only.
 #include "../src/net/room_link.h"
 #include "../src/net/session.h"
 #include <chrono>
@@ -31,6 +32,8 @@ struct Count : vfnet::Game
 };
 
 int late_ms = 0;   // (the servers given this long after the link's made: the lobby slow to answer)
+bool hidden_guest = false;   // (the guest's Hide my IP: through its relay only)
+bool moved_host = false;     // (the host's router maps it to a new port per destination: the lobby's port isn't the one its knocks come from)
 
 struct Side
 {
@@ -51,6 +54,7 @@ bool run(const char *what, const std::string &server, const std::string &user, c
          bool real_addresses, bool wrong_token, bool expect_relay)
 {
 	Side a, b;
+	b.link.set_relay_only(hidden_guest);
 	if (!a.open(server, a_turn, user, pass) || !b.open(server, b_turn, user, pass)) return false;
 	const double t0 = now_ms();
 	while (!(a.link.gathered() && b.link.gathered()) && now_ms() - t0 < 8000) {
@@ -72,7 +76,10 @@ bool run(const char *what, const std::string &server, const std::string &user, c
 	a.link.allow_loopback(true);   // (everything's on this machine)
 	b.link.allow_loopback(true);
 	a.link.set_peer(real_addresses || !b_turn ? b.link.candidates() : nowhere, b.link.relay_address(), true);
-	b.link.set_peer(real_addresses ? a.link.candidates() : nowhere, a.link.relay_address(), false);
+	std::vector<std::string> host_said = a.link.candidates();
+	if (moved_host)   // (the ports the lobby gives: one past the real one, where nothing answers)
+		for (std::string &x : host_said) x = x.substr(0, x.rfind(':') + 1) + std::to_string(atoi(x.c_str() + x.rfind(':') + 1) % 65535 + 1);
+	b.link.set_peer(real_addresses ? host_said : nowhere, a.link.relay_address(), false);
 	Count ga, gb;
 	vfnet::Config ca, cb;
 	ca.token = 0x1234567890ABCDEFull;
@@ -120,6 +127,9 @@ int main(int argc, char **argv)
 	late_ms = 7000;
 	if (!only || only == 5) failed += !run("the relay's login 7 s late", server, user, pass, true, true, false, false, true);
 	late_ms = 0;
+	hidden_guest = moved_host = true;   // (reno's, 5 Nov: the host's knocks through the guest's relay from a port it didn't give)
+	if (!only || only == 6) failed += !run("the host's port not the lobby's, the guest through its relay", server, user, pass, false, true, true, false, true);
+	hidden_guest = moved_host = false;
 	printf(failed ? "%d FAILED\n" : "all passed\n", failed);
 	return failed ? 1 : 0;
 }
