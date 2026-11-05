@@ -2479,25 +2479,41 @@ int main(int argc, char **argv)
 		const float k = mid.w / video::W;
 		// the picture's sides, in the layer's pixels from the 4:3 screen's left
 		const float l = sky_wide ? (all.x - mid.x) / k : 0.0f, r = sky_wide ? (all.x + all.w - mid.x) / k : float(video::W);
-		const float u0 = std::max(video::EXT + l - bg_shift_x, 0.0f), u1 = std::min(video::EXT + r - bg_shift_x, float(video::WW));
-		const float x0 = mid.x + l * k, x1 = mid.x + r * k;
-		// Moved down by bg_shift_y (or up): the band it leaves at the top (or bottom) its edge row's, carried on (the
-		// sky's: a camera tilting fast, a jump attack's, moved it further than the 12 rows that were stretched to cover
-		// it, and left a bar of black)
+		// The layer's place (u, v: in its pixels) for each of the picture's, 1:1: moved by bg_shift (the sky's lead on
+		// the game's backdrop, sky_lead.h, smooth motion's in-between), it reaches past the layer's edges: past the top
+		// (or bottom) when the camera tilts up fast (a round's start, a throw, a jump), past the sides on the widest
+		// screens. The arcade never shows those parts (its backdrop lags the camera, its screen is 4:3): they are the
+		// layer mirrored at its edge, carrying the sky on smoothly. (Issue #35: they were its edge row and column
+		// stretched, vertical streaks across the top of the sky and smears at the sides.)
+		const float sx = std::clamp(bg_shift_x, -float(video::WW) + 1, float(video::WW) - 1);
 		const float sy = std::clamp(bg_shift_y, -float(video::H) + 1, float(video::H) - 1);
-		auto band = [&](float v0, float v1, float d0, float d1) {
-			if (v1 - v0 < 0.01f || d1 - d0 < 0.01f) return;
-			const SDL_FRect src = { u0, v0, u1 - u0, v1 - v0 };
-			const SDL_FRect dst = { x0, mid.y + d0 * k, x1 - x0, (d1 - d0) * k };
-			SDL_RenderTexture(ren, tex_below, &src, &dst);
+		const float ua = video::EXT + l - sx, ub = video::EXT + r - sx, va = -sy, vb = float(video::H) - sy;
+		// one piece: [p0, p1) of the layer (within it) drawn to the picture's [d0, d1), flipped where mirrored
+		auto piece = [&](float p0, float p1, float q0, float q1, float d0, float d1, float e0, float e1, bool fx, bool fy) {
+			if (p1 - p0 < 0.01f || q1 - q0 < 0.01f) return;
+			const SDL_FRect src = { p0, q0, p1 - p0, q1 - q0 };
+			const SDL_FRect dst = { mid.x + d0 * k, mid.y + e0 * k, (d1 - d0) * k, (e1 - e0) * k };
+			if (!fx && !fy) SDL_RenderTexture(ren, tex_below, &src, &dst);
+			else if (fx && fy) SDL_RenderTextureRotated(ren, tex_below, &src, &dst, 180.0, nullptr, SDL_FLIP_NONE);
+			else SDL_RenderTextureRotated(ren, tex_below, &src, &dst, 0.0, nullptr, fx ? SDL_FLIP_HORIZONTAL : SDL_FLIP_VERTICAL);
 		};
-		if (sy > 0) {
-			band(0, 1, 0, sy);
-			band(0, float(video::H) - sy, sy, float(video::H));
-		} else {
-			band(-sy, float(video::H), 0, float(video::H) + sy);
-			band(float(video::H) - 1, float(video::H), float(video::H) + sy, float(video::H));
-		}
+		// a span [a, b) of the layer's coordinates (n wide) cut at its edges: before 0, within, past n (each mirrored
+		// back into the layer)
+		struct Span { float p0, p1, d0, d1; bool flip; };
+		auto spans = [](float a, float b, float n, float off, Span out[3]) {
+			int m = 0;
+			if (a < 0) { const float e = std::min(b, 0.0f); out[m++] = { -e, std::min(-a, n), a + off, e + off, true }; }
+			if (b > 0 && a < n) { const float s = std::max(a, 0.0f), e = std::min(b, n); out[m++] = { s, e, s + off, e + off, false }; }
+			if (b > n) { const float s = std::max(a, n); out[m++] = { std::max(2 * n - b, 0.0f), 2 * n - s, s + off, b + off, true }; }
+			return m;
+		};
+		Span hx[3], vy[3];
+		const int nh = spans(ua, ub, float(video::WW), l - ua, hx), nv = spans(va, vb, float(video::H), -va, vy);
+		for (int i = 0; i < nh; i++)
+			for (int j = 0; j < nv; j++) {
+				// (a mirrored piece's source shorter than its place, past twice the layer: its edge stretched, as before)
+				piece(hx[i].p0, hx[i].p1, vy[j].p0, vy[j].p1, hx[i].d0, hx[i].d1, vy[j].d0, vy[j].d1, hx[i].flip, vy[j].flip);
+			}
 	};
 	// Screen filters (as VF2's): a picture of the monitor's glass multiplied over the game's, at the window's own
 	// pixels (made again when the picture's size changes). Scanlines darkens between the arcade's 384 lines; CRT adds
