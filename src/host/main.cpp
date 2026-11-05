@@ -2347,6 +2347,20 @@ int main(int argc, char **argv)
 			}
 			else cut_n++;
 		}
+		// The 2D opaque over all of the picture (the grade's and the ranking's boards after a game, their name entry):
+		// the 3D under it is never seen, not drawn. On Wolf's desert it was the stage's camera close to a dune, the
+		// sand's big layered polygons filling the screen several times over (a picture 4 times a fight's on the CPU,
+		// slow on an RX 570's Vulkan too: issue #7). Off the 4:3 the picture then has bars (not a stage, below), and
+		// the GPU's texture memory is sent whole when it draws again.
+		const bool hidden_3d = [&] {
+			if (game.view.above.empty()) return false;
+			for (const uint32_t px : game.view.above) if ((px >> 24) != 0xFF) return false;
+			return true;
+		}();
+		if (hidden_3d) {
+			if (g3.on) gpu3d.retexture();
+			game.view.uploads.clear();
+		}
 		bool on_gpu = false;
 		// (not before the first frame's copy: with no sound to wait on, the first picture can come before any frame,
 		// and the GPU's first upload is the whole texture memory, read from that copy)
@@ -2354,7 +2368,8 @@ int main(int argc, char **argv)
 		// the CPU's. The CPU's 3D in between, at 2x, was too slow for 60 frames a second: the title's first seconds
 		// stuttered on an RX 9060 XT whose first check missed by a hair, issue #15)
 		bool gpu_drew = false;   // (the GPU drew this picture, its texture memory up to date, whether or not it's shown)
-		if (g3.on && g3_texture() && !game.view.tex.empty()) {
+		if (hidden_3d) on_gpu = g3_shown;   // (the picture shown before, all under the 2D)
+		else if (g3.on && g3_texture() && !game.view.tex.empty()) {
 			const auto tg = std::chrono::steady_clock::now();
 			raster.prepare(*s);
 			const auto tp = std::chrono::steady_clock::now();
@@ -2374,14 +2389,14 @@ int main(int argc, char **argv)
 				if (on_gpu && g3.checked) raster.drop_buffers();
 			}
 		}
-		if (!on_gpu) {
+		if (!on_gpu && !hidden_3d) {
 			if (g3.on && !gpu_drew) gpu3d.retexture();   // (the texture memory's changes dropped here: the GPU's sent whole when it draws again)
 			game.view.uploads.clear();
 			raster.render(*s, game.view.tex.data());
 			const uint64_t tu = SDL_GetTicksNS();
 			send(tex3d, [&](uint8_t *p, size_t pitch) { raster.to_premultiplied(p, pitch, aa_now()); });
 			pace.upload_ms += double(SDL_GetTicksNS() - tu) / 1e6;
-		} else pace.gpu_ms += gpu3d.last_cpu_ms;
+		} else if (!hidden_3d) pace.gpu_ms += gpu3d.last_cpu_ms;
 		g3_shown = on_gpu;
 		if (static const bool pic_log = getenv("VF3_PIC_LOG") != nullptr; pic_log) {   // (tests: each picture's makings)
 			size_t models = 0;
