@@ -637,8 +637,11 @@ struct settings
 	static constexpr const char *BUILD = VF3_VERSION " " VF3_DATE " " VF3_COMMIT;   // (what gpu3d_failed was learnt by)
 	std::string gpu3d_failed;   // SDL_GPU's drivers whose 3D failed here ("direct3d12 vulkan"): the next start tries the next
 	bool fullscreen = false, arcade = false, show_fps = false, smooth = true;
-	bool fs_window = false;  // fullscreen as a borderless window a line taller than the screen, never the driver's own
-	                         // (settings.ini's fullscreen_window = 1: a test for AMD's Vulkan on Windows, issue #7)
+	// Fullscreen as a borderless window a line taller than the screen, never the driver's own (issue #7: AMD's Vulkan
+	// on Windows froze in its exclusive fullscreen): the way on Windows unless fullscreen_exclusive = 1 (Display >
+	// Fullscreen mode); elsewhere the system's own (a Mac's Spaces, the Deck's gamescope) unless fullscreen_window = 1
+	// (the key issue #7's test was, kept: on Windows it's the default anyway)
+	bool fs_window = false, fs_exclusive = false;
 	bool timings = false;    // F9: the timings in the title bar
 	bool smooth_bg = true;   // the 2D backgrounds (the layers below the 3D) scaled smoothly, not as blocks
 	bool sharp_textures = true;   // the 3D's textures' mipmap levels for the picture's size (false: the arcade's, video::Raster::arcade_lod)
@@ -733,6 +736,7 @@ struct settings
 		flag("team_battle_1v1", tb_one);
 		flag("log", log);
 		flag("fullscreen_window", fs_window);
+		flag("fullscreen_exclusive", fs_exclusive);
 		if (aa == 0) aa = 1;   // (VF2's Low, edges smoothed after drawing: not in this game's renderer)
 		for (int p = 0; p < 2; p++) ctl[p].load(kv, p);
 		// Upgrades, by the version the settings were written with (saved at once when one is made)
@@ -794,6 +798,7 @@ struct settings
 		fprintf(f, "team_battle_1v1 = %d\n", int(tb_one));
 		if (!log) fprintf(f, "log = 0\n");
 		if (fs_window) fprintf(f, "fullscreen_window = 1\n");
+		if (fs_exclusive) fprintf(f, "fullscreen_exclusive = 1\n");
 		if (!gpu3d_failed.empty()) fprintf(f, "gpu_3d_failed = %s\ngpu_3d_failed_build = %s\n", gpu3d_failed.c_str(), BUILD);
 		fprintf(f, "crt_colours = %d\nbrightness = %d\ngamma = %d\nsharp_textures = %d\n", crt_colours, brightness, gamma, int(sharp_textures));
 		if (graphics) fprintf(f, "graphics = %d\n", graphics);
@@ -1846,6 +1851,12 @@ int main(int argc, char **argv)
 			}
 		}
 	}
+#ifdef _WIN32
+	static constexpr bool FS_BORDERLESS_DEFAULT = true;
+#else
+	static constexpr bool FS_BORDERLESS_DEFAULT = false;   // (a Mac's green button and Spaces, the Deck's gamescope)
+#endif
+	auto fs_borderless = [&] { return !cfg.fs_exclusive && (FS_BORDERLESS_DEFAULT || cfg.fs_window); };
 	SDL_PropertiesID wp = SDL_CreateProperties();
 	SDL_SetStringProperty(wp, SDL_PROP_WINDOW_CREATE_TITLE_STRING, board.profile->name);
 	SDL_SetNumberProperty(wp, SDL_PROP_WINDOW_CREATE_WIDTH_NUMBER, win_w);
@@ -1855,7 +1866,7 @@ int main(int argc, char **argv)
 		SDL_SetNumberProperty(wp, SDL_PROP_WINDOW_CREATE_Y_NUMBER, win_y);
 	}
 	SDL_SetNumberProperty(wp, SDL_PROP_WINDOW_CREATE_FLAGS_NUMBER, SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY |
-		(cfg.fullscreen && !cfg.fs_window ? SDL_WINDOW_FULLSCREEN : 0) | (win_placed && cfg.window_max ? SDL_WINDOW_MAXIMIZED : 0) | SDL_WINDOW_HIDDEN);
+		(cfg.fullscreen && !fs_borderless() ? SDL_WINDOW_FULLSCREEN : 0) | (win_placed && cfg.window_max ? SDL_WINDOW_MAXIMIZED : 0) | SDL_WINDOW_HIDDEN);
 	SDL_Window *win = SDL_CreateWindowWithProperties(wp);
 	SDL_DestroyProperties(wp);
 	if (!win) return fail(std::string("Couldn't open the window: ") + SDL_GetError());
@@ -2862,9 +2873,9 @@ int main(int argc, char **argv)
 	auto set_shape = [&](int a) { aspect_i = cfg.aspect = a; cfg_dirty = true; gov_fresh(); apply_window_scale_ref(); };
 	// (fullscreen_window: a borderless window over the screen and a line past it, so no driver takes it for a game's
 	// own fullscreen: AMD's Vulkan on Windows froze there, issue #7; the window's place and size kept for the way back)
-	bool fs_win_on = false;
+	bool fs_win_on = false, fs_win_max = false;
 	SDL_Rect fs_win_was{ 0, 0, 0, 0 };
-	auto is_fullscreen = [&] { return cfg.fs_window ? fs_win_on : (SDL_GetWindowFlags(win) & SDL_WINDOW_FULLSCREEN) != 0; };
+	auto is_fullscreen = [&] { return fs_win_on || (SDL_GetWindowFlags(win) & SDL_WINDOW_FULLSCREEN) != 0; };
 	// Display > Window size (issue #20): the window k times the arcade's 384 lines high, in the window's own pixels (a
 	// Mac's Retina window is sized in points: the pixel density's share of them), its width the picture shape's at
 	// that height (4:3 and Fit: 512 x k, the 4:3 the picture always is; wider shapes 384 x k times theirs, even), so
@@ -2946,26 +2957,29 @@ int main(int argc, char **argv)
 	auto set_window_scale = [&](int k) { cfg.window_scale = std::max(k, 0); cfg_dirty = true; apply_window_scale(); };
 	auto set_fullscreen = [&](bool on) {
 		if (on) exact_px = false;
-		if (cfg.fs_window) {
-			SDL_Rect b;
-			if (on && !fs_win_on && SDL_GetDisplayBounds(SDL_GetDisplayForWindow(win), &b)) {
-				SDL_GetWindowPosition(win, &fs_win_was.x, &fs_win_was.y);
-				SDL_GetWindowSize(win, &fs_win_was.w, &fs_win_was.h);
-				SDL_SetWindowBordered(win, false);
-				SDL_SetWindowPosition(win, b.x, b.y);
-				SDL_SetWindowSize(win, b.w, b.h + 1);
-				fs_win_on = true;
-				fprintf(stderr, "fullscreen: a borderless window, %d x %d (fullscreen_window)\n", b.w, b.h + 1);
-			} else if (!on && fs_win_on) {
-				SDL_SetWindowBordered(win, true);
-				if (fs_win_was.w > 0) { SDL_SetWindowSize(win, fs_win_was.w, fs_win_was.h); SDL_SetWindowPosition(win, fs_win_was.x, fs_win_was.y); }
-				fs_win_on = false;
-			}
-		} else SDL_SetWindowFullscreen(win, on);
+		SDL_Rect b;
+		if (on && !fs_win_on && fs_borderless() && SDL_GetDisplayBounds(SDL_GetDisplayForWindow(win), &b)) {
+			if (SDL_GetWindowFlags(win) & SDL_WINDOW_FULLSCREEN) { SDL_SetWindowFullscreen(win, false); SDL_SyncWindow(win); }
+			fs_win_max = (SDL_GetWindowFlags(win) & SDL_WINDOW_MAXIMIZED) != 0;
+			if (fs_win_max) { SDL_RestoreWindow(win); SDL_SyncWindow(win); }   // (the size under it, for the way back)
+			SDL_GetWindowPosition(win, &fs_win_was.x, &fs_win_was.y);
+			SDL_GetWindowSize(win, &fs_win_was.w, &fs_win_was.h);
+			SDL_SetWindowBordered(win, false);
+			SDL_SetWindowPosition(win, b.x, b.y);
+			SDL_SetWindowSize(win, b.w, b.h + 1);
+			fs_win_on = true;
+			fprintf(stderr, "fullscreen: a borderless window, %d x %d%s\n", b.w, b.h + 1,
+			        cfg.fs_window ? " (fullscreen_window)" : " (fullscreen_exclusive = 1 for the driver's own)");
+		} else if (!on && fs_win_on) {
+			SDL_SetWindowBordered(win, true);
+			if (fs_win_was.w > 0) { SDL_SetWindowSize(win, fs_win_was.w, fs_win_was.h); SDL_SetWindowPosition(win, fs_win_was.x, fs_win_was.y); }
+			if (fs_win_max) SDL_MaximizeWindow(win);
+			fs_win_on = false;
+		} else if (!fs_win_on) SDL_SetWindowFullscreen(win, on);
 		SDL_SyncWindow(win); cfg.fullscreen = on; cfg_dirty = true; gov_fresh();
 		if (!on) apply_window_scale();
 	};
-	if (cfg.fullscreen && cfg.fs_window) set_fullscreen(true);
+	if (cfg.fullscreen && fs_borderless()) { const bool d = cfg_dirty; set_fullscreen(true); cfg_dirty = d; }
 	if (!fixed_window) apply_window_scale();   // (VF3_WINDOW's tests: the size they ask)
 	int test_frames = 0;        // the test button held for these frames (the menu's Service menu; Start in the test menu)
 	int service_frames = 0, test_mode_frames = 0;   // (Down in the test menu: the service button)
@@ -3104,6 +3118,18 @@ int main(int argc, char **argv)
 		p.items.push_back({ "Fullscreen", "Play fullscreen or in a window. (F11, F or Alt+Enter)",
 			[&] { return on_off(is_fullscreen()); },
 			[&](int) { set_fullscreen(!is_fullscreen()); } });
+#ifdef _WIN32
+		p.items.push_back({ "Fullscreen mode",
+			"Borderless covers the screen with a window without a frame, which every graphics driver handles. Exclusive gives the screen to the graphics driver itself, the old way: some AMD cards froze in it.",
+			[&] { return std::string(fs_borderless() ? "Borderless" : "Exclusive"); },
+			[&](int) {
+				const bool was = is_fullscreen();
+				if (was) set_fullscreen(false);
+				cfg.fs_exclusive = fs_borderless(); cfg_dirty = true;
+				if (was) set_fullscreen(true);
+				menu.refresh();
+			} });
+#endif
 		p.items.push_back(back_item());
 		return p;
 	};
@@ -4217,7 +4243,7 @@ int main(int argc, char **argv)
 				window_moved = true;
 			if (e.type == SDL_EVENT_WINDOW_ENTER_FULLSCREEN) exact_px = false;
 			// (fullscreen by the system's own way, a Mac's green button: remembered as the menu's is)
-			if ((e.type == SDL_EVENT_WINDOW_ENTER_FULLSCREEN || e.type == SDL_EVENT_WINDOW_LEAVE_FULLSCREEN) && !cfg.fs_window &&
+			if ((e.type == SDL_EVENT_WINDOW_ENTER_FULLSCREEN || e.type == SDL_EVENT_WINDOW_LEAVE_FULLSCREEN) && !fs_win_on &&
 				cfg.fullscreen != (e.type == SDL_EVENT_WINDOW_ENTER_FULLSCREEN)) {
 				cfg.fullscreen = e.type == SDL_EVENT_WINDOW_ENTER_FULLSCREEN;
 				cfg_dirty = true;

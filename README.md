@@ -157,7 +157,7 @@ Mini) get a fighting stick's layout; Controls > Player 1 (or 2) > Set up buttons
 
 - **Resume** and **Quit**.
 - **Display:** render scale (up to 6x), antialiasing (2x, 3x), the 3D renderer, picture shape (fit the window, 4:3,
-  16:10, 16:9, 21:9), background filter, distant textures (sharp, or as the arcade's), smooth motion, screen filter (scanlines, CRT), CRT colours (an arcade monitor's, as Supermodel's presets), Show FPS, window size, fullscreen.
+  16:10, 16:9, 21:9), background filter, distant textures (sharp, or as the arcade's), smooth motion, screen filter (scanlines, CRT), CRT colours (an arcade monitor's, as Supermodel's presets), Show FPS, window size, fullscreen and (on Windows) fullscreen mode.
   **Window size** makes the window a whole multiple of the arcade's 384 lines (1x 512 x 384 for the 4:3 picture,
   2x 1024 x 768, up to 4x: as many as your screen holds; a wider picture shape makes it as wide as the shape), each
   arcade line that many of your screen's: Render scale 1x with Window size 1x shows the arcade's 384 lines one to one,
@@ -165,6 +165,11 @@ Mini) get a fighting stick's layout; Controls > Player 1 (or 2) > Set up buttons
   when you're back in one), sized in the window's pixels on a Mac's Retina screen too, and resizing the window by hand
   sets it back to **Free**. The window's size, place, maximised and fullscreen are remembered from one start to the
   next (handy for capturing it in OBS).
+  On Windows, fullscreen is a borderless window over the screen (a line taller than it, so no graphics driver takes
+  it for a game's own fullscreen): switching to fullscreen froze on AMD cards in the driver's exclusive fullscreen
+  (issue #7). **Fullscreen mode** (Windows only) switches to **Exclusive**, the old way, as does
+  `fullscreen_exclusive = 1` in settings.ini. A Mac (its green button too), Linux and the Steam Deck keep the system's
+  own fullscreen (`fullscreen_window = 1` gives them the borderless window).
 - **Sound:** volume, and the music's and the effects' own volumes.
 - **Game:** play style (PC: no boot screen, always free play; Arcade: the boot, coins and credits, its coin settings kept for it), reset, and **Version**: Virtua Fighter 3 or Team Battle (it asks first: the game restarts), or **Add Team Battle** while it has only one.
 - **Arcade settings:** difficulty, rounds to win, energy, stage select between two players, demo sound, country, and
