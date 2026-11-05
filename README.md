@@ -213,7 +213,7 @@ needn't pick her; said as the match starts: Dural on, yours, theirs or both), so
 an older version, the match plays that version's choice (Revision D's from before v0.1.15-alpha's 2 Nov update, with her older
 patches, still only meets the same version).
 
-Menu > **Cheats** > **Dural's stage** (issue #22; Off, Guard or Start): on the stage screen (Stage select:
+Menu > **Cheats** > **Dural's stage** (issue #22; Off or Guard: Start stays the game's own, so in Team Battle holding Start and picking with Punch or Kick still gives a stage's VF3 version, issue #36): on the stage screen (Stage select:
 Challenger), confirm a stage with that button for its Dural version. The arcade gives it only to the picker holding
 Start at the right second of the screen's timer (a count kept since power-on decides which), so holding Start till the
 timer runs out yourself, the arcade's own trick, works only about 1 time in 17 after the first match. The cheat holds

@@ -689,6 +689,7 @@ struct settings
 		if (auto it = kv.find("game"); it != kv.end() && m3::find_profile(it->second.c_str())) game = it->second;
 		num("cheat_dural", dural, 0, 3);
 		num("cheat_dural_stage", dural_stage, 0, 2);
+		if (dural_stage == 2) dural_stage = 1;   // (Start as the trigger took the game's own Start + button away: issue #36; Guard now)
 		flag("arcade_random_order", random_order);
 		if (auto it = kv.find("online_name"); it != kv.end()) online.name = online_menu::clean_name(it->second);
 		if (auto it = kv.find("online_address"); it != kv.end()) online.address = online_menu::clean_address(it->second);
@@ -3188,9 +3189,9 @@ int main(int argc, char **argv)
 			} });
 		// (inputs only, src/host/dural_stage.h: online it's what the other side plays too, so no version of its own)
 		p.items.push_back({ "Dural's stage",
-			"On the stage screen (Stage select: Challenger), confirm a stage with this button for its Dural version: Start is held for you and the pick made at the second the game allows (up to about 12 s). Online too (your inputs only), though some picks can't be Dural's there.",
-			[&] { return std::string(cfg.dural_stage == 1 ? "Guard" : cfg.dural_stage == 2 ? "Start" : "Off"); },
-			[&](int d) { cfg.dural_stage = (cfg.dural_stage + (d < 0 ? 2 : 1)) % 3; cfg_dirty = true; } });
+			"On the stage screen (Stage select: Challenger), confirm a stage with this button for its Dural version: Start is held for you and the pick made at the second the game allows (up to about 12 s). Online too (your inputs only), though some picks can't be Dural's there. Start stays the game's own: hold it and pick with Punch or Kick for Team Battle's VF3 version of a stage.",
+			[&] { return std::string(cfg.dural_stage ? "Guard" : "Off"); },
+			[&](int) { cfg.dural_stage = cfg.dural_stage ? 0 : 1; cfg_dirty = true; } });
 		p.items.push_back(back_item());
 		return p;
 	};
@@ -3736,7 +3737,7 @@ int main(int argc, char **argv)
 		else
 			p.items.push_back({ "Online", std::string("Online play isn't ready for ") + board.profile->name + " yet: switch to Virtua Fighter 3 in Game > Version to play online.", {}, {}, {} });
 		if (board.profile->dural)   // (issue #12; after Online: online_row's place kept)
-			p.items.push_back({ "Cheats", cfg.dural ? "Dural on the select: ON. Online you'll meet only players who have it on too. Dural's stage." : "Dural on the select, Dural's stage.", {}, {}, [&] { menu.push(cheats_page()); } });
+			p.items.push_back({ "Cheats", cfg.dural ? "Dural on the select: ON. Online she's on the select whenever either player has her on. Dural's stage." : "Dural on the select, Dural's stage.", {}, {}, [&] { menu.push(cheats_page()); } });
 		p.items.push_back({ "Controls", "Each player's controller, keys and buttons.", {}, {}, [&] { menu.push(controls_page()); } });
 		p.items.push_back({ "Quit", "Saves and closes the game.", {}, {}, [&] { running = false; } });
 		return p;
