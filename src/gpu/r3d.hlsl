@@ -107,6 +107,21 @@ BIND(0, 3) cbuffer Frame : register(b0, space3)
 BIND(4, 2) ByteAddressBuffer quads : register(t4, space2);
 static const float NEAR = 1e-3;   // (r3d_gpu.cpp's: a polygon's depth is NEAR / w)
 
+// a quad's 1/w at a point as split along one diagonal (0: corners 0-2, 1: 1-3), as the CPU's split_depth
+float split_depth(float2 c[4], float iw[4], int diag, float2 p)
+{
+	const int a = diag, e = diag + 2, b1 = (diag + 1) & 3, b2 = (diag + 3) & 3;
+	const float2 ae = c[e] - c[a];
+	const float side = ae.x * (p.y - c[a].y) - ae.y * (p.x - c[a].x);
+	const float s1 = ae.x * (c[b1].y - c[a].y) - ae.y * (c[b1].x - c[a].x);
+	const int b = (side > 0) == (s1 > 0) ? b1 : b2;
+	const float2 ab = c[b] - c[a], ap = p - c[a];
+	const float ar = ab.x * ae.y - ae.x * ab.y;
+	if (!(abs(ar) > 1e-12)) return 0;
+	const float l1 = (ap.x * ae.y - ae.x * ap.y) / ar, l2 = (ab.x * ap.y - ap.x * ab.y) / ar;
+	return iw[a] + l1 * (iw[b] - iw[a]) + l2 * (iw[e] - iw[a]);
+}
+
 // a point's mean value coordinates in a quad, as the CPU's quad_weights (r3d_raster.cpp)
 void quad_weights(float2 c[4], float2 p, out float l[4])
 {
@@ -235,6 +250,7 @@ FsOut main(PolyV i)
 {
 	FsOut o;
 	float wi = 1.0 / i.pos.w;   // (SV_Position.w is w: the reciprocal of GLSL's gl_FragCoord.w)
+	float wd = wi;   // (the depth tested and kept: a whole quad's front, below)
 #ifdef FS_QUADS
 	o.z = i.pos.z;
 	if (i.quad != 0xFFFFFFFFu) {
@@ -265,14 +281,17 @@ FsOut main(PolyV i)
 		i.normal = float3(a0.w, a1.x, a1.y);
 		i.misc = float4(a1.z, a1.w, a2.x, a2.y);
 		i.lodbase = a2.z;
-		o.z = NEAR * wi;
+		// its depth: the nearer of its two splits' (and the mean's), as the CPU's (r3d_raster.cpp)
+		wd = max(wi, split_depth(c, iw, 0, i.pos.xy));
+		if (asfloat(quads.Load(at + 12)) > 0) wd = max(wd, split_depth(c, iw, 1, i.pos.xy));
+		o.z = NEAR * wd;
 	}
 #endif
 	if (i.misc.w > 0)
 		discard;   // facing away
 #if FS_LAYER != 0
 	// translucent: only in front of the opaque layer
-	if (wi <= odepth.Load(int3(int2(i.pos.xy), 0)).r)
+	if (wd <= odepth.Load(int3(int2(i.pos.xy), 0)).r)
 		discard;
 #endif
 	const Draw d = draws.Load<Draw>(i.draw * sizeof(Draw));
@@ -364,7 +383,7 @@ FsOut main(PolyV i)
 	o.base = float4(c.rgb, 1);
 	o.t1 = 0;
 	o.t2 = 0;
-	o.depth = float4(wi, 0, 0, 0);
+	o.depth = float4(wd, 0, 0, 0);
 #else
 	o.t = float4(c.rgb, min(c.a, 1.0));
 #endif

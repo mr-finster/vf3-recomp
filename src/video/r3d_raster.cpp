@@ -317,6 +317,7 @@ void Raster::prepare_mesh(int di, std::vector<Tri> &result) const
 					}
 				}
 				if (even) T.quad = false;   // (corners 0 1 2 3 fanned from 0: the same two triangles)
+				T.convex = !(pos && neg);
 				if (std::min(pos, neg) <= 1) {
 					if (reflex) {   // (the corners turned round so that the bent-in one is the first)
 						Tri R = T;
@@ -549,6 +550,20 @@ static void quad_weights(const float *x, const float *y, float px, float py, flo
 	for (int k = 0; k < 4; k++) out[k] *= inv;
 }
 
+// A quad's 1/w at a point as split along one diagonal (0: corners 0-2, 1: corners 1-3), each half flat on the screen
+static float split_depth(const Raster::Tri &T, int diag, float px, float py)
+{
+	const int a = diag, c = diag + 2, b1 = (diag + 1) & 3, b2 = (diag + 3) & 3;
+	const float side = (T.sx[c] - T.sx[a]) * (py - T.sy[a]) - (T.sy[c] - T.sy[a]) * (px - T.sx[a]);
+	const float s1 = (T.sx[c] - T.sx[a]) * (T.sy[b1] - T.sy[a]) - (T.sy[c] - T.sy[a]) * (T.sx[b1] - T.sx[a]);
+	const int b = (side > 0) == (s1 > 0) ? b1 : b2;
+	const float x0 = T.sx[a], y0 = T.sy[a], x1 = T.sx[b], y1 = T.sy[b], x2 = T.sx[c], y2 = T.sy[c];
+	const float ar = (x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0);
+	if (!(std::fabs(ar) > 1e-12f)) return 0;
+	const float l1 = ((px - x0) * (y2 - y0) - (x2 - x0) * (py - y0)) / ar, l2 = ((x1 - x0) * (py - y0) - (px - x0) * (y1 - y0)) / ar;
+	return T.iw[a] + l1 * (T.iw[b] - T.iw[a]) + l2 * (T.iw[c] - T.iw[a]);
+}
+
 void Raster::draw_tri(const Tri &T, int layer, int band0, int band1)
 {
 	const Draw &d = draws[T.draw];
@@ -597,6 +612,7 @@ void Raster::draw_tri(const Tri &T, int layer, int band0, int band1)
 					continue;
 				const float px = x + 0.5f;
 				float wi, a[11];
+				float wd = -1;
 				if (T.quad) {
 					// a whole quad: the pixel's weights for the four corners, its mean value coordinates on the
 					// screen (Floater's: they give any flat quad's own plane, as the triangles did, and a bent one a
@@ -608,6 +624,12 @@ void Raster::draw_tri(const Tri &T, int layer, int band0, int band1)
 						continue;
 					const float wv = 1.0f / wi;
 					for (int q = 0; q < 11; q++) a[q] = (l4[0] * T.a[0][q] + l4[1] * T.a[1][q] + l4[2] * T.a[2][q] + l4[3] * T.a[3][q]) * wv;
+					// its depth the nearest of that and its two splits' (corners 0-2 and 1-3, the second only if inside
+					// its outline): a bent quad's front, so what was made to lie just under it whichever way it bends
+					// stays under (Pai's skirt's top, 0x00c4f9 polygon 25, the torso's quad 0x001640 polygon 35 split
+					// 1-3 and a corner set back: the mean surface left it 0.04 units in front near corner 1)
+					const float d02 = split_depth(T, 0, px, py), d13 = T.convex ? split_depth(T, 1, px, py) : 0.0f;
+					wd = std::max({ wi, d02, d13 });
 				} else {
 					const float b0 = e0 * inv_area, b1 = e1 * inv_area, b2 = e2 * inv_area;
 					wi = b0 * w0i + b1 * w1i + b2 * w2i;
@@ -618,11 +640,12 @@ void Raster::draw_tri(const Tri &T, int layer, int band0, int band1)
 				}
 				if (a[9] > 0)
 					continue;   // facing away
+				if (!(wd > 0)) wd = wi;   // (a triangle's: its own)
 				const size_t at = size_t(y) * w + x;
 				if (mesh.layered && (stencil[at] & 0x7F))
 					continue;
 				// depth: 1/w, nearer is greater; the opaque layer passes equal, the translucent ones only nearer
-				if (layer == 0 ? wi < depth[at] : wi <= depth[at]) {
+				if (layer == 0 ? wd < depth[at] : wd <= depth[at]) {
 					if (mesh.layered) stencil[at]++;
 					continue;
 				}
@@ -721,7 +744,7 @@ void Raster::draw_tri(const Tri &T, int layer, int band0, int band1)
 						ch += (target - ch) * fog;
 					}
 				}
-				depth[at] = wi;
+				depth[at] = wd;
 				if (mesh.layered) stencil[at]++;
 				if (layer == 0) {
 					base[at] = { c.r, c.g, c.b, 1.0f };

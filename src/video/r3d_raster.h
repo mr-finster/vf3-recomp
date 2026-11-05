@@ -68,6 +68,7 @@ public:
 		int draw;
 		int n;                // 3 to 8 (a triangle clipped by the near plane and the view's sides)
 		bool quad = false;    // n 4, a whole quad (quad_rendering): its pixels from all four corners
+		bool convex = false;  // (a quad's outline convex: its 1-3 diagonal inside too)
 		float sx[8], sy[8], iw[8];
 		float a[8][11];       // the attributes over w
 	};

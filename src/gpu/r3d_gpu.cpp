@@ -348,6 +348,7 @@ bool R3dGpu::render(const video::Scene &scene, const video::Raster &prep, const 
 					memcpy(q.a[k], t.a[k], sizeof(float) * 11);
 					g[k].quad = uint32_t(quads.size());
 				}
+				q.corner[0][3] = t.convex ? 1.0f : 0.0f;   // (its 1-3 split inside too: the shader's split_depth)
 				quads.push_back(q);
 			}
 			if (ranges.size() == batch_first[b] || ranges.back().draw != t.draw)
