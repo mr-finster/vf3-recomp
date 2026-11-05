@@ -116,6 +116,12 @@ struct Profile
 	// parental advisory, none for Export and Asia), so the logo comes from frame 300 to 948: the PC way's unseen boot
 	// stops at it (issue #7), not at boot_frames (Revision D's Japan's: its logo + 12), which online's boot keeps
 	uint32_t sega_logo;
+
+	// RAM: the debug mode's word (0: not known). The arcade's secret code (Service held, then player 1's Left, P, G,
+	// Right, Right, Left, K, Right, P, K, Right, Right, K: Revision D's table at 0x76D74, checked at 0x28580) sets its
+	// 0x200000; with it, the DIP switches 7 and 8 on (0x4280) let the game read all eight, which turn on its displays
+	// (Model3::debug_mode)
+	uint32_t debug_flags;
 };
 
 extern const Profile VF3_REV_D, VF3_TB;

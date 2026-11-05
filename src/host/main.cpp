@@ -631,6 +631,7 @@ struct settings
 	int dural = 0;      // Dural on the select (a cheat): 0 off, else on (1-3, from when it was per player)
 	int dural_stage = 0;   // Dural's stage (a cheat, issue #22): the stage screen's pick confirmed with 1 Guard, 2 Start (0 off)
 	bool random_order = false;   // Revision D's CPU opponents in a random order (issue #30; offline only)
+	bool debug_mode = false;     // Cheats > Debug mode, the arcade's own (Model3::debug_mode; offline only, issue #37)
 	bool log = true;    // log.txt written (Game > Log file: read before the log's opened, so from the next start)
 	bool tb_one = true; // Team Battle: a Start that begins a game held Down with it, the arcade's way into 1 vs 1 (false: 3 vs 3)
 	std::string game;   // the program played, its set's name ("vf3", "vf3tb"): Game > Version, when the zips hold both
@@ -691,6 +692,7 @@ struct settings
 		num("cheat_dural_stage", dural_stage, 0, 2);
 		if (dural_stage == 2) dural_stage = 1;   // (Start as the trigger took the game's own Start + button away: issue #36; Guard now)
 		flag("arcade_random_order", random_order);
+		flag("cheat_debug_mode", debug_mode);
 		if (auto it = kv.find("online_name"); it != kv.end()) online.name = online_menu::clean_name(it->second);
 		if (auto it = kv.find("online_address"); it != kv.end()) online.address = online_menu::clean_address(it->second);
 		if (auto it = kv.find("online_lobby"); it != kv.end() && (it->second.rfind("https://", 0) == 0 || it->second.rfind("http://", 0) == 0))
@@ -796,6 +798,7 @@ struct settings
 		if (dural) fprintf(f, "cheat_dural = %d\n", dural);
 		if (dural_stage) fprintf(f, "cheat_dural_stage = %d\n", dural_stage);
 		if (random_order) fprintf(f, "arcade_random_order = 1\n");
+		if (debug_mode) fprintf(f, "cheat_debug_mode = 1\n");
 		fprintf(f, "team_battle_1v1 = %d\n", int(tb_one));
 		if (!log) fprintf(f, "log = 0\n");
 		if (fs_window) fprintf(f, "fullscreen_window = 1\n");
@@ -3192,6 +3195,17 @@ int main(int argc, char **argv)
 			"On the stage screen (Stage select: Challenger), confirm a stage with this button for its Dural version: Start is held for you and the pick made at the second the game allows (up to about 12 s). Online too (your inputs only), though some picks can't be Dural's there. Start stays the game's own: hold it and pick with Punch or Kick for Team Battle's VF3 version of a stage.",
 			[&] { return std::string(cfg.dural_stage ? "Guard" : "Off"); },
 			[&](int) { cfg.dural_stage = cfg.dural_stage ? 0 : 1; cfg_dirty = true; } });
+		if (board.profile->debug_flags)   // (Model3::debug_mode: offline only, never in an online match)
+			p.items.push_back({ "Debug mode",
+				"The arcade's hidden debug mode, no code to enter: the CPU load, polygon count, hits and damage on the screen. In a fight, hold P2 Guard and press P2 Start to pause; "
+				"then P1 Start runs one frame at a time, and P1 Start with P2 Start held goes on. Offline only: off online. Changing it restarts the game.",
+				[&] { return std::string(cfg.debug_mode ? "On" : "Off"); },
+				[&](int) {
+					if (nvram_away || online.phase() != Online::Phase::off) return;
+					cfg.debug_mode = !cfg.debug_mode;
+					cfg_dirty = true;
+					reset_game();   // (off: the game as ever from its start)
+				} });
 		p.items.push_back(back_item());
 		return p;
 	};
@@ -3740,7 +3754,7 @@ int main(int argc, char **argv)
 		else
 			p.items.push_back({ "Online", std::string("Online play isn't ready for ") + board.profile->name + " yet: switch to Virtua Fighter 3 in Game > Version to play online.", {}, {}, {} });
 		if (board.profile->dural)   // (issue #12; after Online: online_row's place kept)
-			p.items.push_back({ "Cheats", cfg.dural ? "Dural on the select: ON. Online she's on the select whenever either player has her on. Dural's stage." : "Dural on the select, Dural's stage.", {}, {}, [&] { menu.push(cheats_page()); } });
+			p.items.push_back({ "Cheats", cfg.dural ? "Dural on the select: ON. Online she's on the select whenever either player has her on. Dural's stage, debug mode." : "Dural on the select, Dural's stage, the arcade's debug mode.", {}, {}, [&] { menu.push(cheats_page()); } });
 		p.items.push_back({ "Controls", "Each player's controller, keys and buttons.", {}, {}, [&] { menu.push(controls_page()); } });
 		p.items.push_back({ "Quit", "Saves and closes the game.", {}, {}, [&] { running = false; } });
 		return p;
@@ -4456,6 +4470,7 @@ int main(int argc, char **argv)
 				act = InputScript::Actions();
 				if (scripted) act = script.step(script_ctl, game_frame);
 				m3::Controls &c = board.controls;
+				board.debug_mode = cfg.debug_mode && online.phase() == Online::Phase::off;   // (Cheats > Debug mode: offline only)
 				auto mix = [](bool *a, const bool *b, const bool *d) { a[0] = b[0] || d[0]; a[1] = b[1] || d[1]; };
 				mix(c.coin, script_ctl.coin, live.coin); mix(c.start, script_ctl.start, live.start);
 				mix(c.test, script_ctl.test, live.test); mix(c.service, script_ctl.service, live.service);

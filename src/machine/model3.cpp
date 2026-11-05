@@ -491,6 +491,8 @@ void Model3::run_lines(unsigned from, unsigned to)
 
 void Model3::run_frame_start()
 {
+	if (debug_mode && profile->debug_flags)   // (Cheats > Debug mode: the secret code's bit, before each frame)
+		write32(profile->debug_flags, read32(profile->debug_flags) | 0x200000);
 	auto exec = [this](int n) {
 		cpu.execute(n);
 		if (after_slice) after_slice();
@@ -820,7 +822,7 @@ uint8_t Model3::read_inputs(unsigned reg)
 	}
 	case 0x10: return outputs[0];
 	case 0x14: return outputs[1];
-	case 0x18: return 0x7F;
+	case 0x18: return debug_mode ? uint8_t(0x7F & ~DEBUG_DIPS) : 0x7F;   // (Cheats > Debug mode: its switch on)
 	case 0x2C: return serial1;
 	case 0x30: return serial2;
 	case 0x34: return 0;

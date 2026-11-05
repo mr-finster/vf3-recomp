@@ -123,6 +123,7 @@ const Profile VF3_REV_D = {
 	0x1060B0,
 	// (logged per Country, the four, with shots: Japan 948, USA 677, Export and Asia 311)
 	0x10201B,
+	0x102400,   // (r13 - 0x5C00: the code's check 0x28568-0x285D4, the debug mode 0x4250-0x4380)
 };
 
 // Team Battle: its ROMs, and the addresses found so far; what isn't known yet is 0 (that feature off). Online: only
@@ -158,6 +159,7 @@ const Profile VF3_TB = {
 	&TB_DURAL,
 	0x1060B0,   // (Revision D's: the same routines at 0x20DD4-0x20E30, r13 the same)
 	0x10201B,   // (Revision D's: Japan 681, USA 797, Export and Asia 300)
+	0x102400,   // (Revision D's: the code's check 0x2B394-0x2B400, the debug mode 0x4828, the same code)
 };
 
 const Profile *const PROFILES[] = { &VF3_REV_D, &VF3_TB, nullptr };
