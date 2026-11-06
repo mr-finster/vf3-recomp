@@ -10,13 +10,16 @@
 #include <cstring>
 #include <functional>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 namespace {
 
 struct Toy : vfnet::Game
 {
-	struct S { uint64_t mix; uint32_t frame; } s{};
+	// (no padding: the state's bytes are hashed, and a padding's are whatever the memory held, a desync on Apple Silicon)
+	struct S { uint64_t mix; uint32_t frame; uint32_t pad; } s{};
+	static_assert(std::has_unique_object_representations_v<S>);
 	bool begin(const std::vector<uint8_t> &) override { s = {}; return true; }
 	void save(std::vector<uint8_t> &st) override { st.resize(sizeof s); memcpy(st.data(), &s, sizeof s); }
 	bool load(const std::vector<uint8_t> &st) override { if (st.size() != sizeof s) return false; memcpy(&s, st.data(), sizeof s); return true; }

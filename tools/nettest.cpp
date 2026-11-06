@@ -12,6 +12,7 @@
 #include <functional>
 #include <random>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 namespace {
@@ -19,7 +20,8 @@ namespace {
 // The stand-in: two fighters' positions and a mixing word, all changed by every input bit
 struct Toy : vfnet::Game
 {
-	struct S { uint64_t mix; int32_t x[2], y[2]; uint32_t frame; };
+	struct S { uint64_t mix; int32_t x[2], y[2]; uint32_t frame; uint32_t pad; };   // (no padding: the bytes are hashed)
+	static_assert(std::has_unique_object_representations_v<S>);
 	S s{};
 	std::vector<uint64_t> after;   // per frame: the hash after it, the last time it ran
 	uint32_t corrupt_at = UINT32_MAX;   // (a desync's test: this frame's result spoilt, as a nondeterministic game would)
