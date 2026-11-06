@@ -1,4 +1,5 @@
 #include "online.h"
+#include "online_text.h"
 #include "../net/http.h"
 #include "../net/json.h"
 #include "version.h"
@@ -11,6 +12,7 @@
 #include <cstring>
 #include <chrono>
 #include <thread>
+#include <set>
 
 namespace {
 
@@ -32,6 +34,8 @@ std::string mask(const std::string &a)
 }
 
 // A lobby on this machine (tests): plain http allowed for it, and the other game's addresses its own
+std::string lobby_says(const vfnet::http::Reply &r, const std::string &code, const std::string &mine);   // (below: the lobby's answer in words)
+
 bool lobby_on_this_machine(const std::string &url)
 {
 	for (const char *p : { "http://127.0.0.1", "http://localhost", "http://[::1]" })
@@ -127,7 +131,7 @@ void Online::flush(int ms)
 	// (and any request still on its way given up, a moment for them to let go: no thread inside libcurl's or
 	// OpenSSL's as the program's ending, a crash at the quit otherwise)
 	vfnet::http::cancel_all();
-	for (int waited = 0; vfnet::http::active() > 0 && waited < 500; waited += 10) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+	for (int waited = 0; vfnet::http::active() > 0 && waited < 1200; waited += 10) std::this_thread::sleep_for(std::chrono::milliseconds(10));
 }
 
 std::string Online::lobby_default()
@@ -182,6 +186,7 @@ void Online::ended(const std::string &why, bool lost)
 	last.seconds = int((now - began_at) / 1000);
 	last.ping = ping();
 	fprintf(stderr, "online: the match with %s ended after %d s: %s\n", last.opponent.c_str(), last.seconds, why.c_str());
+	feed_last();
 }
 
 // A private network's address (192.168.x.x, 10.x.x.x, 172.16-31.x.x: an iPhone's hotspot is 172.20.10.x; 169.254.x.x):
@@ -364,6 +369,7 @@ bool Online::join_room(const OnlineSettings &s, const std::string &c, std::strin
 	country_peer.clear();
 	tried = Try::join_room;
 	patient_until = patient ? now + 60000 : 0;
+	queue_at = queue_len = 0;
 	patient_for = waited_for;
 	retry_at = 0;
 	started_with = s;
@@ -413,6 +419,7 @@ bool Online::try_again(const OnlineSettings &s, std::string &error)
 	case Try::host: return host(s, error);
 	case Try::join: return join(s, error);
 	case Try::random: return find_random(s, error);
+	case Try::watch: { const std::string w = watch_tried; return watch(s, w, error); }
 	default: error = "Nothing to try again."; return false;
 	}
 }
@@ -542,7 +549,8 @@ std::string Online::me_json(const std::string &extra) const
 	return "{\"game\":" + vfnet::json::quote(identity.game) + ",\"version\":" + vfnet::json::quote(identity.build) + ",\"content\":" +
 	       vfnet::json::quote(hex64(identity.content)) + ",\"name\":" + vfnet::json::quote(identity.name) + ",\"cands\":" + vfnet::json::list(cands) +
 	       ",\"relay\":" + vfnet::json::quote(room ? room->relay_address() : "") +
-	       (pool.empty() ? std::string() : ",\"pool\":" + vfnet::json::quote(pool) + ",\"accepts\":" + vfnet::json::list(accepts)) + extra + "}";
+	       (pool.empty() ? std::string() : ",\"pool\":" + vfnet::json::quote(pool) + ",\"accepts\":" + vfnet::json::list(accepts)) + ",\"watchable\":true" +
+	       (random ? std::string(",\"qm_listed\":") + (started_with.quick_listed ? "true" : "false") : std::string()) + extra + "}";
 }
 
 vfnet::Link &Online::lagged(vfnet::Link &l)
@@ -620,11 +628,622 @@ void Online::room_failed(const std::string &why)
 
 void Online::close_room()
 {
+	room_ws_drop();
 	if (!rooms || !is_host || key.empty()) return;
 	farewell(lobby_url("/v1/close"), "{\"code\":" + vfnet::json::quote(code) + ",\"key\":" + vfnet::json::quote(key) + "}");
 	kept_code = code;   // (a Play again opens it again: the lobby keeps the code for its host, by this key)
 	kept_key = key;
 	key.clear();
+}
+
+
+// ---- watching (src/net/watch.h): this match's watchers, and watching another ----
+
+struct Online::Fetch
+{
+	std::atomic<bool> done{ false };
+	vfnet::http::Reply reply;
+};
+
+std::shared_ptr<Online::Fetch> Online::fetch(const std::string &method, const std::string &url, std::string body, int timeout_ms, size_t most)
+{
+	auto f = std::make_shared<Fetch>();
+	std::thread([f, method, url, body = std::move(body), timeout_ms, most] {   // (its own copy: a stop meanwhile leaves it to finish and be forgotten)
+		f->reply = vfnet::http::request(method, url, body, timeout_ms, most);
+		f->done = true;
+	}).detach();
+	return f;
+}
+
+std::string Online::watch_code() const
+{
+	if (wid.size() != 6) return "";
+	return wid.substr(0, 3) + "-" + wid.substr(3);
+}
+
+std::string Online::player_name(int p) const
+{
+	if (ph == Phase::watching) return online_menu::clean_name(watch_meta.name[p & 1]);
+	if (!session) return "";
+	return p == local_player() ? online_menu::clean_name(identity.name) : opponent();
+}
+
+std::string Online::player_country(int p) const
+{
+	if (ph == Phase::watching) return country(watch_meta.country[p & 1]);
+	return p == local_player() ? country_me : country_peer;
+}
+
+int Online::watchers() const
+{
+	if (ph == Phase::watching) return watch_watchers;
+	if (ph != Phase::playing || wid.empty()) return -1;
+	if (is_host) return feed.on() ? feed.watchers() : -1;
+	return std::max(guest_watchers, 0);
+}
+
+// The host's: the match's start (the session's blob, who plays, the terms), then its frames once a second
+void Online::feed_begin()
+{
+	vfnet::watch::Start s;
+	s.match = vfnet::watch::new_match_id();
+	s.meta.game = identity.game;
+	s.meta.terms = terms;
+	s.meta.content = hex64(identity.content);
+	s.meta.build = identity.build;
+	for (int p = 0; p < 2; p++) {
+		s.meta.name[p] = player_name(p);
+		s.meta.country[p] = player_country(p);
+	}
+	s.blob = session->blob();
+	feed.begin(s, now);
+	log_line("this match may be watched: watch code " + watch_code());
+}
+
+// (how often the lobby asks the host to send: 5 a second while anyone watches, slower under load, every 30 s while
+// nobody does)
+static double feed_every(const vfnet::json::Value &v)
+{
+	return v["every"].kind == vfnet::json::Value::number ? std::clamp(v["every"].n, 200.0, 30000.0) : 200;
+}
+
+// (the lobby's month of watching used up: this match sent no more, quietly; it goes on as ever)
+bool Online::lobby_off(const vfnet::json::Value &v)
+{
+	if (v["off"].kind != vfnet::json::Value::boolean || !v["off"].b) return false;
+	log_line("watching: the lobby takes no more matches this month: this one isn't sent (it goes on)");
+	feed = {};
+	if (feed_ws) std::thread([w = std::move(feed_ws)] {}).detach();
+	feed_ws_failed = true;
+	feed_ws_waiting = false;
+	return true;
+}
+
+void Online::feed_poll()
+{
+	for (FeedSlot &f : feed_slots)
+		if (f.job && f.job->done) {   // (the lobby's answer: what it has, how many watch)
+			vfnet::json::Value v;
+			const vfnet::http::Reply &r = f.job->reply;
+			const bool ok = r.status == 200 && vfnet::json::parse(r.body, v) && (f.up.start ? v["ok"].kind == vfnet::json::Value::boolean : v["has"].kind == vfnet::json::Value::number);
+			const double has = v["has"].n;
+			feed.done(f.up, ok, has < 0 ? vfnet::watch::NONE : uint32_t(std::clamp(has, 0.0, 1e9)), int(std::clamp(v["watchers"].n, 0.0, 1e7)), now);
+			if (ok) feed.interval_ms = feed_every(v);   // (nobody watching, or the lobby busy: sending less often)
+			if (lobby_off(v)) { f.job.reset(); return; }
+			if (!ok && feed.failed()) log_line("watching: the lobby wasn't reached for a minute: this match can't be watched any more (it goes on)");
+			f.job.reset();
+		}
+	if (persist && is_host && ph == Phase::playing && !key.empty()) {   // (a room that stays: still there, its match on)
+		vfnet::http::Reply ignored;
+		if (!random && !room_ws_failed) while (room_ws_poll(ignored)) {}   // (its socket kept: it holds the room; what comes on it means nothing now)
+		if (!room_ws_open() && now >= hold_at) {   // (no socket: held over HTTPS, every 15 s)
+			hold_at = now + 15000;
+			farewell(lobby_url("/v1/hold"), "{\"code\":" + vfnet::json::quote(code) + ",\"key\":" + vfnet::json::quote(key) + "}");
+		}
+	}
+	if (feed.on() && !wid.empty() && !feed_ws && !feed_ws_failed)   // (the host's WebSocket: the uploads on it, from now on)
+		feed_ws = std::make_shared<vfnet::http::Socket>(lobby_url("/v1/watch/feed?w=" + wid + "&k=" + wkey));
+	if (feed_ws) {
+		const vfnet::http::Socket::State fs = feed_ws->state();
+		vfnet::http::Socket::Message msg;
+		while (feed_ws->take(msg)) {   // (the answer to the last upload, as a POST's; or the lobby's word that a watcher came)
+			if (msg.binary) continue;
+			vfnet::json::Value v;
+			const bool parsed = vfnet::json::parse(msg.data, v);
+			if (parsed && v["wake"].kind == vfnet::json::Value::boolean && v["wake"].b) {   // (sent at once, not at the next idle upload)
+				feed.interval_ms = feed_every(v);
+				continue;
+			}
+			if (!feed_ws_waiting) continue;   // (nothing asked)
+			const bool ok = parsed && (feed_ws_up.start ? v["ok"].kind == vfnet::json::Value::boolean : v["has"].kind == vfnet::json::Value::number);
+			const double has = v["has"].n;
+			feed.done(feed_ws_up, ok, has < 0 ? vfnet::watch::NONE : uint32_t(std::clamp(has, 0.0, 1e9)), int(std::clamp(v["watchers"].n, 0.0, 1e7)), now);
+			if (ok) feed.interval_ms = feed_every(v);
+			feed_ws_waiting = false;
+			if (lobby_off(v)) return;
+		}
+		if (fs == vfnet::http::Socket::State::closed || (feed_ws_waiting && now - feed_ws_sent > 3000)) {   // (refused, gone, or too slow: the HTTPS way)
+			log_line("watching: the host's WebSocket " + (fs == vfnet::http::Socket::State::closed ? "closed (" + feed_ws->error() + ")" : std::string("too slow")) + ": sending over HTTPS");
+			if (feed_ws_waiting) feed.done(feed_ws_up, false, 0, 0, now);
+			feed_ws_waiting = false;
+			std::thread([w = std::move(feed_ws)] {}).detach();   // (let go on a thread: never a wait here)
+			feed_ws_failed = true;
+		} else {
+			if (fs == vfnet::http::Socket::State::open && !feed_ws_waiting && feed.next(now, feed_ws_up)) {
+				feed_ws->send(std::string(feed_ws_up.body.begin(), feed_ws_up.body.end()));
+				feed_ws_waiting = true;
+				feed_ws_sent = now;
+			}
+			return;   // (connecting, or sending on it: not over HTTPS as well)
+		}
+	}
+	for (FeedSlot &f : feed_slots) {   // (each upload on a connection of its own, kept open: no new one, and its TLS, ten times a second)
+		if (f.job || !feed.next(now, f.up)) continue;
+		if (!f.client) f.client = std::make_shared<vfnet::http::Client>();
+		auto job = std::make_shared<Fetch>();
+		const std::string url = lobby_url(std::string("/v1/watch/") + (f.up.start ? "start" : "push") + "?w=" + wid + "&k=" + wkey), body(f.up.body.begin(), f.up.body.end());
+		std::thread([job, client = f.client, url, body] { job->reply = client->request("POST", url, body, 3000, 4096); job->done = true; }).detach();
+		f.job = job;
+		break;   // (one a pass)
+	}
+	// (the guest: how many watch, asked once a minute while the figures at the top are shown; only shown)
+	if (!is_host && !wid.empty() && ph == Phase::playing) {
+		if (count_job && count_job->done) {
+			vfnet::json::Value v;
+			if (count_job->reply.status == 200 && vfnet::json::parse(count_job->reply.body, v)) guest_watchers = int(std::clamp(v["watchers"].n, 0.0, 1e7));
+			count_job.reset();
+		}
+		if (!count_job && now >= count_at && now - cells_at < 2000) {
+			count_at = now + 60000;
+			count_job = fetch("GET", lobby_url("/v1/watch/count?w=" + wid), "", 5000, 4096);
+		}
+	}
+}
+
+void Online::feed_last()
+{
+	for (const FeedSlot &f : feed_slots) if (f.job) return;   // (one on its way: the lobby takes the match for over once it's quiet)
+	if (!feed.on()) return;
+	feed.over();
+	feed.interval_ms = 0;
+	vfnet::watch::Feed::Upload u;
+	if (feed.next(now, u)) farewell(lobby_url("/v1/watch/push?w=" + wid + "&k=" + wkey), std::string(u.body.begin(), u.body.end()));
+}
+
+bool Online::watch(const OnlineSettings &s, const std::string &c, std::string &error)
+{
+	const std::string w = online_menu::clean_code(c);
+	if (w.size() != 6) { error = tr::WATCH_CODE_BAD; return false; }
+	if (identity.game.empty()) { error = "Online play isn't ready yet."; return false; }
+	stop();
+	last = {};
+	failure.clear();
+	fail_step = Step::none;
+	note.clear();
+	random = false;
+	tried = Try::watch;
+	watch_tried = w;
+	started_with = s;
+	lobby = s.lobby.empty() ? lobby_default() : s.lobby;
+	if (lobby.empty()) { error = "Online play isn't set up in this build (no lobby)."; return false; }
+	if (lobby.rfind("https://", 0) != 0 && !lobby_on_this_machine(lobby)) { error = "The lobby's address (settings.ini's online_lobby) must start with https://."; return false; }
+	wid = w;
+	watch_sid = hex64(vfnet::watch::new_match_id());
+	watch_match = watch_next = 0;
+	seen_at = -1e18;
+	watch_since = watch_heard = now;
+	watch_live_ok = true;
+	over_at = 0;
+	watch_shown = watch_quick = false;
+	watch_watchers = watch_restarts = 0;
+	watch_meta = {};
+	score = {};
+	is_host = false;
+	rooms = false;
+	ph = Phase::watching;
+	log_line("watching " + watch_code());
+	return true;
+}
+
+void Online::watch_failed(const std::string &why)
+{
+	log_line("watching " + watch_code() + ": " + why);
+	const std::string tried_code = wid;
+	stop();
+	failure = why;
+	fail_step = Step::none;
+	tried = Try::watch;
+	watch_tried = tried_code;
+	notices.push_back({ Notice::refused, why });
+}
+
+void Online::watch_over(const std::string &why)
+{
+	LastMatch m;
+	m.any = m.watched = true;
+	m.why = why;
+	for (int p = 0; p < 2; p++) {
+		m.name[p] = player_name(p);
+		m.country[p] = player_country(p);
+		m.wins[p] = spec ? spec->info().wins[p] : 0;
+	}
+	m.seconds = int((now - watch_since) / 1000);
+	m.watch = wid;
+	log_line("watching " + watch_code() + ": " + why);
+	stop();
+	last = m;
+	notices.push_back({ Notice::ended, why });
+}
+
+// The match's start, if this game can run it as the players do: the same game, ROM and terms (as a guest's)
+bool Online::watch_start(const vfnet::watch::Start &st, std::string &why)
+{
+	if (st.meta.game != identity.game) { why = st.meta.game == "vf3tb" ? tr::WATCH_IS_TEAM_BATTLE : tr::WATCH_IS_REVISION_D; return false; }
+	if (st.meta.content != hex64(identity.content)) { why = tr::WATCH_OTHER_ROM; return false; }
+	if (!use_terms(st.meta.terms)) { why = tr::fill(tr::WATCH_OTHER_VERSION, { { "version", online_menu::clean_name(st.meta.build) } }); return false; }
+	watch_meta = st.meta;
+	score = {};
+	adapter.mute = true;   // (catching up unseen: its sound dropped)
+	if (adapter.settle) adapter.settle();
+	if (!spec->start(st)) { why = tr::WATCH_START_BAD; return false; }
+	log_line("watching " + online_menu::clean_name(st.meta.name[0]) + " vs " + online_menu::clean_name(st.meta.name[1]) + " (" + st.meta.terms + ")");
+	return true;
+}
+
+std::string Online::watch_status() const
+{
+	if (ph != Phase::watching) return "";
+	if (!spec) return watch_match ? tr::WATCH_GETTING : tr::fill(tr::WATCH_LOOKING, { { "code", watch_code() } });
+	switch (spec->state()) {
+	case vfnet::watch::Spectator::State::waiting:
+	case vfnet::watch::Spectator::State::starting: return tr::WATCH_STARTING;
+	case vfnet::watch::Spectator::State::catching_up: return tr::fill(tr::WATCH_CATCHING_UP, { { "pct", std::to_string(watch_progress()) } });
+	case vfnet::watch::Spectator::State::buffering: return tr::WATCH_BUFFERING;
+	case vfnet::watch::Spectator::State::over: return tr::WATCH_BETWEEN;
+	default: return tr::WATCH_ON;
+	}
+}
+
+int Online::watch_step() const
+{
+	if (!spec) return 0;
+	switch (spec->state()) {
+	case vfnet::watch::Spectator::State::waiting:
+	case vfnet::watch::Spectator::State::starting: return 1;
+	case vfnet::watch::Spectator::State::catching_up: return watch_shown ? 3 : 2;
+	default: return watch_shown ? 3 : 2;
+	}
+}
+
+int Online::watch_progress() const
+{
+	if (!spec || !spec->total()) return 0;
+	return int(std::clamp(100.0 * double(spec->frame()) / double(spec->total()), 0.0, 100.0));
+}
+
+void Online::watch_poll()
+{
+	using vfnet::watch::Spectator;
+	// (here every 15 s, every 2 till a match is on: the lobby counts the watchers, says which match is on and
+	// whether it's a Quick match's)
+	if (seen_job && seen_job->done) {
+		vfnet::json::Value v;
+		const vfnet::http::Reply r = seen_job->reply;
+		seen_job.reset();
+		const bool said = r.status >= 400 && vfnet::json::parse(r.body, v);
+		// (watching switched off at the lobby, or an older lobby without it: said plainly)
+		if (said && ((r.status == 503 && v["error"].str() == "off") || (r.status == 404 && v["error"].str() == "bad"))) { watch_failed(tr::WATCH_OFF); return; }
+		if (r.status == 404 && !watch_match) { watch_failed(tr::fill(tr::WATCH_NOTHING, { { "code", watch_code() } })); return; }
+		if (said && r.status == 429 && v["error"].str() == "full") { watch_failed(tr::WATCH_FULL); return; }   // (400 watching already)
+		if (said && r.status == 429 && v["error"].str() == "busy") { watch_failed(tr::WATCH_BUSY); return; }   // (too many watching, all matches together)
+		if (r.status != 0) watch_heard = now;
+		else if (now - watch_heard > 20000) { watch_failed(tr::WATCH_LOBBY_GONE); return; }   // (the lobby gone: said once, plainly; the players go on)
+		if (r.status == 200 && vfnet::json::parse(r.body, v)) {
+			// (the lobby busy: no stream for this one, the frames asked for less often)
+			watch_live_ok = v["live"].kind != vfnet::json::Value::boolean || v["live"].b;
+			if (v["poll_ms"].kind == vfnet::json::Value::number && spec) spec->ask_every(std::clamp(v["poll_ms"].n, 500.0, 10000.0));
+			if (!watch_live_ok) stream_stop();
+			watch_watchers = int(std::clamp(v["watchers"].n, 0.0, 1e7));
+			watch_quick = v["random"].kind == vfnet::json::Value::boolean && v["random"].b;
+			const std::string m = v["match"].str();
+			if (m.size() == 16) watch_next = strtoull(m.c_str(), nullptr, 16);
+		}
+	}
+	if (!seen_job && now >= seen_at) {
+		seen_at = now + (spec && spec->state() != Spectator::State::over ? 15000 : 2000);
+		seen_job = fetch("POST", lobby_url("/v1/watch/seen?w=" + wid + "&s=" + watch_sid), "", 5000, 4096);
+	}
+	// a match on: the first, or the next once one's over (a Play again: the same watch code)
+	if (watch_next && watch_next != watch_match && (!spec || spec->state() == Spectator::State::over)) {
+		if (spec) log_line("watching " + watch_code() + ": their next match");
+		watch_match = watch_next;
+		Spectator::Config c;
+		stream_stop();
+		spec = std::make_unique<Spectator>(adapter, c);
+		spec->on_catch_up = [this](bool on) { adapter.mute = on || !watch_shown; };   // (catching up, unseen: no sound, then none late)
+		watch_job.reset();
+		watch_shown = false;
+		over_at = 0;
+	}
+	if (!spec) {
+		if (now - watch_since > 120000) watch_failed(tr::fill(tr::WATCH_NONE_STARTED, { { "code", watch_code() } }));
+		return;
+	}
+	switch (spec->state()) {
+	case Spectator::State::out_of_step:   // (once: from the match's start again, quietly; a second time, said)
+		if (watch_restarts++ == 0) { log_line("watching: " + spec->why + " From the start again"); stream_stop(); spec.reset(); watch_match = 0; return; }
+		watch_failed(tr::WATCH_OUT_OF_STEP); return;
+	case Spectator::State::failed: watch_failed(spec->why); return;
+	case Spectator::State::over:
+		if (!over_at) over_at = now;
+		if (now - over_at > 45000) { watch_over(tr::WATCH_MATCH_OVER); return; }   // (no next one: back to the Online screen)
+		break;
+	default: break;
+	}
+	stream_poll();   // (the frames as they come, once its start's in)
+	if (ph != Phase::watching) return;   // (told watching's off on its socket: stopped)
+	// the lobby asked for what's next: the start, the frames from where this one is
+	if (watch_job && watch_job->done) {
+		const std::shared_ptr<Fetch> j = watch_job;
+		watch_job.reset();
+		const bool ok = j->reply.status == 200;
+		if (j->reply.status != 0) watch_heard = now;
+		const std::vector<uint8_t> b(j->reply.body.begin(), j->reply.body.end());
+		if (watch_want == "start") {
+			vfnet::watch::Start st;
+			if (ok && vfnet::watch::decode(b, st)) {
+				std::string why;
+				if (!watch_start(st, why)) { watch_failed(why); return; }
+			}
+		} else if (watch_want == "frames") {
+			vfnet::watch::Reply r;
+			if (ok && vfnet::watch::decode_reply(b, r)) {
+				spec->reply(r, now);
+				watch_watchers = int(r.watchers);
+			}
+		}
+		spec->answered(now);
+	}
+	if (!watch_job) {
+		const std::string w = spec->want(now);
+		if (!w.empty()) {
+			spec->asked(now);
+			watch_want = w;
+			const std::string q = "?w=" + wid + "&m=" + hex64(watch_match);
+			if (w == "start") watch_job = fetch("GET", lobby_url("/v1/watch/start" + q), "", 10000, vfnet::watch::MAX_START + 8192);
+			else if (w == "frames") watch_job = fetch("GET", lobby_url("/v1/watch/frames" + q + "&from=" + std::to_string(spec->ask_from())), "", 3000, 64 << 10);
+		}
+	}
+	// (the log every 10 s: how it's going, what a report needs)
+	if (watch_shown && now - logged_at >= 10000) {
+		logged_at = now;
+		char b[200];
+		snprintf(b, sizeof b, "watching: frame %u of the lobby's %u, %.1f s behind, %u of the players' hashes matched, %d watching, %llu frames run unseen",
+		         spec->frame(), spec->total(), spec->behind_s(), spec->hashes_checked, watch_watchers, (unsigned long long)spec->frames_unseen);
+		log_line(b);
+	}
+}
+
+// The frames as they come (a watcher's): one response from the lobby that goes on as long as the match, read on a
+// thread of its own, each message given to the watcher here as it's taken (its time the buffer's measure)
+struct Online::Stream
+{
+	std::mutex lock;
+	std::deque<std::vector<uint8_t>> messages;
+	std::atomic<bool> stop{ false }, done{ false };
+	int status = 0;
+};
+
+void Online::stream_stop()
+{
+	if (watch_ws) { std::thread([w = std::move(watch_ws)] {}).detach(); if (spec) spec->live = false; }
+	if (!stream) return;
+	stream->stop = true;   // (its thread lets go at its next piece, or the lobby's next "still here")
+	stream.reset();
+	if (spec) spec->live = false;
+}
+
+void Online::stream_poll()
+{
+	using vfnet::http::Socket;
+	if (watch_ws) {
+		Socket::Message msg;
+		bool any = false;
+		while (watch_ws->take(msg)) {
+			any = true;
+			if (msg.binary) {
+				vfnet::watch::Reply r;
+				if (spec && vfnet::watch::decode_reply(std::vector<uint8_t>(msg.data.begin(), msg.data.end()), r)) { spec->reply(r, now); watch_watchers = int(r.watchers); watch_ws_frames_at = now; }
+			} else {   // (the lobby's word, as /seen's answer: how many watch, the match on, whether it's a Quick match's)
+				vfnet::json::Value v;
+				if (!vfnet::json::parse(msg.data, v)) continue;
+				if (v["error"].str() == "off") { watch_failed(tr::WATCH_OFF); return; }   // (watching switched off at the lobby)
+				watch_watchers = int(std::clamp(v["watchers"].n, 0.0, 1e7));
+				watch_quick = v["random"].kind == vfnet::json::Value::boolean && v["random"].b;
+				const std::string mm = v["match"].str();
+				if (mm.size() == 16) watch_next = strtoull(mm.c_str(), nullptr, 16);
+			}
+		}
+		if (any) watch_heard = now;
+		const Socket::State ws = watch_ws->state();
+		if (ws == Socket::State::closed) {   // (refused: the lobby busy, the edge's pieces asked; gone: again in a moment)
+			const int st = watch_ws->status();
+			log_line("watching: the WebSocket " + std::string(st == 429 ? "wasn't taken (busy)" : "ended (" + watch_ws->error() + ")") + ": asking over HTTPS meanwhile");
+			std::thread([w = std::move(watch_ws)] {}).detach();
+			if (st != 101) watch_ws_failed = true;   // (never taken: refused, or no WebSocket through this network: the HTTPS stream)
+			else stream_retry = now + 3000;          // (it was open and ended: a new one in a moment)
+			if (spec) spec->live = false;
+			return;
+		}
+		if (ws == Socket::State::open) {
+			// (no frames on it for 45 s, longer than the host's slowest pace: asked for over HTTPS meanwhile, once a
+			// second, whose answer says if the match is over; the lobby tells a socket only of new frames, so a match
+			// that ended with none, or whose host's game closed, would otherwise hold this watcher on its last picture)
+			if (spec) spec->live = now - watch_ws_frames_at < 45000;
+			seen_at = std::max(seen_at, now + 15000);   // (counted by its socket: no /seen while it's open)
+		}
+		return;
+	}
+	if (stream) {
+		std::deque<std::vector<uint8_t>> got;
+		{
+			std::lock_guard<std::mutex> l(stream->lock);
+			got.swap(stream->messages);
+		}
+		for (const std::vector<uint8_t> &m : got) {
+			vfnet::watch::Reply r;
+			if (!m.empty() && vfnet::watch::decode_reply(m, r) && spec) { spec->reply(r, now); watch_watchers = int(r.watchers); }
+		}
+		if (!got.empty()) watch_heard = now;
+		if (stream->done) {   // (ended: the lobby's too busy, or the connection went: asked for by the frames meanwhile, a stream again soon)
+			stream_retry = now + (stream->status == 429 ? 60000 : 3000);
+			log_line(std::string("watching: the stream ended (") + std::to_string(stream->status) + "): asking for the frames meanwhile");
+			stream_stop();
+		}
+		return;
+	}
+	if (!spec || !watch_live_ok || now < stream_retry || spec->state() == vfnet::watch::Spectator::State::waiting || spec->state() == vfnet::watch::Spectator::State::starting ||
+	    spec->state() == vfnet::watch::Spectator::State::over)
+		return;
+	if (!watch_ws_failed && watch_live_ok) {   // (a WebSocket first: hibernating at the lobby, the cheapest way; the HTTPS stream if it's refused)
+		watch_ws = std::make_shared<Socket>(lobby_url("/v1/watch/ws?w=" + wid + "&m=" + hex64(watch_match) + "&from=" + std::to_string(spec->ask_from()) + "&s=" + watch_sid));
+		watch_ws_frames_at = now;
+		return;
+	}
+	auto box = std::make_shared<Stream>();
+	const std::string url = lobby_url("/v1/watch/live?w=" + wid + "&m=" + hex64(watch_match) + "&from=" + std::to_string(spec->ask_from()) + "&s=" + watch_sid);
+	std::thread([box, url] {
+		std::vector<uint8_t> buf;
+		const vfnet::http::Reply r = vfnet::http::stream(url, [box, &buf](const char *p, size_t n) {
+			if (box->stop) return false;
+			buf.insert(buf.end(), p, p + n);
+			size_t at = 0;   // (each message: its length, then it; a length of 0, the lobby still there)
+			while (buf.size() - at >= 4) {
+				uint32_t len = 0;
+				memcpy(&len, buf.data() + at, 4);
+				if (len > (8u << 20)) return false;
+				if (buf.size() - at - 4 < len) break;
+				if (len) {
+					std::lock_guard<std::mutex> l(box->lock);
+					if (box->messages.size() > 4096) return false;   // (not being taken: let go)
+					box->messages.emplace_back(buf.begin() + ptrdiff_t(at) + 4, buf.begin() + ptrdiff_t(at + 4 + len));
+				}
+				at += 4 + len;
+			}
+			buf.erase(buf.begin(), buf.begin() + ptrdiff_t(at));
+			return true;
+		}, 8000, 15000);
+		box->status = r.status;
+		box->done = true;
+	}).detach();
+	stream = box;
+	spec->live = true;
+}
+
+// Enter code: what it is first (the lobby's peek), then a room open joined, a match on watched
+bool Online::enter_code(const OnlineSettings &s, const std::string &c, std::string &error)
+{
+	const std::string want = online_menu::clean_code(c);
+	if (want.size() != 6) { error = "A code is 6 letters and numbers (like KXQ-4M7)."; return false; }
+	stop();
+	last = {};
+	failure.clear();
+	fail_step = Step::none;
+	started_with = s;
+	lobby = s.lobby.empty() ? lobby_default() : s.lobby;
+	if (lobby.empty()) { error = "Online play isn't set up in this build (no lobby)."; return false; }
+	if (lobby.rfind("https://", 0) != 0 && !lobby_on_this_machine(lobby)) { error = "The lobby's address (settings.ini's online_lobby) must start with https://."; return false; }
+	peek_code = want;
+	code = want;
+	tried = Try::join_room;
+	rooms = true;   // (the Online screen's: joining a code, its room being found)
+	ph = Phase::joining;
+	st = Step::finding;
+	peek_job = fetch("POST", lobby_url("/v1/peek"), "{\"code\":" + vfnet::json::quote(want) + "}", 8000, 4096);
+	log_line("the code " + room_code() + ": asking the lobby what it is");
+	return true;
+}
+
+void Online::peek_poll()
+{
+	if (!peek_job || !peek_job->done) return;
+	const vfnet::http::Reply r = peek_job->reply;
+	peek_job.reset();
+	vfnet::json::Value v;
+	const std::string c = peek_code;
+	std::string err;
+	ph = Phase::off;
+	st = Step::none;
+	rooms = false;
+	if (r.status == 200 && vfnet::json::parse(r.body, v) && v["state"].str() == "playing" && v["watch"].kind == vfnet::json::Value::boolean && v["watch"].b) {
+		if (!watch(started_with, c, err)) { failure = err; notices.push_back({ Notice::refused, err }); }
+		return;
+	}
+	if (r.status == 200 || r.status == 404) {   // (open, or not known to the lobby: joined, as the code's always been)
+		if (!join_room(started_with, c, err)) { failure = err; notices.push_back({ Notice::refused, err }); }
+		return;
+	}
+	failure = lobby_says(r, room_code(), identity.build);
+	fail_step = Step::finding;
+	tried = Try::join_room;
+	notices.push_back({ Notice::refused, failure });
+}
+
+// ---- the rooms list ----
+
+const std::vector<Online::RoomRow> &Online::rooms_list(const OnlineSettings &s, bool again)
+{
+	using namespace std::chrono;
+	const double t = duration<double, std::milli>(steady_clock::now().time_since_epoch()).count();
+	if (now == 0) now = t;
+	if (rooms_job && rooms_job->done) {
+		vfnet::json::Value v;
+		if (rooms_job->reply.status == 200 && vfnet::json::parse(rooms_job->reply.body, v)) {
+			rooms_rows.clear();
+			// (what the lobby has on: an older one says nothing, and has neither rooms nor watching)
+			lobby_watch_on = v["features"]["watch"].kind == vfnet::json::Value::boolean && v["features"]["watch"].b;
+			for (const vfnet::json::Value &r : v["rooms"].items) {
+				if (r["game"].str() != identity.game) continue;   // (this game's: Revision D's or Team Battle's)
+				RoomRow row;
+				row.playing = r["state"].str() == "playing";
+				row.code = online_menu::clean_code(r["code"].str());
+				row.watch = online_menu::clean_code(r["watch"].str());
+				row.locked = r["locked"].kind == vfnet::json::Value::boolean && r["locked"].b;
+				row.quick = r["random"].kind == vfnet::json::Value::boolean && r["random"].b;
+				if (row.code.size() != 6 || row.quick) row.code.clear();
+				if (row.watch.size() != 6) row.watch.clear();
+				if (row.quick && (!row.playing || row.watch.empty())) continue;
+				if (row.code.empty() && row.watch.empty() && !row.locked) continue;
+				if (!row.quick) row.room = online_menu::clean_room(r["name"].str());   // (the room's name: a room name's letters, 16 at most)
+				row.queue = int(std::clamp(r["queue"].n, 0.0, 99.0));
+				for (int p = 0; p < 2; p++) {
+					const vfnet::json::Value &who = r[p ? "p2" : "p1"];
+					row.name[p] = online_menu::clean_name(who["name"].str());
+					row.country[p] = country(who["country"].str());
+				}
+				if (row.name[0].empty() || (row.playing && row.name[1].empty())) continue;
+				for (int p = 0; p < 2 && r["score"].items.size() == 2; p++) row.wins[p] = int(std::clamp(r["score"].items[size_t(p)].n, 0.0, 99.0));
+				row.round = int(std::clamp(r["round"].n, 0.0, 99.0));
+				row.watchers = int(std::clamp(r["watchers"].n, 0.0, 1e7));
+				row.since = int(std::clamp(r["since"].n, 0.0, 1e7));
+				const std::string reg = r["region"].str();
+				row.region = reg.size() == 2 ? reg : "";
+				row.older = r["older"].kind == vfnet::json::Value::boolean && r["older"].b;
+				if (rooms_rows.size() < 100) rooms_rows.push_back(row);
+			}
+			rooms_said = v["rooms"].kind == vfnet::json::Value::list ? 1 : 3;   // (no list: rooms off, or an older lobby)
+			rooms_region = v["you"].str().size() == 2 ? v["you"].str() : rooms_region;
+			rooms_seen++;
+		} else rooms_said = 2;
+		rooms_job.reset();
+	}
+	const std::string where = s.lobby.empty() ? lobby_default() : s.lobby;
+	if (!rooms_job && (again || t - rooms_at > 15000) && !where.empty() && where != "none" && !identity.game.empty()) {
+		rooms_at = t;
+		if (rooms_said < 0) rooms_said = 0;
+		rooms_job = fetch("GET", where + "/v1/online", "", 8000, 1 << 20);
+	}
+	return rooms_rows;
 }
 
 namespace {
@@ -666,9 +1285,7 @@ std::string options_said(const std::string &text, const std::string &mine)
 
 std::string lobby_says(const vfnet::http::Reply &r, const std::string &code, const std::string &mine)
 {
-	if (r.status == 0)
-		return "Couldn't reach the online service (" + r.error + "). Check the internet connection; on the same network you can "
-		       "still play: Host by address / Join by address.";
+	if (r.status == 0) return tr::ONLINE_DOWN;   // (what went wrong, in the log: this, plainly)
 	vfnet::json::Value v;
 	vfnet::json::parse(r.body, v);
 	const std::string e = v["error"].str();
@@ -713,6 +1330,58 @@ void Online::host_again(const std::string &why)
 	start_job([url, body](Job &j) { j.reply = vfnet::http::request("POST", url, body, 10000); });
 }
 
+// ---- a room code's host's WebSocket to its room (the lobby's, hibernating): its player told at once, the room held
+// while it's open; refused, or no WebSocket through this network: the HTTPS wait every 20 s, the hold every 15 s ----
+
+bool Online::room_ws_open() const
+{
+	return room_ws && room_ws->state() == vfnet::http::Socket::State::open;
+}
+
+void Online::room_ws_drop()
+{
+	if (room_ws) std::thread([w = std::move(room_ws)] {}).detach();   // (let go on a thread: never a wait here)
+	room_ws.reset();
+	room_ws_for.clear();
+}
+
+bool Online::room_ws_poll(vfnet::http::Reply &r)
+{
+	using vfnet::http::Socket;
+	const std::string want = code + "|" + key;
+	if (room_ws && room_ws_for != want) room_ws_drop();   // (another room, or a new key: a Play again's)
+	if (!room_ws && now >= room_ws_at && !key.empty()) {
+		room_ws = std::make_shared<Socket>(lobby_url("/v1/room/ws?code=" + code + "&key=" + key));
+		room_ws_for = want;
+		room_ws_made = now;
+	}
+	if (!room_ws) return false;
+	Socket::Message msg;
+	while (room_ws->take(msg)) {   // (its player, as a wait's answer; or the room gone)
+		vfnet::json::Value v;
+		if (msg.binary || !vfnet::json::parse(msg.data, v)) continue;
+		r = {};
+		r.status = v["error"].str() == "no_room" ? 404 : 200;
+		r.body = msg.data;
+		return true;
+	}
+	if (room_ws->state() != Socket::State::closed) return false;
+	const int status = room_ws->status();
+	const std::string why = room_ws->error();
+	room_ws_drop();
+	room_ws_at = now + 2000;
+	// (refused: the room gone, or a lobby without this, either way the HTTPS wait says which; only its own message on
+	// the socket, {error: no_room}, is taken for the room gone)
+	if (status == 101 && now - room_ws_made > 60000) room_ws_tries = 0;   // (open a good while, then lost: as new)
+	if (status == 101 && ++room_ws_tries <= 5) {
+		log_line("the room's WebSocket closed (" + why + "): again in a moment");
+		return false;
+	}
+	room_ws_failed = true;
+	log_line("no WebSocket to the room (" + (status ? "the lobby said " + std::to_string(status) : why) + "): waiting over HTTPS");
+	return false;
+}
+
 void Online::room_poll()
 {
 	if (!room) return;
@@ -728,7 +1397,7 @@ void Online::room_poll()
 			if (!job->turn.empty()) room->use_turn(job->turn, job->user, job->password);
 			else log_line(job->reply.status == 0 ? "no relay: the online service wasn't reached (" + job->reply.error + ")"
 			                                    : "no relay: the online service gave none (" + std::to_string(job->reply.status) + ")");
-			if (job->reply.status == 0) { room_failed(lobby_says(job->reply, room_code(), identity.build)); return; }
+			if (job->reply.status == 0) { room_failed(random ? std::string(tr::ONLINE_UNAVAILABLE) : lobby_says(job->reply, room_code(), identity.build)); return; }
 			country_me = country(job->country);
 			job.reset();
 		}
@@ -765,12 +1434,17 @@ void Online::room_poll()
 				search();
 			} else if (is_host) {
 				st = Step::opening;
-				const std::string body = me_json(want_code.empty() ? "" : ",\"want\":" + vfnet::json::quote(want_code) +
-				                                 (want_code == kept_code ? ",\"key\":" + vfnet::json::quote(kept_key) : std::string()));
+				// (a public room, or one whose matches may be watched: said to the lobby; a private room, as ever, nothing)
+				// (every match may be watched, by its code; a room stays for the next in line; listed, in Rooms, if the host chose it)
+				const OnlineSettings &w = started_with;
+				const std::string watching = std::string(w.room_who >= 1 ? ",\"listed\":true" : "") + ",\"persist\":true" +
+				                             (w.room_name.empty() ? "" : ",\"room\":" + vfnet::json::quote(w.room_name));
+				const std::string body = me_json((want_code.empty() ? "" : ",\"want\":" + vfnet::json::quote(want_code) +
+				                                 (want_code == kept_code ? ",\"key\":" + vfnet::json::quote(kept_key) : std::string())) + watching);
 				start_job([base, body](Job &j) { j.reply = vfnet::http::request("POST", base + "/v1/host", body, 10000); });
 			} else {
 				st = Step::finding;
-				const std::string body = me_json(",\"code\":" + vfnet::json::quote(code));
+				const std::string body = me_json(",\"code\":" + vfnet::json::quote(code) + ",\"queue\":true");   // (a room whose match is on: in its line)
 				start_job([base, body](Job &j) { j.reply = vfnet::http::request("POST", base + "/v1/join", body, 10000); });
 			}
 		}
@@ -792,6 +1466,20 @@ void Online::room_poll()
 			code = v["code"].str();
 			key = v["key"].str();
 			room_token = strtoull(v["token"].str().c_str(), nullptr, 16);
+			// (a room stays, kept through its match and open again after it for the next in line, only when the lobby says
+			// so: an older lobby, or one with rooms switched off, makes a code-only room, as ever)
+			persist = !random && v["persist"].kind == vfnet::json::Value::boolean && v["persist"].b;
+			listed_as.clear();   // (how the lobby lists it: its name, or its host's if the lobby wouldn't show the one typed)
+			if (v["listed_as"].kind == vfnet::json::Value::object) {
+				const std::string rn = online_menu::clean_room(v["listed_as"]["room"].str()), hn = online_menu::clean_name(v["listed_as"]["name"].str());
+				listed_as = !rn.empty() ? rn : !hn.empty() ? online_menu::clean_room(hn + "'S ROOM") : "";
+				if (!listed_as.empty()) log_line("listed in Rooms as " + listed_as + (rn.empty() && !started_with.room_name.empty() ? " (the name typed isn't shown: the lobby's word filter)" : ""));
+			}
+			if (v["wid"].str().size() == 6 && v["wkey"].str().size() == 32) {   // (its matches may be watched: the lobby's watch code, the key to send them with)
+				wid = online_menu::clean_code(v["wid"].str());
+				wkey = v["wkey"].str();
+				log_line(std::string(started_with.room_who >= 1 ? "a listed room" : "a room") + ": its matches may be watched with its code");
+			}
 			job.reset();
 			use_terms("");   // (its own till a player comes: then the lobby's terms for the two)
 			room_session(true);
@@ -801,15 +1489,25 @@ void Online::room_poll()
 			log_line("room " + room_code() + " open: waiting for a player");
 		}
 		break;
-	case Step::waiting:
-		if (!job && now >= retry_at) {
+	case Step::waiting: {
+		vfnet::http::Reply r;
+		bool got = false;
+		if (!random && !room_ws_failed) {   // (a room code's host: told on the room's WebSocket, not by a wait every 20 s)
+			got = room_ws_poll(r);
+			if (!got && !room_ws_failed) break;
+			if (!got) retry_at = now;   // (no WebSocket: the HTTPS wait from now)
+		}
+		if (!got && !job && now >= retry_at) {
 			const std::string url = lobby_url("/v1/wait"), body = "{\"code\":" + vfnet::json::quote(code) + ",\"key\":" + vfnet::json::quote(key) + "}";
 			start_job([url, body](Job &j) { j.reply = vfnet::http::request("POST", url, body, 30000); });
 		}
-		if (job && job->done) {
-			vfnet::json::Value v;
-			const vfnet::http::Reply r = job->reply;
+		if (!got && job && job->done) {
+			r = job->reply;
 			job.reset();
+			got = true;
+		}
+		if (got) {
+			vfnet::json::Value v;
 			if (r.status == 200 && vfnet::json::parse(r.body, v)) {
 				if (wait_errors >= 3) note.clear();   // (reached again)
 				wait_errors = 0;
@@ -849,6 +1547,7 @@ void Online::room_poll()
 			}
 		}
 		break;
+	}
 	case Step::connecting:   // (a host told a player's coming who never makes a sound: gone meanwhile; the session waits
 		// for its first hello before it counts the time, so it's counted here)
 		if (is_host && session && session->opponent_name().empty() && !session->game_started() && now - step_at > 30000) {
@@ -880,7 +1579,7 @@ void Online::room_poll()
 			if (r.status != 200 || !vfnet::json::parse(r.body, v)) {
 				// (no answer three times, or one that won't change: an old lobby, another without random matches)
 				const bool never = r.status >= 400 && r.status < 500 && r.status != 429;
-				if (never || (r.status == 0 && ++wait_errors >= 3)) { room_failed(lobby_says(r, "", identity.build)); return; }
+				if (never || (r.status == 0 && ++wait_errors >= 3)) { room_failed(r.status == 0 ? std::string(tr::ONLINE_UNAVAILABLE) : lobby_says(r, "", identity.build)); return; }
 				retry_at = now + (r.status == 429 ? 10000 : 3000);   // (busy, or a moment's trouble: again soon; busy, less often)
 				break;
 			}
@@ -895,6 +1594,7 @@ void Online::room_poll()
 				room_token = strtoull(v["token"].str().c_str(), nullptr, 16);
 				peer_name = v["name"].str();
 				country_peer = country(v["country"].str());
+				if (v["wid"].str().size() == 6 && v["wkey"].str().size() == 32) { wid = online_menu::clean_code(v["wid"].str()); wkey = v["wkey"].str(); }   // (watchable by its code)
 				ticket.clear();
 				if (!use_terms(v["as"].str(), v["them"].str())) { room_failed("The online service matched you with a version this one can't play: update the game."); return; }
 				room_session(true);
@@ -916,7 +1616,7 @@ void Online::room_poll()
 	case Step::finding:
 		if (!job && retry_at > 0 && now >= retry_at) {   // (the room not open yet, and waited for: asked again)
 			retry_at = 0;
-			const std::string base = lobby, body = me_json(",\"code\":" + vfnet::json::quote(code));
+			const std::string base = lobby, body = me_json(",\"code\":" + vfnet::json::quote(code) + ",\"queue\":true");
 			start_job([base, body](Job &j) { j.reply = vfnet::http::request("POST", base + "/v1/join", body, 10000); });
 		}
 		if (job && job->done) {
@@ -925,8 +1625,19 @@ void Online::room_poll()
 			job.reset();
 			// (Play again: the host's room not open again yet. Every 4 s: the lobby's limit is 20 joins a minute)
 			if ((r.status == 404 || r.status == 429) && patient()) { retry_at = now + 4000; break; }
+			// (a room whose match is on, that keeps a line: this player's place in it, asked again every 4 s till it's theirs)
+			if (r.status == 409 && vfnet::json::parse(r.body, v) && v["queued"].kind == vfnet::json::Value::number) {
+				const int was = queue_at;
+				queue_at = int(std::clamp(v["queued"].n, 1.0, 99.0));
+				queue_len = int(std::clamp(v["of"].n, double(queue_at), 99.0));
+				if (queue_at != was) log_line("in line for room " + room_code() + ": " + std::to_string(queue_at) + " of " + std::to_string(queue_len));
+				patient_until = now + 20000;
+				retry_at = now + 4000;
+				break;
+			}
 			if (r.status != 200 || !vfnet::json::parse(r.body, v) || v["token"].str().empty()) { room_failed(lobby_says(r, room_code(), identity.build)); return; }
 			patient_until = 0;
+			queue_at = queue_len = 0;
 			joined(v);
 		}
 		break;
@@ -941,6 +1652,7 @@ void Online::joined(const vfnet::json::Value &v)
 	room_token = strtoull(v["token"].str().c_str(), nullptr, 16);
 	peer_name = v["name"].str();
 	country_peer = country(v["country"].str());
+	if (v["wid"].str().size() == 6) wid = online_menu::clean_code(v["wid"].str());   // (the host's room may be watched: the count's asked by it)
 	if (!use_terms(v["as"].str(), v["them"].str())) { room_failed("The online service matched you with a version this one can't play: update the game."); return; }
 	room->set_peer(v["cands"].strings(), v["relay"].str(), false);
 	room_session(false);
@@ -985,6 +1697,7 @@ std::string Online::country(const std::string &c)
 
 void Online::stop()
 {
+	listed_as.clear();
 	if (room && ph != Phase::playing && st == Step::connecting) log_line("stopped while connecting: " + room->report(mask));
 	if (rooms && st == Step::searching && !ticket.empty()) {   // (out of the queue: no one's matched with a game gone)
 		farewell(lobby_url("/v1/random/leave"), me_json(",\"ticket\":" + vfnet::json::quote(ticket)));
@@ -1011,6 +1724,32 @@ void Online::stop()
 	if (session && ph == Phase::playing) ended("You left the match.");
 	if (session && session->state() != vfnet::Session::State::ended) session->quit();
 	close_room();
+	if (ph == Phase::watching) log_line("stopped watching " + watch_code());
+	spec.reset();
+	seen_job.reset();
+	watch_job.reset();
+	if (stream) stream_stop();
+	feed = {};
+	for (FeedSlot &f : feed_slots) {   // (an upload still on its way keeps its connection on its thread: the next match a new one, never two threads on one)
+		f.job.reset();
+		if (f.client) std::thread([c = std::move(f.client)] {}).detach();
+		f.client.reset();
+	}
+	if (feed_ws) std::thread([w = std::move(feed_ws)] {}).detach();
+	if (watch_ws) std::thread([w = std::move(watch_ws)] {}).detach();
+	feed_ws_failed = feed_ws_waiting = watch_ws_failed = false;
+	room_ws_drop();
+	room_ws_failed = false;
+	room_ws_tries = 0;
+	room_ws_at = 0;
+	peek_job.reset();
+	count_job.reset();
+	wid.clear();
+	wkey.clear();
+	guest_watchers = -1;
+	persist = false;
+	queue_at = queue_len = 0;
+	adapter.mute = false;
 	session.reset();
 	link.reset();
 	room.reset();
@@ -1032,7 +1771,8 @@ void Online::begin_match(const std::string &who)
 	logged_save = logged_run = logged_resim_ms = logged_hash = 0;
 	if (rooms) {
 		log_line(std::string("connected ") + (room->via_relay() ? "through a relay" : "directly") + ", " + mask(room->way()) + ": " + room->report(mask));
-		close_room();   // (the code's done its job)
+		if (is_host && persist) hold_at = now;   // (a room that stays: held while its match is on, its line waiting)
+		else close_room();   // (the code's done its job)
 	}
 	notices.push_back({ Notice::joined, "Playing " + who + ": press Start" });
 	notices.push_back({ Notice::tip, "This match: " + match_said() });   // (both players: the settings it plays, the host's in a pool match)
@@ -1056,13 +1796,19 @@ void Online::begin_match(const std::string &who)
 	start_seen[0] = start_seen[1] = false;
 	note.clear();
 	ticket.clear();   // (out of the queue: the lobby's done with it)
+	guest_watchers = -1;
+	count_at = now + 3000;
+	if (is_host && !wkey.empty()) feed_begin();   // (its matches may be watched: sent to the lobby as it's played)
 }
 
 void Online::poll(double t)
 {
 	now = t;
+	if (ph == Phase::watching) { watch_poll(); return; }
+	if (peek_job) { peek_poll(); return; }
 	if (rooms) room_poll();
 	if (!session) return;
+	feed_poll();
 	session->poll(t);
 	vfnet::Session::Event e;
 	while (session && session->next_event(e)) {
@@ -1138,6 +1884,10 @@ void Online::poll(double t)
 			}
 			if (why != vfnet::Session::End::quit)
 				notices.push_back({ was_playing ? Notice::ended : Notice::refused, was_playing ? last.why : (failure.empty() ? e.text : failure) });
+			// a room that stays: open again at once, the same code, for the next in its line (the host stays)
+			const bool again_room = was_playing && rooms && is_host && persist && !random && !key.empty() && why != vfnet::Session::End::desync;
+			const std::string again_code = code;
+			if (again_room) { kept_code = code; kept_key = key; key.clear(); }
 			close_room();
 			session.reset();
 			link.reset();
@@ -1146,6 +1896,13 @@ void Online::poll(double t)
 			ph = Phase::off;
 			st = Step::none;
 			rooms = false;
+			if (again_room) {
+				const LastMatch m = last;
+				std::string err;
+				log_line("the room stays: open again for the next in line");
+				if (!host_room(started_with, err, again_code)) log_line("the room couldn't open again: " + err);
+				last = m;   // (shown when the hosting's over)
+			}
 			return;
 		}
 		default:
@@ -1226,6 +1983,19 @@ void Online::poll(double t)
 
 bool Online::step(uint16_t input)
 {
+	if (ph == Phase::watching) {   // (a watched match: the frames due from what the lobby's given, no input)
+		if (!spec) return false;
+		spec->time(now);
+		bool shown = false;
+		const int ran = spec->tick(&shown, 10.0);
+		if (ran) score.frame(board);
+		if (shown && !watch_shown) {   // (caught up: its first picture, the sound from now on)
+			watch_shown = true;
+			adapter.mute = false;
+			notices.push_back({ Notice::watching, tr::fill(tr::WATCHING_P1_VS_P2, { { "p1", player_name(0) }, { "p2", player_name(1) } }) });
+		}
+		return shown;
+	}
 	if (ph == Phase::playing && session) {   // (the character select in lockstep: a guess put right shows there, a face flashing)
 		// (over only once the select's byte has been off SELECT_LINGER frames: it drops for ~50 mid-select at times,
 		// as the faces load, and each way out and back moved the input delay under the player's cursor)
@@ -1246,6 +2016,15 @@ bool Online::step(uint16_t input)
 	}
 	if (!(ph == Phase::playing && session && session->step(input))) return false;
 	score.frame(board);   // (the score between the two, from the game's RAM: vf3net::Score)
+	if (feed.on()) {   // (the frames confirmed since, to go to the lobby with the score: nothing waits for it)
+		feed.take(*session);
+		vfnet::watch::Info i;
+		for (int p = 0; p < 2; p++) {
+			i.wins[p] = uint8_t(std::clamp(score.matches[p], 0, 255));
+			i.rounds[p] = uint8_t(std::clamp(score.rounds[p], 0, 255));
+		}
+		feed.set_info(i);
+	}
 	if (score.players() == 3) both_in = true;
 	const uint8_t in_now = score.players_now();
 	for (int p = 0; p < 2; p++)
@@ -1272,6 +2051,7 @@ void Online::set_delay(int setting)
 
 std::string Online::status() const
 {
+	if (ph == Phase::watching) return watch_status();   // (finding it, its start, catching up: under STARTING THE MATCH with the menu closed)
 	const std::string who = session && !session->opponent_name().empty() ? opponent() : online_menu::clean_name(peer_name);
 	if (rooms) {
 		const std::string relay = via_relay() ? " (through the relay)" : "";
@@ -1281,11 +2061,14 @@ std::string Online::status() const
 		case Step::opening: return "Opening a room...";
 		case Step::waiting:   // (a random match's host waits too: for the opponent the lobby found, no code to send)
 			if (random) return "Connecting to " + (who.empty() ? std::string("your opponent") : who) + "...";
-			return "Send it to your opponent: they choose Join and type it";
+			return tr::SEND_THE_CODE;
 		case Step::searching:
 			if (!note.empty()) return note;   // (an opponent passed over, the service hard to reach)
 			return players > 1 ? "Looking for an opponent near you (" + std::to_string(players - 1) + " more searching)..." : "Looking for an opponent near you...";
 		case Step::finding:
+			if (queue_at > 0) {
+				return tr::fill(tr::IN_LINE, { { "code", room_code() }, { "n", std::to_string(queue_at) }, { "of", std::to_string(queue_len) } });
+			}
 			if (patient()) return "Waiting for " + (patient_for.empty() ? std::string("the host") : patient_for) + " to open room " + room_code() + " again...";
 			return "Finding room " + room_code() + "...";
 		case Step::connecting:
@@ -1313,9 +2096,22 @@ std::string Online::status() const
 
 bool Online::connection(game_menu::net_cells &c, bool detailed) const
 {
+	cells_at = now;
+	if (ph == Phase::watching) {   // (a watched match: who plays, the score, how far behind, how many watch)
+		if (!spec || !watch_shown) return false;
+		c = {};
+		c.watching = true;
+		c.name = tr::WATCHING;
+		const vfnet::watch::Info &i = spec->info();
+		c.score = player_name(0) + "  " + std::to_string(i.wins[0]) + "\xE2\x80\x93" + std::to_string(i.wins[1]) + "  " + player_name(1);
+		c.watchers = watch_watchers;
+		c.level = spec->state() == vfnet::watch::Spectator::State::buffering ? 1 : 0;
+		return true;
+	}
 	if (!session || ph != Phase::playing) return false;
 	const auto &stt = session->stats();
 	c = {};
+	c.watchers = watchers();
 	c.name = opponent();
 	c.relay = via_relay();
 	c.interrupted = session->interrupted();
@@ -1572,8 +2368,8 @@ menu_page name_page(OnlineSettings &s, game_menu &menu, std::function<void()> ch
 		else r += "<div class=\"typed\"><div>Just type it</div><div class=\"small\">Letters, numbers and  !  .  -</div></div>";
 		if (!t->problem.empty()) r += "<div class=\"problem\">" + E(t->problem) + "</div>";
 		r += "</div>";
-		return r + (pad ? foot(true, { { "A", "", "type" }, { "X", "", "delete" }, { "Start", "", "save" }, { "B", "", "cancel" } })
-		                : foot(false, { { "", "Enter", "save" }, { "", "Backspace", "delete" }, { "", "Esc", "cancel" } })) + "</div>";
+		return r + (pad ? foot(true, { { "A", "", tr::HINT_TYPE }, { "X", "", tr::HINT_DELETE }, { "Start", "", tr::HINT_SAVE }, { "B", "", tr::HINT_CANCEL } })
+		                : foot(false, { { "", "Enter", tr::HINT_SAVE }, { "", "Backspace", tr::HINT_DELETE }, { "", "Esc", tr::HINT_CANCEL } })) + "</div>";
 	};
 	return p;
 }
@@ -1581,12 +2377,12 @@ menu_page name_page(OnlineSettings &s, game_menu &menu, std::function<void()> ch
 // Joining with a code: typed or picked, and joined at its 6th letter
 menu_page code_page(Online &o, OnlineSettings &s, game_menu &menu, std::function<void()> changed)
 {
-	menu_page p{ "Join with a code", "", {} };
+	menu_page p{ "Enter code", "", {} };
 	auto t = std::make_shared<Entry>();
 	auto join = [&o, &s, &menu, t, changed] {
 		if (t->text.size() != 6) { t->problem = "A code has 6 letters and numbers."; return; }
 		std::string err;
-		if (!o.join_room(s, t->text, err)) { t->problem = err; return; }
+		if (!o.enter_code(s, t->text, err)) { t->problem = err; return; }   // (a room open: joined; its match on: watched)
 		menu.pop();
 		again(o, s, menu, changed);   // (the Online screen: joining, step by step)
 	};
@@ -1601,7 +2397,7 @@ menu_page code_page(Online &o, OnlineSettings &s, game_menu &menu, std::function
 	};
 	p.screen = [t](int sel, bool pad) {
 		std::string r = "<div class=\"scr\"><div class=\"col\"><div class=\"title\">ENTER THE CODE</div>"
-		                "<div class=\"sub\">The 6 letters your opponent sent you</div>"
+		                "<div class=\"sub\">A room's code: you join it, or watch the match on in it</div>"
 		                "<div style=\"margin-top: " + std::string(pad ? "36dp" : "64dp") + "\">" + boxes(t->text, 6, "", true, true) + "</div>";
 		if (pad) r += keypad(CODE_LETTERS, 11, 0, sel, false, "code");
 		else r += "<div class=\"typed\"><div class=\"line\"><div>Type it, or paste with</div><div class=\"key\">" + std::string(PASTE_KEY) + "</div><div>+</div><div class=\"key\">V</div></div>"
@@ -1652,6 +2448,8 @@ menu_page settings_page(Online &o, OnlineSettings &s, game_menu &menu, std::func
 	p.items.push_back({ "Match found chime", "A chime when an online match is found (and the game's window flashes if it isn't the one in front), so "
 		"you can wait in another window.",
 		[&s] { return std::string(s.chime ? "On" : "Off"); }, [&s, changed](int) { s.chime = !s.chime; changed(); } });
+	p.items.push_back({ tr::QUICK_LISTED, tr::QUICK_LISTED_HELP,
+		[&s] { return std::string(s.quick_listed ? tr::ON : tr::OFF); }, [&s, changed](int) { s.quick_listed = !s.quick_listed; changed(); } });
 	p.items.push_back({ "Back", "", {}, {}, [&menu] { menu.pop(); } });
 	return p;
 }
@@ -1739,6 +2537,369 @@ bool closes(game_menu &menu, const SDL_Event &e)
 
 std::string clock(int seconds) { char b[16]; snprintf(b, sizeof b, "%d:%02d", seconds / 60, seconds % 60); return b; }
 
+// B or Esc: back a page
+bool backs(game_menu &menu, const SDL_Event &e)
+{
+	if ((e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN && e.gbutton.button == SDL_GAMEPAD_BUTTON_EAST) ||
+	    (e.type == SDL_EVENT_KEY_DOWN && !e.key.repeat && (e.key.scancode == SDL_SCANCODE_ESCAPE || e.key.scancode == SDL_SCANCODE_BACKSPACE))) {
+		menu.pop();
+		return true;
+	}
+	return false;
+}
+
+// A room's name, typed as a player's is (and '): up to 16
+const std::string ROOM_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 .-!?'";
+const std::string ROOM_PAD = "ABCDEFGHIJKLMNOPQRSTUVWXYZ!.0123456789-'";
+std::string room_clean(const std::string &s)
+{
+	std::string out;
+	for (char ch : s) {
+		ch = char(toupper(uint8_t(ch)));
+		if (ROOM_LETTERS.find(ch) != std::string::npos && out.size() < 16) out += ch;
+	}
+	while (!out.empty() && out.back() == ' ') out.pop_back();
+	while (!out.empty() && out.front() == ' ') out.erase(out.begin());
+	return out;
+}
+// (the name filled in: the room's data, sent to the lobby and shown to everyone as it is: not translated)
+std::string room_name_of(const OnlineSettings &s) { return s.room_name.empty() ? room_clean(s.name + "'S ROOM") : s.room_name; }
+
+menu_page room_name_page(OnlineSettings &s, game_menu &menu, std::function<void()> changed)
+{
+	menu_page p{ "Room name", "", {} };
+	auto t = std::make_shared<Entry>();
+	t->text = room_name_of(s);
+	auto save = [&s, &menu, t, changed] {
+		const std::string n = room_clean(t->text);
+		if (n.empty()) { t->problem = tr::ROOM_NAME_NEEDS; return; }
+		s.room_name = n;
+		changed();
+		menu.pop();
+	};
+	for (char ch : ROOM_PAD)
+		p.items.push_back({ std::string(1, ch), "", {}, {}, [t, ch] { add_to(*t, ROOM_LETTERS, 16, std::string(1, ch)); } });
+	p.items.push_back({ "Delete", "", {}, {}, [t] { if (!t->text.empty()) t->text.pop_back(); } });
+	p.items.push_back({ "OK", "", {}, {}, save });
+	p.start = 0;
+	p.text = true;
+	p.on_event = [&menu, t, save](const SDL_Event &e) { return entry_event(menu, *t, ROOM_LETTERS, 16, e, save, [&menu] { menu.pop(); }, [] {}); };
+	p.screen = [t](int sel, bool pad) {
+		std::string r = "<div class=\"scr\"><div class=\"col\"><div class=\"title\">" + E(tr::ROOM_NAME_TITLE) + "</div>"
+		                "<div class=\"sub\">" + E(tr::ROOM_NAME_SUB) + "</div>"
+		                "<div class=\"roomname\">" + E(t->text) + "<span class=\"caret\"></span></div>";
+		if (pad) r += keypad(ROOM_PAD, 14, 0, sel, true, "name");
+		else r += "<div class=\"typed\"><div>" + E(tr::JUST_TYPE_IT) + "</div><div class=\"small\">" + E(tr::ROOM_NAME_LETTERS) + "</div></div>";
+		if (!t->problem.empty()) r += "<div class=\"problem\">" + E(t->problem) + "</div>";
+		r += "</div>";
+		return r + (pad ? foot(true, { { "A", "", tr::HINT_TYPE }, { "X", "", tr::HINT_DELETE }, { "Start", "", tr::HINT_SAVE }, { "B", "", tr::HINT_CANCEL } })
+		                : foot(false, { { "", "Enter", tr::HINT_SAVE }, { "", "Backspace", tr::HINT_DELETE }, { "", "Esc", tr::HINT_CANCEL } })) + "</div>";
+	};
+	return p;
+}
+
+// Create room: its name (filled in) and whether it's listed in Rooms (not, by default: the code only, as every room
+// before). Every match in it may be watched by anyone with the code; after each, the next in line plays the host.
+menu_page create_room_page(Online &o, OnlineSettings &s, game_menu &menu, std::function<void()> changed)
+{
+	menu_page p{ "Create room", "", {} };
+	auto problem = std::make_shared<std::string>();
+	const int name = 0, listed = 1, go = 2;
+	p.items.push_back({ "Name", "", {}, {}, [&s, &menu, changed] { menu.push(room_name_page(s, menu, changed)); } });
+	p.items.push_back({ "Listed in Rooms", "", {}, {}, [&s, changed] { s.room_who = s.room_who ? 0 : 2; changed(); } });
+	p.items.push_back({ "Create", "", {}, {}, [&o, &s, &menu, problem, changed] {
+		if (s.room_name.empty()) s.room_name = room_name_of(s);
+		std::string err;
+		if (!o.host_room(s, err)) { *problem = err; return; }
+		menu.pop();
+		again(o, s, menu, changed);   // (the Online screen: the room's code, step by step)
+	} });
+	p.start = go;
+	p.on_event = [&menu](const SDL_Event &e) { return backs(menu, e); };
+	p.screen = [&s, problem](int sel, bool pad) {
+		std::string r = "<div class=\"scr\"><div class=\"col\"><div class=\"title\">" + E(tr::CREATE_ROOM_TITLE) + "</div><div class=\"form\">";
+		r += "<div " + menu_row(name, sel, "fr") + "><div class=\"fl\">" + E(tr::ROOM_NAME_FIELD) + "</div><div class=\"fv\"><span class=\"fbox\">" + E(room_name_of(s)) + "</span></div></div>";
+		r += "<div " + menu_row(listed, sel, "fr") + "><div class=\"fl\">" + E(tr::LISTED_IN_ROOMS) + "</div><div class=\"fv\">" + E(s.room_who ? tr::ON : tr::OFF) + "</div>"
+		     "<div class=\"fs fr2\">" + E(s.room_who ? tr::LISTED_ON : tr::LISTED_OFF) + "</div></div></div>";
+		r += "<div class=\"note\">" + E(tr::CREATE_ROOM_NOTE) + "</div>";
+		if (!problem->empty()) r += "<div class=\"problem\">" + E(*problem) + "</div>";
+		r += "<div class=\"btns\"><div " + menu_row(go, sel, "btn") + ">" + E(tr::BUTTON_CREATE) + "</div></div></div>";
+		return r + foot(pad, { { "A", "Enter", sel == name ? tr::HINT_CHANGE_NAME : sel == listed ? tr::HINT_CHANGE : tr::HINT_CREATE }, { "B", "Esc", tr::HINT_BACK } }) + "</div>";
+	};
+	return p;
+}
+
+
+} // namespace
+
+// ---- the room browser (the Online screen): the lobby's rooms, this game's, nearest first; a window of them on screen ----
+
+namespace {
+
+constexpr int B_ROWS = 10;   // (rows on screen: the rest scroll)
+// the screen's items: the name, the actions, the filter, then a row a room
+enum { B_CHIP, B_QUICK, B_CREATE, B_CODE, B_MORE, B_ALL, B_OPEN, B_PLAYING, B_ROW0 };
+struct Browser
+{
+	int first = 0, offset = 0;     // (the window's first row; the selected row's place in it)
+	std::string sel_key;           // (the room selected: kept as the list comes again)
+	int sel_item = B_QUICK;        // (or the item, not a room)
+	std::set<std::string> known;   // (the rooms seen: new ones counted)
+	int fresh = 0, version = -1;
+};
+Browser &browser() { static Browser b; return b; }
+std::string room_key(const Online::RoomRow &r) { return r.code + "|" + r.watch + "|" + r.name[0]; }
+
+// This game's rooms that this version can join or watch (an older version's not shown), by the filter: the open ones
+// first, the nearest first, the newest; then the matches, the most watched first
+std::vector<Online::RoomRow> shown_rooms(Online &o, const OnlineSettings &s)
+{
+	std::vector<Online::RoomRow> v;
+	for (const Online::RoomRow &r : o.rooms_list(s))
+		if (!r.older && (s.rooms_show == 0 || (s.rooms_show == 1) != r.playing)) v.push_back(r);
+	const std::string you = o.rooms_you();
+	std::stable_sort(v.begin(), v.end(), [&](const Online::RoomRow &a, const Online::RoomRow &b) {
+		if (a.playing != b.playing) return !a.playing;
+		if (!a.playing && (a.region == you) != (b.region == you)) return a.region == you;
+		if (a.playing && a.watchers != b.watchers) return a.watchers > b.watchers;
+		return a.since < b.since;
+	});
+	return v;
+}
+
+std::string room_title(const Online::RoomRow &r) { return r.quick ? tr::QUICK_MATCH_TAG : r.room.empty() ? tr::fill(tr::HOSTS_ROOM, { { "name", r.name[0] } }) : r.room; }
+std::string fit(const std::string &s, size_t n) { return s.size() <= n ? s : s.substr(0, n - 1) + "\xE2\x80\xA6"; }   // (a name cut to its column, with ...)
+
+// A on a room: join it if it's open, watch it if a match is on (its line: from the room's own page, or Play next)
+void room_act(Online &o, OnlineSettings &s, game_menu &menu, std::function<void()> changed, const Online::RoomRow &r, std::shared_ptr<std::string> problem, bool join)
+{
+	const std::string code = r.code.empty() ? r.watch : r.code;
+	if (code.empty()) {   // (a locked room: listed with no code, its host gives it: typed in Enter code)
+		named(s, menu, changed, [&o, &s, &menu, changed] { menu.push(code_page(o, s, menu, changed)); });
+		return;
+	}
+	if (r.playing && !join) {
+		std::string err;
+		if (!o.watch(s, r.watch.empty() ? code : r.watch, err)) { *problem = err; return; }
+		while (menu.depth() > 1 && menu.top_name() != "Online") menu.pop();
+		again(o, s, menu, changed);
+		return;
+	}
+	named(s, menu, changed, [&o, &s, &menu, code, problem, changed] {
+		std::string err;
+		if (!o.join_room(s, code, err)) { *problem = err; return; }
+		while (menu.depth() > 1 && menu.top_name() != "Online") menu.pop();
+		again(o, s, menu, changed);
+	});
+}
+
+// A room's own page (Y on it): who plays, how many watch, who's next; watch, play next, back
+menu_page room_view(Online &o, OnlineSettings &s, game_menu &menu, std::function<void()> changed, const Online::RoomRow &r)
+{
+	menu_page p{ "Room", "", {} };
+	auto problem = std::make_shared<std::string>();
+	int watch = -1;
+	if (r.playing) {
+		watch = int(p.items.size());
+		p.items.push_back({ "Watch", "", {}, {}, [&o, &s, &menu, r, problem, changed] { room_act(o, s, menu, changed, r, problem, false); } });
+	}
+	const int join = r.quick ? -1 : int(p.items.size());   // (a Quick match's: to watch only)
+	if (!r.quick) p.items.push_back({ "Join", "", {}, {}, [&o, &s, &menu, r, problem, changed] { room_act(o, s, menu, changed, r, problem, true); } });
+	const int back = int(p.items.size());
+	p.items.push_back({ "Back", "", {}, {}, [&menu] { menu.pop(); } });
+	p.start = watch >= 0 ? watch : join;
+	p.on_event = [&menu](const SDL_Event &e) { return backs(menu, e); };
+	p.screen = [r, watch, join, back, problem](int sel, bool pad) {
+		const std::string c = r.code.empty() ? r.watch : r.code, dashed = c.size() == 6 ? c.substr(0, 3) + "-" + c.substr(3) : std::string("\xE2\x80\x94");   // (a locked room: none)
+		std::string out = "<div class=\"scr\"><div class=\"col\"><div class=\"title\">" + E(room_title(r)) + "</div><div class=\"sub small\">" +
+		                  (r.quick ? E(tr::fill(tr::ROOM_QUICK_SUB, { { "code", dashed } })) : tr::fill(E(tr::ROOM_HOSTED_BY).c_str(), { { "flag", flag(r.country[0], "flag s hb") }, { "name", E(r.name[0]) }, { "code", E(dashed) } })) +
+		                  "</div><div class=\"panes\"><div class=\"pane\">";
+		if (r.playing)
+			out += "<div class=\"ph\">" + E(tr::ROOM_PLAYING) + "</div><div class=\"pvs\">" + flag(r.country[0]) + E(r.name[0]) + "<span class=\"psc\">" + std::to_string(r.wins[0]) + " \xE2\x80\x93 " + std::to_string(r.wins[1]) +
+			       "</span>" + E(r.name[1]) + flag(r.country[1], "flag r") + "</div><div class=\"pq\">" + E(tr::fill(tr::N_WATCHING, { { "n", std::to_string(r.watchers) } })) + "</div>";
+		else out += "<div class=\"ph\">" + E(tr::ROOM_OPEN) + "</div><div class=\"pvs\">" + flag(r.country[0]) + E(r.name[0]) + "</div><div class=\"pq\">" + E(tr::WAITING_FOR_PLAYER) + "</div>";
+		if (!r.quick)
+			out += "</div><div class=\"pane\"><div class=\"ph\">" + E(tr::ROOM_NEXT) + "</div><div class=\"pq\">" +
+			       E(!r.playing ? std::string(tr::JOIN_AND_PLAY) : r.queue > 0 ? tr::fill(tr::N_WAITING_TO_PLAY, { { "n", std::to_string(r.queue) } }) : std::string(tr::NOBODY_WAITING)) + "</div>";
+		out += "</div></div>";
+		if (!problem->empty()) out += "<div class=\"problem\">" + E(*problem) + "</div>";
+		out += "<div class=\"btns\">";
+		if (watch >= 0) out += "<div " + menu_row(watch, sel, "btn") + ">" + E(tr::BUTTON_WATCH) + "</div>";
+		if (join >= 0) out += "<div " + menu_row(join, sel, "btn") + ">" + E(r.playing ? tr::BUTTON_PLAY_NEXT : tr::BUTTON_JOIN) + "</div>";
+		out += "<div " + menu_row(back, sel, "btn") + ">" + E(tr::BUTTON_BACK) + "</div></div></div>";
+		return out + foot(pad, { { "A", "Enter", tr::HINT_SELECT }, { "B", "Esc", tr::HINT_BACK } }) + "</div>";
+	};
+	return p;
+}
+
+// More: what's seldom wanted (on the same network, by address; the settings)
+menu_page more_page(Online &o, OnlineSettings &s, game_menu &menu, std::function<void()> changed)
+{
+	menu_page p{ "More", "", {} };
+	p.items.push_back({ tr::PLAY_BY_ADDRESS, tr::PLAY_BY_ADDRESS_HELP, {}, {}, [&o, &s, &menu, changed] { menu.push(address_page(o, s, menu, changed)); } });
+	p.items.push_back({ tr::SETTINGS, tr::SETTINGS_HELP, {}, {}, [&o, &s, &menu, changed] { menu.push(settings_page(o, s, menu, changed)); } });
+	p.items.push_back({ "Back", "", {}, {}, [&menu] { menu.pop(); } });
+	return p;
+}
+
+// Enter code: a room's code, to join it, or watch the match on in it
+menu_page enter_code_page(Online &o, OnlineSettings &s, game_menu &menu, std::function<void()> changed)
+{
+	menu_page p = code_page(o, s, menu, changed);
+	p.name = "Enter code";
+	return p;
+}
+
+// The browser itself: the Online screen when nothing's on
+void browser_page(Online &o, OnlineSettings &s, game_menu &menu, std::function<void()> changed, menu_page &p, std::shared_ptr<std::string> problem)
+{
+	Browser &b = browser();
+	const std::vector<Online::RoomRow> rows = shown_rooms(o, s);
+	if (o.rooms_version() != b.version) {   // (rooms new since the list was last seen: counted, not moving the one selected)
+		const bool first_time = b.version < 0 || b.known.empty();
+		for (const Online::RoomRow &r : rows)
+			if (b.known.insert(room_key(r)).second && !first_time) b.fresh++;
+		b.version = o.rooms_version();
+	}
+	int sel_row = -1;
+	for (size_t i = 0; i < rows.size() && !b.sel_key.empty(); i++) if (room_key(rows[i]) == b.sel_key) sel_row = int(i);
+	if (sel_row >= 0) b.first = std::clamp(sel_row - b.offset, 0, std::max(0, int(rows.size()) - B_ROWS));
+	else if (!b.sel_key.empty()) b.sel_key.clear();
+	b.first = std::clamp(b.first, 0, std::max(0, int(rows.size()) - B_ROWS));
+
+	auto change_name = [&s, &menu, changed] { menu.push(name_page(s, menu, changed, {})); };
+	p.items.push_back({ "Your name", "", {}, {}, change_name });
+	p.items.push_back({ "Quick match", "", {}, {}, [&o, &s, &menu, problem, changed] {
+		named(s, menu, changed, [&o, &s, &menu, problem, changed] {
+			std::string err;
+			if (!o.find_random(s, err)) { *problem = err; return; }
+			again(o, s, menu, changed);
+		});
+	} });
+	p.items.push_back({ "Create room", "", {}, {}, [&o, &s, &menu, changed] { named(s, menu, changed, [&o, &s, &menu, changed] { menu.push(create_room_page(o, s, menu, changed)); }); } });
+	p.items.push_back({ "Enter code", "", {}, {}, [&o, &s, &menu, changed] { named(s, menu, changed, [&o, &s, &menu, changed] { menu.push(enter_code_page(o, s, menu, changed)); }); } });
+	p.items.push_back({ "More", "", {}, {}, [&o, &s, &menu, changed] { menu.push(more_page(o, s, menu, changed)); } });
+	auto filter = [&o, &s, &menu, changed](int show) {
+		return [&o, &s, &menu, changed, show] { s.rooms_show = show; changed(); browser().first = 0; browser().sel_key.clear(); menu.replace(page(o, s, menu, changed), -1); };
+	};
+	p.items.push_back({ "All", "", {}, {}, filter(0) });
+	p.items.push_back({ "Open", "", {}, {}, filter(1) });
+	p.items.push_back({ "Playing", "", {}, {}, filter(2) });
+	for (const Online::RoomRow &r : rows)
+		p.items.push_back({ room_title(r), "", {}, {}, [&o, &s, &menu, r, problem, changed] { room_act(o, s, menu, changed, r, problem, false); } });
+	p.start = sel_row >= 0 ? B_ROW0 + sel_row : std::min(b.sel_item, B_ROW0 - 1);
+	const int n = int(rows.size());
+	auto to_row = [&menu, n](int row) {   // (a room selected, the window following it)
+		if (n == 0) return;
+		row = std::clamp(row, 0, n - 1);
+		Browser &b = browser();
+		if (row < b.first) b.first = row;
+		if (row >= b.first + B_ROWS) b.first = row - B_ROWS + 1;
+		menu.select_row(B_ROW0 + row);
+	};
+	p.on_event = [&o, &s, &menu, changed, rows, n, to_row, change_name](const SDL_Event &e) {
+		const int sel = menu.selected(), row = sel - B_ROW0;
+		const bool key = e.type == SDL_EVENT_KEY_DOWN, padb = e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN;
+		const SDL_Scancode sc = key ? e.key.scancode : SDL_SCANCODE_UNKNOWN;
+		const int button = padb ? e.gbutton.button : -1;
+		if ((key && sc == SDL_SCANCODE_F5) || button == SDL_GAMEPAD_BUTTON_WEST) { o.rooms_list(s, true); return true; }
+		if (button == SDL_GAMEPAD_BUTTON_NORTH || (key && sc == SDL_SCANCODE_TAB)) {   // (Y: the room's own page; elsewhere, the name)
+			if (row >= 0 && row < n) menu.push(room_view(o, s, menu, changed, rows[size_t(row)]));
+			else change_name();
+			return true;
+		}
+		const bool up = (key && sc == SDL_SCANCODE_UP) || button == SDL_GAMEPAD_BUTTON_DPAD_UP, down = (key && sc == SDL_SCANCODE_DOWN) || button == SDL_GAMEPAD_BUTTON_DPAD_DOWN;
+		const bool pgup = (key && sc == SDL_SCANCODE_PAGEUP) || button == SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, pgdn = (key && sc == SDL_SCANCODE_PAGEDOWN) || button == SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER;
+		if (e.type == SDL_EVENT_MOUSE_WHEEL && n > 0) {   // (the wheel: the list, three rooms a notch)
+			to_row((row >= 0 ? row : browser().first) + (e.wheel.y > 0 ? -3 : 3));
+			return true;
+		}
+		if ((pgup || pgdn) && n > 0) { to_row((row >= 0 ? row : 0) + (pgup ? -B_ROWS : B_ROWS)); return true; }
+		// (Left / Right along the buttons and along the filter, one by one: never off to the other line)
+		const bool left = (key && sc == SDL_SCANCODE_LEFT) || button == SDL_GAMEPAD_BUTTON_DPAD_LEFT, right = (key && sc == SDL_SCANCODE_RIGHT) || button == SDL_GAMEPAD_BUTTON_DPAD_RIGHT;
+		if ((left || right) && sel >= B_QUICK && sel < B_ROW0) {
+			const int lo = sel <= B_MORE ? B_QUICK : B_ALL, hi = sel <= B_MORE ? B_MORE : B_PLAYING;
+			menu.select_row(std::clamp(sel + (right ? 1 : -1), lo, hi));
+			return true;
+		}
+		if (row >= 0 && row < n && (up || down)) {
+			if (up && row == 0) { browser().first = 0; menu.select_row(B_ALL + s.rooms_show); return true; }   // (out of the list: to the filter)
+			to_row(row + (up ? -1 : 1));
+			return true;
+		}
+		if (down && sel >= B_ALL && sel < B_ROW0 && n > 0) { to_row(browser().first); return true; }   // (into the list where it's scrolled to)
+		if (up && sel >= B_ALL && sel < B_ROW0) { menu.select_row(B_QUICK); return true; }
+		return false;
+	};
+	p.screen = [&o, &s, rows, n, problem](int sel, bool pad) {
+		Browser &b = browser();
+		const int row = sel - B_ROW0;
+		if (row >= 0 && row < n) {
+			if (row < b.first) b.first = row;
+			if (row >= b.first + B_ROWS) b.first = row - B_ROWS + 1;
+			b.sel_key = room_key(rows[size_t(row)]);
+			b.offset = row - b.first;
+		} else { b.sel_key.clear(); b.sel_item = sel; }
+		if (b.first == 0) b.fresh = 0;
+		const int players = o.players_online(s);
+		std::string r = "<div class=\"scr\"><div class=\"bhead\"><div class=\"btitle\">" + E(tr::ONLINE) + "</div><div class=\"bgame\">" + E(o.identity.game == "vf3tb" ? tr::GAME_VF3TB : tr::GAME_VF3) + "</div>"
+		                "<div " + menu_row(B_CHIP, sel, "chip bchip") + ">";
+		if (s.name.empty()) r += "<div class=\"me\">" + E(tr::SET_YOUR_NAME) + "</div>";
+		else r += "<div class=\"who\">" + E(tr::PLAYING_AS) + "</div>" + flag(o.my_country()) + "<div class=\"me\">" + E(s.name) + "</div>";
+		r += "</div></div><div class=\"bacts\">"
+		     "<div " + menu_row(B_QUICK, sel, "ab") + ">" + E(tr::QUICK_MATCH) + (players > 0 ? "<span class=\"abs\"><span class=\"live\"></span>" + E(tr::fill(tr::N_ONLINE, { { "n", std::to_string(players) } })) + "</span>" : std::string()) + "</div>"
+		     "<div " + menu_row(B_CREATE, sel, "ab") + ">" + E(tr::CREATE_ROOM) + "</div><div " + menu_row(B_CODE, sel, "ab") + ">" + E(tr::ENTER_CODE) + "</div>"
+		     "<div class=\"abgap\"></div><div " + menu_row(B_MORE, sel, "ab abmore") + ">" + E(tr::MORE) + "</div></div>";
+		auto f = [&](int i, const char *label, bool on) { return "<div " + menu_row(i, sel, std::string("bf") + (on ? " on" : "")) + ">" + label + "</div>"; };
+		r += "<div class=\"bfilt\">" + f(B_ALL, tr::FILTER_ALL, s.rooms_show == 0) + f(B_OPEN, tr::FILTER_OPEN, s.rooms_show == 1) + f(B_PLAYING, tr::FILTER_PLAYING, s.rooms_show == 2);
+		r += "<div class=\"bcount\">" + E(n > B_ROWS ? tr::fill(tr::ROWS_RANGE, { { "from", std::to_string(b.first + 1) }, { "to", std::to_string(std::min(n, b.first + B_ROWS)) }, { "n", std::to_string(n) } })
+		                                          : n == 1 ? std::string(tr::ONE_ROOM) : n ? tr::fill(tr::N_ROOMS, { { "n", std::to_string(n) } }) : std::string()) +
+		     (b.fresh > 0 && b.first > 0 ? "<span class=\"bnewc\">" + E(tr::fill(tr::N_NEW_ABOVE, { { "n", std::to_string(b.fresh) } })) + "</span>" : std::string()) + "</div></div>";
+		r += "<div class=\"blist\"><div class=\"bcols\"><div class=\"c1\">" + E(tr::COL_ROOM) + "</div><div class=\"c2\">" + E(tr::COL_HOST) + "</div><div class=\"c3\">" + E(tr::COL_STATUS) +
+		     "</div><div class=\"c5\">" + E(tr::COL_WATCHING) + "</div><div class=\"c7\"></div></div>";
+		if (!n) {
+			const int st = o.rooms_state();
+			const int all = int(o.rooms_list(s).size());
+			std::string big, small;
+			if (st <= 0) big = tr::LOOKING_FOR_ROOMS;
+			else if (st == 2) { big = tr::ONLINE_UNREACHABLE; small = tr::ONLINE_UNREACHABLE_MORE; }
+			else if (st == 3) { big = tr::ROOMS_OFF; small = tr::ROOMS_OFF_MORE; }
+			else if (all > 0 && s.rooms_show != 0) { big = s.rooms_show == 1 ? tr::NO_OPEN_ROOMS : tr::NO_MATCHES_LISTED; small = tr::ALL_SHOWS_EVERY_ROOM; }
+			else { big = tr::NO_ROOMS; small = tr::NO_ROOMS_MORE; }
+			r += "<div class=\"bicon" + std::string(st == 2 ? " bad" : "") + "\"><div style=\"top: 9dp;\"></div><div style=\"top: 19dp; right: 22dp;\"></div></div>";
+			r += "<div class=\"bempty" + std::string(st == 2 ? " bad" : "") + "\">" + E(big) + "</div>" + (small.empty() ? "" : "<div class=\"bempty2\">" + E(small) + "</div>");
+		}
+		for (int i = b.first; i < n && i < b.first + B_ROWS; i++) {
+			const Online::RoomRow &w = rows[size_t(i)];
+			r += "<div " + menu_row(B_ROW0 + i, sel, "brow") + "><div class=\"c1\">" + (w.quick ? "<span class=\"qm\">" + E(tr::QUICK_MATCH_TAG) + "</span>" : E(fit(room_title(w), 16))) + "</div><div class=\"c2\">" +
+			     (w.quick ? std::string("<span class=\"nohost\">\xE2\x80\x94</span>") : flag(w.country[0], "flag s") + E(w.name[0])) + "</div><div class=\"c3\">";
+			if (w.playing)   // (both players, each with their flag, and the score between)
+				r += "<span class=\"mark\">\xE2\x97\x8F</span><span class=\"pn\">" + flag(w.country[0], "flag s") + E(w.name[0]) + "</span><span class=\"sc\">" + std::to_string(w.wins[0]) + "\xE2\x80\x93" + std::to_string(w.wins[1]) +
+				     "</span><span class=\"pn\">" + flag(w.country[1], "flag s") + E(w.name[1]) + "</span>";
+			else r += "<span class=\"mark open\">\xE2\x97\x8B</span><span class=\"wt\">" + E(tr::ROW_OPEN) + "</span>";
+			r += "</div><div class=\"c5\">" + (w.watchers ? std::to_string(w.watchers) : std::string()) + "</div><div class=\"c7\">" + E(w.playing ? tr::ROW_WATCH : tr::ROW_JOIN) + "</div></div>";
+		}
+		r += "</div>";
+		if (n > B_ROWS) {   // (where the window is: a bar and its thumb)
+			const int top = 194 + 30, h = 720 - 92 - top, th = std::max(24, h * B_ROWS / n), y = top + (h - th) * b.first / std::max(1, n - B_ROWS);
+			r += "<div class=\"bsb\" style=\"top: " + std::to_string(top) + "dp; height: " + std::to_string(h) + "dp;\"></div><div class=\"bsbt\" style=\"top: " + std::to_string(y) + "dp; height: " + std::to_string(th) + "dp;\"></div>";
+		}
+		if (o.lobby_watches()) r += "<div class=\"bnote\">" + E(tr::BROWSER_NOTE) + "</div>";   // (not said where watching's off)
+		if (!problem->empty()) r += "<div class=\"bproblem\">" + E(*problem) + "</div>";
+		const bool on_row = row >= 0 && row < n;
+		const char *act = on_row ? (rows[size_t(row)].playing ? tr::HINT_WATCH : tr::HINT_JOIN) : tr::HINT_SELECT;
+		if (pad) return r + foot(true, { { "A", "", act }, { "Y", "", on_row ? tr::HINT_ROOM : tr::HINT_NAME }, { "LB/RB", "", tr::HINT_PAGE }, { "B", "", tr::HINT_BACK } }) + "</div>";
+		return r + foot(false, { { "", "Enter", act }, { "", "Tab", on_row ? tr::HINT_ROOM : tr::HINT_NAME }, { "", "PgUp/PgDn", tr::HINT_PAGE }, { "", "Esc", tr::HINT_BACK } }) + "</div>";
+	};
+}
+
+} // namespace
+
+// (online.h: the browser is the Online screen itself; this is it, for the host program's "made again" as the list comes)
+menu_page rooms_page(Online &o, OnlineSettings &s, game_menu &menu, std::function<void()> changed) { return page(o, s, menu, changed); }
+
+namespace {
+
 } // namespace
 
 std::string clean_address(const std::string &s)
@@ -1750,6 +2911,8 @@ std::string clean_address(const std::string &s)
 	}
 	return out;
 }
+
+std::string clean_room(const std::string &s) { return room_clean(s); }
 
 std::string clean_name(const std::string &s)
 {
@@ -1780,6 +2943,26 @@ menu_page page(Online &o, OnlineSettings &s, game_menu &menu, std::function<void
 	menu_page p{ "Online", "", {} };
 	const bool hosting = o.phase() == Online::Phase::hosting, joining = o.phase() == Online::Phase::joining;
 
+	if (o.watching()) {
+		// ---- watching a match: found, its start, catching up with the players (then the menu closes on its picture) ----
+		const int stop = int(p.items.size());
+		p.items.push_back({ "Stop", "", {}, {}, [&o, &s, &menu, changed] { o.stop(); again(o, s, menu, changed); } });
+		p.start = stop;
+		p.on_event = [&menu](const SDL_Event &e) { return closes(menu, e); };
+		p.screen = [&o, stop](int sel, bool pad) {
+			const int at = o.watch_step();
+			const std::string a = o.player_name(0), b = o.player_name(1);
+			std::string r = "<div class=\"scr\"><div class=\"col\"><div class=\"title\">" + E(tr::fill(tr::WATCHING_CODE, { { "code", o.watch_code() } })) + "</div><div class=\"sub\">" +
+			                (a.empty() ? std::string("&nbsp;") : flag(o.player_country(0)) + E(a) + " &nbsp;vs&nbsp; " + E(b) + flag(o.player_country(1), "flag r")) + "</div>";
+			const std::vector<std::pair<std::string, Mark>> v = { { tr::STEP_FIND, at > 0 ? done : now }, { tr::STEP_START, at > 1 ? done : at == 1 ? now : todo },
+				{ tr::STEP_CATCH_UP, at > 2 ? done : at == 2 ? now : todo }, { tr::STEP_WATCH, at > 2 ? now : todo } };
+			r += "<div class=\"stepsat\">" + steps(v) + "</div><div class=\"status\">" + E(o.watch_status()) + "</div>";
+			r += "<div class=\"btns\"><div " + menu_row(stop, sel, "btn") + ">" + E(tr::BUTTON_STOP) + "</div></div></div>";
+			return r + foot(pad, { { "A", "Enter", tr::HINT_SELECT }, { "B", "Esc", tr::HINT_CLOSE_MENU } }) + "</div>";
+		};
+		return p;
+	}
+
 	if ((hosting || joining) && o.random_match()) {
 		// ---- a random opponent: searching, found, connecting ----
 		const int stop = int(p.items.size());
@@ -1798,7 +2981,8 @@ menu_page page(Online &o, OnlineSettings &s, game_menu &menu, std::function<void
 			const std::vector<std::pair<std::string, Mark>> v = { { "SEARCH", found ? done : now }, { "FOUND", found ? done : todo },
 				{ "CONNECT", started ? done : found ? now : todo }, { "FIGHT", started ? now : todo } };
 			r += "<div class=\"stepsat\">" + steps(v) + "</div><div class=\"status\">" + E(o.status()) + "</div>";
-			r += "<div class=\"btns\"><div " + menu_row(stop, sel, "btn") + ">STOP</div></div></div>";
+			r += "<div class=\"btns\"><div " + menu_row(stop, sel, "btn") + ">STOP</div></div>";
+			r += (o.lobby_watches() ? "<div class=\"note quiet\">" + E(tr::QUICK_WATCHABLE) + "</div>" : std::string()) + "</div>";   // (the one line about watching: no prompt; none where watching's off)
 			return r + foot(pad, { { "A", "Enter", "select" }, { "B", "Esc", "play solo while you wait" } }) + "</div>";
 		};
 		return p;
@@ -1827,6 +3011,7 @@ menu_page page(Online &o, OnlineSettings &s, game_menu &menu, std::function<void
 			std::vector<std::pair<std::string, Mark>> v;
 			if (hosting) {
 				r += "<div class=\"title\">YOUR ROOM CODE</div>";
+				if (!o.listed_as_name().empty()) r += "<div class=\"sub\">" + E(tr::fill(tr::LISTED_AS, { { "room", o.listed_as_name() } })) + "</div>";
 				const std::string c = o.room_code();
 				r += "<div style=\"margin-top: 28dp\">" + boxes(c.empty() ? "" : c.substr(0, 3) + c.substr(4), 6, "big", false, true, "") + "</div>";
 				const bool open = st == Online::Step::waiting || st == Online::Step::connecting;
@@ -1908,7 +3093,10 @@ menu_page page(Online &o, OnlineSettings &s, game_menu &menu, std::function<void
 			const Online::Step f = o.failed_at();
 			std::string sub, r = "<div class=\"scr\"><div class=\"col\"><div class=\"title red\">COULDN'T CONNECT</div>";
 			std::vector<std::pair<std::string, Mark>> v;
-			if (t == Online::Try::random) {
+			if (t == Online::Try::watch) {
+				sub = tr::WATCHING_A_MATCH;
+				v = { { tr::STEP_FIND, bad }, { tr::STEP_START, todo }, { tr::STEP_CATCH_UP, todo }, { tr::STEP_WATCH, todo } };
+			} else if (t == Online::Try::random) {
 				sub = "Finding a random opponent";
 				const bool found = f == Online::Step::connecting || f == Online::Step::waiting;
 				v = { { "SEARCH", found ? done : bad }, { "FOUND", found ? done : todo }, { "CONNECT", f == Online::Step::connecting ? bad : todo }, { "FIGHT", todo } };
@@ -1931,6 +3119,36 @@ menu_page page(Online &o, OnlineSettings &s, game_menu &menu, std::function<void
 			if (!problem->empty()) r += "<div class=\"problem\">" + E(*problem) + "</div>";
 			r += "<div class=\"btns\"><div " + menu_row(again_i, sel, "btn") + ">TRY AGAIN</div><div " + menu_row(back, sel, "btn") + ">BACK</div></div></div>";
 			return r + foot(pad, { { "A", "Enter", "select" }, { "B", "Esc", "back" } }) + "</div>";
+		};
+		return p;
+	}
+
+	if (const Online::LastMatch &m = o.last_match(); m.any && m.watched) {
+		// ---- a match watched, over: who, the score, and watching that code again ----
+		int again_i = -1;
+		if (!m.watch.empty()) {
+			again_i = int(p.items.size());
+			p.items.push_back({ "Watch again", "", {}, {}, [&o, &s, &menu, problem, changed] {
+				std::string err;
+				if (!o.watch(s, o.last_match().watch, err)) { *problem = err; return; }
+				again(o, s, menu, changed);
+			} });
+		}
+		const int back = int(p.items.size());
+		p.items.push_back({ "Back", "", {}, {}, [&o, &s, &menu, changed] { o.set_last_match({}); again(o, s, menu, changed); } });
+		p.start = back;
+		p.on_event = [&menu](const SDL_Event &e) { return closes(menu, e); };
+		p.screen = [&o, again_i, back, problem](int sel, bool pad) {
+			const Online::LastMatch &m = o.last_match();
+			std::string r = "<div class=\"scr\"><div class=\"col\"><div class=\"title\">" + E(tr::MATCH_OVER) + "</div>";
+			const std::string mid = m.wins[0] + m.wins[1] > 0 ? "<div class=\"score\">" + std::to_string(m.wins[0]) + " \xE2\x80\x93 " + std::to_string(m.wins[1]) + "</div>"
+			                                                 : std::string("<div class=\"vs\">VS</div>");
+			r += "<div class=\"mini\"><div class=\"n\">" + flag(m.country[0]) + E(m.name[0]) + "</div>" + mid + "<div class=\"n\">" + E(m.name[1]) + flag(m.country[1]) + "</div></div>";
+			r += "<div class=\"sub\">" + E(m.why) + " " + E(tr::fill(tr::WATCHED_FOR, { { "time", clock(m.seconds) } })) + "</div>";
+			if (!problem->empty()) r += "<div class=\"problem\">" + E(*problem) + "</div>";
+			r += "<div class=\"btns\">" + (again_i >= 0 ? "<div " + menu_row(again_i, sel, "btn") + ">" + E(tr::BUTTON_WATCH_AGAIN) + "</div>" : std::string()) + "<div " + menu_row(back, sel, "btn") + ">" + E(tr::BUTTON_BACK) + "</div></div>";
+			r += "<div class=\"note\">" + E(tr::WATCH_AGAIN_NOTE) + "</div></div>";
+			return r + foot(pad, { { "A", "Enter", tr::HINT_SELECT }, { "B", "Esc", tr::HINT_PLAY_SOLO } }) + "</div>";
 		};
 		return p;
 	}
@@ -1987,55 +3205,24 @@ menu_page page(Online &o, OnlineSettings &s, game_menu &menu, std::function<void
 		return p;
 	}
 
-	// ---- the two choices ----
-	const int chip = 0, rnd = 1, host = 2, join = 3, addr = 4, settings = 5;
-	auto change_name = [&s, &menu, changed] { menu.push(name_page(s, menu, changed, {})); };
-	p.items.push_back({ "Your name", "", {}, {}, change_name });
-	p.items.push_back({ "Random", "", {}, {}, [&o, &s, &menu, problem, changed] {
-		named(s, menu, changed, [&o, &s, &menu, problem, changed] {
-			std::string err;
-			if (!o.find_random(s, err)) { *problem = err; return; }
-			again(o, s, menu, changed);
-		});
-	} });
-	p.items.push_back({ "Host", "", {}, {}, [&o, &s, &menu, problem, changed] {
-		named(s, menu, changed, [&o, &s, &menu, problem, changed] {
-			std::string err;
-			if (!o.host_room(s, err)) { *problem = err; return; }
-			again(o, s, menu, changed);
-		});
-	} });
-	p.items.push_back({ "Join", "", {}, {}, [&o, &s, &menu, changed] {
-		named(s, menu, changed, [&o, &s, &menu, changed] { menu.push(code_page(o, s, menu, changed)); });
-	} });
-	p.items.push_back({ "Play by address", "", {}, {}, [&o, &s, &menu, changed] { menu.push(address_page(o, s, menu, changed)); } });
-	p.items.push_back({ "Settings", "", {}, {}, [&o, &s, &menu, changed] { menu.push(settings_page(o, s, menu, changed)); } });
-	p.start = rnd;
-	p.on_event = [change_name](const SDL_Event &e) {
-		if (e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN && e.gbutton.button == SDL_GAMEPAD_BUTTON_NORTH) { change_name(); return true; }
-		return false;
-	};
-	p.screen = [&o, &s, problem](int sel, bool pad) {
-		std::string r = "<div class=\"scr\"><div class=\"col\"><div class=\"title\">ONLINE</div>";
-		r += "<div " + menu_row(chip, sel, "chip") + ">";
-		if (s.name.empty()) r += "<div class=\"me\">Set your name</div>";
-		else r += "<div class=\"who\">Playing as</div>" + flag(o.my_country()) + "<div class=\"me\">" + E(s.name) + "</div>";
-		if (pad) r += "<div class=\"key\">Y</div><div class=\"who\">change</div>";
-		const int players = o.players_online(s);   // (playing at random now: on the Random card, 0 too; -1 not known yet)
-		r += "</div><div class=\"tiles\">"
-		     "<div " + menu_row(rnd, sel, "tile") + "><div class=\"t\">RANDOM</div><div class=\"s\">" + (players >= 0 ? (players > 0 ? "<span class=\"live\"></span>" : "") + std::to_string(players) + " online" : std::string("Anyone near you")) + "</div></div>"
-		     "<div " + menu_row(host, sel, "tile") + "><div class=\"t\">HOST</div><div class=\"s\">Get a code for a friend</div></div>"
-		     "<div " + menu_row(join, sel, "tile") + "><div class=\"t\">JOIN</div><div class=\"s\">Type a friend's code</div></div></div>";
-		if (!problem->empty()) r += "<div class=\"problem\">" + E(*problem) + "</div>";
-		r += "<div class=\"more\"><div>Same network?</div><div " + menu_row(addr, sel, "link") + ">Play by address</div><div>\xC2\xB7</div>"
-		     "<div " + menu_row(settings, sel, "link") + ">Settings</div></div></div>";
-		return r + foot(pad, { { "A", "Enter", "select" }, { "B", "Esc", "back" } }) + "</div>";
-	};
+	// ---- the room browser: the rooms, Quick match, Create room, by code or address ----
+	browser_page(o, s, menu, changed, p, problem);
 	return p;
 }
 
 void match_rows(Online &o, OnlineSettings &s, game_menu &menu, std::function<void()> changed, std::vector<menu_item> &rows)
 {
+	if (o.watching()) {   // (a match watched: stop, or play the winner next: a room's match, not a Quick match's, which has no room)
+		rows.push_back({ tr::STOP_WATCHING, tr::STOP_WATCHING_HELP, {}, {}, [&o, &menu] { o.stop(); menu.close(); } });
+		if (!o.watching_quick())
+			rows.push_back({ tr::PLAY_NEXT, tr::PLAY_NEXT_HELP, {}, {}, [&o, &s, &menu] {
+				const std::string c = o.watch_code();
+				std::string err;
+				if (!o.join_room(s, c, err)) o.tell_failure(err);   // (the watch stopped: why, on the Online page it goes back to)
+				menu.close();
+			} });
+		return;
+	}
 	menu_item who{ "Playing", "", [&o] {
 		return o.opponent() + "   " + std::to_string(o.ping()) + " ms" + (o.via_relay() ? "   relay" : "") + (o.interrupted() ? "   interrupted" : "");
 	}, {}, {}, true };

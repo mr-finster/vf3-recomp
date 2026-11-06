@@ -251,3 +251,85 @@ div { display: block; }
 .flag { width: 32dp; height: 24dp; margin: 0 10dp; border: 1dp #ffffff55; vertical-align: middle; }
 .mini .flag { width: 40dp; height: 30dp; }
 .chip .flag { width: 28dp; height: 21dp; margin: 0; }
+
+
+/* The room browser (the Online screen): a header that stays (the title, the name, the actions, the filters), the list
+   between it and the hints, a row a room in columns, a window of them scrolled to the selection, its place at the right */
+.bhead { position: absolute; left: 56dp; right: 56dp; top: 22dp; height: 54dp; display: flex; align-items: center; gap: 18dp; }
+.btitle { font-size: 48dp; line-height: 52dp; font-weight: 700; font-style: italic; color: #f2d14b; }
+.bgame { font-size: 21dp; color: #8f9ac8; }
+.chip.bchip { margin-top: 0; margin-left: auto; height: 40dp; font-size: 21dp; }
+.bacts { position: absolute; left: 56dp; right: 56dp; top: 88dp; display: flex; gap: 10dp; }
+.ab { height: 42dp; line-height: 38dp; padding: 0 16dp; border-radius: 10dp; border: 2dp #2a3466; background-color: #141b3d; font-size: 21dp; font-weight: 700; font-style: italic; color: #ffffff; }
+.ab .abs { font-style: normal; font-weight: 500; font-size: 18dp; color: #8f9ac8; margin-left: 8dp; }
+.ab.selected .abs { color: #0b1026; }
+.ab .live { display: inline-block; width: 9dp; height: 9dp; border-radius: 5dp; margin-right: 5dp; background-color: #8fe08a; }
+.abgap { flex: 1; }
+.bfilt { position: absolute; left: 56dp; right: 56dp; top: 146dp; height: 40dp; display: flex; align-items: center; gap: 8dp; font-size: 20dp; color: #8f9ac8; }
+.bfl { margin-left: 10dp; }
+.bf { padding: 0 14dp; height: 30dp; line-height: 26dp; border-radius: 10dp; border: 2dp #2a3466; color: #d8ddf5; }
+.bf.on { background-color: #d8ddf5; color: #0b1026; border-color: #d8ddf5; }
+.bf.sort { margin-left: 14dp; }
+.bcount { margin-left: auto; color: #8f9ac8; }
+.bcount .bnewc { color: #8fe08a; margin-left: 10dp; }   /* (rooms new since the list was scrolled from its top: up there) */
+.blist { position: absolute; left: 56dp; right: 70dp; top: 194dp; bottom: 98dp; border-top: 2dp #2a3466; }
+.bcols, .brow { display: flex; align-items: center; padding: 0 12dp; }
+.bcols { height: 28dp; font-size: 14dp; letter-spacing: 1.5dp; color: #8f9ac8; border-bottom: 2dp #2a3466; }
+.brow { height: 36dp; font-size: 20dp; color: #d8ddf5; border-bottom: 1dp #1d2654; }
+.brow.selected { border-radius: 8dp; border: 2dp #ffffff; }
+/* (each column its own width and well clear of the next; the count right-aligned in its own) */
+.c1 { width: 240dp; padding-right: 24dp; } .c2 { width: 200dp; padding-right: 24dp; } .c3 { flex: 1; padding-right: 24dp; }
+.c5 { width: 110dp; text-align: right; padding-right: 40dp; } .c7 { width: 84dp; text-align: right; font-weight: 700; font-style: italic; }
+.c1, .c2, .c5, .c7 { box-sizing: content-box; flex: none; }
+.brow .c3 .pn { display: inline-block; width: 150dp; white-space: nowrap; overflow: hidden; vertical-align: top; }
+.brow .c3 .pn .flag.s { margin-right: 7dp; }
+.qm { font-size: 15dp; font-weight: 600; letter-spacing: 1.5dp; padding: 1dp 8dp; border: 1dp #3a4682; border-radius: 4dp; color: #8f9ac8; }
+.brow.selected .qm { color: #0b1026; border-color: #0b1026; }
+.nohost { color: #3a4682; }
+.brow .c3 .pn + .sc + .pn { text-align: left; }
+.ab.abmore { padding: 0 14dp; font-style: normal; font-weight: 600; color: #8f9ac8; }
+.ab.abmore.selected { color: #0b1026; }
+.bnote { position: absolute; left: 56dp; right: 56dp; bottom: 74dp; height: 22dp; font-size: 19dp; font-weight: 500; color: #8f9ac8; text-align: center; }
+.fr2 { margin-left: 24dp; }
+.brow .c1 { color: #ffffff; white-space: nowrap; overflow: hidden; }
+.brow .c2, .brow .c3 { white-space: nowrap; overflow: hidden; }
+.brow .c3, .brow .c5, .brow .c7 { color: #8f9ac8; }
+.brow .c3 .wt { color: #d8ddf5; }   /* (Open: a hollow ring, as the site's; a match on, the green dot) */
+/* (a match on: a green disc; open: a ring. The mono font's own circles: round at any size, on any renderer) */
+.brow .mark { display: inline-block; width: 18dp; font-family: "JetBrains Mono"; font-size: 15dp; color: #8fe08a; vertical-align: top; padding-top: 4dp; }
+.brow .mark.open { color: #8f9ac8; }
+.brow.selected .mark { color: #0b1026; }
+.brow .c3 .sc { display: inline-block; width: 52dp; text-align: center; color: #f2d14b; font-weight: 700; font-style: italic; vertical-align: top; }   /* (the score in a slot of its own; its baseline the names') */
+.brow.selected .c1, .brow.selected .c2, .brow.selected .c3, .brow.selected .c3 .wt, .brow.selected .c3 .sc, .brow.selected .c5, .brow.selected .c7 { color: #0b1026; }
+.flag.s { width: 26dp; height: 19dp; margin: 0 8dp 0 0; }
+.bicon { position: relative; width: 52dp; height: 40dp; margin: 72dp auto 0 auto; border: 3dp #3a4682; border-radius: 6dp; }   /* (an empty list: the page's own line drawing of one) */
+.bicon div { position: absolute; left: 8dp; right: 8dp; height: 3dp; border-radius: 2dp; background-color: #3a4682; }
+.bicon.bad { border-color: #ff7a6b; } .bicon.bad div { background-color: #ff7a6b; }
+.bempty { margin-top: 16dp; font-size: 26dp; color: #d8ddf5; text-align: center; }
+.bempty.bad { color: #ff7a6b; }
+.bempty2 { margin-top: 10dp; font-size: 22dp; color: #8f9ac8; text-align: center; }
+.bsb { position: absolute; right: 44dp; width: 6dp; border-radius: 3dp; background-color: #1d2654; }
+.bsbt { position: absolute; right: 44dp; width: 6dp; border-radius: 3dp; background-color: #8f9ac8; }
+.bproblem { position: absolute; left: 0; right: 0; bottom: 100dp; text-align: center; font-size: 22dp; color: #ff7a6b; }
+
+/* Create room: a form, a row a choice */
+.form { width: 820dp; margin-top: 24dp; }
+.fr { display: flex; align-items: center; height: 56dp; padding: 0 22dp; border-bottom: 2dp #2a3466; font-size: 25dp; }
+.fr.selected { border-radius: 10dp; border: 3dp #ffffff; }
+.fl { width: 250dp; color: #8f9ac8; }
+.fv { color: #ffffff; }
+.fs { color: #8f9ac8; font-size: 20dp; }
+.fbox { padding: 0 10dp; border: 2dp #3a4682; border-radius: 6dp; }
+.fr.selected .fl, .fr.selected .fv, .fr.selected .fs { color: #0b1026; }
+.roomname { margin-top: 40dp; font-size: 64dp; line-height: 72dp; font-weight: 700; font-style: italic; color: #ffffff; border-bottom: 3dp #f2d14b; min-width: 300dp; text-align: center; }
+.roomname .caret { display: inline-block; width: 4dp; height: 56dp; margin-left: 6dp; background-color: #f2d14b; }
+
+/* a room's own page: who plays, who watches, who's next */
+.panes { display: flex; gap: 24dp; margin-top: 28dp; }
+.pane { width: 480dp; padding: 16dp 22dp; border-radius: 14dp; border: 2dp #2a3466; background-color: #141b3d; }
+.ph { font-size: 17dp; letter-spacing: 2dp; color: #8f9ac8; margin: 6dp 0; }
+.pvs { font-size: 32dp; font-weight: 700; font-style: italic; color: #ffffff; }
+.pvs .psc { color: #f2d14b; margin: 0 14dp; }
+.pq { font-size: 23dp; color: #d8ddf5; }
+.flag.s.hb { margin: 0 8dp 0 8dp; }
+.note.quiet { margin-top: 20dp; font-size: 19dp; line-height: 24dp; }   /* (a line beside the point: Quick match can be watched) */

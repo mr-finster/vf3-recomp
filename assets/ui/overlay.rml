@@ -69,6 +69,9 @@
 		#net .c.direct { color: #8fe08a; }
 		#net .c.relay { color: #ffd23f; }
 		#net .c.lost { color: #ff6b5a; border-color: #ff6b5a80; }
+		/* how many watch the match (drawn only), and a watched match's players and score */
+		#net .c.eye .v { color: #ffd23f; }
+		#net .c.mid .v { left: 0; right: 0; text-align: center; }
 		/* a notice that comes and goes, at the bottom right (out of the menu's way and the HUD's) */
 		#toast {
 			position: absolute;

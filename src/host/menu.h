@@ -61,7 +61,10 @@ public:
 	// In a match, the same place: the figures in cells of a fixed width, in a mono font (nothing moves as they
 	// change); detailed, a second row of them
 	struct net_cells { std::string name; int level = 0, ping = 0, delay = 0, rollback = 0; bool relay = false, interrupted = false, detailed = false;
-	                   double jitter = 0, rb_avg = 0, ahead = 0, frame_ms = 0; };
+	                   double jitter = 0, rb_avg = 0, ahead = 0, frame_ms = 0;
+	                   int watchers = -1;          // (how many watch this match: -1 none can)
+	                   bool watching = false;      // (a watched match's: the players and the score)
+	                   std::string score; };
 	void set_net(const net_cells &c);
 	void toast(const std::string &text, double seconds = 4);
 	void set_notice(const std::string &title, const std::string &sub = "", const std::string &small = "");

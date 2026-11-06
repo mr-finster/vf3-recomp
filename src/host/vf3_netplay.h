@@ -149,6 +149,9 @@ public:
 	std::function<void(const std::vector<uint8_t> &)> midi_out;   // bytes for the sound board
 	std::function<void()> on_begin;            // a match's start, before the board is set up for it (keep the player's NVRAM)
 	std::function<void()> booting;             // now and then in the match's boot (seconds of frames: the window's events)
+	// (a watcher catching up from the match's start, unseen: the frames' sound bytes dropped, not played in a burst;
+	// only what's heard, never the game)
+	bool mute = false;
 
 	bool begin(const std::vector<uint8_t> &blob) override;
 	void save(std::vector<uint8_t> &state) override;

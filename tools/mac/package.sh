@@ -31,6 +31,10 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 	<key>LSApplicationCategoryType</key><string>public.app-category.arcade-games</string>
 	<key>GCSupportsControllerUserInteraction</key><true/>
 	<key>NSLocalNetworkUsageDescription</key><string>Online play: to host a match or join one on your network.</string>
+	<key>CFBundleURLTypes</key><array><dict>
+		<key>CFBundleURLName</key><string>recomp.vf3.unofficial.room</string>
+		<key>CFBundleURLSchemes</key><array><string>vf3recomp</string></array>
+	</dict></array>
 </dict>
 </plist>
 PLIST

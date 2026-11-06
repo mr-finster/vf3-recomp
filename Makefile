@@ -51,7 +51,7 @@ $(OBJ)/src/host/online.o: CXXFLAGS += -I$(OBJ)
 # Netplay (src/net): rollback sessions and their links, nothing of the game's (shared with VF1 and VF2 Recomp)
 NET = src/net/session.cpp src/net/link.cpp src/net/room_link.cpp src/net/stun.cpp src/net/http.cpp src/net/watch.cpp
 
-HOST = src/host/main.cpp src/host/menu.cpp src/host/online.cpp src/host/vf3_netplay.cpp src/host/sysinfo.cpp src/host/d3d11_map.cpp src/gpu/r3d_gpu.cpp $(NET)
+HOST = src/host/main.cpp src/host/menu.cpp src/host/online.cpp src/host/links.cpp src/host/vf3_netplay.cpp src/host/sysinfo.cpp src/host/d3d11_map.cpp src/gpu/r3d_gpu.cpp $(NET)
 
 CORE = src/ppc/ppc.cpp src/machine/model3.cpp src/machine/dural.cpp src/machine/romset.cpp src/machine/profile.cpp src/host/input_script.cpp \
 	src/rec/ppc_rec.cpp src/rec/vf3_map.cpp src/rec/vf3tb_map.cpp src/video/tilegen.cpp src/video/hud_names.cpp src/video/dural_cell.cpp src/video/r3d_scene.cpp src/video/r3d_raster.cpp \
@@ -121,7 +121,7 @@ $(BIN)/netfuzz: $(NET) tools/netfuzz.cpp
 	$(CXX) -std=c++20 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer $^ -o $@
 
 # menutest: the Online pages drawn offscreen to pictures (SDL_VIDEO_DRIVER=offscreen)
-$(BIN)/menutest: $(call objs,src/host/menu.cpp src/host/online.cpp src/host/vf3_netplay.cpp src/machine/model3.cpp src/machine/dural.cpp src/machine/romset.cpp src/machine/profile.cpp src/rec/vf3_map.cpp src/rec/vf3tb_map.cpp src/ppc/ppc.cpp $(NET) tools/menutest.cpp $(RML_SRC))
+$(BIN)/menutest: $(call objs,src/host/menu.cpp src/host/online.cpp src/host/links.cpp src/host/vf3_netplay.cpp src/machine/model3.cpp src/machine/dural.cpp src/machine/romset.cpp src/machine/profile.cpp src/rec/vf3_map.cpp src/rec/vf3tb_map.cpp src/ppc/ppc.cpp $(NET) tools/menutest.cpp $(RML_SRC))
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) $^ -o $@ $(SDL_LIBS) $(FT_LIBS) $(LDLIBS)
 

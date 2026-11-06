@@ -13,6 +13,9 @@
 #include "../net/room_link.h"
 #include "../net/session.h"
 #include "../net/json.h"
+#include "../net/watch.h"
+#include "../net/http.h"
+#include <mutex>
 #include <algorithm>
 #include <atomic>
 #include <deque>
@@ -34,15 +37,21 @@ struct OnlineSettings
 	bool chime = true;            // a chime when a match is found (and the window flashing, if it's not the one in front)
 	bool stage_select = true;     // the arcade's stage select in a match (CHALLENGER: the loser picks on a rematch); "+stage" on the online version
 	                              // (on by default since it no longer splits Random, issue #32: a match plays the host's)
+	// Create room: its name (filled in from the player's), and whether it's listed in Rooms (2; 0 not: the code only, as
+	// every room before). Every match may be watched by anyone with its code; a room stays for the next in line.
+	std::string room_name;
+	int room_who = 0;
+	int rooms_show = 0;           // the rooms list's filter, kept: 0 all, 1 open, 2 playing
+	bool quick_listed = true;     // Show my Quick Match games in Rooms (listed only if both players have it on)
 };
 
 class Online
 {
 public:
-	enum class Phase { off, hosting, joining, playing };
+	enum class Phase { off, hosting, joining, playing, watching };   // (watching: another match, a few seconds behind; frames through step as a match's)
 	// Where a room code's match has got to (none: by address)
 	enum class Step { none, getting_ready, opening, waiting, finding, searching, connecting };   // (searching: a random opponent)
-	struct Notice { enum Kind { joined, ended, refused, tip } kind; std::string text; };   // (tip: a toast, nothing more)
+	struct Notice { enum Kind { joined, ended, refused, tip, watching } kind; std::string text; };   // (tip: a toast, nothing more; watching: a watched match's first picture)
 	// The match that ended last: what ended it, who and how long, for the Online page to show after it (and offer
 	// the same again)
 	struct LastMatch
@@ -56,9 +65,12 @@ public:
 		int seconds = 0, ping = 0;
 		int wins[2] = {};             // matches won between the two: player 1's (the host's), player 2's
 		std::string country[2];       // (and their countries: two letters, "" not known)
+		bool watched = false;         // a match watched, not played: name[] the players
+		std::string name[2];
+		std::string watch;            // (its watch code: watched again)
 	};
 	// What was tried last (for Try again): hosting or joining, with a code or by address
-	enum class Try { none, host_room, join_room, host, join, random };
+	enum class Try { none, host_room, join_room, host, join, random, watch };
 
 	explicit Online(m3::Model3 &board) : adapter(board), board(board) {}
 	~Online();
@@ -100,10 +112,11 @@ public:
 	bool is_random() const { return random; }   // (a random opponent's match, not a code's)
 	bool is_hosting() const { return is_host; }
 	std::string room_code() const;   // "ABC-DEF" ("" until the lobby's given one)
-	bool playing() const { return ph == Phase::playing; }
+	// a match on: played, or watched (its frames through step either way: the host program runs them as a match's)
+	bool playing() const { return ph == Phase::playing || ph == Phase::watching; }
 	bool waiting() const { return ph == Phase::hosting || ph == Phase::joining; }
 	// the match's game is set up and waits for the other side: no frame may run on the board meanwhile
-	bool starting() const { return waiting() && session && session->game_started(); }
+	bool starting() const { return (waiting() && session && session->game_started()) || (watching() && !watch_shown); }
 	bool interrupted() const { return session && session->interrupted(); }
 	bool via_relay() const { return room && room->via_relay(); }
 	std::string status() const;   // a line for the menu: what's happening now
@@ -146,7 +159,7 @@ public:
 	// who's in the game, as the score holds it (bit 0 player 1, bit 1 player 2): a side the CPU has (a player out, or
 	// one who never pressed Start) shows the game's own name on the HUD, not the player's
 	// (in at once, as the RAM has them this frame; out once that holds)
-	int players_in_game() const { return session && ph == Phase::playing ? score.players() | score.players_now() : 0; }
+	int players_in_game() const { return (session && ph == Phase::playing) || watch_showing() ? score.players() | score.players_now() : 0; }
 	// How many play at random now (searching, or in a random match lately), as the lobby last said; -1 not known.
 	// Asked again every 30 s while it's called (the Online screen open), never while a match is on or being made
 	int players_online(const OnlineSettings &s);
@@ -156,7 +169,46 @@ public:
 	bool slow_local() const { return local_slow; }   // (this match through the relay only for a Mac's Local Network permission)
 	void set_last_match(const LastMatch &m) { last = m; }   // ({}: forgotten, the menu closed after it; tests: one made up)
 	void forget_failure() { failure.clear(); }              // (the menu closed after it)
+	// (a try made from the match's menu that didn't get going, the match left already: said on the Online page)
+	void tell_failure(const std::string &why) { failure = why; fail_step = Step::none; notices.push_back({ Notice::refused, why }); }
 	const std::string &local_address() const { return lan; }
+
+	// ---- watching (src/net/watch.h): a match's watchers, and watching one ----
+	// Watch a match by its room's code (the browser's, Enter code's or a link's): the game starts from the match's start
+	// a moment behind the players and runs their inputs; nothing goes to them
+	bool watch(const OnlineSettings &s, const std::string &code, std::string &error);
+	// Enter code: the lobby asked what the code is; a room open is joined, a match on is watched
+	bool enter_code(const OnlineSettings &s, const std::string &code, std::string &error);
+	bool watching() const { return ph == Phase::watching; }
+	bool watching_quick() const { return watching() && watch_quick; }   // (a Quick match's: no room to play next in)
+	bool watch_showing() const { return watching() && watch_shown; }   // (its picture up: caught up)
+	std::string watch_status() const;   // (watching: how it's going, in words)
+	int watch_progress() const;         // (catching up: 0-100)
+	int watch_step() const;             // (0 finding the match, 1 its start, 2 catching up, 3 watching)
+	// Who plays (player 1 the host): a match's or a watched one's, for the HUD and the screens
+	std::string player_name(int p) const;
+	std::string player_country(int p) const;
+	// How many watch: this match's (the host told by the lobby with each upload, the guest asking now and then), or
+	// the watched one's; -1 a match nobody can watch
+	int watchers() const;
+	std::string watch_code() const;     // "KXQ-4M7": the room's code this match is watched by, or the watched one's ("" none)
+	const std::string &rooms_you() const { return rooms_region; }   // (the lobby's continent for this player: "near me")
+	// The rooms list (the lobby's /v1/online: listed rooms, open or playing), this game's; asked again every 15 s while
+	// it's called (the Online screen, the browser, open)
+	struct RoomRow
+	{
+		bool playing = false, older = false, locked = false;   // (locked: listed, its code needed from its host: none here)
+		bool quick = false;   // (a Quick match: its two players, to watch only: no code, no room name)
+		std::string room, code, watch, name[2], country[2], region;   // (room: its name; code: to join, watch: to watch)
+		int wins[2] = {}, round = 0, watchers = 0, since = 0, queue = 0;
+	};
+	const std::vector<RoomRow> &rooms_list(const OnlineSettings &s, bool again = false);
+	// A listed room's name as the lobby lists it (its own, or "<HOST>'S ROOM" if the lobby's word filter wouldn't show it)
+	const std::string &listed_as_name() const { return listed_as; }
+	int rooms_state() const { return rooms_said; }   // (-1 not asked yet, 0 asking, 1 have, 2 couldn't reach the lobby, 3 no rooms there)
+	bool lobby_watches() const { return lobby_watch_on; }   // (the lobby's last word: watching on; an older lobby's none)
+	int rooms_version() const { return rooms_seen; }   // (a new list each time it comes: its page made again)
+	void set_rooms(std::vector<RoomRow> r) { rooms_rows = std::move(r); rooms_said = 1; rooms_seen++; lobby_watch_on = true; }   // (tests: a list made up, as a lobby with watching gives)
 	int local_port() const { return port; }
 	static std::string lobby_default();   // the built-in lobby's address
 
@@ -206,6 +258,7 @@ private:
 	Try tried = Try::none;
 	std::string want_code;           // (host_room's want)
 	std::string kept_code, kept_key;  // (the last room this side hosted: its code and key, for a Play again's)
+	std::string listed_as;            // (a listed room's name as the lobby lists it: "" not listed)
 	double patient_until = 0;
 	std::string patient_for;         // (whose room's waited for)
 	bool random = false;
@@ -250,12 +303,82 @@ private:
 	std::vector<std::pair<std::string, double>> avoid;   // (the rooms of random opponents too far, and when: the lobby keeps those apart)
 	static std::string country(const std::string &c);
 	void close_room();                  // (the host's: the lobby told, on a thread, nothing waited for)
+
+	// ---- watching ----
+	struct Fetch;                       // (a request about a watched match, on a thread of its own: the players never wait on one)
+	static std::shared_ptr<Fetch> fetch(const std::string &method, const std::string &url, std::string body, int timeout_ms, size_t most);
+	std::string wid, wkey;              // this match's watch code and the key the host sends it with (none: not watchable)
+	vfnet::watch::Feed feed;            // (the host's: the match to the lobby)
+	struct FeedSlot { std::shared_ptr<Fetch> job; vfnet::watch::Feed::Upload up; std::shared_ptr<vfnet::http::Client> client; };
+	FeedSlot feed_slots[vfnet::watch::Feed::MOST_IN_FLIGHT];   // (the uploads on their way, each on a connection kept open)
+	// (the host's WebSocket to its match's Watch, the uploads on it one at a time; none, or it failed: the HTTPS slots)
+	std::shared_ptr<vfnet::http::Socket> feed_ws;
+	bool feed_ws_failed = false, feed_ws_waiting = false;
+	bool lobby_off(const vfnet::json::Value &v);   // (the lobby's answer says no more this month: true, the feed stopped)
+	double feed_ws_sent = 0;
+	vfnet::watch::Feed::Upload feed_ws_up;
+	// (a watcher's WebSocket: the frames as they come and the lobby's word on who watches; refused or failed: the stream)
+	std::shared_ptr<vfnet::http::Socket> watch_ws;
+	bool watch_ws_failed = false;
+	double watch_ws_frames_at = 0;      // (the last frames on it)
+	std::shared_ptr<Fetch> count_job;
+	double count_at = 0;
+	int guest_watchers = -1;
+	mutable double cells_at = -1e18;    // (when the figures at the top were last asked for: the guest's count asked only while they're shown)
+	// (a room code's host's WebSocket to its room, hibernating at the lobby: told of its player at once, and the room
+	// held while it's open, a persistent one's through its matches; refused or failed: the HTTPS wait and hold)
+	std::shared_ptr<vfnet::http::Socket> room_ws;
+	std::string room_ws_for;            // (the code and key it's for)
+	bool room_ws_failed = false;
+	int room_ws_tries = 0;
+	double room_ws_at = 0, room_ws_made = 0;
+	bool room_ws_open() const;
+	void room_ws_drop();
+	bool room_ws_poll(vfnet::http::Reply &r);   // (a message on it, as a wait's answer: true, r it)
+	void feed_begin();
+	void feed_poll();
+	void feed_last();                   // (the match over: said to the lobby)
+	// a watcher's
+	std::unique_ptr<vfnet::watch::Spectator> spec;
+	std::shared_ptr<Fetch> seen_job, watch_job;
+	struct Stream;                      // (the frames as they come: a response read on a thread of its own)
+	std::shared_ptr<Stream> stream;
+	double stream_retry = 0;
+	void stream_poll();
+	void stream_stop();
+	std::string watch_sid, watch_want, watch_tried;   // (watch_tried: the code a watch that failed had: Try again)
+	uint64_t watch_match = 0, watch_next = 0;   // (the match watched; a newer one the lobby says is on)
+	double seen_at = -1e18, watch_since = 0, over_at = 0;
+	double watch_heard = 0;           // (the lobby's last answer to this watcher: none for 20 s, watching stops)
+	bool watch_live_ok = true;        // (the lobby lets this watcher have a stream: not when it's busy)
+	bool watch_shown = false, watch_quick = false;   // (watch_quick: the lobby says it's a Quick match's: no room, nobody plays next)
+	int watch_watchers = 0, watch_restarts = 0;
+	vfnet::watch::Meta watch_meta;
+	void watch_poll();
+	void watch_failed(const std::string &why);
+	void watch_over(const std::string &why);
+	bool watch_start(const vfnet::watch::Start &s, std::string &why);
+	// the rooms list
+	std::shared_ptr<Fetch> rooms_job;
+	std::vector<RoomRow> rooms_rows;
+	double rooms_at = -1e18;
+	int rooms_said = -1, rooms_seen = 0;
+	bool lobby_watch_on = false;
+	std::shared_ptr<Fetch> peek_job;
+	std::string peek_code;
+	void peek_poll();
+	std::string rooms_region;
+	int queue_at = 0, queue_len = 0;
+	bool persist = false;               // (the room's own: kept through its match, opened again after it)
+	double hold_at = 0;
 };
 
 namespace online_menu {
 
-// The Online page (out of a match). changed: a setting changed (settings.ini to be saved).
+// The Online page (out of a match; and a watched match's start). changed: a setting changed (settings.ini to be saved).
 menu_page page(Online &o, OnlineSettings &s, game_menu &menu, std::function<void()> changed);
+// Online > Rooms: public rooms to join and matches to watch, this game's (made again as the list comes: rooms_version)
+menu_page rooms_page(Online &o, OnlineSettings &s, game_menu &menu, std::function<void()> changed);
 // The menu's rows in a match (the game goes on under it): who and how the connection is, input delay, the
 // connection display, leaving the match
 void match_rows(Online &o, OnlineSettings &s, game_menu &menu, std::function<void()> changed, std::vector<menu_item> &rows);
@@ -263,6 +386,8 @@ void match_rows(Online &o, OnlineSettings &s, game_menu &menu, std::function<voi
 std::string clean_name(const std::string &s);
 // An address as settings.ini has it: the letters one is typed with, lower case, at most 64
 std::string clean_address(const std::string &s);
+// A room's name as typed: a name's letters and ', upper case, at most 16
+std::string clean_room(const std::string &s);
 // A room code as typed: its letters only (no 0/O, 1/I/L), upper case, at most 6
 std::string clean_code(const std::string &s);
 

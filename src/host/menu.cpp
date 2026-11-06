@@ -1,4 +1,5 @@
 #include "menu.h"
+#include "online_text.h"
 #include "flags.h"
 #include <RmlUi/Core.h>
 #include "RmlUi_Platform_SDL.h"
@@ -127,9 +128,16 @@ void game_menu::set_net(const net_cells &c)
 	std::string name = c.name;   // (10 letters fit)
 	if (name.size() > 10) name = name.substr(0, 9) + "\xE2\x80\xA6";
 	std::string rml = "<div class=\"row\"><div class=\"c name\" style=\"width: 118dp;\"><span class=\"v\">" + escape(name) + "</span><span class=\"dot\">" + (m->mono ? "\xE2\x97\x8F" : "\xE2\x80\xA2") + "</span></div>";   // (a circle of the font: drawn round at any size; Barlow has only the bullet)
+	const std::string watchers = c.watchers > 0 ? cell(tr::WATCHING, std::to_string(std::min(c.watchers, 99999)), 112, "eye") : "";   // (how many watch, if any: drawn only)
+	if (c.watching) {   // (a watched match: one cell, watching and how many, and the score)
+		rml = "<div class=\"row\"><div class=\"c name\" style=\"width: 150dp;\"><span class=\"v\">" + std::string(tr::WATCHING) + (c.watchers > 0 ? " \xC2\xB7 " + std::to_string(std::min(c.watchers, 99999)) : std::string()) +
+		      "</span><span class=\"dot\">" + (m->mono ? "\xE2\x97\x8F" : "\xE2\x80\xA2") + "</span></div>" + cell("", c.score, 236, "mid") + "</div>";
+		show_net(rml, c.level <= 0 ? "cells good" : "cells fair");
+		return;
+	}
 	if (c.interrupted) rml += cell("", "CONNECTION INTERRUPTED", 222, "lost");
 	else rml += cell("PING", std::to_string(std::min(c.ping, 9999)), 86) + cell("DELAY", std::to_string(c.delay), 76) + cell("RB", std::to_string(c.rollback), 50);
-	rml += cell("", c.relay ? "RELAY" : "DIRECT", 66, c.relay ? "via relay" : "via direct") + "</div>";
+	rml += cell("", c.relay ? "RELAY" : "DIRECT", 66, c.relay ? "via relay" : "via direct") + watchers + "</div>";
 	if (c.detailed && !c.interrupted)   // (above it: the first row stays where it is either way)
 		rml = "<div class=\"row two\">" + cell("JITTER", num("%.0f", c.jitter), 92) + cell("RB AVG", num("%.1f", c.rb_avg), 92) +
 		      cell("AHEAD", num("%+.1f", c.ahead), 86) + cell("FRAME", num("%.1f", c.frame_ms), 92) + "</div>" + rml;
