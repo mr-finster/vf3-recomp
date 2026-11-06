@@ -30,7 +30,22 @@
 	--r-m: 6px;
 	--h: 32px;
 	--focus: 0 0 0 2px var(--ground), 0 0 0 4px var(--gold);
+	--font: "Barlow Condensed", "Arial Narrow", sans-serif;
 }
+/* (the languages Barlow doesn't write: Noto, from Google Fonts, after Barlow, so the Latin letters and the numbers stay
+   Barlow's; no slanted CJK, which has no italic of its own) */
+html[lang="ko"] { --font: "Barlow Condensed", "Noto Sans KR", sans-serif; }
+html[lang="ja"] { --font: "Barlow Condensed", "Noto Sans JP", sans-serif; }
+html[lang="zh-Hans"] { --font: "Barlow Condensed", "Noto Sans SC", sans-serif; }
+html[lang="zh-Hant"] { --font: "Barlow Condensed", "Noto Sans TC", sans-serif; }
+html[lang="ru"] { --font: "Barlow Condensed", "Noto Sans", "Arial Narrow", sans-serif; }
+html.cjk { font-synthesis: none; }
+html.cjk .lede, html.cjk .note, html.cjk .how { line-height: 1.5; }
+/* the language, in the corner */
+main { position: relative; }
+.lang { position: absolute; top: 32px; right: 16px; height: var(--h); padding: 2px 8px 0; font: 500 15px/1 var(--font); color: var(--row); background: var(--panel); border: 1px solid var(--line-2); border-radius: var(--r-s); cursor: pointer; }
+.lang:hover { border-color: var(--muted); }
+h1 { padding-right: 180px; }
 * { box-sizing: border-box; }
 html { background: var(--ground); }
 body {
@@ -38,7 +53,7 @@ body {
 	min-height: 100vh;
 	background: linear-gradient(90deg, #040818 0%, #0b1438 100%);
 	color: var(--ink);
-	font-family: "Barlow Condensed", "Arial Narrow", sans-serif;
+	font-family: var(--font);
 	font-weight: 600;
 	-webkit-font-smoothing: antialiased;
 }
@@ -62,7 +77,7 @@ button, a, input { -webkit-tap-highlight-color: transparent; }
 .strip { display: flex; flex-wrap: wrap; align-items: stretch; gap: 8px; margin-bottom: 24px; }
 .gchip { display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 12px 0 8px; background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--gold); border-radius: 0 var(--r-s) var(--r-s) 0; }
 .gchip img { width: 28px; height: 28px; border-radius: var(--r-m); display: block; }
-.gchip .gn { font-size: 17px; line-height: 1; font-weight: 700; font-style: italic; text-transform: uppercase; }
+.gchip .gn { font-size: 17px; line-height: 1; font-weight: 700; font-style: italic; text-transform: uppercase; white-space: nowrap; }
 .gchip .gc { font-size: 15px; line-height: 1; font-weight: 500; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .gchip .gc b { color: var(--ink); font-weight: 600; }
 .lands { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; padding: 0 4px; font-size: 15px; color: var(--row); font-variant-numeric: tabular-nums; }
@@ -74,7 +89,7 @@ button, a, input { -webkit-tap-highlight-color: transparent; }
 .tabs { display: flex; gap: 4px; padding: 8px 8px 0; background: #060c24; border: 1px solid var(--line); border-bottom: 0; border-radius: var(--r-m) var(--r-m) 0 0; overflow-x: auto; scrollbar-width: none; }
 .tabs::-webkit-scrollbar { display: none; }
 .tab { flex: none; display: flex; align-items: center; gap: 8px; height: 48px; padding: 0 16px; margin: 0; border: 1px solid transparent; border-bottom: 0; border-radius: var(--r-m) var(--r-m) 0 0;
-	background: transparent; color: var(--muted); font: italic 700 20px/1 "Barlow Condensed", "Arial Narrow", sans-serif; cursor: pointer; white-space: nowrap; position: relative; }
+	background: transparent; color: var(--muted); font: italic 700 20px/1 var(--font); cursor: pointer; white-space: nowrap; position: relative; }
 .tab:hover { color: var(--ink); background: var(--panel-2); }
 .tab:active { color: var(--ink); }
 .tab[aria-selected="true"] { color: var(--ink); background: var(--panel); border-color: var(--line); }
@@ -86,17 +101,17 @@ button, a, input { -webkit-tap-highlight-color: transparent; }
 .tab .name { padding-top: 1px; }
 .tab .short { display: none; }
 .tab .count { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; height: 20px; padding: 1px 7px 0; border-radius: 10px;
-	font: normal 600 13px/1 "Barlow Condensed", "Arial Narrow", sans-serif; font-variant-numeric: tabular-nums; color: var(--ink); background: var(--line); }
+	font: normal 600 13px/1 var(--font); font-variant-numeric: tabular-nums; color: var(--ink); background: var(--line); }
 .tab[aria-selected="true"] .count { color: var(--on-gold); background: var(--gold); }
 .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; min-height: 56px; padding: 12px; background: var(--panel); border: 1px solid var(--line); border-bottom: 0; }
 .bar .lbl, .bar .ago, .chip, .search { height: var(--h); line-height: 1; }
 .bar .lbl { display: inline-flex; align-items: center; padding-top: 2px; margin-right: 4px; font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
 .chips { display: flex; align-items: center; gap: 8px; }
-.chip { display: inline-flex; align-items: center; padding: 2px 14px 0; font: 600 17px/1 "Barlow Condensed", "Arial Narrow", sans-serif; color: var(--row); background: transparent; border: 1px solid var(--line-2); border-radius: 16px; cursor: pointer; white-space: nowrap; }
+.chip { display: inline-flex; align-items: center; padding: 2px 14px 0; font: 600 17px/1 var(--font); color: var(--row); background: transparent; border: 1px solid var(--line-2); border-radius: 16px; cursor: pointer; white-space: nowrap; }
 .chip:hover { color: var(--ink); border-color: var(--muted); }
 .chip:active { background: var(--panel-2); }
 .chip[aria-pressed="true"] { color: var(--on-gold); background: var(--ink); border-color: var(--ink); }
-.search { width: 220px; padding: 2px 12px 0; font: 500 17px/1 "Barlow Condensed", "Arial Narrow", sans-serif; color: var(--ink); background: var(--well); border: 1px solid var(--line-2); border-radius: var(--r-s); }
+.search { width: 220px; padding: 2px 12px 0; font: 500 17px/1 var(--font); color: var(--ink); background: var(--well); border: 1px solid var(--line-2); border-radius: var(--r-s); }
 .search:hover { border-color: var(--muted); }
 .search:focus-visible { border-color: var(--gold); box-shadow: none; }
 .search::placeholder { color: var(--muted); }
@@ -135,7 +150,7 @@ table.rooms { width: 100%; border-collapse: collapse; table-layout: fixed; backg
 .st .sc { display: inline-block; width: 48px; text-align: center; color: var(--gold); font-style: italic; font-weight: 700; }   /* (the score in a slot of its own) */
 .muted { color: var(--muted); font-weight: 500; }
 .act .btn { display: inline-flex; align-items: center; justify-content: center; min-width: 88px; height: 34px; padding: 2px 14px 0; border-radius: var(--r-m); cursor: pointer; text-decoration: none;
-	font: italic 700 18px/1 "Barlow Condensed", "Arial Narrow", sans-serif; letter-spacing: 0.02em; color: var(--on-gold); background: linear-gradient(90deg, #f2d14b, #f0922e); border: 0; }
+	font: italic 700 18px/1 var(--font); letter-spacing: 0.02em; color: var(--on-gold); background: linear-gradient(90deg, #f2d14b, #f0922e); border: 0; }
 .act .btn:hover { filter: brightness(1.08); }
 .act .btn:active { filter: brightness(0.92); }
 .act .btn.watch { color: var(--ink); background: transparent; border: 2px solid var(--line-2); }
@@ -146,7 +161,7 @@ tr.how td { padding: 12px 16px 16px; background: var(--well); border-top: 0; hei
 .how { font-size: 17px; font-weight: 500; color: var(--row); line-height: 1.35; }
 .how .code { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 4px; }
 .how .code b { font-size: 30px; line-height: 1.1; font-style: italic; font-weight: 700; color: var(--gold); letter-spacing: 0.06em; font-variant-numeric: tabular-nums; }
-.how .copy { display: inline-flex; align-items: center; height: var(--h); padding: 2px 14px 0; font: 600 17px/1 "Barlow Condensed", "Arial Narrow", sans-serif; color: var(--ink); background: var(--line); border: 1px solid var(--line-2); border-radius: var(--r-s); cursor: pointer; }
+.how .copy { display: inline-flex; align-items: center; height: var(--h); padding: 2px 14px 0; font: 600 17px/1 var(--font); color: var(--ink); background: var(--line); border: 1px solid var(--line-2); border-radius: var(--r-s); cursor: pointer; }
 .how .copy:hover { border-color: var(--muted); }
 .how em { font-style: normal; color: var(--ink); }
 /* nothing to list: an icon, one line, one action */
@@ -158,7 +173,7 @@ tr.how td { padding: 12px 16px 16px; background: var(--well); border-top: 0; hei
 .state small { font-size: 15px; font-weight: 500; color: var(--muted); }
 .state .chip { margin-top: 4px; }
 .pager { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px; background: var(--panel); border: 1px solid var(--line); border-top: 0; border-radius: 0 0 var(--r-m) var(--r-m); font-size: 15px; font-weight: 500; color: var(--muted); }
-.pager button { display: inline-flex; align-items: center; height: var(--h); padding: 2px 14px 0; font: 600 17px/1 "Barlow Condensed", "Arial Narrow", sans-serif; color: var(--ink); background: var(--line); border: 1px solid var(--line-2); border-radius: var(--r-s); cursor: pointer; }
+.pager button { display: inline-flex; align-items: center; height: var(--h); padding: 2px 14px 0; font: 600 17px/1 var(--font); color: var(--ink); background: var(--line); border: 1px solid var(--line-2); border-radius: var(--r-s); cursor: pointer; }
 .pager button:hover:not(:disabled) { border-color: var(--muted); }
 .pager button:disabled { opacity: 0.35; cursor: default; }
 .pager[hidden] { display: none; }
@@ -171,6 +186,8 @@ table.rooms.last { border-radius: 0 0 var(--r-m) var(--r-m); }
    figures; its button on the right) */
 @media (max-width: 760px) {
 	main { padding: 24px 12px 40px; }
+	.lang { top: 24px; right: 12px; max-width: 128px; font-size: 13px; }
+	h1 { padding-right: 136px; }
 	h1 { font-size: 34px; }
 	.lede { margin: 8px 0 16px; font-size: 17px; }
 	.strip { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 16px; }
@@ -178,7 +195,7 @@ table.rooms.last { border-radius: 0 0 var(--r-m) var(--r-m); }
 	.gchip img { width: 24px; height: 24px; }
 	.gchip .gn { font-size: 15px; }
 	.gchip { min-width: 0; }
-	.gchip .gc { font-size: 15px; }
+	.gchip .gc { font-size: 15px; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 	.gchip .qmc { display: none; }   /* (a phone: the players online only) */
 	.lands { grid-column: 1 / span 2; }
 	.tabs { padding: 4px 4px 0; gap: 2px; }
@@ -223,18 +240,23 @@ table.rooms.last { border-radius: 0 0 var(--r-m) var(--r-m); }
 <body>
 <main>
 	<h1 id="title"></h1>
+	<select class="lang" id="lang"></select>
 	<p class="lede" id="lede"></p>
 	<div class="strip" id="strip"></div>
 	<div class="head" id="head"><nav class="tabs" id="tabs" role="tablist" aria-label="Game"></nav><div class="bar" id="bar"></div></div>
 	<table class="rooms" id="rooms"></table>
 	<div class="pager" id="pager"></div>
-	<p class="note"><span id="note"></span><br>Flags: <a href="https://github.com/twitter/twemoji">Twemoji</a> by Twitter, Inc. and contributors, <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>.</p>
+	<p class="note"><span id="note"></span><br><span id="flags">Flags:</span> <a href="https://github.com/twitter/twemoji">Twemoji</a> by Twitter, Inc. and contributors, <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>.</p>
 </main>
 <script>
 "use strict";
-// Every line the page shows, in one place for the translations: whole sentences, {name}-style places filled in by fill()
-const T = {
+// Every line the page shows, in one place for the translations: whole sentences, {name}-style places filled in by fill();
+// the other languages below (TR), the language from the browser's or the one chosen in the corner
+const EN = {
 	title: "VF Recomp \u00b7 Online",
+	description: "The rooms and matches online now in Virtua Fighter, Virtua Fighter 2 and Virtua Fighter 3 Recomp: join one, or watch.",
+	language: "Language",
+	flags: "Flags:",
 	lede: "Join a room, or watch a match. The same list as in the games' Online screen, live.",
 	note: "A room shows here when its host turns on Listed in Rooms in the game, and Quick Match games when both players let them be (they can be watched by anyone); other rooms play by code, counted above but never named. Any match can be watched by anyone with its room's code, a moment behind the players, who never wait for anyone watching. A player's country is where the lobby sees them connect from.",
 	online: "{n} online",
@@ -256,7 +278,6 @@ const T = {
 	col_host: "Host",
 	col_status: "Status",
 	col_watching: "Watching",
-	hosts_room: "{name}'S ROOM",
 	quick_tag: "Quick match",
 	open: "Open",
 	join: "JOIN",
@@ -294,6 +315,804 @@ const T = {
 	s_ago: "{n} s ago",
 	min_ago: "{n} min ago",
 };
+// The other languages: each line as in English above, the same {places} (a line missing shows in English)
+const TR = {
+	ko: {
+		title: "VF Recomp · 온라인",
+		description: "Virtua Fighter, Virtua Fighter 2, Virtua Fighter 3 Recomp에서 지금 열린 방과 대전: 참가하거나 관전하세요.",
+		language: "언어",
+		lede: "방에 참가하거나 대전을 관전하세요. 게임의 온라인 화면과 같은 목록을 실시간으로 보여 줘요.",
+		note: "방장이 게임에서 방 목록에 공개를 켜면 그 방이 여기에 나오고, 퀵 매치 대전은 두 플레이어가 모두 허용하면 나와요(누구나 관전할 수 있어요). 다른 방은 코드로만 플레이하며, 위의 숫자에는 포함되지만 이름은 나오지 않아요. 어떤 대전이든 방 코드가 있으면 누구나 플레이어보다 조금 늦게 관전할 수 있고, 플레이어는 관전자를 기다리지 않아요. 플레이어의 국가는 로비가 본 접속 위치예요.",
+		flags: "국기:",
+		online: "{n}명 접속",
+		in_quick: " · 퀵 매치 {n}명",
+		older: "그중 {n}명은 이전 버전: 최신 버전이면 모두와 만날 수 있어요",
+		more_countries: "+{n}개국",
+		unknown: "알 수 없음",
+		all_games: "모든 게임",
+		all_short: "전체",
+		rooms_label: "방",
+		filter_all: "전체",
+		filter_open: "대기 중",
+		filter_playing: "대전 중",
+		find: "방 또는 플레이어 찾기",
+		n_rooms: "방 {n}개",
+		one_room: "방 1개",
+		col_room: "방",
+		col_game: "게임",
+		col_host: "방장",
+		col_status: "상태",
+		col_watching: "관전",
+		quick_tag: "퀵 매치",
+		open: "대기 중",
+		join: "참가",
+		watch: "관전",
+		get_code: "코드 보기",
+		n_watching: "{n}명 관전 · ",
+		now: "방금",
+		minutes: "{m}분",
+		hours: "{h}시간 {m}분",
+		opening: "{app}을(를) 여는 중… 열리지 않나요? 게임에서 온라인 > 코드 입력으로 참가하세요:",
+		opening_watch: "{app}을(를) 여는 중… 열리지 않나요? 게임에서 온라인 > 코드 입력으로 관전하세요:",
+		on_pc: "PC나 Deck의 {game}에서 온라인 > 코드 입력으로 참가하세요:",
+		on_pc_watch: "PC나 Deck의 {game}에서 온라인 > 코드 입력으로 관전하세요:",
+		copy: "복사",
+		copied: "복사됨",
+		unreachable: "지금은 온라인 서비스에 연결할 수 없어요.",
+		rooms_off: "지금은 방 목록을 쓸 수 없어요.",
+		rooms_off_more: "게임에서 방 코드와 퀵 매치는 계속 쓸 수 있어요.",
+		unreachable_more: "자동으로 다시 시도하고 있어요.",
+		try_now: "지금 다시 시도",
+		looking: "방을 찾는 중…",
+		none_here: "여기에는 방이 없어요.",
+		none_for: "“{find}”에 해당하는 방이 없어요.",
+		show_all: "모든 방 보기",
+		none_listed: "지금 공개된 방이 없어요.",
+		none_listed_more: "게임에서 온라인 > 방 만들기, 방 목록에 공개를 켜고 만드세요.",
+		previous: "‹ 이전",
+		next: "다음 ›",
+		pages: "방 {n}개 중 {from}–{to} · {pages}쪽 중 {page}쪽",
+		cant_reach: "로비에 연결할 수 없음",
+		cant_reach_last: "로비에 연결할 수 없음 · 마지막 업데이트 {ago}",
+		loading: "불러오는 중…",
+		updated: "업데이트 {ago}",
+		just_now: "방금",
+		s_ago: "{n}초 전",
+		min_ago: "{n}분 전",
+	},
+	ja: {
+		title: "VF Recomp · オンライン",
+		description: "Virtua Fighter、Virtua Fighter 2、Virtua Fighter 3 Recompで今オンラインのルームと対戦：参加するか、観戦しよう。",
+		language: "言語",
+		lede: "ルームに参加するか、対戦を観戦しよう。ゲームのオンライン画面と同じ一覧をリアルタイムで表示します。",
+		note: "ホストがゲーム内で「ルーム一覧に公開」をオンにするとルームがここに表示されます。クイックマッチの対戦は両プレイヤーが許可した場合に表示されます（誰でも観戦できます）。その他のルームはコードで遊ぶもので、上の人数には含まれますが名前は表示されません。どの対戦もルームのコードがあれば誰でも、プレイヤーより少し遅れて観戦できます。プレイヤーが観戦者を待つことはありません。プレイヤーの国は、ロビーから見た接続元です。",
+		flags: "国旗：",
+		online: "{n}人オンライン",
+		in_quick: " · クイックマッチ{n}人",
+		older: "うち{n}人は古いバージョン：最新版なら全員と対戦できます",
+		more_countries: "+{n}か国",
+		unknown: "不明",
+		all_games: "すべてのゲーム",
+		all_short: "すべて",
+		rooms_label: "ルーム",
+		filter_all: "すべて",
+		filter_open: "募集中",
+		filter_playing: "対戦中",
+		find: "ルームやプレイヤーを検索",
+		n_rooms: "{n}ルーム",
+		one_room: "1ルーム",
+		col_room: "ルーム",
+		col_game: "ゲーム",
+		col_host: "ホスト",
+		col_status: "状態",
+		col_watching: "観戦",
+		quick_tag: "クイックマッチ",
+		open: "募集中",
+		join: "参加",
+		watch: "観戦",
+		get_code: "コード",
+		n_watching: "{n}人観戦 · ",
+		now: "たった今",
+		minutes: "{m}分",
+		hours: "{h}時間{m}分",
+		opening: "{app}を起動中… 起動しない場合は、ゲームのオンライン > コード入力で参加：",
+		opening_watch: "{app}を起動中… 起動しない場合は、ゲームのオンライン > コード入力で観戦：",
+		on_pc: "PCかDeckの{game}で、オンライン > コード入力から参加：",
+		on_pc_watch: "PCかDeckの{game}で、オンライン > コード入力から観戦：",
+		copy: "コピー",
+		copied: "コピーしました",
+		unreachable: "現在オンラインサービスに接続できません。",
+		rooms_off: "現在ルーム一覧は使えません。",
+		rooms_off_more: "ゲーム内のルームコードとクイックマッチは使えます。",
+		unreachable_more: "自動で再試行しています。",
+		try_now: "今すぐ再試行",
+		looking: "ルームを探しています…",
+		none_here: "ここにはルームがありません。",
+		none_for: "「{find}」のルームはありません。",
+		show_all: "すべてのルームを表示",
+		none_listed: "現在公開中のルームはありません。",
+		none_listed_more: "ゲームのオンライン > ルーム作成で、ルーム一覧に公開をオンにして作成。",
+		previous: "‹ 前へ",
+		next: "次へ ›",
+		pages: "{n}ルーム中 {from}–{to} · {page}/{pages}ページ",
+		cant_reach: "ロビーに接続できません",
+		cant_reach_last: "ロビーに接続できません · 最終更新 {ago}",
+		loading: "読み込み中…",
+		updated: "更新 {ago}",
+		just_now: "たった今",
+		s_ago: "{n}秒前",
+		min_ago: "{n}分前",
+	},
+	"zh-Hans": {
+		title: "VF Recomp · 联机",
+		description: "Virtua Fighter、Virtua Fighter 2 和 Virtua Fighter 3 Recomp 现在在线的房间和对战：加入或观战。",
+		language: "语言",
+		lede: "加入房间，或观看对战。与游戏联机画面相同的列表，实时更新。",
+		note: "房主在游戏中打开“在房间列表公开”后，房间会显示在这里；快速匹配的对战在双方都允许时显示（任何人都可观战）。其他房间通过代码游玩，计入上方人数但不显示名称。任何对战，只要有房间代码，任何人都能观战，比玩家稍晚一点；玩家从不等待观众。玩家的国家是大厅看到的连接来源。",
+		flags: "旗帜：",
+		online: "{n} 人在线",
+		in_quick: " · {n} 人在快速匹配",
+		older: "其中 {n} 人使用旧版本：最新版本可与所有人对战",
+		more_countries: "+{n} 个国家/地区",
+		unknown: "未知",
+		all_games: "全部游戏",
+		all_short: "全部",
+		rooms_label: "房间",
+		filter_all: "全部",
+		filter_open: "等待中",
+		filter_playing: "对战中",
+		find: "查找房间或玩家",
+		n_rooms: "{n} 个房间",
+		one_room: "1 个房间",
+		col_room: "房间",
+		col_game: "游戏",
+		col_host: "房主",
+		col_status: "状态",
+		col_watching: "观战",
+		quick_tag: "快速匹配",
+		open: "等待中",
+		join: "加入",
+		watch: "观战",
+		get_code: "获取代码",
+		n_watching: "{n} 人观战 · ",
+		now: "刚刚",
+		minutes: "{m} 分钟",
+		hours: "{h} 小时 {m} 分钟",
+		opening: "正在打开 {app}… 没打开？在游戏中：联机 > 输入代码，加入：",
+		opening_watch: "正在打开 {app}… 没打开？在游戏中：联机 > 输入代码，观战：",
+		on_pc: "在你的 PC 或 Deck 上：{game} 中的联机 > 输入代码，加入：",
+		on_pc_watch: "在你的 PC 或 Deck 上：{game} 中的联机 > 输入代码，观战：",
+		copy: "复制",
+		copied: "已复制",
+		unreachable: "现在无法连接联机服务。",
+		rooms_off: "现在无法使用房间列表。",
+		rooms_off_more: "游戏中的房间代码和快速匹配仍可使用。",
+		unreachable_more: "正在自动重试。",
+		try_now: "立即重试",
+		looking: "正在寻找房间…",
+		none_here: "这里没有房间。",
+		none_for: "没有与“{find}”相符的房间。",
+		show_all: "显示全部房间",
+		none_listed: "现在没有公开的房间。",
+		none_listed_more: "在游戏中：联机 > 创建房间，打开“在房间列表公开”。",
+		previous: "‹ 上一页",
+		next: "下一页 ›",
+		pages: "{n} 个房间中的 {from}–{to} · 第 {page}/{pages} 页",
+		cant_reach: "无法连接大厅",
+		cant_reach_last: "无法连接大厅 · 上次更新 {ago}",
+		loading: "加载中…",
+		updated: "更新于 {ago}",
+		just_now: "刚刚",
+		s_ago: "{n} 秒前",
+		min_ago: "{n} 分钟前",
+	},
+	"zh-Hant": {
+		title: "VF Recomp · 連線",
+		description: "Virtua Fighter、Virtua Fighter 2 和 Virtua Fighter 3 Recomp 現在線上的房間和對戰：加入或觀戰。",
+		language: "語言",
+		lede: "加入房間，或觀看對戰。與遊戲連線畫面相同的列表，即時更新。",
+		note: "房主在遊戲中開啟「在房間列表公開」後，房間會顯示在這裡；快速配對的對戰在雙方都允許時顯示（任何人都可觀戰）。其他房間透過代碼遊玩，計入上方人數但不顯示名稱。任何對戰，只要有房間代碼，任何人都能觀戰，比玩家稍晚一點；玩家從不等待觀眾。玩家的國家是大廳看到的連線來源。",
+		flags: "旗幟：",
+		online: "{n} 人線上",
+		in_quick: " · {n} 人在快速配對",
+		older: "其中 {n} 人使用舊版本：最新版本可與所有人對戰",
+		more_countries: "+{n} 個國家/地區",
+		unknown: "未知",
+		all_games: "全部遊戲",
+		all_short: "全部",
+		rooms_label: "房間",
+		filter_all: "全部",
+		filter_open: "等待中",
+		filter_playing: "對戰中",
+		find: "尋找房間或玩家",
+		n_rooms: "{n} 個房間",
+		one_room: "1 個房間",
+		col_room: "房間",
+		col_game: "遊戲",
+		col_host: "房主",
+		col_status: "狀態",
+		col_watching: "觀戰",
+		quick_tag: "快速配對",
+		open: "等待中",
+		join: "加入",
+		watch: "觀戰",
+		get_code: "取得代碼",
+		n_watching: "{n} 人觀戰 · ",
+		now: "剛剛",
+		minutes: "{m} 分鐘",
+		hours: "{h} 小時 {m} 分鐘",
+		opening: "正在開啟 {app}… 沒開啟？在遊戲中：連線 > 輸入代碼，加入：",
+		opening_watch: "正在開啟 {app}… 沒開啟？在遊戲中：連線 > 輸入代碼，觀戰：",
+		on_pc: "在你的 PC 或 Deck 上：{game} 中的連線 > 輸入代碼，加入：",
+		on_pc_watch: "在你的 PC 或 Deck 上：{game} 中的連線 > 輸入代碼，觀戰：",
+		copy: "複製",
+		copied: "已複製",
+		unreachable: "現在無法連上線上服務。",
+		rooms_off: "現在無法使用房間列表。",
+		rooms_off_more: "遊戲中的房間代碼和快速配對仍可使用。",
+		unreachable_more: "正在自動重試。",
+		try_now: "立即重試",
+		looking: "正在尋找房間…",
+		none_here: "這裡沒有房間。",
+		none_for: "沒有與「{find}」相符的房間。",
+		show_all: "顯示全部房間",
+		none_listed: "現在沒有公開的房間。",
+		none_listed_more: "在遊戲中：連線 > 建立房間，開啟「在房間列表公開」。",
+		previous: "‹ 上一頁",
+		next: "下一頁 ›",
+		pages: "{n} 個房間中的 {from}–{to} · 第 {page}/{pages} 頁",
+		cant_reach: "無法連上大廳",
+		cant_reach_last: "無法連上大廳 · 上次更新 {ago}",
+		loading: "載入中…",
+		updated: "更新於 {ago}",
+		just_now: "剛剛",
+		s_ago: "{n} 秒前",
+		min_ago: "{n} 分鐘前",
+	},
+	es: {
+		title: "VF Recomp · Online",
+		description: "Las salas y partidas online ahora en Virtua Fighter, Virtua Fighter 2 y Virtua Fighter 3 Recomp: entra en una o mira.",
+		language: "Idioma",
+		lede: "Entra en una sala o mira una partida. La misma lista que la pantalla Online de los juegos, en directo.",
+		note: "Una sala aparece aquí cuando su anfitrión activa Pública en Salas en el juego, y las partidas de Partida rápida cuando ambos jugadores lo permiten (cualquiera puede verlas); las demás salas se juegan por código: cuentan arriba, pero nunca se nombran. Cualquiera con el código de la sala puede ver sus partidas, un poco por detrás de los jugadores, que nunca esperan a quien mira. El país de un jugador es desde donde el lobby lo ve conectarse.",
+		flags: "Banderas:",
+		online: "{n} online",
+		in_quick: " · {n} en Partida rápida",
+		older: "{n} con una versión anterior: la última versión juega con todos",
+		more_countries: "+{n} países",
+		unknown: "Desconocido",
+		all_games: "Todos los juegos",
+		all_short: "Todos",
+		rooms_label: "Salas",
+		filter_all: "Todas",
+		filter_open: "Abiertas",
+		filter_playing: "Jugando",
+		find: "Buscar sala o jugador",
+		n_rooms: "{n} salas",
+		one_room: "1 sala",
+		col_room: "Sala",
+		col_game: "Juego",
+		col_host: "Anfitrión",
+		col_status: "Estado",
+		col_watching: "Viendo",
+		quick_tag: "Partida rápida",
+		open: "Abierta",
+		join: "ENTRAR",
+		watch: "VER",
+		get_code: "CÓDIGO",
+		n_watching: "{n} viendo · ",
+		now: "ahora",
+		minutes: "{m} min",
+		hours: "{h} h {m} min",
+		opening: "Abriendo {app}… ¿No se abrió? En el juego: Online > Código, para entrar:",
+		opening_watch: "Abriendo {app}… ¿No se abrió? En el juego: Online > Código, para ver:",
+		on_pc: "En tu PC o Deck: Online > Código, en {game}, para entrar:",
+		on_pc_watch: "En tu PC o Deck: Online > Código, en {game}, para ver:",
+		copy: "Copiar",
+		copied: "Copiado",
+		unreachable: "No se puede conectar con el servicio online ahora.",
+		rooms_off: "Las salas no están disponibles ahora.",
+		rooms_off_more: "Los códigos de sala y Partida rápida siguen funcionando en el juego.",
+		unreachable_more: "Reintentando automáticamente.",
+		try_now: "Reintentar",
+		looking: "Buscando salas…",
+		none_here: "No hay salas aquí.",
+		none_for: "No hay salas aquí para “{find}”.",
+		show_all: "Ver todas las salas",
+		none_listed: "No hay salas públicas ahora.",
+		none_listed_more: "En el juego: Online > Crear sala, con Pública en Salas activado.",
+		previous: "‹ Anterior",
+		next: "Siguiente ›",
+		pages: "{from}–{to} de {n} salas · página {page} de {pages}",
+		cant_reach: "no se puede conectar con el lobby",
+		cant_reach_last: "no se puede conectar con el lobby · actualizado {ago}",
+		loading: "cargando…",
+		updated: "actualizado {ago}",
+		just_now: "ahora mismo",
+		s_ago: "hace {n} s",
+		min_ago: "hace {n} min",
+	},
+	"pt-BR": {
+		title: "VF Recomp · Online",
+		description: "As salas e partidas online agora em Virtua Fighter, Virtua Fighter 2 e Virtua Fighter 3 Recomp: entre em uma ou assista.",
+		language: "Idioma",
+		lede: "Entre em uma sala ou assista a uma partida. A mesma lista da tela Online dos jogos, ao vivo.",
+		note: "Uma sala aparece aqui quando o anfitrião ativa Pública em Salas no jogo, e as partidas de Partida rápida quando os dois jogadores permitem (qualquer um pode assistir); as outras salas jogam por código: contam acima, mas nunca aparecem pelo nome. Qualquer um com o código da sala pode assistir às partidas, um pouco atrás dos jogadores, que nunca esperam por quem assiste. O país de um jogador é de onde o lobby o vê conectar.",
+		flags: "Bandeiras:",
+		online: "{n} online",
+		in_quick: " · {n} em Partida rápida",
+		older: "{n} deles numa versão antiga: a versão mais nova joga com todos",
+		more_countries: "+{n} países",
+		unknown: "Desconhecido",
+		all_games: "Todos os jogos",
+		all_short: "Todos",
+		rooms_label: "Salas",
+		filter_all: "Todas",
+		filter_open: "Abertas",
+		filter_playing: "Jogando",
+		find: "Buscar sala ou jogador",
+		n_rooms: "{n} salas",
+		one_room: "1 sala",
+		col_room: "Sala",
+		col_game: "Jogo",
+		col_host: "Anfitrião",
+		col_status: "Status",
+		col_watching: "Assistindo",
+		quick_tag: "Partida rápida",
+		open: "Aberta",
+		join: "ENTRAR",
+		watch: "ASSISTIR",
+		get_code: "CÓDIGO",
+		n_watching: "{n} assistindo · ",
+		now: "agora",
+		minutes: "{m} min",
+		hours: "{h} h {m} min",
+		opening: "Abrindo {app}… Não abriu? No jogo: Online > Código, para entrar:",
+		opening_watch: "Abrindo {app}… Não abriu? No jogo: Online > Código, para assistir:",
+		on_pc: "No seu PC ou Deck: Online > Código, em {game}, para entrar:",
+		on_pc_watch: "No seu PC ou Deck: Online > Código, em {game}, para assistir:",
+		copy: "Copiar",
+		copied: "Copiado",
+		unreachable: "Não dá para alcançar o serviço online agora.",
+		rooms_off: "As salas não estão disponíveis agora.",
+		rooms_off_more: "Códigos de sala e Partida rápida continuam funcionando no jogo.",
+		unreachable_more: "Tentando de novo sozinho.",
+		try_now: "Tentar agora",
+		looking: "Procurando salas…",
+		none_here: "Nenhuma sala aqui.",
+		none_for: "Nenhuma sala aqui para “{find}”.",
+		show_all: "Mostrar todas as salas",
+		none_listed: "Nenhuma sala pública agora.",
+		none_listed_more: "No jogo: Online > Criar sala, com Pública em Salas ativado.",
+		previous: "‹ Anterior",
+		next: "Próxima ›",
+		pages: "{from}–{to} de {n} salas · página {page} de {pages}",
+		cant_reach: "não dá para alcançar o lobby",
+		cant_reach_last: "não dá para alcançar o lobby · atualizado {ago}",
+		loading: "carregando…",
+		updated: "atualizado {ago}",
+		just_now: "agora mesmo",
+		s_ago: "há {n} s",
+		min_ago: "há {n} min",
+	},
+	fr: {
+		title: "VF Recomp · En ligne",
+		description: "Les salons et les matchs en ligne en ce moment dans Virtua Fighter, Virtua Fighter 2 et Virtua Fighter 3 Recomp : rejoins-en un, ou regarde.",
+		language: "Langue",
+		lede: "Rejoins un salon ou regarde un match. La même liste que l'écran En ligne des jeux, en direct.",
+		note: "Un salon apparaît ici quand son hôte active Public dans les salons dans le jeu, et les matchs rapides quand les deux joueurs l'autorisent (tout le monde peut les regarder) ; les autres salons se jouent par code : comptés plus haut, mais jamais nommés. N'importe qui ayant le code du salon peut regarder ses matchs, un peu en retard sur les joueurs, qui n'attendent jamais les spectateurs. Le pays d'un joueur est celui d'où le lobby le voit se connecter.",
+		flags: "Drapeaux :",
+		online: "{n} en ligne",
+		in_quick: " · {n} en match rapide",
+		older: "dont {n} sur une ancienne version : la dernière version affronte tout le monde",
+		more_countries: "+{n} pays",
+		unknown: "Inconnu",
+		all_games: "Tous les jeux",
+		all_short: "Tous",
+		rooms_label: "Salons",
+		filter_all: "Tous",
+		filter_open: "Ouverts",
+		filter_playing: "En jeu",
+		find: "Chercher un salon ou un joueur",
+		n_rooms: "{n} salons",
+		one_room: "1 salon",
+		col_room: "Salon",
+		col_game: "Jeu",
+		col_host: "Hôte",
+		col_status: "Statut",
+		col_watching: "Public",
+		quick_tag: "Match rapide",
+		open: "Ouvert",
+		join: "REJOINDRE",
+		watch: "VOIR",
+		get_code: "CODE",
+		n_watching: "{n} spectateurs · ",
+		now: "à l'instant",
+		minutes: "{m} min",
+		hours: "{h} h {m} min",
+		opening: "Ouverture de {app}… Rien ne s'ouvre ? Dans le jeu : En ligne > Entrer un code, pour rejoindre :",
+		opening_watch: "Ouverture de {app}… Rien ne s'ouvre ? Dans le jeu : En ligne > Entrer un code, pour regarder :",
+		on_pc: "Sur ton PC ou ton Deck : En ligne > Entrer un code, dans {game}, pour rejoindre :",
+		on_pc_watch: "Sur ton PC ou ton Deck : En ligne > Entrer un code, dans {game}, pour regarder :",
+		copy: "Copier",
+		copied: "Copié",
+		unreachable: "Le service en ligne est injoignable pour l'instant.",
+		rooms_off: "Les salons ne sont pas disponibles pour l'instant.",
+		rooms_off_more: "Les codes de salon et le match rapide marchent toujours dans le jeu.",
+		unreachable_more: "Nouvel essai automatique.",
+		try_now: "Réessayer",
+		looking: "Recherche de salons…",
+		none_here: "Aucun salon ici.",
+		none_for: "Aucun salon ici pour « {find} ».",
+		show_all: "Voir tous les salons",
+		none_listed: "Aucun salon public pour l'instant.",
+		none_listed_more: "Dans le jeu : En ligne > Créer un salon, avec Public dans les salons activé.",
+		previous: "‹ Précédent",
+		next: "Suivant ›",
+		pages: "{from}–{to} sur {n} salons · page {page} sur {pages}",
+		cant_reach: "lobby injoignable",
+		cant_reach_last: "lobby injoignable · mis à jour {ago}",
+		loading: "chargement…",
+		updated: "mis à jour {ago}",
+		just_now: "à l'instant",
+		s_ago: "il y a {n} s",
+		min_ago: "il y a {n} min",
+	},
+	ru: {
+		title: "VF Recomp · Онлайн",
+		description: "Комнаты и матчи онлайн прямо сейчас в Virtua Fighter, Virtua Fighter 2 и Virtua Fighter 3 Recomp: войди или смотри.",
+		language: "Язык",
+		lede: "Войди в комнату или смотри матч. Тот же список, что на экране «Онлайн» в играх, в реальном времени.",
+		note: "Комната появляется здесь, когда хост включает в игре «В списке комнат», а быстрые матчи — когда оба игрока это разрешают (смотреть их может любой). Остальные комнаты играют по коду: они учтены в счётчиках выше, но не называются. Любой матч может смотреть любой, у кого есть код комнаты, чуть позже игроков, которые никогда не ждут зрителей. Страна игрока — место, откуда его видит лобби.",
+		flags: "Флаги:",
+		online: "онлайн: {n}",
+		in_quick: " · в быстром матче: {n}",
+		older: "из них на старой версии: {n}; на последней версии можно играть со всеми",
+		more_countries: "ещё стран: {n}",
+		unknown: "Неизвестно",
+		all_games: "Все игры",
+		all_short: "Все",
+		rooms_label: "Комнаты",
+		filter_all: "Все",
+		filter_open: "Открытые",
+		filter_playing: "Идёт матч",
+		find: "Найти комнату или игрока",
+		n_rooms: "комнат: {n}",
+		one_room: "1 комната",
+		col_room: "Комната",
+		col_game: "Игра",
+		col_host: "Хост",
+		col_status: "Статус",
+		col_watching: "Зрители",
+		quick_tag: "Быстрый матч",
+		open: "Открыта",
+		join: "ВОЙТИ",
+		watch: "СМОТРЕТЬ",
+		get_code: "КОД",
+		n_watching: "зрителей: {n} · ",
+		now: "только что",
+		minutes: "{m} мин",
+		hours: "{h} ч {m} мин",
+		opening: "Открываем {app}… Не открылось? В игре: Онлайн > Код, чтобы войти:",
+		opening_watch: "Открываем {app}… Не открылось? В игре: Онлайн > Код, чтобы смотреть:",
+		on_pc: "На ПК или Deck: Онлайн > Код в {game}, чтобы войти:",
+		on_pc_watch: "На ПК или Deck: Онлайн > Код в {game}, чтобы смотреть:",
+		copy: "Копировать",
+		copied: "Скопировано",
+		unreachable: "Онлайн-сервис сейчас недоступен.",
+		rooms_off: "Комнаты сейчас недоступны.",
+		rooms_off_more: "Коды комнат и быстрый матч в игре работают.",
+		unreachable_more: "Пробуем снова автоматически.",
+		try_now: "Повторить",
+		looking: "Ищем комнаты…",
+		none_here: "Здесь нет комнат.",
+		none_for: "Нет комнат по запросу «{find}».",
+		show_all: "Показать все комнаты",
+		none_listed: "Сейчас нет открытых комнат в списке.",
+		none_listed_more: "В игре: Онлайн > Создать комнату, с включённым «В списке комнат».",
+		previous: "‹ Назад",
+		next: "Далее ›",
+		pages: "{from}–{to} из {n} комнат · страница {page} из {pages}",
+		cant_reach: "лобби недоступно",
+		cant_reach_last: "лобби недоступно · обновлено {ago}",
+		loading: "загрузка…",
+		updated: "обновлено {ago}",
+		just_now: "только что",
+		s_ago: "{n} с назад",
+		min_ago: "{n} мин назад",
+	},
+	de: {
+		title: "VF Recomp · Online",
+		description: "Die Räume und Matches, die gerade in Virtua Fighter, Virtua Fighter 2 und Virtua Fighter 3 Recomp online sind: tritt bei oder schau zu.",
+		language: "Sprache",
+		lede: "Tritt einem Raum bei oder schau einem Match zu. Dieselbe Liste wie im Online-Bildschirm der Spiele, live.",
+		note: "Ein Raum erscheint hier, wenn sein Host im Spiel In Räumen gelistet einschaltet, und Schnelle Matches, wenn beide Spieler es erlauben (jeder kann sie ansehen); andere Räume laufen per Code: oben mitgezählt, aber nie genannt. Jedes Match kann jeder mit dem Code seines Raums ansehen, kurz hinter den Spielern, die nie auf Zuschauer warten. Das Land eines Spielers ist, von wo die Lobby ihn verbinden sieht.",
+		flags: "Flaggen:",
+		online: "{n} online",
+		in_quick: " · {n} im Schnellen Match",
+		older: "{n} davon mit einer älteren Version: die neueste Version trifft alle",
+		more_countries: "+{n} Länder",
+		unknown: "Unbekannt",
+		all_games: "Alle Spiele",
+		all_short: "Alle",
+		rooms_label: "Räume",
+		filter_all: "Alle",
+		filter_open: "Offen",
+		filter_playing: "Im Spiel",
+		find: "Raum oder Spieler suchen",
+		n_rooms: "{n} Räume",
+		one_room: "1 Raum",
+		col_room: "Raum",
+		col_game: "Spiel",
+		col_host: "Host",
+		col_status: "Status",
+		col_watching: "Zuschauer",
+		quick_tag: "Schnelles Match",
+		open: "Offen",
+		join: "BEITRETEN",
+		watch: "ANSEHEN",
+		get_code: "CODE",
+		n_watching: "{n} schauen zu · ",
+		now: "jetzt",
+		minutes: "{m} Min.",
+		hours: "{h} Std. {m} Min.",
+		opening: "{app} wird geöffnet… Nicht geöffnet? Im Spiel: Online > Code eingeben, zum Beitreten:",
+		opening_watch: "{app} wird geöffnet… Nicht geöffnet? Im Spiel: Online > Code eingeben, zum Zuschauen:",
+		on_pc: "Auf deinem PC oder Deck: Online > Code eingeben, in {game}, zum Beitreten:",
+		on_pc_watch: "Auf deinem PC oder Deck: Online > Code eingeben, in {game}, zum Zuschauen:",
+		copy: "Kopieren",
+		copied: "Kopiert",
+		unreachable: "Der Online-Dienst ist gerade nicht erreichbar.",
+		rooms_off: "Räume sind gerade nicht verfügbar.",
+		rooms_off_more: "Raumcodes und Schnelles Match funktionieren im Spiel weiter.",
+		unreachable_more: "Es wird von selbst erneut versucht.",
+		try_now: "Jetzt versuchen",
+		looking: "Suche Räume…",
+		none_here: "Hier gibt es keine Räume.",
+		none_for: "Keine Räume für „{find}“.",
+		show_all: "Alle Räume zeigen",
+		none_listed: "Gerade keine gelisteten Räume.",
+		none_listed_more: "Im Spiel: Online > Raum erstellen, mit In Räumen gelistet an.",
+		previous: "‹ Zurück",
+		next: "Weiter ›",
+		pages: "{from}–{to} von {n} Räumen · Seite {page} von {pages}",
+		cant_reach: "Lobby nicht erreichbar",
+		cant_reach_last: "Lobby nicht erreichbar · zuletzt aktualisiert {ago}",
+		loading: "lädt…",
+		updated: "aktualisiert {ago}",
+		just_now: "gerade eben",
+		s_ago: "vor {n} s",
+		min_ago: "vor {n} Min.",
+	},
+	it: {
+		title: "VF Recomp · Online",
+		description: "Le stanze e le partite online ora in Virtua Fighter, Virtua Fighter 2 e Virtua Fighter 3 Recomp: entra o guarda.",
+		language: "Lingua",
+		lede: "Entra in una stanza o guarda una partita. La stessa lista della schermata Online dei giochi, in diretta.",
+		note: "Una stanza compare qui quando il suo host attiva Pubblica in Stanze nel gioco, e le partite rapide quando entrambi i giocatori lo permettono (chiunque può guardarle); le altre stanze si giocano con il codice: contate sopra, ma mai nominate. Chiunque abbia il codice della stanza può guardarne le partite, un po' dietro ai giocatori, che non aspettano mai chi guarda. Il paese di un giocatore è da dove la lobby lo vede collegarsi.",
+		flags: "Bandiere:",
+		online: "{n} online",
+		in_quick: " · {n} in partita rapida",
+		older: "{n} con una versione precedente: l'ultima versione gioca con tutti",
+		more_countries: "+{n} paesi",
+		unknown: "Sconosciuto",
+		all_games: "Tutti i giochi",
+		all_short: "Tutti",
+		rooms_label: "Stanze",
+		filter_all: "Tutte",
+		filter_open: "Aperte",
+		filter_playing: "In gioco",
+		find: "Cerca stanza o giocatore",
+		n_rooms: "{n} stanze",
+		one_room: "1 stanza",
+		col_room: "Stanza",
+		col_game: "Gioco",
+		col_host: "Host",
+		col_status: "Stato",
+		col_watching: "Spettatori",
+		quick_tag: "Partita rapida",
+		open: "Aperta",
+		join: "ENTRA",
+		watch: "GUARDA",
+		get_code: "CODICE",
+		n_watching: "{n} spettatori · ",
+		now: "ora",
+		minutes: "{m} min",
+		hours: "{h} h {m} min",
+		opening: "Apertura di {app}… Non si apre? Nel gioco: Online > Inserisci codice, per entrare:",
+		opening_watch: "Apertura di {app}… Non si apre? Nel gioco: Online > Inserisci codice, per guardare:",
+		on_pc: "Sul tuo PC o Deck: Online > Inserisci codice, in {game}, per entrare:",
+		on_pc_watch: "Sul tuo PC o Deck: Online > Inserisci codice, in {game}, per guardare:",
+		copy: "Copia",
+		copied: "Copiato",
+		unreachable: "Il servizio online non è raggiungibile ora.",
+		rooms_off: "Le stanze non sono disponibili ora.",
+		rooms_off_more: "I codici stanza e la partita rapida funzionano ancora nel gioco.",
+		unreachable_more: "Riprovo da solo.",
+		try_now: "Riprova ora",
+		looking: "Cerco stanze…",
+		none_here: "Nessuna stanza qui.",
+		none_for: "Nessuna stanza qui per “{find}”.",
+		show_all: "Mostra tutte le stanze",
+		none_listed: "Nessuna stanza pubblica ora.",
+		none_listed_more: "Nel gioco: Online > Crea stanza, con Pubblica in Stanze attivo.",
+		previous: "‹ Precedente",
+		next: "Successiva ›",
+		pages: "{from}–{to} di {n} stanze · pagina {page} di {pages}",
+		cant_reach: "lobby non raggiungibile",
+		cant_reach_last: "lobby non raggiungibile · aggiornato {ago}",
+		loading: "caricamento…",
+		updated: "aggiornato {ago}",
+		just_now: "proprio ora",
+		s_ago: "{n} s fa",
+		min_ago: "{n} min fa",
+	},
+	pl: {
+		title: "VF Recomp · Online",
+		description: "Pokoje i mecze online teraz w Virtua Fighter, Virtua Fighter 2 i Virtua Fighter 3 Recomp: dołącz albo oglądaj.",
+		language: "Język",
+		lede: "Dołącz do pokoju albo oglądaj mecz. Ta sama lista co na ekranie Online w grach, na żywo.",
+		note: "Pokój pojawia się tutaj, gdy jego host włączy w grze Publiczny w Pokojach, a szybkie mecze, gdy obaj gracze na to pozwolą (każdy może je oglądać); inne pokoje gra się przez kod: są liczone wyżej, ale nigdy nie nazwane. Każdy mecz może oglądać każdy, kto ma kod pokoju, chwilę za graczami, którzy nigdy nie czekają na widzów. Kraj gracza to miejsce, z którego lobby widzi jego połączenie.",
+		flags: "Flagi:",
+		online: "{n} online",
+		in_quick: " · w szybkim meczu: {n}",
+		older: "w tym na starszej wersji: {n}; najnowsza wersja gra ze wszystkimi",
+		more_countries: "+{n} krajów",
+		unknown: "Nieznany",
+		all_games: "Wszystkie gry",
+		all_short: "Wszystkie",
+		rooms_label: "Pokoje",
+		filter_all: "Wszystkie",
+		filter_open: "Otwarte",
+		filter_playing: "W grze",
+		find: "Szukaj pokoju lub gracza",
+		n_rooms: "pokoje: {n}",
+		one_room: "1 pokój",
+		col_room: "Pokój",
+		col_game: "Gra",
+		col_host: "Host",
+		col_status: "Status",
+		col_watching: "Widzowie",
+		quick_tag: "Szybki mecz",
+		open: "Otwarty",
+		join: "DOŁĄCZ",
+		watch: "OGLĄDAJ",
+		get_code: "KOD",
+		n_watching: "oglądających: {n} · ",
+		now: "teraz",
+		minutes: "{m} min",
+		hours: "{h} godz. {m} min",
+		opening: "Otwieram {app}… Nie otworzyło się? W grze: Online > Wpisz kod, aby dołączyć:",
+		opening_watch: "Otwieram {app}… Nie otworzyło się? W grze: Online > Wpisz kod, aby oglądać:",
+		on_pc: "Na PC lub Decku: Online > Wpisz kod, w {game}, aby dołączyć:",
+		on_pc_watch: "Na PC lub Decku: Online > Wpisz kod, w {game}, aby oglądać:",
+		copy: "Kopiuj",
+		copied: "Skopiowano",
+		unreachable: "Usługa online jest teraz nieosiągalna.",
+		rooms_off: "Pokoje są teraz niedostępne.",
+		rooms_off_more: "Kody pokojów i szybki mecz nadal działają w grze.",
+		unreachable_more: "Ponawiam automatycznie.",
+		try_now: "Spróbuj teraz",
+		looking: "Szukam pokojów…",
+		none_here: "Brak pokojów.",
+		none_for: "Brak pokojów dla „{find}”.",
+		show_all: "Pokaż wszystkie pokoje",
+		none_listed: "Teraz brak publicznych pokojów.",
+		none_listed_more: "W grze: Online > Utwórz pokój, z włączonym Publiczny w Pokojach.",
+		previous: "‹ Poprzednia",
+		next: "Następna ›",
+		pages: "{from}–{to} z {n} pokojów · strona {page} z {pages}",
+		cant_reach: "lobby nieosiągalne",
+		cant_reach_last: "lobby nieosiągalne · ostatnia aktualizacja {ago}",
+		loading: "wczytywanie…",
+		updated: "zaktualizowano {ago}",
+		just_now: "przed chwilą",
+		s_ago: "{n} s temu",
+		min_ago: "{n} min temu",
+	},
+	tr: {
+		title: "VF Recomp · Çevrimiçi",
+		description: "Virtua Fighter, Virtua Fighter 2 ve Virtua Fighter 3 Recomp'ta şu an çevrimiçi odalar ve maçlar: katıl ya da izle.",
+		language: "Dil",
+		lede: "Bir odaya katıl ya da bir maç izle. Oyunların Çevrimiçi ekranındaki listenin aynısı, canlı.",
+		note: "Kurucusu oyunda Odalar'da listele'yi açtığında oda burada görünür; Hızlı Maç oyunları ise iki oyuncu da izin verdiğinde (herkes izleyebilir). Diğer odalar kodla oynanır: yukarıda sayılır ama adları gösterilmez. Odanın kodunu bilen herkes her maçı oyuncuların biraz gerisinden izleyebilir; oyuncular izleyenleri asla beklemez. Bir oyuncunun ülkesi, lobinin onu bağlanırken gördüğü yerdir.",
+		flags: "Bayraklar:",
+		online: "{n} çevrimiçi",
+		in_quick: " · Hızlı Maç'ta {n}",
+		older: "{n} kişi eski sürümde: en yeni sürüm herkesle karşılaşır",
+		more_countries: "+{n} ülke",
+		unknown: "Bilinmiyor",
+		all_games: "Tüm oyunlar",
+		all_short: "Tümü",
+		rooms_label: "ODALAR",
+		filter_all: "Tümü",
+		filter_open: "Açık",
+		filter_playing: "Oynanıyor",
+		find: "Oda ya da oyuncu bul",
+		n_rooms: "{n} oda",
+		one_room: "1 oda",
+		col_room: "ODA",
+		col_game: "OYUN",
+		col_host: "KURUCU",
+		col_status: "DURUM",
+		col_watching: "İZLEYEN",
+		quick_tag: "HIZLI MAÇ",
+		open: "Açık",
+		join: "KATIL",
+		watch: "İZLE",
+		get_code: "KOD",
+		n_watching: "{n} izleyen · ",
+		now: "şimdi",
+		minutes: "{m} dk",
+		hours: "{h} sa {m} dk",
+		opening: "{app} açılıyor… Açılmadı mı? Oyunda katılmak için: Çevrimiçi > Kod gir:",
+		opening_watch: "{app} açılıyor… Açılmadı mı? Oyunda izlemek için: Çevrimiçi > Kod gir:",
+		on_pc: "PC'nde ya da Deck'inde, {game} içinde katılmak için: Çevrimiçi > Kod gir:",
+		on_pc_watch: "PC'nde ya da Deck'inde, {game} içinde izlemek için: Çevrimiçi > Kod gir:",
+		copy: "Kopyala",
+		copied: "Kopyalandı",
+		unreachable: "Çevrimiçi hizmete şu an ulaşılamıyor.",
+		rooms_off: "Odalar şu an kullanılamıyor.",
+		rooms_off_more: "Oda kodları ve Hızlı Maç oyunda hâlâ çalışıyor.",
+		unreachable_more: "Kendiliğinden yeniden deneniyor.",
+		try_now: "Şimdi dene",
+		looking: "Odalar aranıyor…",
+		none_here: "Burada oda yok.",
+		none_for: "“{find}” için oda yok.",
+		show_all: "Tüm odaları göster",
+		none_listed: "Şu an listelenen oda yok.",
+		none_listed_more: "Oyunda: Çevrimiçi > Oda kur, Odalar'da listele açık olarak.",
+		previous: "‹ Önceki",
+		next: "Sonraki ›",
+		pages: "{n} odadan {from}–{to} · sayfa {page}/{pages}",
+		cant_reach: "lobiye ulaşılamıyor",
+		cant_reach_last: "lobiye ulaşılamıyor · son güncelleme {ago}",
+		loading: "yükleniyor…",
+		updated: "güncellendi: {ago}",
+		just_now: "az önce",
+		s_ago: "{n} sn önce",
+		min_ago: "{n} dk önce",
+	},
+};
+// (each language in its own name; a room without a name keeps its English name in every language, as in the games)
+const LANGS = [["en", "English"], ["ko", "\ud55c\uad6d\uc5b4"], ["ja", "\u65e5\u672c\u8a9e"], ["zh-Hans", "\u7b80\u4f53\u4e2d\u6587"], ["zh-Hant", "\u7e41\u9ad4\u4e2d\u6587"],
+	["es", "Espa\u00f1ol"], ["pt-BR", "Portugu\u00eas (Brasil)"], ["fr", "Fran\u00e7ais"], ["ru", "\u0420\u0443\u0441\u0441\u043a\u0438\u0439"], ["de", "Deutsch"],
+	["it", "Italiano"], ["pl", "Polski"], ["tr", "T\u00fcrk\u00e7e"]];
+const HOSTS_ROOM = "{name}'S ROOM";
+// (the one chosen in the corner, kept in this browser; else the browser's first one the page has: zh-TW, zh-HK and
+// zh-MO Traditional, the other Chinese Simplified, any Portuguese Brazil's; else English)
+function from_locale(l) {
+	l = String(l || "").toLowerCase();
+	const base = l.split(/[-_]/)[0];
+	if (base === "zh") return /-(hant|tw|hk|mo)\b/.test(l) ? "zh-Hant" : "zh-Hans";
+	if (base === "pt") return "pt-BR";
+	const hit = LANGS.find(([c]) => c.toLowerCase() === base);
+	return hit ? hit[0] : "";
+}
+function pick_lang() {
+	try { const s = localStorage.getItem("vf-lang"); if (LANGS.some(([c]) => c === s)) return s; } catch (e) {}
+	for (const l of navigator.languages && navigator.languages.length ? navigator.languages : [navigator.language]) { const c = from_locale(l); if (c) return c; }
+	return "en";
+}
+const LANG = pick_lang();
+const T = Object.assign({}, EN, TR[LANG] || {});
+document.documentElement.lang = LANG;
+if (["ko", "ja", "zh-Hans", "zh-Hant"].includes(LANG)) document.documentElement.classList.add("cjk");
+const FONTS = { ko: "Noto+Sans+KR:wght@500;600;700", ja: "Noto+Sans+JP:wght@500;600;700", "zh-Hans": "Noto+Sans+SC:wght@500;600;700",
+	"zh-Hant": "Noto+Sans+TC:wght@500;600;700", ru: "Noto+Sans:ital,wdth,wght@0,75,500;0,75,600;0,75,700;1,75,700" };
+if (FONTS[LANG]) {
+	const l = document.createElement("link");
+	l.rel = "stylesheet";
+	l.href = "https://fonts.googleapis.com/css2?family=" + FONTS[LANG] + "&display=swap";
+	document.head.appendChild(l);
+}
+{
+	const s = document.getElementById("lang");
+	for (const [c, name] of LANGS) { const o = document.createElement("option"); o.value = c; o.textContent = name; o.lang = c; s.appendChild(o); }
+	s.value = LANG;
+	s.setAttribute("aria-label", T.language);
+	s.addEventListener("change", () => { try { localStorage.setItem("vf-lang", s.value); } catch (e) {} location.reload(); });
+}
 const fill = (t, v) => t.replace(/\{(\w+)\}/g, (m, k) => (k in v ? String(v[k]) : m));
 const GAMES = [
 	{ id: "vf1", name: "Virtua Fighter", short: "VF1", app: "Virtua Fighter Recomp", icon: "icons/vf1.png" },
@@ -311,8 +1130,9 @@ const mobile = (() => {
 		return touch || /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 	} catch (e) { return false; }
 })();
-for (const [id, key] of [["title", "title"], ["lede", "lede"], ["note", "note"]]) { const e = document.getElementById(id); if (e) e.textContent = T[key]; }
+for (const [id, key] of [["title", "title"], ["lede", "lede"], ["note", "note"], ["flags", "flags"]]) { const e = document.getElementById(id); if (e) e.textContent = T[key]; }
 document.title = T.title;
+{ const d = document.querySelector('meta[name="description"]'); if (d) d.setAttribute("content", T.description); }
 let fresh = new Set();   // (rooms new in the latest answer: faded in once)
 // (what the viewer chose: kept while the page is open, and in the address's #, so a link shows the same)
 const view = { game: "all", status: "all", sort: "status", up: false, open: new Set(), page: 0, find: "" };
@@ -340,7 +1160,7 @@ function el(tag, cls, text) {
 	return e;
 }
 let names = null;
-try { names = new Intl.DisplayNames([navigator.language || "en", "en"], { type: "region" }); } catch (e) {}
+try { names = new Intl.DisplayNames([LANG, "en"], { type: "region" }); } catch (e) {}
 function country_name(cc) {
 	if (!cc) return T.unknown;
 	try { const s = names && names.of(cc); if (s && s !== cc) return s; } catch (e) {}
@@ -377,7 +1197,7 @@ function rooms() {
 		if (!r || typeof r !== "object" || !game_of(r.game) || r.older === true || r.locked === true) continue;   // (an older version's: not shown)
 		const p1 = who(r.p1), p2 = who(r.p2);
 		if (!p1) continue;
-		const base = { game: r.game, name: typeof r.name === "string" && ROOM.test(r.name) ? r.name : fill(T.hosts_room, { name: p1.name }), p1, region: REGIONS[r.region] ? r.region : "",
+		const base = { game: r.game, name: typeof r.name === "string" && ROOM.test(r.name) ? r.name : fill(HOSTS_ROOM, { name: p1.name }), p1, region: REGIONS[r.region] ? r.region : "",
 			since: n(r.since), watchers: n(r.watchers), code: CODE.test(r.code) ? r.code : "" };
 		if (r.state === "waiting" && base.code) out.push({ ...base, state: "waiting", p2: null, watch: "" });
 		else if (r.state === "playing" && p2 && (CODE.test(r.watch) || base.code)) out.push({ ...base, state: "playing", p2, watch: CODE.test(r.watch) ? r.watch : base.code,
