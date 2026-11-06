@@ -50,6 +50,14 @@ How to release: [RELEASE.md](RELEASE.md). The site's production branch is `claud
 - CRT colours: r3d.hlsl's `FS_COLOUR` through SDL's GPU render state (`colour_shader` in r3d_gpu.cpp); GPU renderer
   only. The same code went to VF1 and VF2 for their next releases.
 
+## The menus' languages
+
+The menus, notices, online screens and the Online site page are in 13 languages (Game > Language; `language =` in
+settings.ini): [i18n-design.md](i18n-design.md) says how it works, how to add a string or a language, the fonts and
+what VF1 and VF2 must do; [i18n-glossary.md](i18n-glossary.md) the terms. A new string goes in `src/host/lang/en.inc`
+and every other `lang/*.inc`; `langtest` and `tools/langcheck.py` (menutest in every language) catch what's missing
+or doesn't fit. Not reviewed by native speakers yet (the list is in i18n-design.md).
+
 ## Sibling projects
 
 VF1 and VF2 Recomp share most of the host (menu, governor, pacing, CRT colours, the menu's mouse fix). Changes made
