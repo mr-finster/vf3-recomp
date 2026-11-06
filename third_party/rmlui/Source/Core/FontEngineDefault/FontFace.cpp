@@ -50,6 +50,8 @@ FontFaceHandleDefault* FontFace::GetHandle(int size, bool load_default_glyphs)
 	}
 
 	FontFaceHandleDefault* result = handle.get();
+	result->face_style = style;
+	result->face_weight = weight;
 
 	// Save the new handle to the font face
 	handles[size] = std::move(handle);

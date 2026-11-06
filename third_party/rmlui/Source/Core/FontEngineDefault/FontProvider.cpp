@@ -10,6 +10,9 @@
 #include "FreeTypeInterface.h"
 #include <algorithm>
 
+#include <algorithm>
+#include <tuple>
+
 namespace Rml {
 
 static FontProvider* g_font_provider = nullptr;
@@ -80,6 +83,37 @@ void FontProvider::ReleaseFontResources()
 	RMLUI_ASSERT(g_font_provider);
 	for (auto& name_family : g_font_provider->font_families)
 		name_family.second->ReleaseFontResources();
+}
+
+FontFaceHandleDefault* FontProvider::GetFallbackFontFace(int index, int font_size, Style::FontStyle style, Style::FontWeight weight)
+{
+	FontProvider& p = FontProvider::Get();
+	const int n = (int)p.fallback_font_faces.size();
+	if (index < 0 || index >= n)
+		return nullptr;
+	// the faces sorted: their family's place in the order (those not in it after, as loaded), then the same style,
+	// then the nearest weight
+	auto rank = [&](int i) {
+		const auto it = std::find(p.fallback_order.begin(), p.fallback_order.end(), p.fallback_families[i]);
+		const int family = it == p.fallback_order.end() ? (int)p.fallback_order.size() : (int)(it - p.fallback_order.begin());
+		const FontFace* f = p.fallback_font_faces[i];
+		const int style_miss = f->GetStyle() == style ? 0 : 1;
+		const int weight_off = Math::Absolute((int)f->GetWeight() - (int)weight);
+		return std::make_tuple(family, style_miss, weight_off, i);
+	};
+	Vector<int> order(n);
+	for (int i = 0; i < n; i++)
+		order[i] = i;
+	std::sort(order.begin(), order.end(), [&](int a, int b) { return rank(a) < rank(b); });
+	return p.fallback_font_faces[order[index]]->GetHandle(font_size, false);
+}
+
+void FontProvider::SetFallbackFontOrder(const StringList& families)
+{
+	FontProvider& p = FontProvider::Get();
+	p.fallback_order.clear();
+	for (const String& f : families)
+		p.fallback_order.push_back(StringUtilities::ToLower(f));
 }
 
 bool FontProvider::LoadFontFace(const String& file_name, int face_index, bool fallback_face, Style::FontWeight weight)
@@ -243,6 +277,7 @@ auto FontProvider::AddFace(FontFaceHandleFreetype face, const String& family, St
 		if (it_fallback_face == fallback_font_faces.end())
 		{
 			fallback_font_faces.push_back(face_ptr);
+			fallback_families.push_back(family_lower);
 		}
 	}
 

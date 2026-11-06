@@ -122,6 +122,11 @@ private:
 	FontMetrics metrics;
 
 	FontFaceHandleFreetype ft_face;
+
+public:
+	// (vf3-recomp: the face's style and weight, so a glyph from a fallback face is taken from the closest of them)
+	Style::FontStyle face_style = Style::FontStyle::Normal;
+	Style::FontWeight face_weight = Style::FontWeight::Normal;
 };
 
 } // namespace Rml

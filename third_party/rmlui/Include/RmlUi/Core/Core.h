@@ -166,6 +166,10 @@ RMLUICORE_API void ReleaseCompiledGeometry(RenderInterface* render_interface = n
 /// Releases unused font textures and rendered glyphs to free up memory, and regenerates actively used fonts.
 /// @note Invalidates all existing FontFaceHandles returned from the font engine.
 RMLUICORE_API void ReleaseFontResources();
+/// (vf3-recomp) The fallback faces' families in the order a missing glyph is looked for in them (the language on's
+/// first: Chinese, Japanese and Korean share characters drawn differently); within a family the closest style and
+/// weight first. Then ReleaseFontResources(), for the glyphs already taken to be looked for again.
+RMLUICORE_API void SetFallbackFontOrder(const StringList& families);
 /// Releases render managers that are not used by any contexts.
 /// @note Any resources referring to the render manager in user space must be cleared first, including callback textures and compiled geometry.
 /// @note Also releases font resources, which invalidates all existing FontFaceHandles returned from the font engine.

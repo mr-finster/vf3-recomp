@@ -367,7 +367,7 @@ const FontGlyph* FontFaceHandleDefault::GetOrAppendGlyph(Character& character, b
 			const int num_fallback_faces = FontProvider::CountFallbackFontFaces();
 			for (int i = 0; i < num_fallback_faces; i++)
 			{
-				FontFaceHandleDefault* fallback_face = FontProvider::GetFallbackFontFace(i, metrics.size);
+				FontFaceHandleDefault* fallback_face = FontProvider::GetFallbackFontFace(i, metrics.size, face_style, face_weight);
 				if (!fallback_face || fallback_face == this)
 					continue;
 

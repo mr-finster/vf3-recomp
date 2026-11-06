@@ -28,6 +28,7 @@
 
 #ifdef RMLUI_FONT_ENGINE_FREETYPE
 	#include "FontEngineDefault/FontEngineInterfaceDefault.h"
+	#include "FontEngineDefault/FontProvider.h"
 #endif
 
 #ifdef RMLUI_LOTTIE_PLUGIN
@@ -419,6 +420,15 @@ void ReleaseCompiledGeometry(RenderInterface* match_render_interface)
 		if (!match_render_interface || render_manager.first == match_render_interface)
 			RenderManagerAccess::ReleaseAllCompiledGeometry(render_manager.second.get());
 	}
+}
+
+void SetFallbackFontOrder(const StringList& families)
+{
+#ifdef RMLUI_FONT_ENGINE_FREETYPE
+	FontProvider::SetFallbackFontOrder(families);
+#else
+	(void)families;
+#endif
 }
 
 void ReleaseFontResources()

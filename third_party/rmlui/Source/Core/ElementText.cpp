@@ -568,10 +568,45 @@ void ElementText::GenerateDecoration(Mesh& mesh, const FontFaceHandle font_face_
 	}
 }
 
+// (vf3-recomp) Chinese and Japanese have no spaces between words: a line may break between two of their characters
+// (Han, kana, their punctuation), but not before closing punctuation or a long vowel mark, nor after an opening
+// bracket (kinsoku). Korean keeps breaking at its spaces only.
+static char32_t DecodeAt(const char* p, const char* end)
+{
+	const unsigned char c = (unsigned char)*p;
+	const int n = c < 0x80 ? 0 : (c >> 5) == 6 ? 1 : (c >> 4) == 14 ? 2 : (c >> 3) == 30 ? 3 : 0;
+	if (end - p <= n)
+		return c;
+	char32_t r = n ? (c & (0x3F >> n)) : c;
+	for (int i = 1; i <= n; i++)
+		r = (r << 6) | ((unsigned char)p[i] & 0x3F);
+	return r;
+}
+static bool IsCJKBreakable(char32_t c)
+{
+	return (c >= 0x3000 && c <= 0x30FF) || (c >= 0x3400 && c <= 0x4DBF) || (c >= 0x4E00 && c <= 0x9FFF) || (c >= 0xF900 && c <= 0xFAFF) ||
+		(c >= 0x31F0 && c <= 0x31FF) || (c >= 0xFF00 && c <= 0xFFEF);
+}
+static bool NoBreakBefore(char32_t c)
+{
+	static const char32_t list[] = {0x3001, 0x3002, 0xFF0C, 0xFF0E, 0xFF1A, 0xFF1B, 0xFF1F, 0xFF01, 0xFF09, 0x300D, 0x300F, 0x3011, 0x3015, 0x3009, 0x300B,
+		0x30FC, 0x30FB, 0x3005, 0x301C, 0x2026, 0x2025, 0x3041, 0x3043, 0x3045, 0x3047, 0x3049, 0x3063, 0x3083, 0x3085, 0x3087, 0x308E, 0x30A1, 0x30A3,
+		0x30A5, 0x30A7, 0x30A9, 0x30C3, 0x30E3, 0x30E5, 0x30E7, 0x30EE, 0x30F5, 0x30F6, '.', ',', ':', ';', '!', '?', ')', ']', '}', '%', 0xB7};
+	for (char32_t l : list)
+		if (c == l)
+			return true;
+	return false;
+}
+static bool NoBreakAfter(char32_t c)
+{
+	return c == 0xFF08 || c == 0x300C || c == 0x300E || c == 0x3010 || c == 0x3014 || c == 0x3008 || c == 0x300A || c == '(' || c == '[' || c == '{';
+}
+
 static bool BuildToken(String& token, const char*& token_begin, const char* string_end, bool first_token, bool collapse_white_space,
 	bool break_at_endline, Style::TextTransform text_transformation, bool decode_escape_characters)
 {
 	RMLUI_ASSERT(token_begin != string_end);
+	char32_t previous = 0;   // (vf3-recomp: the last letter put in this token, for the CJK breaks)
 
 	token.reserve(string_end - token_begin + token.size());
 
@@ -667,6 +702,19 @@ static bool BuildToken(String& token, const char*& token_begin, const char* stri
 				token += ' ';
 
 			parsing_white_space = false;
+		}
+
+		// (vf3-recomp) a break between two letters of which one is Chinese or Japanese: this token ends before this one
+		if (!white_space && ((unsigned char)character & 0xC0) != 0x80)
+		{
+			const char32_t current = DecodeAt(token_begin, string_end);
+			if (previous && (IsCJKBreakable(previous) || IsCJKBreakable(current)) && !NoBreakBefore(current) && !NoBreakAfter(previous) &&
+				!(previous < 0x80 && current < 0x80))
+			{
+				token_begin = escape_begin;
+				return false;
+			}
+			previous = current;
 		}
 
 		// If the current character is white-space, we'll append a space character to the token if we're not collapsing

@@ -3,7 +3,9 @@
 - `sljit/`: Zoltan Herczeg's SLJIT (BSD-2-Clause, see sljit/LICENSE; the commit in sljit/VERSION), as VF1 and
   VF2 have it: the native code VF3's PowerPC program is recompiled to when the game starts (src/rec).
 - `rmlui/`: RmlUi 6.3 (MIT, see rmlui/LICENSE.txt), the in-game menu, as VF2 has it (its SDL renderer loads images
-  with SDL 3.4's SDL_LoadSurface_IO and has BeginOverlay(); see VF2's notes).
+  with SDL 3.4's SDL_LoadSurface_IO and has BeginOverlay(); see VF2's notes). For the menus' languages: fallback
+  faces ordered by language, then style and weight (`Rml::SetFallbackFontOrder`, FontProvider, FontFaceHandleDefault),
+  and lines broken between Chinese, Japanese and Korean letters with the kinsoku rules (ElementText's BuildToken).
 - `mame/m68000/`: MAME's 68000 (BSD-3-Clause, Olivier Galibert), as VF2 has it: the generated instruction handlers
   and decode table unchanged, the device reduced to the core on a bus interface (see mame/README.md). It compiles
   against `src/core/shim_include/emu.h` and `src/core/mame_shim.*`, VF2's stand-in for MAME's device framework.

@@ -51,6 +51,10 @@ public:
 
 	/// Return a font face handle with the given index, at the given font size.
 	static FontFaceHandleDefault* GetFallbackFontFace(int index, int font_size);
+	/// (vf3-recomp) The same, the faces in the order SetFallbackFontOrder gives their families, and within a family
+	/// the closest to this style and weight first.
+	static FontFaceHandleDefault* GetFallbackFontFace(int index, int font_size, Style::FontStyle style, Style::FontWeight weight);
+	static void SetFallbackFontOrder(const StringList& families);
 
 	/// Releases resources owned by sized font faces, including their textures and rendered glyphs.
 	static void ReleaseFontResources();
@@ -72,6 +76,8 @@ private:
 
 	FontFamilyMap font_families;
 	FontFaceList fallback_font_faces;
+	StringList fallback_families;   // (each fallback face's family, lowercase)
+	StringList fallback_order;
 
 	static const String debugger_font_family_name;
 };
