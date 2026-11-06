@@ -8,7 +8,7 @@
 #include "../src/host/menu.h"
 #include "../src/host/online.h"
 #include "../src/host/links.h"
-#include "../src/host/online_text.h"
+#include "../src/host/text.h"
 #include "../src/host/png.h"
 #include <SDL3/SDL.h>
 #include <algorithm>
@@ -24,6 +24,9 @@ SDL_Renderer *ren = nullptr;
 game_menu *menu = nullptr;
 std::string out;
 SDL_Texture *backdrop = nullptr;   // MENUTEST_BACKDROP: a picture of the game instead of the stand-in
+std::vector<std::string> overflows;   // (each picture's text past its box: game_menu::overflow)
+std::vector<uint32_t> last_px;   // (the last picture written, its pixels)
+std::vector<std::string> misaligned;   // (a page's rows whose labels don't start where the others' do)
 
 // a stand-in for the game's picture: a dark stage, two energy bars and a timer, so the notices are seen over something
 void draw_game(int w, int h)
@@ -53,6 +56,7 @@ void shot(const char *name, int w, int h)
 	draw_game(w, h);
 	menu->render(false);
 	if (!*name) return;   // (a frame only)
+	for (const std::string &o : menu->overflow()) overflows.push_back(std::string(name) + ": " + o);
 	SDL_Surface *s = SDL_RenderReadPixels(ren, nullptr);
 	SDL_Surface *c = s ? SDL_ConvertSurface(s, SDL_PIXELFORMAT_ABGR8888) : nullptr;
 	if (s) SDL_DestroySurface(s);
@@ -61,8 +65,16 @@ void shot(const char *name, int w, int h)
 	for (int y = 0; y < c->h; y++) memcpy(&px[size_t(y) * size_t(c->w)], static_cast<uint8_t *>(c->pixels) + size_t(y) * size_t(c->pitch), size_t(c->w) * 4);
 	const std::string path = out + "/" + name;
 	write_png(path.c_str(), px.data(), c->w, c->h);
+	last_px = px;
 	SDL_DestroySurface(c);
 	printf("%s\n", path.c_str());
+}
+
+// After a picture: the rows let finish sliding, then checked for starting in line (the picture's as it was).
+void settle_check(const char *name, int w, int h)
+{
+	for (int i = 0; i < 8; i++) { shot("", w, h); SDL_Delay(40); }
+	for (const std::string &o : menu->misaligned()) misaligned.push_back(std::string(name) + ": " + o);
 }
 
 void key(SDL_Scancode sc)
@@ -101,6 +113,154 @@ void text(const char *t)
 	menu->handle_event(e);
 }
 
+// The settings pages (main.cpp's: they need the game to be made, so here their rows as they are there, by the same
+// strings, each with its longest value): each page drawn, each row selected (its help under the rows), and every
+// line checked against its box. One picture a page: pages_<name>.png, its longest help showing.
+struct row { tr::text label; std::string help, value; };
+void page_shots(game_menu &gm, int w, int h, const char *file, tr::text title, const std::vector<row> &rows, const std::string &note = "")
+{
+	const bool top = title.id == tr::M_RESUME.id;   // (the main page: the menu's first, no name over its rows)
+	menu_page root{ "", "", {} };
+	root.items.push_back({ tr::M_RESUME, "", {}, {}, {} });
+	if (!top) gm.open(root);
+	menu_page p{ top ? std::string() : std::string(title), note, {} };
+	size_t longest = 0;
+	for (size_t i = 0; i < rows.size(); i++) {
+		const row &r = rows[i];
+		menu_item it{ r.label, r.help, {}, {}, {} };
+		if (!r.value.empty()) { const std::string v = r.value; it.value = [v] { return v; }; it.change = [](int) {}; }
+		p.items.push_back(it);
+		if (r.help.size() > rows[longest].help.size()) longest = i;
+	}
+	if (!top) p.items.push_back({ tr::BACK, tr::BACK_HELP, {}, {}, {} });
+	if (top) gm.open(p); else gm.push(p);
+	for (size_t i = 0; i < rows.size(); i++) {
+		gm.select_row(int(i));
+		shot("", w, h);
+		for (const std::string &o : gm.overflow()) overflows.push_back(std::string(file) + " row " + std::to_string(i) + ": " + o);
+	}
+	gm.select_row(int(longest));
+	for (int i = 0; i < 8; i++) { shot("", w, h); SDL_Delay(40); }   // (the rows' slide, 0.12 s, over before the picture)
+	shot(file, w, h);
+	for (const std::string &o : gm.misaligned()) misaligned.push_back(std::string(file) + ": " + o);
+	gm.close();
+}
+
+void pages(game_menu &gm, int w, int h)
+{
+	using namespace tr;
+	auto F = [](tr::text t, tr::with v) { return tr::fill(t, v); };
+	const std::string on = ON, off = OFF;
+	page_shots(gm, w, h, "pages_main.png", M_RESUME, {   // (the main page: its rows' helps)
+		{ M_RESUME, M_RESUME_HELP, "" }, { P_DISPLAY, M_DISPLAY_HELP, "" }, { P_SOUND, M_SOUND_HELP, "" }, { P_GAME, M_GAME_HELP, "" },
+		{ M_ARCADE, M_ARCADE_HELP, "" }, { P_ONLINE, F(M_ONLINE_NOT_READY, { { "game", "Virtua Fighter 3 Team Battle" } }), "" },
+		{ P_CHEATS, M_CHEATS_ON_HELP, "" }, { P_CONTROLS, M_CONTROLS_MATCH_HELP, "" }, { M_QUIT, M_QUIT_HELP, "" } });
+	page_shots(gm, w, h, "pages_display.png", P_DISPLAY, {
+		{ D_SCALE, D_SCALE_HELP, F(D_SCALE_LOWERED, { { "n", "6" }, { "now", "2" } }) },
+		{ D_AA, D_AA_HELP, F(D_AA_NOW_CPU, { { "n", "3" }, { "now", OFF_LOWER } }) },
+		{ D_RENDERER, D_RENDERER_HELP, D_R3D_CRASHED },
+		{ D_SHAPE, D_SHAPE_HELP, D_SHAPE_FIT },
+		{ D_BG_FILTER, D_BG_FILTER_HELP, D_SMOOTH },
+		{ D_TEXTURES, D_TEXTURES_HELP, D_ARCADE },
+		{ D_QUADS, D_QUADS_HELP, on },
+		{ D_SMOOTH_MOTION, D_SMOOTH_MOTION_HELP, D_SMOOTH_BUSY },
+		{ D_SCREEN_FILTER, D_SCREEN_FILTER_HELP, D_SCANLINES },
+		{ D_CRT_COLOURS, D_CRT_COLOURS_HELP, F(NOT_WITH_RENDERER, { { "what", CRT_PAL } }) },
+		{ D_BRIGHTNESS, D_BRIGHTNESS_HELP, F(N_PERCENT, { { "n", "100" } }) },
+		{ D_GAMMA, D_GAMMA_HELP, F(NOT_WITH_RENDERER, { { "what", F(N_PERCENT, { { "n", "100" } }) } }) },
+		{ D_DRIVER, D_DRIVER_HELP, D_DRIVER_AUTO },
+		{ D_SHOW_FPS, D_SHOW_FPS_HELP, off },
+		{ D_WINDOW_SIZE, D_WINDOW_SIZE_HELP, F(D_WINDOW_N_IN_WINDOW, { { "n", "3" }, { "w", "1536" }, { "h", "1152" } }) },
+		{ D_FULLSCREEN, D_FULLSCREEN_HELP, on },
+		{ D_FS_MODE, D_FS_MODE_HELP, D_BORDERLESS } });
+	page_shots(gm, w, h, "pages_display_more.png", P_DISPLAY, {   // (the other values of its rows)
+		{ D_RENDERER, D_RENDERER_HELP, F(D_R3D_NEXT_START, { { "what", AUTO } }) }, { D_RENDERER, D_RENDERER_HELP, F(AUTO_IS, { { "what", R3D_GPU } }) },
+		{ D_RENDERER, D_RENDERER_HELP, D_R3D_FAILED }, { D_AA, D_AA_HELP, F(D_AA_NOW_BUSY, { { "n", "3" }, { "now", F(N_X, { { "n", "2" } }) } }) },
+		{ D_AA, D_AA_HELP, F(D_AA_NOW_SCALE, { { "n", "3" }, { "now", F(N_X, { { "n", "2" } }) } }) }, { D_CRT_COLOURS, D_CRT_COLOURS_HELP, CRT_SEGA },
+		{ D_CRT_COLOURS, D_CRT_COLOURS_HELP, CRT_NTSC_JP }, { D_TEXTURES, D_TEXTURES_HELP, D_SHARP }, { D_SCREEN_FILTER, D_SCREEN_FILTER_HELP, D_CRT },
+		{ D_WINDOW_SIZE, D_WINDOW_SIZE_HELP, D_FREE }, { D_FS_MODE, D_FS_MODE_HELP, D_STANDARD } });
+	page_shots(gm, w, h, "pages_sound.png", P_SOUND, {
+		{ S_VOLUME, S_VOLUME_HELP, F(N_PERCENT, { { "n", "100" } }) }, { S_MUSIC, S_MUSIC_HELP, F(N_PERCENT, { { "n", "80" } }) },
+		{ S_EFFECTS, S_EFFECTS_HELP, F(N_PERCENT, { { "n", "100" } }) } });
+	page_shots(gm, w, h, "pages_game.png", P_GAME, {
+		{ G_LANGUAGE, G_LANGUAGE_HELP, F(LANG_AUTO_IS, { { "lang", info(tr::current() == lang::en || tr::current() == lang::pseudo ? lang::pt_br : tr::current()).name } }) },
+		{ G_PLAY_STYLE, G_PLAY_STYLE_HELP, G_ARCADE }, { G_RESET, G_RESET_HELP, "" },
+		{ G_VERSION, G_VERSION_HELP, "Virtua Fighter 3" }, { G_ADD_TB, G_ADD_TB_HELP, G_CHOOSING },
+		{ G_TB_MODE, G_TB_MODE_HELP, G_3V3 }, { G_LOG, G_LOG_HELP, on } });
+	{   // (Game > Language: each of its choices, its name in its own letters)
+		std::vector<row> v;
+		for (int i = 0; i < CHOICES; i++) v.push_back({ G_LANGUAGE, G_LANGUAGE_HELP, choice_name(tr::choice{ i }) });
+		page_shots(gm, w, h, "pages_languages.png", P_GAME, v);
+	}
+	{   // (Game > Version: the question asked first)
+		menu_page root{ "", "", {} };
+		root.items.push_back({ M_RESUME, "", {}, {}, {} });
+		gm.open(root);
+		menu_page q{ fill(G_SWITCH_Q, { { "game", "Virtua Fighter 3 Team Battle" } }), "", {} };
+		q.items.push_back({ G_SWITCH_RESTART, fill(G_SWITCH_RESTART_HELP, { { "game", "Virtua Fighter 3 Team Battle" } }), {}, {}, {} });
+		q.items.push_back({ CANCEL, fill(G_STAY_IN, { { "game", "Virtua Fighter 3" } }), {}, {}, {} });
+		gm.push(q);
+		shot("pages_switch.png", w, h);
+		gm.close();
+	}
+	page_shots(gm, w, h, "pages_arcade.png", P_ARCADE, {
+		{ A_DIFFICULTY, A_DIFFICULTY_HELP, A_HARDEST }, { A_ROUNDS_CPU, A_ROUNDS_CPU_HELP, "3" }, { A_ROUNDS_VS, A_ROUNDS_VS_HELP, "3" },
+		{ A_ENERGY_CPU, A_ENERGY_CPU_HELP, "200" }, { A_ENERGY_VS, A_ENERGY_VS_HELP, "200" }, { A_STAGE_SELECT, A_STAGE_SELECT_HELP_TB, A_CHALLENGER },
+		{ A_CPU_ORDER, A_CPU_ORDER_HELP, A_THE_GAMES }, { A_DEMO_SOUND, A_DEMO_SOUND_HELP, on }, { A_COUNTRY, A_COUNTRY_HELP, A_EXPORT },
+		{ A_DEBUG, A_DEBUG_HELP, off }, { A_SERVICE, A_SERVICE_HELP, "" } });
+	page_shots(gm, w, h, "pages_arcade_more.png", P_ARCADE, {
+		{ A_DIFFICULTY, A_DIFFICULTY_HELP, A_EASY }, { A_DIFFICULTY, A_DIFFICULTY_HELP, A_NORMAL }, { A_DIFFICULTY, A_DIFFICULTY_HELP, A_HARD },
+		{ A_STAGE_SELECT, A_STAGE_SELECT_HELP, A_VARIABLE }, { A_STAGE_SELECT, A_STAGE_SELECT_HELP, A_FULL }, { A_CPU_ORDER, A_CPU_ORDER_HELP, A_RANDOM },
+		{ A_COUNTRY, A_COUNTRY_HELP, A_JAPAN }, { A_COUNTRY, A_COUNTRY_HELP, A_USA }, { A_COUNTRY, A_COUNTRY_HELP, A_ASIA } });
+	page_shots(gm, w, h, "pages_cheats.png", P_CHEATS, { { C_DURAL, C_DURAL_HELP, on }, { C_DURAL_STAGE, C_DURAL_STAGE_HELP, CTL_GUARD } });
+	page_shots(gm, w, h, "pages_controls.png", P_CONTROLS, {
+		{ P_PLAYER_1, CTL_P1_HELP, F(CTL_ANY_PAD, { { "pad", "Xbox Series X Controller" } }) }, { P_PLAYER_2, CTL_P2_HELP, CTL_ANY_PAD_NONE },
+		{ CTL_SWAP, CTL_SWAP_HELP, "" } });
+	page_shots(gm, w, h, "pages_player.png", P_PLAYER_1, {
+		{ CTL_PAD, CTL_PAD_HELP, CTL_CHOSEN_PAD_GONE }, { CTL_KEYBOARD, CTL_KEYBOARD_HELP, "" }, { CTL_PAD_BUTTONS, CTL_PAD_BUTTONS_HELP, "" },
+		{ CTL_SETUP, CTL_SETUP_HELP, "" }, { CTL_RESET, CTL_RESET_HELP, "" } });
+	{
+		const tr::text names[] = { CTL_UP, CTL_DOWN, CTL_LEFT, CTL_RIGHT, CTL_GUARD, CTL_PUNCH, CTL_KICK, CTL_ESCAPE, CTL_GUARD_PUNCH, CTL_PUNCH_KICK, CTL_GUARD_KICK,
+			CTL_ALL_THREE, CTL_START, CTL_COIN, CTL_MENU };
+		std::vector<row> keys, pads;
+		for (int a = 0; a < 15; a++) {
+			keys.push_back({ names[a], a == 13 ? CTL_KEY_HELP_COIN : a == 14 ? CTL_KEY_HELP_MENU : CTL_KEY_HELP, a == 14 ? F(CTL_KEY_N, { { "n", "231" } }) : "Left Shift" });
+			if (a >= 4) pads.push_back({ names[a], a == 13 ? CTL_PADB_HELP_COIN : a == 14 ? CTL_PADB_HELP_MENU : CTL_PADB_HELP, a == 5 ? PAD_RIGHT_STICK : a == 6 ? PAD_TOUCHPAD : a == 7 ? std::string(PAD_DPAD_RIGHT) : std::string("LB") });
+		}
+		page_shots(gm, w, h, "pages_keys.png", P_P2_KEYBOARD, keys);
+		page_shots(gm, w, h, "pages_pad.png", P_P2_PAD, pads);
+	}
+	// the prompts that take the help's place while a key, a button or a set-up step is waited for
+	{
+		menu_page root{ "", "", {} };
+		root.items.push_back({ M_RESUME, "", {}, {}, {} });
+		gm.open(root);
+		menu_page p{ P_P1_PAD, "", {} };
+		p.items.push_back({ CTL_GUARD_PUNCH, "", [] { return std::string("-"); }, {}, {} });
+		gm.push(p);
+		for (const std::string &prompt : { fill(CTL_PRESS_PAD_VIEW_P2, { { "control", CTL_GUARD_PUNCH } }), fill(CTL_PRESS_KEY_P1, { { "control", CTL_ALL_THREE } }),
+		                                   fill(SETUP_PRESS, { { "button", SETUP_MENU_STEP }, { "player", "2" }, { "n", "10" }, { "of", "10" } }) }) {
+			gm.capture(prompt, [](const SDL_Event &) { return false; });
+			shot("", w, h);
+			for (const std::string &o : gm.overflow()) overflows.push_back("a prompt: " + o);
+		}
+		shot("pages_prompt.png", w, h);
+		gm.end_capture();
+		gm.close();
+	}
+	// the toasts (bottom right): each of the longest
+	for (const std::string &t : { fill(CPU_NOTICE_CUT, { { "why", CPU_WHY_NO_DRIVER }, { "todo", CPU_TODO_OTHER_DRIVER } }), std::string(SETUP_HELD),
+	                              fill(DURAL_STAGE_WAIT, { { "n", "12" } }), std::string(DURAL_STAGE_NOT_NOW), fill(SETUP_DONE_BOTH, { { "player", "1" }, { "other", "2" } }),
+	                              std::string(CTL_RESET_FORGOTTEN), std::string(SETUP_STEAM), std::string(LINK_IS_TEAM_BATTLE) }) {
+		gm.toast(t);
+		shot("", w, h);
+		for (const std::string &o : gm.overflow()) overflows.push_back("a toast: " + o);
+	}
+	gm.toast(fill(CPU_NOTICE_CUT, { { "why", CPU_WHY_NO_DRIVER }, { "todo", CPU_TODO_OTHER_DRIVER } }));
+	shot("pages_toast.png", w, h);
+	gm.toast("");
+}
+
 } // namespace
 
 int main(int argc, char **argv)
@@ -114,6 +274,9 @@ int main(int argc, char **argv)
 	const char *rd = getenv("MENUTEST_RENDERER");
 	ren = win ? SDL_CreateRenderer(win, rd && *rd ? rd : "software") : nullptr;
 	if (!ren) { fprintf(stderr, "menutest: %s\n", SDL_GetError()); return 1; }
+	// the language: VF_LANG (en, ko, ja, zh-Hans, ..., pseudo), else English
+	tr::set(getenv("VF_LANG") && *getenv("VF_LANG") ? tr::resolve(tr::choice{}) : tr::lang::en);
+	printf("language: %s\n", tr::code(tr::current()));
 	game_menu gm;
 	menu = &gm;
 	if (!gm.init(win, ren, "assets")) { fprintf(stderr, "menutest: the menu's files aren't in ./assets\n"); return 1; }
@@ -147,7 +310,7 @@ int main(int argc, char **argv)
 	auto changed = [] {};
 	auto root = [&] {
 		menu_page p{ "", "", {} };
-		for (const char *r : { "Resume", "Display", "Sound", "Game", "Arcade settings", "Online", "Controls", "Quit" })
+		for (tr::text r : { tr::M_RESUME, tr::P_DISPLAY, tr::P_SOUND, tr::P_GAME, tr::M_ARCADE, tr::P_ONLINE, tr::P_CONTROLS, tr::M_QUIT })
 			p.items.push_back({ r, "", {}, {}, {} });
 		return p;
 	};
@@ -183,7 +346,7 @@ int main(int argc, char **argv)
 	key(SDL_SCANCODE_RIGHT);
 	check(gm.selected() == 2, "Right goes to Create room");
 	key(SDL_SCANCODE_DOWN);
-	check(gm.selected() >= 7 && gm.selected() <= 14, "Down goes to the filters");
+	check(gm.selected() >= 5 && gm.selected() <= 7, ("Down goes to the filters (" + std::to_string(gm.selected()) + ")").c_str());
 	key(SDL_SCANCODE_UP);
 	key(SDL_SCANCODE_UP);
 	check(gm.selected() == 0, "Up from the actions goes to the name");
@@ -193,7 +356,7 @@ int main(int argc, char **argv)
 
 	// your name, on a pad: Y from the home screen
 	pad(SDL_GAMEPAD_BUTTON_NORTH);
-	check(top() == "Your name", "Y opens the name");
+	check(top() == tr::P_YOUR_NAME.c_str(), "Y opens the name");
 	for (int i = 0; i < 3; i++) pad(SDL_GAMEPAD_BUTTON_WEST);   // (X takes letters off)
 	for (int i = 0; i < 5; i++) pad(SDL_GAMEPAD_BUTTON_DPAD_RIGHT);
 	pad(SDL_GAMEPAD_BUTTON_DPAD_DOWN);
@@ -201,16 +364,16 @@ int main(int argc, char **argv)
 	pad(SDL_GAMEPAD_BUTTON_SOUTH);   // (A: the letter selected, T)
 	pad(SDL_GAMEPAD_BUTTON_START);   // (saved)
 	check(s.name == "MRFINST", ("the pad typed the name (" + s.name + ")").c_str());
-	check(top() == "Online", "Start saves and goes back");
+	check(top() == tr::P_ONLINE.c_str(), "Start saves and goes back");
 	// on a keyboard
 	gm.select_row(0);   // (the name: Up from wherever the pad left it)
 	key(SDL_SCANCODE_RETURN);
-	check(top() == "Your name", "Enter on the name opens it");
+	check(top() == tr::P_YOUR_NAME.c_str(), "Enter on the name opens it");
 	key(SDL_SCANCODE_BACKSPACE);
 	text("ER");
 	shot("name_key.png", w, h);
 	key(SDL_SCANCODE_SPACE);   // (types a space: doesn't press anything)
-	check(top() == "Your name", "Space types, it doesn't press");
+	check(top() == tr::P_YOUR_NAME.c_str(), "Space types, it doesn't press");
 	key(SDL_SCANCODE_RETURN);
 	check(s.name == "MRFINSER", ("the keyboard typed the name (" + s.name + ")").c_str());
 	s.name = "MRFINSTER";
@@ -221,7 +384,7 @@ int main(int argc, char **argv)
 	key(SDL_SCANCODE_RIGHT);
 	key(SDL_SCANCODE_RIGHT);
 	key(SDL_SCANCODE_RETURN);
-	check(top() == "Enter code", "Enter code opens the code");
+	check(top() == tr::P_ENTER_CODE.c_str(), "Enter code opens the code");
 	text("zz");
 	key(SDL_SCANCODE_Z);   // (a letter's key: its letter comes as text, not twice)
 	text("z");
@@ -230,7 +393,7 @@ int main(int argc, char **argv)
 	for (int i = 0; i < 7; i++) pad(SDL_GAMEPAD_BUTTON_DPAD_RIGHT);
 	shot("join_pad.png", w, h);
 	pad(SDL_GAMEPAD_BUTTON_EAST);   // (B: back)
-	check(top() == "Online", "B goes back from the code");
+	check(top() == tr::P_ONLINE.c_str(), "B goes back from the code");
 
 	// no name yet: asked for first, then on to the code
 	s.name.clear();
@@ -239,11 +402,11 @@ int main(int argc, char **argv)
 	key(SDL_SCANCODE_RIGHT);   // (a keyboard again: Quick match to Join by code)
 	key(SDL_SCANCODE_RIGHT);
 	key(SDL_SCANCODE_RETURN);
-	check(top() == "Your name", "Join with no name asks for it");
+	check(top() == tr::P_YOUR_NAME.c_str(), "Join with no name asks for it");
 	shot("name_first.png", w, h);
 	text("AKIRA");
 	key(SDL_SCANCODE_RETURN);
-	check(s.name == "AKIRA" && top() == "Enter code", "then goes on to the code");
+	check(s.name == "AKIRA" && top() == tr::P_ENTER_CODE.c_str(), "then goes on to the code");
 	key(SDL_SCANCODE_ESCAPE);
 	s.name = "MRFINSTER";
 
@@ -252,20 +415,21 @@ int main(int argc, char **argv)
 	gm.select_row(1);
 	for (int i = 0; i < 3; i++) key(SDL_SCANCODE_RIGHT);   // (Quick match to More)
 	key(SDL_SCANCODE_RETURN);
-	check(top() == "More", "More: what's seldom wanted");
+	check(top() == tr::P_MORE.c_str(), "More: what's seldom wanted");
 	shot("more.png", w, h);
+	settle_check("more.png", w, h);
 	key(SDL_SCANCODE_RETURN);
-	check(top() == "Play by address", "the link opens Play by address");
+	check(top() == tr::P_PLAY_ADDRESS.c_str(), "the link opens Play by address");
 	shot("address_page.png", w, h);
 	key(SDL_SCANCODE_DOWN);
 	key(SDL_SCANCODE_RETURN);
-	check(top() == "Join by address", "Join by address opens the address");
+	check(top() == tr::P_JOIN_ADDRESS.c_str(), "Join by address opens the address");
 	text("192.168.1.20");
 	shot("address_key.png", w, h);
 	pad(SDL_GAMEPAD_BUTTON_DPAD_DOWN);
 	shot("address_pad.png", w, h);
 	pad(SDL_GAMEPAD_BUTTON_EAST);   // (B: back to Play by address)
-	check(top() == "Play by address", "B goes back from the address");
+	check(top() == tr::P_PLAY_ADDRESS.c_str(), "B goes back from the address");
 	key(SDL_SCANCODE_ESCAPE);
 	key(SDL_SCANCODE_ESCAPE);   // (More: back to the browser)
 	s.address.clear();
@@ -277,7 +441,7 @@ int main(int argc, char **argv)
 	key(SDL_SCANCODE_RETURN);
 	key(SDL_SCANCODE_DOWN);
 	key(SDL_SCANCODE_RETURN);
-	check(top() == "Settings", "Settings is in More, under Play by address");
+	check(top() == tr::P_SETTINGS.c_str(), "Settings is in More, under Play by address");
 	for (int i = 0; i < 3; i++) key(SDL_SCANCODE_DOWN);
 	key(SDL_SCANCODE_RIGHT);
 	key(SDL_SCANCODE_RIGHT);
@@ -299,19 +463,20 @@ int main(int argc, char **argv)
 	key(SDL_SCANCODE_RIGHT);
 	check(s.chime, "and on");
 	shot("settings.png", w, h);
+	settle_check("settings.png", w, h);
 	s.max_ping = 0;
 	key(SDL_SCANCODE_ESCAPE);
 	key(SDL_SCANCODE_ESCAPE);   // (More: back to the browser)
 	again();
 
 	// by address: hosting, then joining a host that isn't there
-	std::string err;
-	if (!o.host(s, err)) fprintf(stderr, "menutest: hosting: %s\n", err.c_str());
+	tr::line err;
+	if (!o.host(s, err)) fprintf(stderr, "menutest: hosting: %s\n", err.en().c_str());
 	again();
 	shot("address_hosting.png", w, h);
 	o.stop();
 	s.address = "192.168.1.20";
-	if (!o.join(s, err)) fprintf(stderr, "menutest: joining: %s\n", err.c_str());
+	if (!o.join(s, err)) fprintf(stderr, "menutest: joining: %s\n", err.en().c_str());
 	o.poll(1000);
 	again();
 	shot("address_joining.png", w, h);
@@ -320,7 +485,7 @@ int main(int argc, char **argv)
 	shot("address_failed.png", w, h);
 	check(!o.join_failure().empty() && o.last_try() == Online::Try::join, "a join by address that failed: Couldn't connect, to try again");
 	key(SDL_SCANCODE_ESCAPE);
-	check(o.join_failure().empty() && top() == "Online" && gm.selected() < 8, "Esc on Couldn't connect: back to the browser");
+	check(o.join_failure().empty() && top() == tr::P_ONLINE.c_str() && gm.selected() < 8, "Esc on Couldn't connect: back to the browser");
 
 	// a room code's (the lobby: VF_LOBBY, e.g. tools/lobby's npx wrangler dev, or test/serve.mjs with its switches; an
 	// older lobby too: what it has on, from its /v1/online, says what's expected)
@@ -350,7 +515,7 @@ int main(int argc, char **argv)
 		o2.identity = o.identity;
 		OnlineSettings s2 = s;
 		s2.name = "AKIRAFAN";
-		if (!o2.find_random(s2, err)) fprintf(stderr, "menutest: the other's random: %s\n", err.c_str());
+		if (!o2.find_random(s2, err)) fprintf(stderr, "menutest: the other's random: %s\n", err.en().c_str());
 		const uint64_t r0 = SDL_GetTicks();
 		while (SDL_GetTicks() - r0 < 15000 && !(o.step_now() == Online::Step::connecting && o2.step_now() == Online::Step::connecting)) {
 			o.poll(double(SDL_GetTicks()));
@@ -404,7 +569,7 @@ int main(int argc, char **argv)
 		key(SDL_SCANCODE_RIGHT);
 		key(SDL_SCANCODE_RETURN);
 		text("zzz222");   // (the 6th letter: it joins)
-		check(top() == "Online" && o.phase() == Online::Phase::joining, "the 6th letter joins");
+		check(top() == tr::P_ONLINE.c_str() && o.phase() == Online::Phase::joining, "the 6th letter joins");
 		shot("room_joining.png", w, h);
 		poll_for(15000, [&] { return o.phase() == Online::Phase::off; });
 		again();
@@ -430,7 +595,7 @@ int main(int argc, char **argv)
 		s.room_who = 2;
 		const std::string named_was = s.room_name;
 		s.room_name = "SH1T ROOM";   // (a name the lobby's word filter won't show: listed as its host's)
-		if (!o.host_room(s, err)) fprintf(stderr, "menutest: a public room: %s\n", err.c_str());
+		if (!o.host_room(s, err)) fprintf(stderr, "menutest: a public room: %s\n", err.en().c_str());
 		poll_for(15000, [&] { return o.step_now() == Online::Step::waiting || o.phase() == Online::Phase::off; });
 		const std::string pub = o.room_code();
 		check(pub.size() == 7 && o.watch_code().empty() != has_watch, ("a public room: a code, and a watch code only with watching (" + pub + ", " + o.watch_code() + ")").c_str());
@@ -455,10 +620,10 @@ int main(int argc, char **argv)
 			check(o2.rooms_state() == 3, "rooms off: the browser says Rooms aren't available right now");
 		}
 		if (!has_watch) {   // (a watcher told plainly, the host's room as it was)
-			if (!o2.watch(s2, pub, err)) fprintf(stderr, "menutest: watch: %s\n", err.c_str());
+			if (!o2.watch(s2, pub, err)) fprintf(stderr, "menutest: watch: %s\n", err.en().c_str());
 			for (const uint64_t t0 = SDL_GetTicks(); SDL_GetTicks() - t0 < 8000 && o2.phase() != Online::Phase::off;) { o.poll(double(SDL_GetTicks())); o2.poll(double(SDL_GetTicks())); SDL_Delay(10); }
 			printf("watching with watching off: %s\n", o2.join_failure().c_str());
-			check(o2.phase() == Online::Phase::off && o2.join_failure() == tr::WATCH_OFF, "watching off: a watcher told Watching isn't available right now");
+			check(o2.phase() == Online::Phase::off && o2.join_failure() == std::string(tr::WATCH_OFF), "watching off: a watcher told Watching isn't available right now");
 			check(o.step_now() == Online::Step::waiting, "and the host's room as it was");
 			o2.forget_failure();
 		}
@@ -488,10 +653,10 @@ int main(int argc, char **argv)
 				counted += sr.status == 200 && vfnet::json::parse(sr.body, sv) && sv["watchers"].n == i + 1;
 			}
 			check(counted == 400, ("400 watching a match, counted (" + std::to_string(counted) + ")").c_str());
-			if (!o2.watch(s2, wc, err)) fprintf(stderr, "menutest: watch: %s\n", err.c_str());
+			if (!o2.watch(s2, wc, err)) fprintf(stderr, "menutest: watch: %s\n", err.en().c_str());
 			for (const uint64_t t0 = SDL_GetTicks(); SDL_GetTicks() - t0 < 8000 && o2.phase() != Online::Phase::off;) { o.poll(double(SDL_GetTicks())); o2.poll(double(SDL_GetTicks())); SDL_Delay(10); }
 			printf("watching the 401st: %s\n", o2.join_failure().c_str());
-			check(o2.phase() == Online::Phase::off && o2.join_failure() == tr::WATCH_FULL, "the 401st watcher: Too many watching right now");
+			check(o2.phase() == Online::Phase::off && o2.join_failure() == std::string(tr::WATCH_FULL), "the 401st watcher: Too many watching right now");
 			check(o.step_now() == Online::Step::waiting, "and the host's room as it was");
 			o2.forget_failure();
 		}
@@ -501,7 +666,7 @@ int main(int argc, char **argv)
 		// watching is no way to find room codes): the game looks for its match (and after 2 minutes says none began);
 		// without watching (switched off, an older lobby) it says so at once
 		again();
-		if (!o.watch(s, "QQQ222", err)) fprintf(stderr, "menutest: watch: %s\n", err.c_str());
+		if (!o.watch(s, "QQQ222", err)) fprintf(stderr, "menutest: watch: %s\n", err.en().c_str());
 		if (has_watch) {
 			poll_for(4000, [&] { return o.phase() == Online::Phase::off; });
 			again();
@@ -524,7 +689,7 @@ int main(int argc, char **argv)
 		s.lobby = "none";   // (no room opened by these pages' presses)
 		gm.select_row(2);
 		key(SDL_SCANCODE_RETURN);   // (Create room: the name's set)
-		check(top() == "Create room" && gm.selected() == 2 && s.room_who == 0, "Create room: on Create, not listed (the code only) as ever");
+		check(top() == tr::P_CREATE_ROOM.c_str() && gm.selected() == 2 && s.room_who == 0, "Create room: on Create, not listed (the code only) as ever");
 		shot("create_room.png", w, h);
 		gm.select_row(1);
 		key(SDL_SCANCODE_RETURN);
@@ -534,14 +699,14 @@ int main(int argc, char **argv)
 		check(s.room_who == 0, "and off");
 		gm.select_row(0);
 		key(SDL_SCANCODE_RETURN);
-		check(top() == "Room name", "Name: typed");
+		check(top() == tr::P_ROOM_NAME.c_str(), "Name: typed");
 		for (int i = 0; i < 20; i++) key(SDL_SCANCODE_BACKSPACE);
 		text("korea finals");
 		shot("room_name.png", w, h);
 		key(SDL_SCANCODE_RETURN);
-		check(s.room_name == "KOREA FINALS" && top() == "Create room", ("the room's name (" + s.room_name + ")").c_str());
+		check(s.room_name == "KOREA FINALS" && top() == tr::P_CREATE_ROOM.c_str(), ("the room's name (" + s.room_name + ")").c_str());
 		key(SDL_SCANCODE_ESCAPE);
-		check(top() == "Online", "Esc: back to the browser");
+		check(top() == tr::P_ONLINE.c_str(), "Esc: back to the browser");
 		// the browser with 60 rooms (the lobby's, made up): scrolled with the selection, a page at a time, filtered
 		std::vector<Online::RoomRow> rows;
 		// (every host once, every opponent once, a room's name once: as a real list would be)
@@ -607,7 +772,7 @@ int main(int argc, char **argv)
 		      ("a new list: the room selected still selected (" + std::to_string(now_row) + ")").c_str());
 		shot("browser_new.png", w, h);
 		pad(SDL_GAMEPAD_BUTTON_NORTH);   // (Y: the room's own page)
-		check(top() == "Room", "Y: the room's own page");
+		check(top() == tr::P_ROOM.c_str(), "Y: the room's own page");
 		shot("room_view.png", w, h);
 		pad(SDL_GAMEPAD_BUTTON_EAST);
 		{   // (a Quick match: the most watched, the first match in the list; its own page to watch only, no Join)
@@ -618,13 +783,13 @@ int main(int argc, char **argv)
 			check(gm.selected() == 8 + open, "the Quick match selected");
 			shot("browser_quick.png", w, h);
 			pad(SDL_GAMEPAD_BUTTON_NORTH);
-			check(top() == "Room", "Y on a Quick match: its page");
+			check(top() == tr::P_ROOM.c_str(), "Y on a Quick match: its page");
 			shot("room_view_quick.png", w, h);
 			gm.select_row(1);
 			gm.select_row(2);   // (no third: Watch and Back only)
 			check(gm.selected() == 1, "a Quick match's page: Watch and Back, no Join");
 			key(SDL_SCANCODE_RETURN);
-			check(top() == "Online" && o.phase() == Online::Phase::off, "and Back goes back");
+			check(top() == tr::P_ONLINE.c_str() && o.phase() == Online::Phase::off, "and Back goes back");
 		}
 		// the filter: open rooms; then playing, with none
 		gm.select_row(6);   // (Open)
@@ -652,12 +817,12 @@ int main(int argc, char **argv)
 				gm.select_row(8 + r);
 				pad(SDL_GAMEPAD_BUTTON_NORTH);   // (Y: the room's own page)
 				shot("room_view_locked.png", w, h);
-				check(top() == "Room", "a locked room's page: drawn");
+				check(top() == tr::P_ROOM.c_str(), "a locked room's page: drawn");
 				pad(SDL_GAMEPAD_BUTTON_EAST);
 				gm.select_row(8 + r);
 				key(SDL_SCANCODE_RETURN);   // (A: join it, or watch it)
 				check(o.phase() == Online::Phase::off, "a locked room: nothing started without its code");
-				while (top() != "Online") key(SDL_SCANCODE_ESCAPE);
+				while (top() != tr::P_ONLINE.c_str()) key(SDL_SCANCODE_ESCAPE);
 			}
 			o.set_rooms({});
 			again();
@@ -667,7 +832,7 @@ int main(int argc, char **argv)
 		gm.push(online_menu::page(o, s, gm, changed));
 		// watching: a match's code typed; the screen while it's found and caught up with
 		s.lobby = "http://127.0.0.1:9";   // (nobody there: it goes on looking)
-		if (!o.watch(s, "QX7KMP", err)) fprintf(stderr, "menutest: watch: %s\n", err.c_str());
+		if (!o.watch(s, "QX7KMP", err)) fprintf(stderr, "menutest: watch: %s\n", err.en().c_str());
 		again();
 		check(o.watching() && o.playing(), "watching: a match on, as the host program sees it (its frames through step)");
 		shot("watch_finding.png", w, h);
@@ -675,31 +840,31 @@ int main(int argc, char **argv)
 		// the lobby down (nobody at its address): each says so in one plain line; the browser its unreachable state
 		{
 			auto until_off = [&](double ms) { poll_for(ms, [&] { return o.phase() == Online::Phase::off; }); };
-			if (!o.enter_code(s, "KXQ4M7", err)) fprintf(stderr, "menutest: enter code: %s\n", err.c_str());
+			if (!o.enter_code(s, "KXQ4M7", err)) fprintf(stderr, "menutest: enter code: %s\n", err.en().c_str());
 			until_off(10000);
-			check(o.join_failure() == tr::ONLINE_DOWN, ("the lobby down: Enter code says so plainly (" + o.join_failure() + ")").c_str());
+			check(o.join_failure() == std::string(tr::ONLINE_DOWN), ("the lobby down: Enter code says so plainly (" + o.join_failure() + ")").c_str());
 			o.forget_failure();
-			if (!o.find_random(s, err)) fprintf(stderr, "menutest: quick match: %s\n", err.c_str());
+			if (!o.find_random(s, err)) fprintf(stderr, "menutest: quick match: %s\n", err.en().c_str());
 			until_off(10000);
 			again();
 			shot("quick_unavailable.png", w, h);
-			check(o.join_failure() == tr::ONLINE_UNAVAILABLE, ("the lobby down: Quick match says Online is unavailable (" + o.join_failure() + ")").c_str());
+			check(o.join_failure() == std::string(tr::ONLINE_UNAVAILABLE), ("the lobby down: Quick match says Online is unavailable (" + o.join_failure() + ")").c_str());
 			o.forget_failure();
 			o.rooms_list(s, true);
 			poll_for(5000, [&] { o.rooms_list(s); return o.rooms_state() == 2; });
 			again();
 			shot("browser_unreachable.png", w, h);
 			check(o.rooms_state() == 2, "the lobby down: the browser shows it can't reach it");
-			if (!o.watch(s, "QX7KMP", err)) fprintf(stderr, "menutest: watch: %s\n", err.c_str());
+			if (!o.watch(s, "QX7KMP", err)) fprintf(stderr, "menutest: watch: %s\n", err.en().c_str());
 			until_off(40000);
-			check(o.join_failure() == tr::WATCH_LOBBY_GONE, ("the lobby down: a watcher told once, plainly (" + o.join_failure() + ")").c_str());
+			check(o.join_failure() == std::string(tr::WATCH_LOBBY_GONE), ("the lobby down: a watcher told once, plainly (" + o.join_failure() + ")").c_str());
 			o.forget_failure();
 		}
 		s.lobby = lobby_was;
 		// a watched match over
 		Online::LastMatch wm;
 		wm.any = wm.watched = true;
-		wm.why = "The match is over.";
+		wm.why = tr::WATCH_MATCH_OVER;
 		wm.name[0] = "SEOULKICK"; wm.name[1] = "DENVERDAN"; wm.country[0] = "KR"; wm.country[1] = "US";
 		wm.wins[0] = 3; wm.wins[1] = 1; wm.seconds = 412; wm.watch = "QX7KMP";
 		o.set_last_match(wm);
@@ -713,7 +878,7 @@ int main(int argc, char **argv)
 	Online::LastMatch lm;
 	Online::LastMatch &m = lm;
 	m.any = m.was_host = m.by_code = true;
-	m.why = "AKIRAFAN left the match.";
+	m.why = tr::line(tr::OPPONENT_LEFT, { { "name", "AKIRAFAN" } });
 	m.opponent = "AKIRAFAN";
 	m.code = "FR7W25";
 	m.seconds = 760;
@@ -731,7 +896,7 @@ int main(int argc, char **argv)
 	shot("match_over_vs.png", w, h);
 	m.was_host = false;
 	m.lost = m.relay = true;
-	m.why = "AKIRAFAN's game stopped answering.";
+	m.why = tr::line(tr::OPPONENT_STOPPED, { { "name", "AKIRAFAN" } });
 	m.seconds = 195;
 	m.ping = 25;
 	o.set_last_match(m);
@@ -739,19 +904,19 @@ int main(int argc, char **argv)
 	shot("match_lost.png", w, h);
 	key(SDL_SCANCODE_RIGHT);
 	key(SDL_SCANCODE_RETURN);   // (Back: the choices)
-	check(!o.last_match().any && top() == "Online", "Back after a match: the browser");
+	check(!o.last_match().any && top() == tr::P_ONLINE.c_str(), "Back after a match: the browser");
 	pad(SDL_GAMEPAD_BUTTON_DPAD_UP);
 	key(SDL_SCANCODE_ESCAPE);   // (B / Esc: back a page, the home screen's)
-	check(top() != "Online", "Esc on the choices: back a page");
+	check(top() != tr::P_ONLINE.c_str(), "Esc on the choices: back a page");
 	}
 
 	gm.close();
 	menu_page m{ "", "", {} };
-	m.items.push_back({ "Resume", "Back to the match (it goes on while the menu's open).", {}, {}, {} });
+	m.items.push_back({ tr::M_RESUME, tr::M_RESUME_MATCH_HELP, {}, {}, {} });
 	online_menu::match_rows(o, s, gm, changed, m.items);
-	for (const char *r : { "Display", "Sound", "Controls" }) m.items.push_back({ r, "", {}, {}, {} });
+	for (tr::text r : { tr::P_DISPLAY, tr::P_SOUND, tr::P_CONTROLS }) m.items.push_back({ r, "", {}, {}, {} });
 	gm.open(m);
-	gm.set_title("ONLINE MATCH");
+	gm.set_title(tr::TITLE_ONLINE_MATCH);
 	game_menu::net_cells near;
 	near.name = "MRFINSTER"; near.ping = 21; near.delay = 1; near.rollback = 0;
 	gm.set_net(near);
@@ -760,9 +925,9 @@ int main(int argc, char **argv)
 	key(SDL_SCANCODE_RETURN);
 	shot("leave.png", w, h);
 	gm.close();
-	gm.set_title("PAUSED");
+	gm.set_title(tr::TITLE_PAUSED);
 
-	gm.toast("Playing MRFINSTER");
+	gm.toast(tr::fill(tr::ST_PLAYING, { { "name", "MRFINSTER" } }));
 	game_menu::net_cells far;   // (a far one through the relay, Detailed, its name too long)
 	far.name = "GUESTPLAYER12"; far.level = 2; far.ping = 412; far.delay = 11; far.rollback = 6; far.relay = true;
 	far.detailed = true; far.jitter = 12; far.rb_avg = 3.1; far.ahead = 0.4; far.frame_ms = 9.8;
@@ -771,32 +936,32 @@ int main(int argc, char **argv)
 	far.ping = 1234; far.delay = 15; far.ahead = -12.5; far.frame_ms = 17.4; far.name = "G";
 	gm.set_net(far);
 	shot("net_wide.png", w, h);
-	gm.toast("A player couldn't join: Your opponent has v0.1.6-alpha-13-gf9440e8, you have v0.1.7-netplay-test3: you both need the same version.");
+	gm.toast(tr::line(tr::PLAYER_COULDNT_JOIN, { { "why", tr::line("Your opponent has v0.1.6-alpha-13-gf9440e8, you have v0.1.7-netplay-test3: you both need the same version.") } }).str());
 	shot("toast_long.png", w, h);
 	gm.toast("");
 	near.interrupted = true;
 	gm.set_net(near);
-	gm.set_notice("WAITING FOR AKIRAFAN", "The connection dropped. Holding the match for 7 s...", "It carries on from right here if it comes back");
+	gm.set_notice(tr::fill(tr::BANNER_WAITING_FOR, { { "name", "AKIRAFAN" } }), tr::fill(tr::NOTICE_DROPPED, { { "n", "7" } }), tr::NOTICE_CARRIES_ON);
 	shot("interrupted.png", w, h);
 	SDL_Delay(250);
 	shot("interrupted_later.png", w, h);   // (its spinner a quarter turn on)
 	gm.set_notice("");
 	gm.set_net("", 0);
-	gm.show_versus({ "PLAYER 1 \xC2\xB7 HOST", "MRFINSTER", "PLAYER 2", "AKIRAFAN", "Connected directly \xC2\xB7 19 ms", "Both press Start", false, "AU", "JP", "RANDOM", "SECRET: SIBA" });
+	gm.show_versus({ tr::VS_PLAYER_1_HOST, "MRFINSTER", tr::VS_PLAYER_2, "AKIRAFAN", tr::fill(tr::VS_DIRECT_MS, { { "ms", "19" } }), tr::VS_BOTH_PRESS_START, false, "AU", "JP", "RANDOM", "SECRET: SIBA" });
 	for (int i = 0; i < 20; i++) { shot("", w, h); SDL_Delay(20); }   // (its fade in)
 	shot("versus.png", w, h);
 	// (the longest names, 10 wide letters each, with flags: each kept to its side of the badge)
-	gm.show_versus({ "PLAYER 1 \xC2\xB7 HOST", "WWWWWWWWWW", "PLAYER 2", "AAAAAAAAAA", "Connected through a relay \xC2\xB7 61 ms", "Both press Start", true, "AU", "JP" });
+	gm.show_versus({ tr::VS_PLAYER_1_HOST, "WWWWWWWWWW", tr::VS_PLAYER_2, "AAAAAAAAAA", tr::current() == tr::lang::en ? std::string("Connected through a relay \xC2\xB7 61 ms") : tr::fill(tr::VS_RELAY_MS, { { "ms", "61" } }), tr::VS_BOTH_PRESS_START, true, "AU", "JP" });
 	for (int i = 0; i < 20; i++) { shot("", w, h); SDL_Delay(20); }
 	shot("versus_long.png", w, h);
 	for (int i = 0; i < 20; i++) { shot("", w, h); SDL_Delay(200); }   // (gone after its 3.5 s)
-	gm.set_banner("PRESS", "", "OPTIONS");
+	gm.set_banner(tr::BANNER_PRESS, "", "OPTIONS");
 	shot("press_start.png", w, h);
-	gm.set_banner("WAITING FOR AKIRAFAN", "to press Start");
+	gm.set_banner(tr::fill(tr::BANNER_WAITING_FOR, { { "name", "AKIRAFAN" } }), tr::BANNER_TO_PRESS_START);
 	shot("waiting_start.png", w, h);
-	gm.set_banner("PRESS", "for a rematch", "OPTIONS");
+	gm.set_banner(tr::BANNER_PRESS, tr::BANNER_FOR_REMATCH, "OPTIONS");
 	shot("rematch.png", w, h);
-	gm.set_banner("PRESS", "for a rematch", "+");   // (a pad's Start as the Deck names it: one sign, in the middle of its box)
+	gm.set_banner(tr::BANNER_PRESS, tr::BANNER_FOR_REMATCH, "+");   // (a pad's Start as the Deck names it: one sign, in the middle of its box)
 	shot("rematch_plus.png", w, h);
 	gm.set_banner("");
 	{   // (the connection bar in a match: each cell's words in the middle of its box)
@@ -811,8 +976,7 @@ int main(int argc, char **argv)
 		v.watching = true; v.name = "WATCHING"; v.score = "SEOULKICK  2\xE2\x80\x93" "1  DENVERDAN"; v.watchers = 37;
 		gm.set_net(v);
 		shot("net_watching.png", w, h);
-		gm.show_versus({ "PLAYER 1", "SEOULKICK", "PLAYER 2", "DENVERDAN", "Watching \xC2\xB7 a few seconds behind the players",
-		                 "The players never wait for you. Esc or Start: the menu, to stop watching", false, "KR", "US" });
+		gm.show_versus({ tr::VS_PLAYER_1, "SEOULKICK", tr::VS_PLAYER_2, "DENVERDAN", tr::WATCHING_BEHIND, tr::WATCHING_HOW_TO_STOP, false, "KR", "US" });
 		for (int i = 0; i < 20; i++) { shot("", w, h); SDL_Delay(20); }
 		shot("versus_watching.png", w, h);
 		gm.hide_versus();
@@ -827,6 +991,35 @@ int main(int argc, char **argv)
 		                         "http://vf3/join/KXQ4M7", "vf3recomp://vf3/join/../../KXQ4M7", "vf3recomp://vf3//join/KXQ4M7", "vf3recomp://vf3/join/KXQ--4M7", "vf3recomp://vf3/join/KX-Q4M7" })
 			check(!links::parse(bad, l), (std::string("not a link: ") + bad).c_str());
 	}
+	pages(gm, w, h);
+	// Game > Language changed with a page open (as main.cpp's set_language: tr::set, then the menu's set_language): the
+	// page at once in the other language, its letters' fonts first; and back, exactly the picture it was
+	if (tr::current() == tr::lang::en) {
+		menu_page root{ "", "", {} };
+		for (tr::text t : { tr::M_RESUME, tr::P_DISPLAY, tr::P_SOUND, tr::P_GAME, tr::M_ARCADE, tr::P_ONLINE, tr::M_QUIT }) root.items.push_back({ t, "", {}, {}, {} });
+		gm.open(root);
+		gm.select_row(3);
+		auto drawn = [&](const char *name) { for (int i = 0; i < 8; i++) { shot("", w, h); SDL_Delay(40); } shot(name, w, h); return last_px; };
+		const std::vector<uint32_t> en = drawn("switch_en.png");
+		std::vector<uint32_t> other;
+		for (tr::lang l : { tr::lang::ko, tr::lang::ja, tr::lang::ru, tr::lang::tr }) {
+			tr::set(l);
+			gm.set_language();
+			other = drawn((std::string("switch_") + tr::code(l) + ".png").c_str());
+			check(other != en, (std::string("Game > Language: the page drawn in ") + tr::code(l) + " at once").c_str());
+			for (const std::string &o : gm.misaligned()) misaligned.push_back(std::string("switch_") + tr::code(l) + ": " + o);
+		}
+		tr::set(tr::lang::en);
+		gm.set_language();
+		check(drawn("switch_back.png") == en, "and back in English, the picture it was");
+		gm.close();
+	}
+	// text past its box, anywhere: listed (tools/langcheck.py runs this in every language and fails a language on a
+	// box its text overflows where the English doesn't; pseudo, 40% longer than any, finds the tight places)
+	for (const std::string &o : overflows) printf("overflow: %s\n", o.c_str());
+	printf("%zu lines past their box\n", overflows.size());
+	for (const std::string &o : misaligned) check(false, ("a row out of line: " + o).c_str());
+	check(misaligned.empty(), "every page's rows start in line");
 	if (fails) { fprintf(stderr, "menutest: %d failed\n", fails); return 1; }
 	printf("all passed\n");
 	return 0;

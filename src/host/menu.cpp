@@ -1,7 +1,8 @@
 #include "menu.h"
-#include "online_text.h"
+#include "text.h"
 #include "flags.h"
 #include <RmlUi/Core.h>
+#include <RmlUi/Core/ElementText.h>
 #include "RmlUi_Platform_SDL.h"
 #include "RmlUi_Renderer_SDL.h"
 #include <algorithm>
@@ -21,6 +22,40 @@ std::string escape(const std::string &s)
 		else o += c;
 	}
 	return o;
+}
+
+// The fonts for what Barlow Condensed hasn't got (assets/fonts: each a subset of Noto Sans with only the letters the
+// strings use, tools/fonts/subset.py): Korean, Japanese, Chinese (Simplified, Traditional) and Cyrillic (condensed, as
+// Barlow; its italic for Barlow's). Fallback faces: a glyph is looked for in them only when Barlow has none.
+struct fallback_font { const char *file, *family; int weight; bool italic; };
+const fallback_font FALLBACK_FONTS[] = {
+	{ "NotoSansKR-Medium.ttf", "Noto Sans KR", 500, false }, { "NotoSansKR-Bold.ttf", "Noto Sans KR", 700, false },
+	{ "NotoSansJP-Medium.ttf", "Noto Sans JP", 500, false }, { "NotoSansJP-Bold.ttf", "Noto Sans JP", 700, false },
+	{ "NotoSansSC-Medium.ttf", "Noto Sans SC", 500, false }, { "NotoSansSC-Bold.ttf", "Noto Sans SC", 700, false },
+	{ "NotoSansTC-Medium.ttf", "Noto Sans TC", 500, false }, { "NotoSansTC-Bold.ttf", "Noto Sans TC", 700, false },
+	{ "NotoSansCyr-Medium.ttf", "Noto Sans Cyr", 500, false }, { "NotoSansCyr-SemiBold.ttf", "Noto Sans Cyr", 600, false },
+	{ "NotoSansCyr-BoldItalic.ttf", "Noto Sans Cyr", 700, true },
+};
+// (the language on's own first: Chinese, Japanese and Korean share characters each draws its own way)
+Rml::StringList fallback_order(tr::lang l)
+{
+	switch (l) {
+	case tr::lang::ko: return { "Noto Sans KR", "Noto Sans JP", "Noto Sans SC", "Noto Sans TC", "Noto Sans Cyr" };
+	case tr::lang::ja: return { "Noto Sans JP", "Noto Sans SC", "Noto Sans TC", "Noto Sans KR", "Noto Sans Cyr" };
+	case tr::lang::zh_hans: return { "Noto Sans SC", "Noto Sans TC", "Noto Sans JP", "Noto Sans KR", "Noto Sans Cyr" };
+	case tr::lang::zh_hant: return { "Noto Sans TC", "Noto Sans SC", "Noto Sans JP", "Noto Sans KR", "Noto Sans Cyr" };
+	default: return { "Noto Sans Cyr", "Noto Sans JP", "Noto Sans KR", "Noto Sans SC", "Noto Sans TC" };
+	}
+}
+
+// The menu's key hints (under the rows), in the language on: each key's name, then what it does
+std::string hint_rml()
+{
+	auto key = [](const std::string &k) { return "<span class=\"key\">" + escape(k) + "</span>"; };
+	return key(tr::KEYS_ARROWS) + " / " + key(tr::KEYS_DPAD) + " " + escape(tr::HINT_CHOOSE) +
+	       " &nbsp;&nbsp;" + key(tr::KEYS_LEFT_RIGHT) + " " + escape(tr::HINT_CHANGE) +
+	       " &nbsp;&nbsp;" + key("Enter") + " / " + key("A") + " " + escape(tr::HINT_SELECT) +
+	       " &nbsp;&nbsp;" + key("Esc") + " / " + key("B") + " " + escape(tr::HINT_BACK);
 }
 
 int first_selectable(const menu_page &p)
@@ -122,25 +157,25 @@ void game_menu::set_net(const net_cells &c)
 	// narrower, centred under the first)
 	auto cell = [](const char *label, const std::string &v, int w, const char *cls = "") {
 		return std::string("<div class=\"c ") + cls + "\" style=\"width: " + std::to_string(w) + "dp;\">" +
-		       (*label ? std::string("<span class=\"l\">") + label + "</span>" : "") + "<span class=\"v\">" + escape(v) + "</span></div>";
+		       (*label ? std::string("<span class=\"l\">") + escape(label) + "</span>" : "") + "<span class=\"v\">" + escape(v) + "</span></div>";
 	};
 	auto num = [](const char *f, double v) { char b[32]; snprintf(b, sizeof b, f, v); return std::string(b); };
 	std::string name = c.name;   // (10 letters fit)
 	if (name.size() > 10) name = name.substr(0, 9) + "\xE2\x80\xA6";
 	std::string rml = "<div class=\"row\"><div class=\"c name\" style=\"width: 118dp;\"><span class=\"v\">" + escape(name) + "</span><span class=\"dot\">" + (m->mono ? "\xE2\x97\x8F" : "\xE2\x80\xA2") + "</span></div>";   // (a circle of the font: drawn round at any size; Barlow has only the bullet)
-	const std::string watchers = c.watchers > 0 ? cell(tr::WATCHING, std::to_string(std::min(c.watchers, 99999)), 112, "eye") : "";   // (how many watch, if any: drawn only)
+	const std::string watchers = c.watchers > 0 ? cell(tr::CELL_WATCHING.c_str(), std::to_string(std::min(c.watchers, 99999)), 112, "eye") : "";   // (how many watch, if any: drawn only)
 	if (c.watching) {   // (a watched match: one cell, watching and how many, and the score)
-		rml = "<div class=\"row\"><div class=\"c name\" style=\"width: 150dp;\"><span class=\"v\">" + std::string(tr::WATCHING) + (c.watchers > 0 ? " \xC2\xB7 " + std::to_string(std::min(c.watchers, 99999)) : std::string()) +
+		rml = "<div class=\"row\"><div class=\"c name\" style=\"width: 150dp;\"><span class=\"v\">" + escape(c.watchers > 0 ? tr::fill(tr::CELL_WATCHING_N, { { "n", std::to_string(std::min(c.watchers, 99999)) } }) : std::string(tr::CELL_WATCHING)) +
 		      "</span><span class=\"dot\">" + (m->mono ? "\xE2\x97\x8F" : "\xE2\x80\xA2") + "</span></div>" + cell("", c.score, 236, "mid") + "</div>";
 		show_net(rml, c.level <= 0 ? "cells good" : "cells fair");
 		return;
 	}
-	if (c.interrupted) rml += cell("", "CONNECTION INTERRUPTED", 222, "lost");
-	else rml += cell("PING", std::to_string(std::min(c.ping, 9999)), 86) + cell("DELAY", std::to_string(c.delay), 76) + cell("RB", std::to_string(c.rollback), 50);
-	rml += cell("", c.relay ? "RELAY" : "DIRECT", 66, c.relay ? "via relay" : "via direct") + watchers + "</div>";
+	if (c.interrupted) rml += cell("", tr::CELL_INTERRUPTED, 222, "lost");
+	else rml += cell(tr::CELL_PING.c_str(), std::to_string(std::min(c.ping, 9999)), 86) + cell(tr::CELL_DELAY.c_str(), std::to_string(c.delay), 76) + cell(tr::CELL_RB.c_str(), std::to_string(c.rollback), 50);
+	rml += cell("", c.relay ? tr::CELL_RELAY : tr::CELL_DIRECT, 66, c.relay ? "via relay" : "via direct") + watchers + "</div>";
 	if (c.detailed && !c.interrupted)   // (above it: the first row stays where it is either way)
-		rml = "<div class=\"row two\">" + cell("JITTER", num("%.0f", c.jitter), 92) + cell("RB AVG", num("%.1f", c.rb_avg), 92) +
-		      cell("AHEAD", num("%+.1f", c.ahead), 86) + cell("FRAME", num("%.1f", c.frame_ms), 92) + "</div>" + rml;
+		rml = "<div class=\"row two\">" + cell(tr::CELL_JITTER.c_str(), num("%.0f", c.jitter), 92) + cell(tr::CELL_RB_AVG.c_str(), num("%.1f", c.rb_avg), 92) +
+		      cell(tr::CELL_AHEAD.c_str(), num("%+.1f", c.ahead), 86) + cell(tr::CELL_FRAME.c_str(), num("%.1f", c.frame_ms), 92) + "</div>" + rml;
 	show_net(rml, c.interrupted ? "cells poor" : c.level <= 0 ? "cells good" : c.level == 1 ? "cells fair" : "cells poor");
 }
 
@@ -282,6 +317,107 @@ void game_menu::set_footer(const std::string &text)
 		if (Rml::Element *e = m->doc->GetElementById("ver")) e->SetInnerRML(escape(text));
 }
 
+// The language on (tr::current) into the documents: their body's class (the .cjk and lang- styles), the key hints,
+// and the fallback fonts' order (the glyphs taken from them looked for again)
+void game_menu::set_language()
+{
+	if (!m->ctx) return;
+	Rml::SetFallbackFontOrder(fallback_order(tr::current()));
+	for (Rml::ElementDocument *d : { m->doc, m->overlay, m->screen })
+		if (d) d->SetClassNames(tr::css_class());
+	if (m->doc)
+		if (Rml::Element *e = m->doc->GetElementById("hint")) e->SetInnerRML(hint_rml());
+	Rml::ReleaseFontResources();
+	if (m_open) build();
+}
+
+// Text past its box: each line of each text in the shown documents against the boxes it's in (each block it's inside,
+// up to the first one placed absolutely: what its place is measured from), and the window. (menutest: every screen
+// in every language, so a translation that doesn't fit is found without looking.)
+std::vector<std::string> game_menu::overflow()
+{
+	std::vector<std::string> out;
+	if (!m->ctx) return out;
+	m->ctx->Update();
+	const Rml::Vector2i win = m->ctx->GetDimensions();
+	std::vector<Rml::ElementDocument *> docs;
+	if (m_open) docs.push_back(on_screen() && m->screen ? m->screen : m->doc);
+	if (m->overlay) docs.push_back(m->overlay);
+	std::function<void(Rml::Element *)> walk = [&](Rml::Element *e) {
+		if (!e->IsVisible()) return;
+		if (auto *t = dynamic_cast<Rml::ElementText *>(e)) {
+			const Rml::Vector2f at = t->GetAbsoluteOffset(Rml::BoxArea::Border);
+			for (const auto &ln : t->GetLines()) {
+				if (ln.text.find_first_not_of(" \t\n") == std::string::npos) continue;
+				const float x0 = at.x + ln.position.x, x1 = x0 + float(ln.width);
+				const float lh = t->GetLineHeight(), y1 = at.y + ln.position.y, y0 = y1 - lh * 0.8f;
+				std::string where;
+				if (x0 < -1 || x1 > float(win.x) + 1) where = "the window";
+				for (Rml::Element *a = t->GetParentNode(); a && where.empty(); a = a->GetParentNode()) {
+					if (a->GetDisplay() == Rml::Style::Display::Inline) continue;
+					const Rml::Vector2f p = a->GetAbsoluteOffset(Rml::BoxArea::Border), sz = a->GetBox().GetSize(Rml::BoxArea::Border);
+					if (sz.x <= 0) continue;
+					// (a box that clips what's past its bottom, but not the menu's list of rows: it scrolls)
+					const bool clips = a->GetComputedValues().overflow_y() != Rml::Style::Overflow::Visible && a->GetId() != "rows";
+					if (x0 < p.x - 1.5f || x1 > p.x + sz.x + 1.5f || (clips && (y0 < p.y - 1.5f || y1 > p.y + sz.y + 1.5f)))
+						where = "#" + a->GetId() + "." + a->GetClassNames();
+					if (a->GetPosition() == Rml::Style::Position::Absolute || a->GetPosition() == Rml::Style::Position::Fixed) break;
+				}
+				if (!where.empty()) {
+					size_t cut = std::min<size_t>(ln.text.size(), 60);
+					while (cut < ln.text.size() && (uint8_t(ln.text[cut]) & 0xC0) == 0x80) cut--;   // (a whole letter)
+					out.push_back("\"" + ln.text.substr(0, cut) + "\" past " + where);
+				}
+			}
+		}
+		for (int i = 0; i < e->GetNumChildren(); i++) walk(e->GetChild(i));
+	};
+	for (Rml::ElementDocument *d : docs) if (d && d->IsVisible()) walk(d);
+	return out;
+}
+
+std::vector<std::string> game_menu::misaligned()
+{
+	// The rows' labels each start where the others do (but the selected one's, and a sub row's: indented on purpose),
+	// and none starts with a space (a full-width one, a no-break one: what the layout doesn't collapse).
+	std::vector<std::string> out;
+	if (!m->ctx || !m_open || on_screen()) return out;
+	m->ctx->Update();
+	Rml::Element *rows = m->doc->GetElementById("rows");
+	if (!rows) return out;
+	std::vector<std::pair<float, std::string>> at;
+	for (int i = 0; i < rows->GetNumChildren(); i++) {
+		Rml::Element *r = rows->GetChild(i);
+		if (!r->IsVisible() || !r->IsClassSet("row")) continue;
+		bool plain = true;
+		for (const char *c : { "selected", "sub", "heading", "info", "error", "good", "big" }) plain = plain && !r->IsClassSet(c);
+		Rml::Element *label = nullptr;
+		for (int j = 0; j < r->GetNumChildren() && !label; j++)
+			if (r->GetChild(j)->IsClassSet("label")) label = r->GetChild(j);
+		std::function<Rml::ElementText *(Rml::Element *)> first = [&](Rml::Element *e) -> Rml::ElementText * {
+			if (auto *t = dynamic_cast<Rml::ElementText *>(e); t && !t->GetLines().empty()) return t;
+			for (int j = 0; j < e->GetNumChildren(); j++) if (Rml::ElementText *t = first(e->GetChild(j))) return t;
+			return nullptr;
+		};
+		Rml::ElementText *t = first(label ? label : r);
+		if (!t) continue;
+		const auto &ln = t->GetLines().front();
+		const std::string &s = ln.text;
+		if (!s.empty() && (s[0] == ' ' || s.rfind("\xE3\x80\x80", 0) == 0 || s.rfind("\xC2\xA0", 0) == 0))
+			out.push_back("\"" + s.substr(0, std::min<size_t>(s.size(), 40)) + "\" starts with a space");
+		if (plain) at.push_back({ t->GetAbsoluteOffset(Rml::BoxArea::Border).x + ln.position.x, s.substr(0, std::min<size_t>(s.size(), 40)) });
+	}
+	if (at.size() < 2) return out;
+	std::vector<float> xs;
+	for (const auto &a : at) xs.push_back(a.first);
+	std::nth_element(xs.begin(), xs.begin() + xs.size() / 2, xs.end());
+	const float mid = xs[xs.size() / 2];
+	for (const auto &a : at)
+		if (std::fabs(a.first - mid) > 1.0f)
+			out.push_back("\"" + a.second + "\" starts at " + std::to_string(int(std::lround(a.first))) + ", the rows at " + std::to_string(int(std::lround(mid))));
+	return out;
+}
+
 bool game_menu::init(SDL_Window *win, SDL_Renderer *ren, const std::string &assets)
 {
 	m->win = win;
@@ -293,6 +429,11 @@ bool game_menu::init(SDL_Window *win, SDL_Renderer *ren, const std::string &asse
 	if (!Rml::Initialise()) return false;
 	for (const char *f : { "BarlowCondensed-Medium.ttf", "BarlowCondensed-SemiBold.ttf", "BarlowCondensed-BoldItalic.ttf" })
 		if (!Rml::LoadFontFace(assets + "/fonts/" + f)) return false;
+	// the other scripts' letters, where Barlow has none: each language's own subset (assets/fonts/README.txt), fallback
+	// faces looked in only for a glyph Barlow hasn't got (English is Barlow's alone), in the order set_language gives
+	for (const fallback_font &f : FALLBACK_FONTS)
+		if (!Rml::LoadFontFace(assets + "/fonts/" + f.file, f.family, f.italic ? Rml::Style::FontStyle::Italic : Rml::Style::FontStyle::Normal, Rml::Style::FontWeight(f.weight), true))
+			SDL_Log("menu: %s isn't there: its language's letters not drawn", f.file);
 	// (online play's figures: without it, in Barlow, set below)
 	const bool mono = m->mono = Rml::LoadFontFace(assets + "/fonts/JetBrainsMono-SemiBold.ttf", "JetBrains Mono", Rml::Style::FontStyle::Normal);
 	int w = 0, h = 0;
@@ -301,6 +442,7 @@ bool game_menu::init(SDL_Window *win, SDL_Renderer *ren, const std::string &asse
 	if (!m->ctx) return false;
 	m->doc = m->ctx->LoadDocument(assets + "/ui/menu.rml");
 	if (!m->doc) return false;
+	if (Rml::Element *e = m->doc->GetElementById("title")) e->SetInnerRML(escape(tr::TITLE_PAUSED));   // (the file's is English)
 	m->overlay = m->ctx->LoadDocument(assets + "/ui/overlay.rml");   // optional
 	if (m->overlay) {
 		m->overlay->Show();
@@ -317,6 +459,7 @@ bool game_menu::init(SDL_Window *win, SDL_Renderer *ren, const std::string &asse
 			d->AddEventListener(Rml::EventId::Click, &m->listener);
 		}
 	m_pad = SDL_HasGamepad();   // (a pad plugged in: the screens start as a pad's, a Steam Deck's)
+	set_language();
 	return true;
 }
 
@@ -473,13 +616,25 @@ void game_menu::end_capture()
 
 void game_menu::show_help()
 {
-	if (m_capture) {
-		m->doc->GetElementById("note")->SetInnerRML("<span class=\"key\">" + escape(m_capture_prompt) + "</span>");
-		return;
+	Rml::Element *note = m->doc->GetElementById("note");
+	if (m_capture) note->SetInnerRML("<span class=\"key\">" + escape(m_capture_prompt) + "</span>");
+	else {
+		const menu_page &p = m_stack.back();
+		const std::string &h = m_sel < int(p.items.size()) && !p.items[m_sel].help.empty() ? p.items[m_sel].help : p.note;
+		note->SetInnerRML(escape(h));
 	}
-	const menu_page &p = m_stack.back();
-	const std::string &h = m_sel < int(p.items.size()) && !p.items[m_sel].help.empty() ? p.items[m_sel].help : p.note;
-	m->doc->GetElementById("note")->SetInnerRML(escape(h));
+	// (a translation longer than its four lines: a size smaller, then another, till it fits, 14dp at the least. Not
+	// the English: its layout as it was)
+	note->RemoveProperty("font-size");
+	note->RemoveProperty("line-height");
+	if (tr::current() == tr::lang::en) return;
+	const float dp = m->ctx->GetDensityIndependentPixelRatio();
+	m->doc->UpdateDocument();
+	for (int size = 17; size >= 14 && note->GetScrollHeight() > note->GetClientHeight() + 1; size--) {
+		note->SetProperty("font-size", std::to_string(float(size) * dp) + "px");
+		note->SetProperty("line-height", std::to_string(float(size) * 20.0f / 18.0f * dp) + "px");
+		m->doc->UpdateDocument();
+	}
 }
 
 void game_menu::select(int i)

@@ -8,6 +8,7 @@
 // By address (on the same network, or over a VPN): the host waits on a port, the other types its address.
 #pragma once
 #include "menu.h"
+#include "text.h"
 #include "vf3_netplay.h"
 #include "../net/link.h"
 #include "../net/room_link.h"
@@ -51,7 +52,7 @@ public:
 	enum class Phase { off, hosting, joining, playing, watching };   // (watching: another match, a few seconds behind; frames through step as a match's)
 	// Where a room code's match has got to (none: by address)
 	enum class Step { none, getting_ready, opening, waiting, finding, searching, connecting };   // (searching: a random opponent)
-	struct Notice { enum Kind { joined, ended, refused, tip, watching } kind; std::string text; };   // (tip: a toast, nothing more; watching: a watched match's first picture)
+	struct Notice { enum Kind { joined, ended, refused, tip, watching } kind; tr::line text; };   // (tip: a toast, nothing more; watching: a watched match's first picture)
 	// The match that ended last: what ended it, who and how long, for the Online page to show after it (and offer
 	// the same again)
 	struct LastMatch
@@ -60,7 +61,8 @@ public:
 		bool lost = false;            // the connection lost (else left, or out of step)
 		bool random = false;          // a random opponent's (else a code's or an address's)
 		bool relay = false;           // it went through a relay
-		std::string why, opponent;
+		tr::line why;                 // (shown in the language on, logged in English)
+		std::string opponent;
 		std::string code, address;    // the room's code, or the address joined (for the same again)
 		int seconds = 0, ping = 0;
 		int wins[2] = {};             // matches won between the two: player 1's (the host's), player 2's
@@ -88,18 +90,18 @@ public:
 	// With a room code: open a room (the code comes in a moment: room_code()), or join one
 	// (want: the room's code from before, kept if it's free: a match's Play again; patient: no room yet is waited for,
 	// a minute, the host opening it again)
-	bool host_room(const OnlineSettings &s, std::string &error, const std::string &want = "");
-	bool join_room(const OnlineSettings &s, const std::string &code, std::string &error, bool patient = false);
+	bool host_room(const OnlineSettings &s, tr::line &error, const std::string &want = "");
+	bool join_room(const OnlineSettings &s, const std::string &code, tr::line &error, bool patient = false);
 	// A random opponent: the nearest of those searching (the lobby's), then a room's match like any other
-	bool find_random(const OnlineSettings &s, std::string &error);
+	bool find_random(const OnlineSettings &s, tr::line &error);
 	bool random_match() const { return random; }
 	int searching_with() const { return players; }   // (others searching too, as the lobby last said)
 	// The same again: the last try (Try again), or the last match's (Play again)
-	bool try_again(const OnlineSettings &s, std::string &error);
-	bool play_again(const OnlineSettings &s, std::string &error);
+	bool try_again(const OnlineSettings &s, tr::line &error);
+	bool play_again(const OnlineSettings &s, tr::line &error);
 	// By address
-	bool host(const OnlineSettings &s, std::string &error);
-	bool join(const OnlineSettings &s, std::string &error);
+	bool host(const OnlineSettings &s, tr::line &error);
+	bool join(const OnlineSettings &s, tr::line &error);
 	void stop();                  // stop waiting, or leave the match (the other side is told)
 	void poll(double now_ms);
 	// One frame in a match with this player's input; false if it couldn't run yet (the picture stays)
@@ -140,7 +142,8 @@ public:
 	double slow_down() const { return playing() && session ? std::clamp(session->stats().lead * 0.02, 0.0, 0.06) : 0.0; }
 	const LastMatch &last_match() const { return last; }
 	// Why the last try didn't get going ("" if it did, or none yet): shown on the page it was made from
-	const std::string &join_failure() const { return failure; }
+	std::string join_failure() const { return failure.str(); }
+	const tr::line &join_failure_line() const { return failure; }
 	Step failed_at() const { return fail_step; }   // (how far the failed try got)
 	Try last_try() const { return tried; }
 	bool patient() const { return now < patient_until; }   // (joining a room that isn't open yet: waiting for it)
@@ -152,7 +155,7 @@ public:
 	int hold_left() const { return session ? session->quiet_left_s() : 0; }
 	// What the host's screen says besides how it's going: a player who couldn't join and why, the lobby hard to
 	// reach ("" none)
-	const std::string &host_note() const { return note; }
+	std::string host_note() const { return note.str(); }
 	// Who's to press Start: on the match's title screen 1 this player hasn't yet, 2 the other hasn't; after a match
 	// (the loser out of the game, as its RAM has it) 3 this player's out (Start for a rematch), 4 the other is; 0 none
 	int start_wait() const;
@@ -170,15 +173,15 @@ public:
 	void set_last_match(const LastMatch &m) { last = m; }   // ({}: forgotten, the menu closed after it; tests: one made up)
 	void forget_failure() { failure.clear(); }              // (the menu closed after it)
 	// (a try made from the match's menu that didn't get going, the match left already: said on the Online page)
-	void tell_failure(const std::string &why) { failure = why; fail_step = Step::none; notices.push_back({ Notice::refused, why }); }
+	void tell_failure(const tr::line &why) { failure = why; fail_step = Step::none; notices.push_back({ Notice::refused, why }); }
 	const std::string &local_address() const { return lan; }
 
 	// ---- watching (src/net/watch.h): a match's watchers, and watching one ----
 	// Watch a match by its room's code (the browser's, Enter code's or a link's): the game starts from the match's start
 	// a moment behind the players and runs their inputs; nothing goes to them
-	bool watch(const OnlineSettings &s, const std::string &code, std::string &error);
+	bool watch(const OnlineSettings &s, const std::string &code, tr::line &error);
 	// Enter code: the lobby asked what the code is; a room open is joined, a match on is watched
-	bool enter_code(const OnlineSettings &s, const std::string &code, std::string &error);
+	bool enter_code(const OnlineSettings &s, const std::string &code, tr::line &error);
 	bool watching() const { return ph == Phase::watching; }
 	bool watching_quick() const { return watching() && watch_quick; }   // (a Quick match's: no room to play next in)
 	bool watch_showing() const { return watching() && watch_shown; }   // (its picture up: caught up)
@@ -226,10 +229,10 @@ private:
 	std::string lan, joining_to;
 	double now = 0, logged_at = 0, began_at = 0;
 	LastMatch last;
-	std::string failure;
-	void ended(const std::string &why, bool lost = false);   // (the match over: kept as the last match)
+	tr::line failure;
+	void ended(const tr::line &why, bool lost = false);   // (the match over: kept as the last match)
 	Step fail_step = Step::none;
-	std::string note;
+	tr::line note;
 	bool local_slow = false;
 	vf3net::Score score;
 	mutable size_t start_scan[2] = {};   // (start_wait: how far each player's inputs have been looked through)
@@ -268,7 +271,7 @@ private:
 	double logged_save = 0, logged_run = 0, logged_resim_ms = 0, logged_hash = 0;
 	std::deque<Notice> notices;
 	vfnet::Config config(const OnlineSettings &s) const;
-	bool open_host(std::string &error);
+	bool open_host(tr::line &error);
 	OnlineSettings started_with;
 	vfnet::Link &the_link() { return room ? static_cast<vfnet::Link &>(*room) : static_cast<vfnet::Link &>(*link); }
 
@@ -287,15 +290,15 @@ private:
 	std::string me_json(const std::string &extra) const;   // this side, as the lobby takes it
 	void start_job(std::function<void(Job &)> work);
 	void room_poll();
-	void host_again(const std::string &why);
+	void host_again(const tr::line &why);
 	void room_session(bool host);       // the session, with the lobby's token, on the room's link
 	bool use_terms(const std::string &as, const std::string &them = "");   // the match's terms (the lobby's "as", or "": this side's own): the adapter set for them
 	vfnet::Identity match_identity() const { vfnet::Identity i = identity; i.build = terms; return i; }
-	std::string match_said() const;     // (what the match plays, said to both players: the stage select and the rest)
-	void room_failed(const std::string &why);
+	tr::line match_said() const;        // (what the match plays, said to both players: the stage select and the rest)
+	void room_failed(const tr::line &why);
 	void joined(const vfnet::json::Value &v);   // (the room found: connecting to its host)
 	void search();                      // (into the queue for a random opponent)
-	void search_again(const std::string &why);   // (a random opponent connected but too far: another)
+	void search_again(const tr::line &why);   // (a random opponent connected but too far: another)
 	void begin_match(const std::string &who);    // (connected, and the ping fine if it's measured first: playing)
 	bool checking = false;              // (a random match connected, its ping measured before it begins: max_ping)
 	double check_from = 0;
@@ -355,9 +358,9 @@ private:
 	int watch_watchers = 0, watch_restarts = 0;
 	vfnet::watch::Meta watch_meta;
 	void watch_poll();
-	void watch_failed(const std::string &why);
-	void watch_over(const std::string &why);
-	bool watch_start(const vfnet::watch::Start &s, std::string &why);
+	void watch_failed(const tr::line &why);
+	void watch_over(const tr::line &why);
+	bool watch_start(const vfnet::watch::Start &s, tr::line &why);
 	// the rooms list
 	std::shared_ptr<Fetch> rooms_job;
 	std::vector<RoomRow> rooms_rows;

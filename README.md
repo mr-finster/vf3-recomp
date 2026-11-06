@@ -349,7 +349,7 @@ CPU (a machine with no graphics driver), where the CPU's own renderer is faster.
 | `src/gpu` | the Real3D on the GPU (SDL_GPU), its HLSL shaders (`r3d.hlsl`) and their compiled forms (`r3d_shaders.h`) |
 | `src/sound` | the sound board: MAME's SCSP and its DSP, with MAME's 68000 in `third_party/mame` |
 | `src/host` | the SDL 3 game: window, input, pacing, the GPU compositing, settings, the RmlUi menu |
-| `assets/` | the app icon, the menu (`ui/`) and its font |
+| `assets/` | the app icon, the menu (`ui/`) and its fonts |
 | `third_party/` | MAME's 68000 and SCSP, SLJIT, RmlUi (`third_party/README.md`) |
 | `tools/recomp` | the address map's maker (from coverage runs) |
 | `tools/ref` | the instrumented reference build (Supermodel with coverage, input scripts and state dumps) |
@@ -404,15 +404,16 @@ lists the files), all BSD-3-Clause. Supermodel (Bart Trzynadlowski, Ian Curtis, 
 documentation of the Model 3 and its Real3D, and was the reference everything was checked against; none of its code
 is in this one, but its settings for Virtua Fighter 3's sound (the SCSP's timers counted at the samples, its FM and
 pitch LFO depths) and its CRT colours (Dan Mons' colour_matrix_adaptations) are followed. Also SLJIT (Zoltan Herczeg, BSD-2-Clause), RmlUi (MIT), SDL 3 (zlib), FreeType (FreeType License),
-zlib, and the Barlow Condensed font (SIL Open Font License).
+zlib, the Barlow Condensed font and, for the menus' Korean, Japanese, Chinese and Cyrillic, Noto Sans (all SIL Open
+Font License).
 
 Virtua Fighter 3 is SEGA's. This project is not affiliated with or endorsed by SEGA.
 
 ## Licence
 
 MIT for this project's own code: see [LICENSE](LICENSE). Code from MAME keeps its BSD-3-Clause licence and notices;
-the rest of `third_party/` keeps its own (`third_party/README.md`), and the Barlow Condensed font the SIL Open Font
-License. The app icon (`assets/icon/`, drawn by `tools/release/make_icon.py`) is by Mr Finster under
+the rest of `third_party/` keeps its own (`third_party/README.md`), and the fonts (Barlow Condensed, Noto Sans, JetBrains
+Mono: `assets/fonts/README.txt`) the SIL Open Font License. The app icon (`assets/icon/`, drawn by `tools/release/make_icon.py`) is by Mr Finster under
 [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
 
 ## Support

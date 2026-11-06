@@ -51,6 +51,10 @@ public:
 	bool init(SDL_Window *win, SDL_Renderer *ren, const std::string &assets_dir);
 	bool ready() const;
 	void set_footer(const std::string &text);
+	void set_language();                        // (tr::set's language into the menus: after a change, at once)
+	// (tests: each line of text drawn past the box it's in, as laid out now: the menu's page or screen and the overlay)
+	std::vector<std::string> overflow();
+	std::vector<std::string> misaligned();   // (rows whose labels don't start where the others' do: for tests)
 	void set_title(const std::string &text);    // (PAUSED; a match goes on under the menu: ONLINE MATCH)
 	void select_row(int i) { select(i); }
 	void set_fps(const std::string &text);      // the small FPS at the top right; empty hides it

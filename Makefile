@@ -43,7 +43,7 @@ RML_SRC = $(wildcard third_party/rmlui/Source/Core/*.cpp third_party/rmlui/Sourc
 	third_party/rmlui/Backends/RmlUi_Platform_SDL.cpp third_party/rmlui/Backends/RmlUi_Renderer_SDL.cpp
 RML_CFLAGS = -DRMLUI_STATIC_LIB -DRMLUI_FONT_ENGINE_FREETYPE -DRMLUI_SDL_VERSION_MAJOR=3 -Ithird_party/rmlui/Include -Ithird_party/rmlui/Backends
 $(OBJ)/third_party/rmlui/%.o: CXXFLAGS += $(RML_CFLAGS) $(FT_CFLAGS) $(SDL_CFLAGS) -w
-$(OBJ)/src/host/main.o $(OBJ)/src/host/menu.o $(OBJ)/src/host/online.o $(OBJ)/src/host/sysinfo.o $(OBJ)/src/host/d3d11_map.o $(OBJ)/src/gpu/r3d_gpu.o $(OBJ)/tools/menutest.o: CXXFLAGS += $(SDL_CFLAGS) $(RML_CFLAGS)
+$(OBJ)/src/host/main.o $(OBJ)/src/host/menu.o $(OBJ)/src/host/online.o $(OBJ)/src/host/i18n.o $(OBJ)/tools/langtest.o $(OBJ)/src/host/sysinfo.o $(OBJ)/src/host/d3d11_map.o $(OBJ)/src/gpu/r3d_gpu.o $(OBJ)/tools/menutest.o: CXXFLAGS += $(SDL_CFLAGS) $(RML_CFLAGS)
 $(OBJ)/src/host/main.o: $(OBJ)/version.h
 $(OBJ)/src/host/main.o: CXXFLAGS += -I$(OBJ)
 $(OBJ)/src/host/online.o: $(OBJ)/version.h
@@ -51,7 +51,7 @@ $(OBJ)/src/host/online.o: CXXFLAGS += -I$(OBJ)
 # Netplay (src/net): rollback sessions and their links, nothing of the game's (shared with VF1 and VF2 Recomp)
 NET = src/net/session.cpp src/net/link.cpp src/net/room_link.cpp src/net/stun.cpp src/net/http.cpp src/net/watch.cpp
 
-HOST = src/host/main.cpp src/host/menu.cpp src/host/online.cpp src/host/links.cpp src/host/vf3_netplay.cpp src/host/sysinfo.cpp src/host/d3d11_map.cpp src/gpu/r3d_gpu.cpp $(NET)
+HOST = src/host/main.cpp src/host/menu.cpp src/host/online.cpp src/host/i18n.cpp src/host/text.cpp src/host/links.cpp src/host/vf3_netplay.cpp src/host/sysinfo.cpp src/host/d3d11_map.cpp src/gpu/r3d_gpu.cpp $(NET)
 
 CORE = src/ppc/ppc.cpp src/machine/model3.cpp src/machine/dural.cpp src/machine/romset.cpp src/machine/profile.cpp src/host/input_script.cpp \
 	src/rec/ppc_rec.cpp src/rec/vf3_map.cpp src/rec/vf3tb_map.cpp src/video/tilegen.cpp src/video/hud_names.cpp src/video/dural_cell.cpp src/video/r3d_scene.cpp src/video/r3d_raster.cpp \
@@ -121,9 +121,16 @@ $(BIN)/netfuzz: $(NET) tools/netfuzz.cpp
 	$(CXX) -std=c++20 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer $^ -o $@
 
 # menutest: the Online pages drawn offscreen to pictures (SDL_VIDEO_DRIVER=offscreen)
-$(BIN)/menutest: $(call objs,src/host/menu.cpp src/host/online.cpp src/host/links.cpp src/host/vf3_netplay.cpp src/machine/model3.cpp src/machine/dural.cpp src/machine/romset.cpp src/machine/profile.cpp src/rec/vf3_map.cpp src/rec/vf3tb_map.cpp src/ppc/ppc.cpp $(NET) tools/menutest.cpp $(RML_SRC))
+$(BIN)/menutest: $(call objs,src/host/menu.cpp src/host/online.cpp src/host/i18n.cpp src/host/text.cpp src/host/links.cpp src/host/vf3_netplay.cpp src/machine/model3.cpp src/machine/dural.cpp src/machine/romset.cpp src/machine/profile.cpp src/rec/vf3_map.cpp src/rec/vf3tb_map.cpp src/ppc/ppc.cpp $(NET) tools/menutest.cpp $(RML_SRC))
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) $^ -o $@ $(SDL_LIBS) $(FT_LIBS) $(LDLIBS)
+
+# langtest: the strings' tables (src/host/lang): every ID in every language once, the same {places} as the English, each
+# language's letters in the menus' fonts, the settings' language codes; no ROM, no window
+$(BIN)/langtest: $(call objs,src/host/i18n.cpp src/host/text.cpp tools/langtest.cpp)
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) $^ -o $@ $(SDL_LIBS) $(FT_LIBS)
+$(OBJ)/tools/langtest.o: CXXFLAGS += $(FT_CFLAGS)
 
 $(BIN)/vf3: $(call objs,$(CORE) $(HOST) $(RML_SRC)) $(SLJIT_OBJ)
 	@mkdir -p $(dir $@)
