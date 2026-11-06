@@ -98,6 +98,7 @@ void RenderInterface_SDL::RenderGeometry(Rml::CompiledGeometryHandle handle, Rml
 	{
 		SDL_Vertex& sdl_vertex = sdl_vertices[i];
 		sdl_vertex.position = {vertices[i].position.x + translation.x, vertices[i].position.y + translation.y};
+
 		sdl_vertex.tex_coord = {vertices[i].tex_coord.x, vertices[i].tex_coord.y};
 
 		const auto& color = vertices[i].colour;
@@ -116,6 +117,24 @@ void RenderInterface_SDL::RenderGeometry(Rml::CompiledGeometryHandle handle, Rml
 
 	SDL_Texture* sdl_texture = (SDL_Texture*)texture;
 
+#if SDL_MAJOR_VERSION >= 3
+	// vf3-recomp: the software renderer leaves a line of pixels out between two triangles turned opposite ways (a
+	// line through a rounded box's fill, a dot drawn as a "c"): every triangle turned the same way there
+	if (straight && !texture && num_indices >= 3)
+	{
+		if (sdl_indices.size() < num_indices)
+			sdl_indices.resize(num_indices);
+		for (size_t i = 0; i + 2 < num_indices; i += 3)
+		{
+			const SDL_FPoint a = sdl_vertices[indices[i]].position, b = sdl_vertices[indices[i + 1]].position, c = sdl_vertices[indices[i + 2]].position;
+			const bool turned = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x) < 0;
+			sdl_indices[i] = indices[i];
+			sdl_indices[i + 1] = indices[turned ? i + 2 : i + 1];
+			sdl_indices[i + 2] = indices[turned ? i + 1 : i + 2];
+		}
+		indices = sdl_indices.data();
+	}
+#endif
 	SDL_RenderGeometry(renderer, sdl_texture, sdl_vertices.get(), (int)num_vertices, indices, (int)num_indices);
 }
 

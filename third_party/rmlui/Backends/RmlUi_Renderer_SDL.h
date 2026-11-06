@@ -1,6 +1,7 @@
 #pragma once
 
 #include <RmlUi/Core/RenderInterface.h>
+#include <vector>
 
 #if RMLUI_SDL_VERSION_MAJOR == 3
 	#include <SDL3/SDL.h>
@@ -41,6 +42,7 @@ private:
 
 	SDL_Renderer* renderer;
 	SDL_BlendMode blend_mode = {};
+	std::vector<int> sdl_indices;   // vf3-recomp: (the software renderer's: its triangles all turned one way)
 	bool straight = false;   // vf3-recomp: the software renderer's colours and textures not premultiplied (its own blend, SDL's plain one)
 	SDL_Rect rect_scissor = {};
 	bool scissor_region_enabled = false;
