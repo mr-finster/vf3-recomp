@@ -114,7 +114,51 @@ From a survey of other projects' online play (Oct 2026; many sources secondhand,
 - **Sound**: VF3's sound board is apart from the game's state, so it can't be rolled back. Waiting for certain
   frames would make every sound up to 7 frames late, so the MIDI bytes of guessed frames go to it at once, and after
   a rollback only bytes that weren't sent already: a wrong guess can leave a stray sound, never a late one.
-- **Later**: spectators, shared replays, ranked play, a region filter, a lag simulator for practice, a wifi badge.
+- **Watching and the room browser** (below): done. **Later**: shared replays, ranked play, a lag simulator for practice, a wifi badge.
+
+## Rooms and watching
+
+The Online screen is a room browser: the lobby's listed rooms, this game's, a row each (its name, host and flag, Open
+or the match on with its score, how many watch), open ones first and nearest first, then the matches; All / Open /
+Playing; a window of them scrolled with the selection (LB/RB a page, the wheel), kept on the room selected as the list
+comes again. A joins a room that's open or watches a match; Y opens the room's own page (Watch, Play next). Quick
+match games are listed too, to watch only (their two players, a "Quick match" label, no code: listed once the host's
+game sends the match, so never an older build's, and only if both players have Settings > "Show my Quick Match games
+in Rooms" On, its default; "Quick Match games can be watched by anyone." is said once, quietly, no prompt). Quick
+match, Create room and Enter code are its buttons; By address and Settings are under More. The site's Online page
+(tools/online) is the same list on the web, its Join and Watch opening the game there (`vf3recomp://vf3/join/CODE`,
+`.../watch/CODE`; src/host/links.cpp parses only exactly that form).
+
+- **Create room**: a name (filled in) and Listed in Rooms (off by default: the code only, as every room before). The
+  lobby checks the names others see against a short word list (tools/lobby/src/words.js): a blocked room name is listed
+  as "<HOST>'S ROOM" (the hosting page says how it's listed), a blocked player name as PLAYER. The
+  room stays through its match (held by its host's WebSocket to it, `/v1/room/ws`, which also tells it the moment a
+  player joins; without one, a `/v1/wait` every 20 s and a `/v1/hold` every 15 s); a player who joins meanwhile waits in
+  its line, and when the match is over the host opens it again with the same code and the first in line gets it.
+- **Watching** (`src/net/watch.h`): every match may be watched by anyone with its room's code. The host sends the lobby,
+  every 200 ms on a thread of its own, the frames confirmed since (both players' input words) and the desync check's
+  hashes: 5 small messages a second on one WebSocket (HTTPS POSTs where a network won't carry one), the same with one
+  watcher or a thousand, never waited for; with none, one every 30 s, and the first to come has the lobby tell it at
+  once on its socket (over HTTPS it hears at its next upload). The lobby's Watch (a Durable Object per code) keeps the match and sends
+  it to its watchers as it comes (a WebSocket each, hibernating between messages, else one long response; if the stream's lost, they ask for whole pieces that Cloudflare's edge keeps). 400 watch a match at
+  most: one more is told "Too many watching right now. Try again in a little while." A watcher's game starts from
+  the match's start blob and runs the same inputs as close behind as its own connection allows: it holds as many frames as their arrival's jitter needs (a few hundred ms on a good line), a frame
+  in 4 more to catch up, a frame time in 3 held rather than running dry, a jump past 8 s. Its state is hashed and checked
+  against the players' own every 2 s. Joining late, it runs the match from its start, unseen and silent, then catches
+  up (VF3: ~1 ms a frame on a fast PC); no watcher's state is ever handed to another, as one could be forged to the
+  players' hash. Its WebSocket is told when the match is over, even when the host's game closed with no last word (the
+  Watch's alarm, 30 s after the host's last upload). The players never know who watches: they see how many (the host from its uploads' answers,
+  the guest asking once a minute while the figures at the top are shown; drawn only). The lobby can switch rooms,
+  their listing, watching and its WebSockets off in seconds (Worker variables, tools/lobby/README.md); the game then
+  says so in one line ("Rooms aren't available right now", "Watching isn't available right now") or falls back to
+  HTTPS, and room codes and Quick match play as before, as they do against an older lobby.
+- **Tests**: `watchsim` (no ROM): two players with 0, 1 and 50 watchers on links of 20, 80, 200 ms with jitter and
+  400 ms with loss, phones, cut off, late; the players' every count the same, every watcher's game frame for frame
+  theirs, how far behind each kept; `watchsim --lobby http://127.0.0.1:8787` the same through the real lobby (`node
+  tools/lobby/test/serve.mjs src/index.js 8787`, the stream read by the game's own `http::stream`; `--quick`: a Quick
+  match, listed to watch only); `vf3net --watchers 2`
+  (the ROM): real boards watching, the straight run's state at every checkpoint, a late one checking every one of the
+  players' hashes from the start; `tools/lobby` `npm test`.
 
 ## Safety: a stranger on the other end
 
@@ -126,6 +170,12 @@ of what it does, not because nobody looks. What another player can reach, and wh
   a side hold more and more), the starting blob at most 4 MB. `netfuzz` plays sessions while a man in the middle
   spoils packets every way it can (bits, lengths, extreme values, splices, replays, made-up packets), built with
   AddressSanitizer and UBSan: 48,000 sessions and about 14 million spoilt packets, nothing out of bounds.
+- **The lobby's WebSocket frames** (watching: src/net/http's `FrameReader`, the game's own reading on macOS and
+  Linux) are read strictly, as a client must: a masked frame, a reserved bit or opcode, a control frame fragmented or
+  over 125, a stray continuation or a message begun in the middle of one, anything over 32 MB end the connection.
+  `wsfuzz` (AddressSanitizer and UBSan) reads valid streams cut into pieces of every size (lengths at 0, 125, 126,
+  127, 65535, 65536, fragments with pings between) back whole, refuses each forbidden case, and takes thousands of
+  random and spoilt streams without a fault.
 - **A session's token**: the guest picks 64 random bits; every packet carries them and any other is dropped (and
   doesn't count as hearing from the other side). Someone who can't see the packets can't put one in.
 - **Whom a host listens to**: it locks onto a sender only once its hello is good (same protocol, build, game and

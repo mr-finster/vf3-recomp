@@ -18,17 +18,26 @@
 // the pool's (VERSION's base with +host1: as --host-terms; "+host1+dural3": Dural on; "+host1+dural2", Team Battle's
 // "+host1+dural": Dural on with v0.1.16-alpha's patches, as an older build plays it)
 // VF3NET_WATCH=addr,... (hex): those RAM bytes on the straight run, printed as they change ("bytes FRAME v...").
+// --watchers N: N more boards watching the match (src/net/watch.h), as the game's watchers do: the host's uploads once a
+// second to a stand-in for the lobby (--watch-ms each way), each watcher asking it for the frames and running them a few
+// seconds behind; the first from the start, the others joining at --watch-late F (catching up from the start, unseen).
+// Each watcher's board must be the straight run's at every checkpoint, its own checks of the players' hashes all good;
+// the players' rollbacks and waits are printed as ever, to be compared with a run without watchers.
 #include "../src/host/input_script.h"
 #include "../src/host/dural_stage.h"
 #include "../src/host/vf3_netplay.h"
 #include "../src/machine/model3.h"
 #include "../src/net/session.h"
+#include "../src/net/watch.h"
 #include "../src/rec/ppc_rec.h"
 #include <algorithm>
 #include <chrono>
+#include <functional>
+#include <map>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <memory>
 #include <string>
 #include <vector>
@@ -84,7 +93,9 @@ int main(int argc, char **argv)
 	const m3::Profile *profile = nullptr;
 	const bool slow = getenv("VF3NET_SLOW") != nullptr;   // (each step over 40 ms, the host's)
 	const char *usage = "usage: vf3net <vf3.zip> --script FILE [--frames N] [--latency MS] [--jitter MS] [--loss PERCENT] [--delay D] [--interp] [--soft] [--set vf3tb] [--stage] [--dural] [--dural-stage host|guest|both] [--vs-rounds N] [--hashes FILE] [--blob-out FILE] [--blob-in FILE] [--host-terms] [--guest-stage 0|1] [--guest-dural 0|1] [--team 1v1|3v3] [--terms VERSION]\n";
-	int vs_rounds = 0;
+	int vs_rounds = 0, watchers = 0;
+	long watch_late = 1500;
+	double watch_ms = 60;
 	const char *hashes_path = nullptr, *blob_out = nullptr, *blob_in = nullptr, *terms = nullptr;
 	for (int i = 1; i < argc; i++) {
 		std::string a = argv[i];
@@ -112,6 +123,9 @@ int main(int argc, char **argv)
 		else if (a == "--blob-out" && i + 1 < argc) blob_out = argv[++i];
 		else if (a == "--blob-in" && i + 1 < argc) blob_in = argv[++i];
 		else if (a == "--terms" && i + 1 < argc) terms = argv[++i];
+		else if (a == "--watchers" && i + 1 < argc) watchers = std::clamp(atoi(argv[++i]), 0, 4);
+		else if (a == "--watch-late" && i + 1 < argc) watch_late = strtol(argv[++i], nullptr, 10);
+		else if (a == "--watch-ms" && i + 1 < argc) watch_ms = atof(argv[++i]);
 		else if (a == "--set" && i + 1 < argc) {
 			if (!(profile = m3::find_profile(argv[++i]))) { fprintf(stderr, "vf3net: no such set %s\n", argv[i]); return 2; }
 		}
@@ -206,6 +220,43 @@ int main(int argc, char **argv)
 		                 said == dural_stage::Picker::waiting ? "waiting" : said == dural_stage::Picker::no_version ? "no Dural version" : "not this time", wait_s);
 		return out;
 	};
+	// watching: the host's feed (the same whether anyone watches), a stand-in lobby, the watchers' boards
+	namespace vw = vfnet::watch;
+	vw::Feed feed;
+	bool feed_on = false;
+	struct Lobby { std::vector<uint8_t> start; std::vector<uint16_t> in; std::map<uint32_t, uint64_t> hashes; vw::Info info; uint64_t match = 0; } lobby;
+	struct Due { double at; std::function<void()> fn; };
+	std::deque<Due> dues;   // (the uploads and answers on their way, in the order sent: the same delay for all)
+	struct Watcher { std::unique_ptr<Board> b; std::unique_ptr<vw::Spectator> sp; long join = 0; bool on = false; };
+	std::vector<Watcher> ws;
+	for (int i = 0; i < watchers; i++) {
+		Watcher w;
+		w.b = std::make_unique<Board>();
+		w.b->use_rec = use_rec;
+		if (!w.b->open(rom, profile, error)) { fprintf(stderr, "vf3net: a watcher's board: %s\n", error.c_str()); return 1; }
+		w.b->adapter.host_terms = host_terms;   // (the terms as a guest plays them: the host's blob says the rest)
+		w.b->adapter.dural_legacy = A.adapter.dural_legacy;
+		w.b->adapter.team_one = A.adapter.team_one;
+		w.b->adapter.stage_select_on = stage;
+		w.b->adapter.dural = dural;
+		w.b->adapter.checkpoint_every = 300;
+		w.sp = std::make_unique<vw::Spectator>(w.b->adapter, vw::Spectator::Config{});
+		w.join = i == 0 ? 0 : watch_late;
+		ws.push_back(std::move(w));
+	}
+	auto serve = [&](vw::Spectator &sp, const std::string &want) -> std::function<void(double)> {
+		if (want == "start") { std::vector<uint8_t> b = lobby.start; return [&sp, b](double) { vw::Start st; if (vw::decode(b, st)) sp.start(st); }; }
+		vw::Reply r;
+		r.match = lobby.match;
+		r.state = 1;
+		const uint32_t total = uint32_t(lobby.in.size() / 2), from = std::min(sp.ask_from() / 256 * 256, total), n = std::min<uint32_t>(total - from, 2048);
+		r.total = total;
+		r.frames.first = from;
+		r.frames.in.assign(lobby.in.begin() + ptrdiff_t(from) * 2, lobby.in.begin() + ptrdiff_t(from + n) * 2);
+		for (auto &[f, h] : lobby.hashes) if (f + 120 >= from && f <= from + n) r.frames.hashes.push_back({ f, h });   // (and those made late, as the lobby's)
+		r.frames.info = lobby.info;
+		return [&sp, r](double at) { sp.reply(r, at); };
+	};
 	Timing ta, tb;
 	size_t na = 0, nb = 0;   // each side's frames run (its next script frame)
 	double t = 1000, next_a = 1000, next_b = 1000 + 23;
@@ -226,6 +277,18 @@ int main(int argc, char **argv)
 			const auto s0 = Clock::now();
 			const uint64_t rb0 = sa.stats().resim_frames;
 			if (sa.step(own_word(pick_a, A.m, 0, vf3net::pack(real[std::min(na, real.size() - 1)], 0)))) { na++; score_a.frame(A.m); }
+			if (!feed_on && sa.state() == vfnet::Session::State::running) {   // (the host's match to the lobby, as the game sends it)
+				vw::Start st;
+				st.match = 0x5eed;
+				st.meta = { "vf3", "test", vw::hex(content), "test", { "HOST", "GUEST" }, { "", "" } };
+				st.blob = blob;
+				feed.begin(st, t);
+				feed_on = true;
+			}
+			feed.take(sa);
+			vw::Info info;
+			for (int q = 0; q < 2; q++) { info.wins[q] = uint8_t(score_a.matches[q]); info.rounds[q] = uint8_t(score_a.rounds[q]); }
+			feed.set_info(info);
 			const double ms = std::chrono::duration<double, std::milli>(Clock::now() - s0).count();
 			if (connected) ta.add(ms);
 			if (slow && ms > 40) printf("  slow step: host frame %u, %.1f ms, %llu frames run again\n", sa.frame(), ms, (unsigned long long)(sa.stats().resim_frames - rb0));
@@ -237,7 +300,58 @@ int main(int argc, char **argv)
 			if (connected) tb.add(std::chrono::duration<double, std::milli>(Clock::now() - s0).count());
 			next_b += fb / (1 - (soft ? std::clamp(sb.stats().lead * 0.02, 0.0, 0.04) : 0.0));
 		}
+		// the host's upload, the lobby's keeping it, the watchers asking and running theirs
+		vw::Feed::Upload up;
+		if (feed.next(t, up))
+			dues.push_back({ t + watch_ms, [&, up, at = t + watch_ms] {
+				uint32_t has = 0;
+				if (up.start) { vw::Start st; if (vw::decode(up.body, st)) { lobby.start = up.body; lobby.match = st.match; } }
+				else {
+					vw::Frames f;
+					if (vw::decode_push(up.body, f)) {
+						const uint32_t had = uint32_t(lobby.in.size() / 2);
+						if (f.first <= had && f.first + f.count() > had) lobby.in.insert(lobby.in.end(), f.in.begin() + ptrdiff_t(had - f.first) * 2, f.in.end());
+						for (auto &[fr, h] : f.hashes) lobby.hashes[fr] = h;
+						lobby.info = f.info;
+					}
+					has = uint32_t(lobby.in.size() / 2);
+				}
+				dues.push_back({ at + watch_ms, [&feed, up, has, done = at + watch_ms] { feed.done(up, true, has, int(0), done); } });
+			} });
+		while (!dues.empty() && dues.front().at <= t) { auto fn = dues.front().fn; dues.pop_front(); fn(); }
+		for (Watcher &w : ws) {
+			if (!w.on && long(sa.frame()) >= w.join && !lobby.start.empty()) w.on = true;
+			if (!w.on) continue;
+			const std::string want = w.sp->want(t);
+			if (!want.empty()) {
+				w.sp->asked(t);
+				dues.push_back({ t + watch_ms, [&, sp = w.sp.get(), want, at = t + watch_ms] {
+					auto answer = serve(*sp, want);
+					dues.push_back({ at + watch_ms, [sp, answer, done = at + watch_ms] { answer(done); sp->answered(done); } });
+				} });
+			}
+			w.sp->run(t);
+		}
 		t += 1;
+	}
+	// (the watchers to the end of what the lobby has: the players are done)
+	for (double end = t + 30000; t < end && !ws.empty(); t += 1) {
+		while (!dues.empty() && dues.front().at <= t) { auto fn = dues.front().fn; dues.pop_front(); fn(); }
+		bool all = true;
+		for (Watcher &w : ws) {
+			if (!w.on) continue;
+			const std::string want = w.sp->want(t);
+			if (!want.empty()) {
+				w.sp->asked(t);
+				dues.push_back({ t + watch_ms, [&, sp = w.sp.get(), want, at = t + watch_ms] {
+					auto answer = serve(*sp, want);
+					dues.push_back({ at + watch_ms, [sp, answer, done = at + watch_ms] { answer(done); sp->answered(done); } });
+				} });
+			}
+			w.sp->run(t);
+			all = all && w.sp->frame() >= lobby.in.size() / 2;
+		}
+		if (all) break;
 	}
 	vfnet::Session::Event e;
 	bool failed = false;
@@ -301,6 +415,27 @@ int main(int argc, char **argv)
 			if (A.adapter.checkpoints[f] != h) { printf("the host's board differs from a straight run after frame %u\n", f); failed = true; break; }
 			if (B.adapter.checkpoints[f] != h) { printf("the guest's board differs from a straight run after frame %u\n", f); failed = true; break; }
 			checked++;
+		}
+		for (size_t i = 0; i < ws.size(); i++) {   // (each watcher: the straight run's board at every checkpoint it ran past, the players' hashes matched)
+			Watcher &w = ws[i];
+			uint32_t same = 0;
+			for (auto &[f, h] : w.b->adapter.checkpoints) {
+				if (f > n || f % 300) continue;
+				if (C.adapter.checkpoints[f] != h) { printf("watcher %zu's board differs from a straight run after frame %u\n", i + 1, f); failed = true; break; }
+				same++;
+			}
+			const bool whole = w.sp->frame() + 60 >= n;
+			// (one come late ran the match from its start: every one of the players' hashes in it checked, none skipped)
+			uint32_t there = 0;
+			for (auto &[f, h] : lobby.hashes) there += f + vw::HASH_PARTS < w.sp->frame();
+			const bool all = !w.join || w.sp->hashes_checked >= there;
+			printf("watcher %zu (from frame %ld): ran %u frames (%llu unseen, catching up), the straight run's board at %u checkpoints, %u of the players' hashes matched%s%s\n",
+			       i + 1, w.join, w.sp->frame(), (unsigned long long)w.sp->frames_unseen, same, w.sp->hashes_checked,
+			       w.join ? (" (all " + std::to_string(there) + " there: from the match's start)").c_str() : "", whole ? "" : " (NOT to the end)");
+			if (!whole || !same || !w.sp->hashes_checked || !all || w.sp->state() == vw::Spectator::State::out_of_step) failed = true;
+		}
+		if (!ws.empty()) {
+			printf("the host's uploads: %llu, %llu bytes\n", (unsigned long long)feed.uploads, (unsigned long long)feed.bytes);
 		}
 	}
 	const auto &xa = sa.stats(), &xb = sb.stats();
