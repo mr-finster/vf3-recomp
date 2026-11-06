@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>VF Recomp · Online now</title>
-<meta name="description" content="Players online now in Virtua Fighter, Virtua Fighter 2 and Virtua Fighter 3 Recomp.">
+<title>VF Recomp · Online</title>
+<meta name="description" content="The rooms and matches online now in Virtua Fighter, Virtua Fighter 2 and Virtua Fighter 3 Recomp: join one, or watch.">
 <link rel="icon" href="icons/vf3.png">
 <style>
 @font-face { font-family: "Barlow Condensed"; font-weight: 500; font-style: normal; font-display: swap; src: url(fonts/barlow-condensed-medium.woff2) format("woff2"); }
@@ -13,13 +13,23 @@
 /* (country flags: Twemoji's, the font only for the flags' letters, so they're flags on Windows too; fonts/TwemojiCountryFlags-LICENSE.md) */
 @font-face { font-family: "Twemoji Country Flags"; unicode-range: U+1F1E6-1F1FF, U+1F3F4, U+E0062-E007F; font-display: swap; src: url(fonts/TwemojiCountryFlags.woff2) format("woff2"); }
 :root {
+	/* (the page's one scale: spacing 4/8/12/16/24/32; type 13/15/17/20/30/44; corners 4/6 and pills; controls 32 high) */
 	--ground: #040818;
 	--panel: #0a1230;
+	--panel-2: #0d1840;     /* (a row under the pointer, a tab under it) */
+	--well: #070d24;        /* (wells: the search box, a room's code panel) */
 	--line: #1b2a5c;
+	--line-2: #34488f;      /* (an outline that must read: Watch, a chip under the pointer) */
 	--ink: #dfe7fb;
 	--row: #c3cff0;
-	--muted: #8fa3d6;
-	--gold: #ffd23f;
+	--muted: #8fa3d6;       /* (quiet text: 7:1 on the panel) */
+	--gold: #ffd23f;        /* (the accent, sparingly: the title, the chosen tab, Join, the score, a code) */
+	--green: #8fe08a;       /* (a match on) */
+	--on-gold: #0b1026;
+	--r-s: 4px;
+	--r-m: 6px;
+	--h: 32px;
+	--focus: 0 0 0 2px var(--ground), 0 0 0 4px var(--gold);
 }
 * { box-sizing: border-box; }
 html { background: var(--ground); }
@@ -30,94 +40,297 @@ body {
 	color: var(--ink);
 	font-family: "Barlow Condensed", "Arial Narrow", sans-serif;
 	font-weight: 600;
+	-webkit-font-smoothing: antialiased;
 }
-main { max-width: 1080px; margin: 0 auto; padding: 32px 16px 48px; }
-h1 {
-	margin: 0 0 4px;
-	font-size: 46px;
-	line-height: 1.05;
-	font-weight: 700;
-	font-style: italic;
-	color: var(--gold);
-	padding-bottom: 6px;
-	border-bottom: 3px solid var(--gold);
+main { max-width: 1240px; margin: 0 auto; padding: 32px 16px 48px; }
+h1 { margin: 0; padding-bottom: 8px; font-size: 44px; line-height: 1.05; font-weight: 700; font-style: italic; color: var(--gold); border-bottom: 3px solid var(--gold); }
+.lede { margin: 12px 0 24px; font-size: 20px; line-height: 1.3; font-weight: 500; color: var(--muted); }
+.flag { display: inline-block; width: 1.25em; margin-right: 6px; font-family: "Twemoji Country Flags", "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif; font-style: normal; font-size: 17px; line-height: 1; text-align: center; vertical-align: -1px; }
+button { font-family: inherit; }
+button, a, input { -webkit-tap-highlight-color: transparent; }
+:focus { outline: none; }
+:focus-visible { box-shadow: var(--focus); }
+@media (prefers-reduced-motion: no-preference) {
+	button, a.btn, .tab, .chip, .rooms tr.room td { transition: background-color 0.12s, border-color 0.12s, color 0.12s; }
+	.rooms tr.fresh td { animation: fresh 0.35s ease-out; }
+	.spin { animation: spin 0.9s linear infinite; }
 }
-.lede { margin: 8px 0 28px; font-size: 19px; font-weight: 500; color: var(--muted); }
-.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr)); gap: 16px; }
-.card {
-	background: var(--panel);
-	border: 1px solid var(--line);
-	border-left: 4px solid var(--gold);
-	padding: 18px 18px 14px;
-	display: flex;
-	flex-direction: column;
-	min-width: 0;
-}
-.head { display: flex; align-items: center; gap: 14px; }
-.head img { width: 64px; height: 64px; border-radius: 14px; flex: none; }
-.name { font-size: 24px; line-height: 1.05; font-weight: 700; font-style: italic; color: var(--ink); text-transform: uppercase; }
-.total { margin: 14px 0 0; font-size: 64px; line-height: 1; font-weight: 700; font-style: italic; color: var(--gold); font-variant-numeric: tabular-nums; }
-.unit { font-size: 18px; font-weight: 500; color: var(--muted); margin-bottom: 10px; }
-table.states { width: 100%; border-collapse: collapse; table-layout: fixed; font-variant-numeric: tabular-nums; }
-.states th { padding: 0 0 4px; font-size: 13px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); text-align: center; border-bottom: 1px solid var(--line); }
-.states col.num { width: 33.333%; }
-.states th:first-child, .states td:first-child { text-align: left; }
-.states th:last-child, .states td:last-child { text-align: right; }
-.states td { padding: 6px 0; font-size: 19px; color: var(--ink); text-align: center; border-bottom: 1px solid var(--line); vertical-align: top; }
-.states td.vlabel { text-align: left; color: var(--row); font-size: 18px; line-height: 1.15; padding-right: 6px; overflow-wrap: anywhere; }
-.states td.zero { color: var(--line); }
-.states td.none { text-align: left; color: var(--muted); font-weight: 500; }
-.older { margin-top: 8px; font-size: 15px; color: var(--row); }
-.lands { margin-top: 10px; font-size: 17px; color: var(--row); display: flex; flex-wrap: wrap; gap: 2px 12px; font-variant-numeric: tabular-nums; }
+@keyframes fresh { from { opacity: 0; } to { opacity: 1; } }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* who's online, in a line: each game's players, those in Quick match, the top countries */
+.strip { display: flex; flex-wrap: wrap; align-items: stretch; gap: 8px; margin-bottom: 24px; }
+.gchip { display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 12px 0 8px; background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--gold); border-radius: 0 var(--r-s) var(--r-s) 0; }
+.gchip img { width: 28px; height: 28px; border-radius: var(--r-m); display: block; }
+.gchip .gn { font-size: 17px; line-height: 1; font-weight: 700; font-style: italic; text-transform: uppercase; }
+.gchip .gc { font-size: 15px; line-height: 1; font-weight: 500; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.gchip .gc b { color: var(--ink); font-weight: 600; }
+.lands { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; padding: 0 4px; font-size: 15px; color: var(--row); font-variant-numeric: tabular-nums; }
+.lands span { display: inline-flex; align-items: center; }
 .lands .more { color: var(--muted); font-weight: 500; }
-.flag { font-family: "Twemoji Country Flags", "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif; font-style: normal; margin-right: 5px; }
-.legend { margin: 14px 0 0; display: flex; flex-wrap: wrap; gap: 4px 22px; font-size: 16px; font-weight: 500; color: var(--muted); }
-.legend b { color: var(--ink); font-weight: 600; }
-h2 { margin: 36px 0 12px; font-size: 30px; line-height: 1.1; font-weight: 700; font-style: italic; color: var(--gold); padding-bottom: 4px; border-bottom: 2px solid var(--line); }
-.countries { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 0 24px; }
-.countries li { display: flex; align-items: baseline; gap: 4px; padding: 7px 0; font-size: 20px; color: var(--ink); border-bottom: 1px solid var(--line); min-width: 0; }
-.countries .cname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.countries .cnum { color: var(--gold); font-variant-numeric: tabular-nums; }
-.countries li.rest { color: var(--muted); font-weight: 500; font-size: 18px; }
-.ago { margin-top: auto; padding-top: 10px; font-size: 15px; font-weight: 500; color: var(--muted); }
-.note { margin-top: 28px; font-size: 16px; font-weight: 500; color: var(--muted); max-width: 720px; line-height: 1.35; }
+
+/* the games' tabs, then the filters, stuck to the top as the rooms scroll */
+.head { position: sticky; top: 0; z-index: 2; box-shadow: 0 8px 12px -10px #000; }
+.tabs { display: flex; gap: 4px; padding: 8px 8px 0; background: #060c24; border: 1px solid var(--line); border-bottom: 0; border-radius: var(--r-m) var(--r-m) 0 0; overflow-x: auto; scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
+.tab { flex: none; display: flex; align-items: center; gap: 8px; height: 48px; padding: 0 16px; margin: 0; border: 1px solid transparent; border-bottom: 0; border-radius: var(--r-m) var(--r-m) 0 0;
+	background: transparent; color: var(--muted); font: italic 700 20px/1 "Barlow Condensed", "Arial Narrow", sans-serif; cursor: pointer; white-space: nowrap; position: relative; }
+.tab:hover { color: var(--ink); background: var(--panel-2); }
+.tab:active { color: var(--ink); }
+.tab[aria-selected="true"] { color: var(--ink); background: var(--panel); border-color: var(--line); }
+.tab[aria-selected="true"]::after { content: ""; position: absolute; left: 12px; right: 12px; bottom: 0; height: 3px; border-radius: 3px 3px 0 0; background: var(--gold); }
+.tab:focus-visible { box-shadow: inset 0 0 0 2px var(--gold); }
+.tab img { width: 28px; height: 28px; border-radius: var(--r-m); display: block; }
+.tab .all-icon { width: 28px; height: 28px; padding: 4px; display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.tab .all-icon i { display: block; border-radius: 2px; background: currentColor; }
+.tab .name { padding-top: 1px; }
+.tab .short { display: none; }
+.tab .count { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; height: 20px; padding: 1px 7px 0; border-radius: 10px;
+	font: normal 600 13px/1 "Barlow Condensed", "Arial Narrow", sans-serif; font-variant-numeric: tabular-nums; color: var(--ink); background: var(--line); }
+.tab[aria-selected="true"] .count { color: var(--on-gold); background: var(--gold); }
+.bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; min-height: 56px; padding: 12px; background: var(--panel); border: 1px solid var(--line); border-bottom: 0; }
+.bar .lbl, .bar .ago, .chip, .search { height: var(--h); line-height: 1; }
+.bar .lbl { display: inline-flex; align-items: center; padding-top: 2px; margin-right: 4px; font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.chips { display: flex; align-items: center; gap: 8px; }
+.chip { display: inline-flex; align-items: center; padding: 2px 14px 0; font: 600 17px/1 "Barlow Condensed", "Arial Narrow", sans-serif; color: var(--row); background: transparent; border: 1px solid var(--line-2); border-radius: 16px; cursor: pointer; white-space: nowrap; }
+.chip:hover { color: var(--ink); border-color: var(--muted); }
+.chip:active { background: var(--panel-2); }
+.chip[aria-pressed="true"] { color: var(--on-gold); background: var(--ink); border-color: var(--ink); }
+.search { width: 220px; padding: 2px 12px 0; font: 500 17px/1 "Barlow Condensed", "Arial Narrow", sans-serif; color: var(--ink); background: var(--well); border: 1px solid var(--line-2); border-radius: var(--r-s); }
+.search:hover { border-color: var(--muted); }
+.search:focus-visible { border-color: var(--gold); box-shadow: none; }
+.search::placeholder { color: var(--muted); }
+.bar .ago { display: inline-flex; align-items: center; gap: 6px; padding-top: 2px; margin-left: auto; font-size: 15px; font-weight: 500; color: var(--muted); }
+.ago.down { color: var(--gold); }
+
+/* the rooms: a table, every row 52 px; columns apart, numbers right-aligned, names cut with … */
+table.rooms { width: 100%; border-collapse: collapse; table-layout: fixed; background: var(--panel); border: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+.rooms th { position: sticky; top: var(--bar-h, 104px); z-index: 1; height: 36px; padding: 2px 12px 0; text-align: left; vertical-align: middle; background: var(--panel); box-shadow: inset 0 -1px 0 var(--line), 0 1px 0 var(--line);
+	font-size: 13px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); white-space: nowrap; user-select: none; }
+.rooms th.sort { cursor: pointer; }
+.rooms th.sort:hover, .rooms th.on { color: var(--ink); }
+.rooms th.on::after { content: " \25BE"; }
+.rooms th.on.up::after { content: " \25B4"; }
+.rooms td { height: 52px; padding: 0 12px; font-size: 17px; line-height: 1.2; border-top: 1px solid var(--line); vertical-align: middle; }
+.rooms .num { text-align: right; padding-right: 32px; }
+/* (the columns' widths set, so none takes all the room left: Status as wide as two names and a score, Watching beside it) */
+.rooms .c-room { width: 22%; } .rooms .c-game { width: 8%; } .rooms .c-host { width: 18%; } .rooms .c-watch { width: 104px; } .rooms .act { width: 124px; }
+.rooms.one .c-room { width: 29%; } .rooms.one .c-host { width: 21%; }
+.rooms td.c-room, .rooms td.c-host { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rooms td.c-status { white-space: nowrap; overflow: hidden; }
+.rooms td.c-watch { color: var(--row); }
+.rooms td.act { text-align: right; white-space: nowrap; }
+.rooms tr.room:hover td { background: var(--panel-2); }
+.rooms.one .c-game { display: none; }   /* (one game's tab: its name is the tab's) */
+.rname { color: var(--ink); }
+.qm { display: inline-flex; align-items: center; height: 22px; padding: 2px 8px 0; border: 1px solid var(--line-2); border-radius: var(--r-s); font-size: 13px; line-height: 1; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.game { font-size: 15px; color: var(--muted); white-space: nowrap; }
+.dash { color: var(--muted); }
+.st { white-space: nowrap; }
+.st .dot { display: inline-block; width: 8px; height: 8px; margin-right: 8px; border-radius: 50%; vertical-align: 1px; }
+.st .live .dot { background: var(--green); }
+.st .wait .dot { border: 2px solid var(--muted); }
+.st .wait { color: var(--ink); }
+.st .p { display: inline-block; width: 140px; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
+.st .sc { display: inline-block; width: 48px; text-align: center; color: var(--gold); font-style: italic; font-weight: 700; }   /* (the score in a slot of its own) */
+.muted { color: var(--muted); font-weight: 500; }
+.act .btn { display: inline-flex; align-items: center; justify-content: center; min-width: 88px; height: 34px; padding: 2px 14px 0; border-radius: var(--r-m); cursor: pointer; text-decoration: none;
+	font: italic 700 18px/1 "Barlow Condensed", "Arial Narrow", sans-serif; letter-spacing: 0.02em; color: var(--on-gold); background: linear-gradient(90deg, #f2d14b, #f0922e); border: 0; }
+.act .btn:hover { filter: brightness(1.08); }
+.act .btn:active { filter: brightness(0.92); }
+.act .btn.watch { color: var(--ink); background: transparent; border: 2px solid var(--line-2); }
+.act .btn.watch:hover { border-color: var(--gold); filter: none; }
+.act .btn.watch:active { background: var(--panel-2); }
+.act .btn[aria-expanded="true"] { box-shadow: var(--focus); }
+tr.how td { padding: 12px 16px 16px; background: var(--well); border-top: 0; height: auto; }
+.how { font-size: 17px; font-weight: 500; color: var(--row); line-height: 1.35; }
+.how .code { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 4px; }
+.how .code b { font-size: 30px; line-height: 1.1; font-style: italic; font-weight: 700; color: var(--gold); letter-spacing: 0.06em; font-variant-numeric: tabular-nums; }
+.how .copy { display: inline-flex; align-items: center; height: var(--h); padding: 2px 14px 0; font: 600 17px/1 "Barlow Condensed", "Arial Narrow", sans-serif; color: var(--ink); background: var(--line); border: 1px solid var(--line-2); border-radius: var(--r-s); cursor: pointer; }
+.how .copy:hover { border-color: var(--muted); }
+.how em { font-style: normal; color: var(--ink); }
+/* nothing to list: an icon, one line, one action */
+.rooms .empty td { height: auto; padding: 48px 16px; text-align: center; }
+.state { display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center; }
+.state svg { width: 40px; height: 40px; color: var(--muted); }
+.state.bad svg { color: var(--gold); }
+.state p { margin: 0; font-size: 20px; font-weight: 600; color: var(--ink); }
+.state small { font-size: 15px; font-weight: 500; color: var(--muted); }
+.state .chip { margin-top: 4px; }
+.pager { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px; background: var(--panel); border: 1px solid var(--line); border-top: 0; border-radius: 0 0 var(--r-m) var(--r-m); font-size: 15px; font-weight: 500; color: var(--muted); }
+.pager button { display: inline-flex; align-items: center; height: var(--h); padding: 2px 14px 0; font: 600 17px/1 "Barlow Condensed", "Arial Narrow", sans-serif; color: var(--ink); background: var(--line); border: 1px solid var(--line-2); border-radius: var(--r-s); cursor: pointer; }
+.pager button:hover:not(:disabled) { border-color: var(--muted); }
+.pager button:disabled { opacity: 0.35; cursor: default; }
+.pager[hidden] { display: none; }
+table.rooms.last { border-radius: 0 0 var(--r-m) var(--r-m); }
+.note { margin-top: 24px; font-size: 15px; font-weight: 500; color: var(--muted); max-width: 820px; line-height: 1.4; }
 .note a { color: var(--row); }
-.down { color: var(--gold); }
-/* (wide screens: the four games side by side, as the first page had them) */
-@media (min-width: 1360px) {
-	main { max-width: 1680px; }
-	.cards { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-	.states th { font-size: 12px; letter-spacing: 0.02em; }
-	.states col.num { width: 22%; }
-	.countries { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
-}
-@media (max-width: 480px) {
-	main { padding-top: 20px; }
-	h1 { font-size: 36px; }
-	.total { font-size: 54px; }
-	h2 { font-size: 26px; }
+.note b { color: var(--row); font-weight: 600; }
+.rooms td.c-meta { display: none; }
+/* a phone: the tabs scroll sideways with short names; each room a compact card (name and game, host, status, the
+   figures; its button on the right) */
+@media (max-width: 760px) {
+	main { padding: 24px 12px 40px; }
+	h1 { font-size: 34px; }
+	.lede { margin: 8px 0 16px; font-size: 17px; }
+	.strip { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 16px; }
+	.gchip { height: 40px; padding: 0 8px 0 6px; gap: 6px; }
+	.gchip img { width: 24px; height: 24px; }
+	.gchip .gn { font-size: 15px; }
+	.gchip { min-width: 0; }
+	.gchip .gc { font-size: 15px; }
+	.gchip .qmc { display: none; }   /* (a phone: the players online only) */
+	.lands { grid-column: 1 / span 2; }
+	.tabs { padding: 4px 4px 0; gap: 2px; }
+	.tab { height: 44px; padding: 0 12px; gap: 8px; font-size: 18px; }
+	.tab img, .tab .all-icon { width: 24px; height: 24px; }
+	.tab .all-icon { padding: 3px; gap: 3px; }
+	.tab .full { display: none; }
+	.tab .short { display: inline; }
+	.bar { padding: 8px; gap: 8px; }
+	.bar .lbl { display: none; }
+	.chip { padding: 2px 12px 0; font-size: 16px; }
+	.search { flex: 1 1 120px; width: auto; min-width: 120px; font-size: 16px; }
+	.bar .ago { flex-basis: 100%; height: auto; margin-left: 0; font-size: 13px; }
+	table.rooms, .rooms tbody { display: block; width: 100%; }
+	.rooms thead { display: none; }
+	.rooms tr.room { display: grid; grid-template-columns: 1fr auto; column-gap: 12px; row-gap: 4px; padding: 12px; border-top: 1px solid var(--line); }
+	.rooms tr.room:hover td { background: transparent; }
+	.rooms td { display: block; width: auto !important; height: auto; border: 0; padding: 0; font-size: 16px; }
+	.rooms td.c-room { grid-column: 1; grid-row: 1; font-size: 17px; }
+	.rooms td.c-game { grid-column: 2; grid-row: 1; text-align: right; }
+	.rooms td.c-host { grid-column: 1; grid-row: 2; color: var(--row); }
+	.rooms tr.quick td.c-host { display: none; }
+	.rooms tr.quick td.c-status { grid-row: 2; }
+	.rooms tr.quick td.act { grid-row: 2; }   /* (beside its status, under the game's name) */
+	.rooms.one tr.quick td.act { grid-row: 1 / span 2; }   /* (one game's tab: no game's name there) */
+	.rooms td.c-status { grid-column: 1; grid-row: 3; font-size: 16px; }
+	.st .p { width: auto; max-width: 110px; }
+	.st .sc { width: 40px; }
+	.rooms td.c-watch { display: none; }
+	.rooms td.act { grid-column: 2; grid-row: 2 / span 2; align-self: center; width: auto; padding: 0; }
+	.act .btn { min-width: 80px; }
+	.rooms tr.how { display: block; }
+	tr.how td { display: block; padding: 12px; }
+	.rooms td.c-meta { display: block; grid-column: 1 / span 2; grid-row: 4; font-size: 13px; color: var(--muted); font-weight: 500; }
+	.rooms tr.empty { display: block; }
+	.rooms .empty td { display: block; padding: 32px 16px; }
+	.pager { flex-wrap: wrap; justify-content: center; }
+	.pager span { order: -1; flex-basis: 100%; text-align: center; }
 }
 </style>
 </head>
 <body>
 <main>
-	<h1>VF Recomp · Online now</h1>
-	<p class="lede">Players in the online lobby right now, updated every 30 seconds.</p>
-	<div class="cards" id="cards"></div>
-	<p class="legend"><span><b>Searching</b>: in Random, looking for an opponent</span><span><b>Waiting</b>: hosting a room code, waiting for a friend to join</span><span><b>Playing</b>: in a match, Random or room code</span></p>
-	<h2>By country</h2>
-	<ul class="countries" id="countries"></ul>
-	<p class="note" id="note">Counted by the lobby from what it sees: players searching in Random, in a Random match made in the last 10 minutes, waiting with a room code, or in a room code match from the last 10 minutes. Each player once. Play by address isn't counted. A player's country is where the lobby sees them connect from; only the totals are kept, never names or addresses. Random already matches you with the nearest players first. Everyone on the current version of a game meets everyone else on it, whatever their settings: a match plays the host's.<br>Flags: <a href="https://github.com/twitter/twemoji">Twemoji</a> by Twitter, Inc. and contributors, <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>.</p>
+	<h1 id="title"></h1>
+	<p class="lede" id="lede"></p>
+	<div class="strip" id="strip"></div>
+	<div class="head" id="head"><nav class="tabs" id="tabs" role="tablist" aria-label="Game"></nav><div class="bar" id="bar"></div></div>
+	<table class="rooms" id="rooms"></table>
+	<div class="pager" id="pager"></div>
+	<p class="note"><span id="note"></span><br>Flags: <a href="https://github.com/twitter/twemoji">Twemoji</a> by Twitter, Inc. and contributors, <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>.</p>
 </main>
 <script>
 "use strict";
+// Every line the page shows, in one place for the translations: whole sentences, {name}-style places filled in by fill()
+const T = {
+	title: "VF Recomp \u00b7 Online",
+	lede: "Join a room, or watch a match. The same list as in the games' Online screen, live.",
+	note: "A room shows here when its host turns on Listed in Rooms in the game, and Quick Match games when both players let them be (they can be watched by anyone); other rooms play by code, counted above but never named. Any match can be watched by anyone with its room's code, a moment behind the players, who never wait for anyone watching. A player's country is where the lobby sees them connect from.",
+	online: "{n} online",
+	in_quick: " \u00b7 {n} in Quick match",
+	older: "{n} of them on an older version: the latest version meets everyone",
+	more_countries: "+{n} countries",
+	unknown: "Unknown",
+	all_games: "All games",
+	all_short: "All",
+	rooms_label: "Rooms",
+	filter_all: "All",
+	filter_open: "Open",
+	filter_playing: "Playing",
+	find: "Find a room or player",
+	n_rooms: "{n} rooms",
+	one_room: "1 room",
+	col_room: "Room",
+	col_game: "Game",
+	col_host: "Host",
+	col_status: "Status",
+	col_watching: "Watching",
+	hosts_room: "{name}'S ROOM",
+	quick_tag: "Quick match",
+	open: "Open",
+	join: "JOIN",
+	watch: "WATCH",
+	get_code: "GET CODE",
+	n_watching: "{n} watching \u00b7 ",
+	now: "now",
+	minutes: "{m} min",
+	hours: "{h} h {m} min",
+	opening: "Opening {app}\u2026 Didn't open? In the game: Online > Enter code, to join:",
+	opening_watch: "Opening {app}\u2026 Didn't open? In the game: Online > Enter code, to watch:",
+	on_pc: "On your PC or Deck: Online > Enter code, in {game}, to join:",
+	on_pc_watch: "On your PC or Deck: Online > Enter code, in {game}, to watch:",
+	copy: "Copy",
+	copied: "Copied",
+	unreachable: "Can't reach the online service right now.",
+	rooms_off: "Rooms aren't available right now.",
+	rooms_off_more: "Room codes and Quick Match still work in the game.",
+	unreachable_more: "Trying again by itself.",
+	try_now: "Try now",
+	looking: "Looking for rooms\u2026",
+	none_here: "No rooms here.",
+	none_for: "No rooms here for \u201c{find}\u201d.",
+	show_all: "Show all rooms",
+	none_listed: "No listed rooms right now.",
+	none_listed_more: "In the game: Online > Create room, with Listed in Rooms on.",
+	previous: "\u2039 Previous",
+	next: "Next \u203a",
+	pages: "{from}\u2013{to} of {n} rooms \u00b7 page {page} of {pages}",
+	cant_reach: "can't reach the lobby",
+	cant_reach_last: "can't reach the lobby \u00b7 last updated {ago}",
+	loading: "loading\u2026",
+	updated: "updated {ago}",
+	just_now: "just now",
+	s_ago: "{n} s ago",
+	min_ago: "{n} min ago",
+};
+const fill = (t, v) => t.replace(/\{(\w+)\}/g, (m, k) => (k in v ? String(v[k]) : m));
 const GAMES = [
-	{ id: "vf1", name: "Virtua Fighter", icon: "icons/vf1.png" },
-	{ id: "vf2", name: "Virtua Fighter 2", icon: "icons/vf2.png" },
-	{ id: "vf3", name: "Virtua Fighter 3", icon: "icons/vf3.png" },
-	{ id: "vf3tb", name: "VF3 Team Battle", icon: "icons/vf3.png" },
+	{ id: "vf1", name: "Virtua Fighter", short: "VF1", app: "Virtua Fighter Recomp", icon: "icons/vf1.png" },
+	{ id: "vf2", name: "Virtua Fighter 2", short: "VF2", app: "Virtua Fighter 2 Recomp", icon: "icons/vf2.png" },
+	{ id: "vf3", name: "Virtua Fighter 3", short: "VF3", app: "Virtua Fighter 3 Recomp", icon: "icons/vf3.png" },
+	{ id: "vf3tb", name: "VF3 Team Battle", short: "VF3 TB", app: "Virtua Fighter 3 Recomp (Team Battle)", icon: "icons/vf3.png" },
 ];
-let data = null, fetched = 0, failed = false;
+const REGIONS = { AF: "Africa", AN: "Antarctica", AS: "Asia", EU: "Europe", NA: "N. America", OC: "Oceania", SA: "S. America" };
+const NAME = /^[A-Z0-9 .!?-]{1,10}$/, ROOM = /^[A-Z0-9 .!?'-]{1,16}$/, CODE = /^[A-HJKMNP-Z2-9]{6}$/, CC = /^[A-Z]{2}$/;
+let data = null, failed = false;
+// (a phone or a tablet: the games don't run there, so no link into one; the code, for a PC or a Deck)
+const mobile = (() => {
+	try {
+		const touch = matchMedia("(pointer: coarse)").matches && matchMedia("(max-width: 1024px)").matches;
+		return touch || /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+	} catch (e) { return false; }
+})();
+for (const [id, key] of [["title", "title"], ["lede", "lede"], ["note", "note"]]) { const e = document.getElementById(id); if (e) e.textContent = T[key]; }
+document.title = T.title;
+let fresh = new Set();   // (rooms new in the latest answer: faded in once)
+// (what the viewer chose: kept while the page is open, and in the address's #, so a link shows the same)
+const view = { game: "all", status: "all", sort: "status", up: false, open: new Set(), page: 0, find: "" };
+const PER_PAGE = 25;
+let you = "";   // (the viewer's continent, as Cloudflare places them: nearest rooms first)
+// (the address's #: the game's tab first, then open or playing: #vf3, #vf3&playing; the older #game=vf3&status=playing too)
+function read_view() {
+	for (const part of location.hash.slice(1).split("&")) {
+		const [k, v] = part.split("=");
+		const id = v === undefined ? k : k === "game" ? v : "";
+		const st = v === undefined ? k : k === "status" ? v : "";
+		if (GAMES.some((g) => g.id === id)) view.game = id;
+		if (id === "all") view.game = "all";
+		if (st === "open" || st === "waiting") view.status = "waiting";
+		if (st === "playing") view.status = "playing";
+	}
+}
+try { read_view(); } catch (e) {}
 
 function n(x) { return Number.isInteger(x) && x >= 0 ? x : 0; }
 function el(tag, cls, text) {
@@ -126,113 +339,295 @@ function el(tag, cls, text) {
 	if (text !== undefined) e.textContent = String(text);
 	return e;
 }
-// A country: its flag and its name (the browser's own, else the code). "" is a player whose country isn't known.
-const CC = /^[A-Z]{2}$/;
 let names = null;
 try { names = new Intl.DisplayNames([navigator.language || "en", "en"], { type: "region" }); } catch (e) {}
 function country_name(cc) {
-	if (!cc) return "Unknown";
+	if (!cc) return T.unknown;
 	try { const s = names && names.of(cc); if (s && s !== cc) return s; } catch (e) {}
 	return cc;
 }
 function flag(cc) {   // (the code's two regional indicator letters: a flag, by the Twemoji font where the system has none)
 	const f = el("span", "flag", String.fromCodePoint(...[...cc].map((ch) => 0x1f1a5 + ch.charCodeAt(0))));
 	f.setAttribute("aria-hidden", "true");
+	f.title = country_name(cc);
 	return f;
 }
-// (a game's or all games' countries, checked, most first; "" last)
-function lands(c) {
-	const list = c && typeof c === "object" ? Object.entries(c) : [];
-	return list.filter(([k, v]) => (k === "" || CC.test(k)) && n(v) > 0).map(([k, v]) => [k, n(v)])
-		.sort((a, b) => (a[0] === "") - (b[0] === "") || b[1] - a[1] || (a[0] < b[0] ? -1 : 1));
+function who(p) { return p && typeof p === "object" && NAME.test(p.name) ? { name: p.name, country: CC.test(p.country) ? p.country : "" } : null; }
+function named(p, cls) {
+	const s = el("span", cls);
+	s.title = p.name + (p.country ? " (" + country_name(p.country) + ")" : "");
+	if (p.country) s.appendChild(flag(p.country));
+	s.appendChild(document.createTextNode(p.name));
+	return s;
 }
-const STATES = [["Searching", (c) => n(c.searching)], ["Waiting", (c) => n(c.hosting)], ["Playing", (c) => n(c.random) + n(c.room)]];
-// (a game's one row: everyone it can meet, whatever their settings; the lobby pairs them by the host's)
-function table(c) {
-	const t = el("table", "states");
-	const cols = el("colgroup");
-	for (let i = 0; i < STATES.length; i++) cols.appendChild(el("col", "num"));
-	t.appendChild(cols);
-	const head = el("tr");
-	for (const [name] of STATES) head.appendChild(el("th", "", name));
-	t.appendChild(el("thead")).appendChild(head);
-	const tr = t.appendChild(el("tbody")).appendChild(el("tr"));
-	for (const [, get] of STATES) {
-		const x = get(c);
-		tr.appendChild(el("td", x ? "" : "zero", x || "–"));
+function room_key(r) { return r.game + "|" + r.p1.name + "|" + (r.code || r.watch || r.name); }
+function dashed(c) { return c.slice(0, 3) + "-" + c.slice(3); }
+function minutes(s) { s = n(s); return s < 60 ? T.now : s < 3600 ? fill(T.minutes, { m: Math.floor(s / 60) }) : fill(T.hours, { h: Math.floor(s / 3600), m: Math.floor((s % 3600) / 60) }); }
+const game_of = (id) => GAMES.find((g) => g.id === id);
+// The game's own link: opens it straight into the room or the match (each game its own scheme, so all three can be
+// installed: vf3recomp://vf3/join/KXQ4M7, vf3recomp://vf3tb/watch/KXQ4M7)
+const SCHEME = { vf1: "vf1recomp", vf2: "vf2recomp", vf3: "vf3recomp", vf3tb: "vf3recomp" };
+function game_link(r, what) { return SCHEME[r.game] + "://" + r.game + "/" + what + "/" + (what === "watch" ? r.watch : r.code); }
+
+// ---- the rooms, as the lobby lists them (each field checked) ----
+function rooms() {
+	const list = data && Array.isArray(data.rooms) ? data.rooms : [];
+	const out = [];
+	for (const r of list) {
+		if (!r || typeof r !== "object" || !game_of(r.game) || r.older === true || r.locked === true) continue;   // (an older version's: not shown)
+		const p1 = who(r.p1), p2 = who(r.p2);
+		if (!p1) continue;
+		const base = { game: r.game, name: typeof r.name === "string" && ROOM.test(r.name) ? r.name : fill(T.hosts_room, { name: p1.name }), p1, region: REGIONS[r.region] ? r.region : "",
+			since: n(r.since), watchers: n(r.watchers), code: CODE.test(r.code) ? r.code : "" };
+		if (r.state === "waiting" && base.code) out.push({ ...base, state: "waiting", p2: null, watch: "" });
+		else if (r.state === "playing" && p2 && (CODE.test(r.watch) || base.code)) out.push({ ...base, state: "playing", p2, watch: CODE.test(r.watch) ? r.watch : base.code,
+			score: Array.isArray(r.score) && r.score.length === 2 ? r.score.map(n) : [0, 0],
+			// (a Quick match: its two players, to watch only; no room name, no code to join)
+			...(r.random === true && CODE.test(r.watch) ? { quick: true, name: "QUICK MATCH", code: "" } : {}) });
 	}
-	if (n(c.random) && n(c.room)) tr.lastChild.title = n(c.random) + " Random, " + n(c.room) + " room code";
-	return t;
+	return out;
 }
-// (a game card's line: its top countries, flag and count)
-function card_lands(c) {
-	const known = lands(c).filter(([k]) => k), top = known.slice(0, 5);
-	const div = el("div", "lands");
-	for (const [cc, x] of top) {
-		const s = el("span");
-		s.title = country_name(cc);
-		s.appendChild(flag(cc));
-		s.appendChild(document.createTextNode(x));
-		div.appendChild(s);
-	}
-	const rest = known.length - top.length;
-	if (rest > 0) div.appendChild(el("span", "more", "+" + rest + (rest === 1 ? " country" : " countries")));
-	return top.length ? div : null;
+const SORTS = {
+	room: (a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0),
+	host: (a, b) => (a.p1.name < b.p1.name ? -1 : a.p1.name > b.p1.name ? 1 : 0),
+	// (open rooms first, those near the viewer first, newest first; then the matches, the most watched first)
+	status: (a, b) => (b.state === "waiting") - (a.state === "waiting") || (a.state === "waiting" ? (b.region === you) - (a.region === you) || a.since - b.since : b.watchers - a.watchers || a.since - b.since),
+	watch: (a, b) => b.watchers - a.watchers,
+};
+function shown() {
+	const s = SORTS[view.sort] || SORTS.status;
+	const find = view.find.trim().toUpperCase();
+	const has = (r) => !find || r.name.includes(find) || r.p1.name.includes(find) || (r.p2 && r.p2.name.includes(find));
+	return rooms().filter((r) => (view.game === "all" || r.game === view.game) && (view.status === "all" || r.state === view.status) && has(r))
+		.sort((a, b) => (view.up ? -1 : 1) * s(a, b) || SORTS.status(a, b));
 }
-const TOP_COUNTRIES = 12;
-function render_countries() {
-	const ul = document.getElementById("countries");
-	ul.replaceChildren();
-	const list = lands(data && data.countries), known = list.filter(([k]) => k), unknown = list.find(([k]) => !k);
-	for (const [cc, x] of known.slice(0, TOP_COUNTRIES)) {
-		const li = el("li");
-		li.appendChild(flag(cc));
-		li.appendChild(el("span", "cname", country_name(cc)));
-		li.appendChild(el("span", "cnum", x));
-		ul.appendChild(li);
+
+// ---- who's online: each game's players and Quick match, in a line ----
+function render_strip() {
+	const strip = document.getElementById("strip");
+	strip.replaceChildren();
+	for (const g of GAMES) {
+		const d = data && data.games && data.games[g.id];
+		const c = strip.appendChild(el("div", "gchip"));
+		const img = c.appendChild(el("img"));
+		img.src = g.icon; img.alt = ""; img.width = 30; img.height = 30;
+		c.appendChild(el("span", "gn", g.short));
+		const t = c.appendChild(el("span", "gc"));
+		if (!d) { t.textContent = "…"; continue; }
+		const [before, after] = T.online.split("{n}");   // (the number in bold, where the sentence puts it)
+		if (before) t.appendChild(document.createTextNode(before));
+		t.appendChild(el("b", "", n(d.total)));
+		if (after) t.appendChild(document.createTextNode(after));
+		if (n(d.searching)) t.appendChild(el("span", "qmc", fill(T.in_quick, { n: n(d.searching) })));
+		const older = Math.min(n(d.older), n(d.total));
+		if (older) t.title = fill(T.older, { n: older });
 	}
-	const more = known.slice(TOP_COUNTRIES);
-	if (more.length) {
-		const players = more.reduce((a, [, x]) => a + x, 0);
-		ul.appendChild(el("li", "rest", "and " + more.length + " more " + (more.length === 1 ? "country" : "countries") + " · " + players + (players === 1 ? " player" : " players")));
+	const all = data && data.countries && typeof data.countries === "object" ? Object.entries(data.countries) : [];
+	const known = all.filter(([k, v]) => CC.test(k) && n(v) > 0).sort((a, b) => n(b[1]) - n(a[1]));
+	if (known.length) {
+		const l = strip.appendChild(el("div", "lands"));
+		for (const [cc, x] of known.slice(0, 8)) { const s = l.appendChild(el("span")); s.title = country_name(cc); s.appendChild(flag(cc)); s.appendChild(document.createTextNode(n(x))); }
+		if (known.length > 8) l.appendChild(el("span", "more", fill(T.more_countries, { n: known.length - 8 })));
 	}
-	if (unknown) ul.appendChild(el("li", "rest", "Country not known · " + unknown[1] + (unknown[1] === 1 ? " player" : " players")));
-	if (!ul.children.length) ul.appendChild(el("li", "rest", data ? "No one right now" : "…"));
+}
+
+// ---- the filters ----
+function chip(label, on, act) {
+	const b = el("button", "chip", label);
+	b.type = "button";
+	b.setAttribute("aria-pressed", on ? "true" : "false");
+	b.addEventListener("click", act);
+	return b;
+}
+function keep_view() {
+	view.page = 0;
+	const h = [view.game === "all" && view.status !== "all" ? "all" : view.game === "all" ? "" : view.game, view.status === "waiting" ? "open" : view.status === "playing" ? "playing" : ""].filter(Boolean);
+	try { history.replaceState(null, "", h.length ? "#" + h.join("&") : location.pathname + location.search); } catch (e) {}
+	render_rooms();
+	render_bar();
+}
+addEventListener("hashchange", () => { view.game = "all"; view.status = "all"; read_view(); view.page = 0; render_rooms(); render_bar(); });
+// the games' tabs: All games, then each game by its badge and name, its rooms counted beside
+function tab(id, label, short, icon, count) {
+	const on = view.game === id, b = el("button", "tab");
+	b.type = "button";
+	b.setAttribute("role", "tab");
+	b.setAttribute("aria-selected", on ? "true" : "false");
+	if (icon) { const i = b.appendChild(el("img")); i.src = icon; i.alt = ""; i.width = 28; i.height = 28; }
+	else { const i = b.appendChild(el("span", "all-icon")); for (let k = 0; k < 4; k++) i.appendChild(el("i")); }
+	b.appendChild(el("span", "name full", label));
+	b.appendChild(el("span", "name short", short));
+	const c = b.appendChild(el("span", "count", data ? count : "\u2013"));
+	c.setAttribute("aria-label", count === 1 ? T.one_room : fill(T.n_rooms, { n: count }));
+	b.addEventListener("click", () => { view.game = id; keep_view(); });
+	return b;
+}
+function render_tabs() {
+	const t = document.getElementById("tabs");
+	t.replaceChildren();
+	const all = rooms();
+	t.appendChild(tab("all", T.all_games, T.all_short, "", all.length));
+	for (const x of GAMES) t.appendChild(tab(x.id, x.name, x.short, x.icon, all.filter((r) => r.game === x.id).length));
+	const on = t.querySelector('[aria-selected="true"]');
+	if (on && t.scrollWidth > t.clientWidth) t.scrollLeft = Math.max(0, on.offsetLeft - (t.clientWidth - on.offsetWidth) / 2);   // (a phone: the chosen tab in view)
+}
+function render_bar() {
+	render_tabs();
+	const bar = document.getElementById("bar");
+	bar.replaceChildren();
+	const s = bar.appendChild(el("div", "chips"));
+	s.appendChild(el("span", "lbl", T.rooms_label));
+	for (const [id, label] of [["all", T.filter_all], ["waiting", T.filter_open], ["playing", T.filter_playing]])
+		s.appendChild(chip(label, view.status === id, () => { view.status = id; keep_view(); }));
+	const f = bar.appendChild(el("input", "search"));
+	f.type = "search";
+	f.placeholder = T.find;
+	f.value = view.find;
+	f.setAttribute("aria-label", T.find);
+	f.addEventListener("input", () => { view.find = f.value.slice(0, 16); view.page = 0; render_rooms(); });
+	bar.appendChild(el("span", "ago" + (failed ? " down" : ""), ago()));
+	bar_height();
+}
+// (the table's head sticks just under the filters, whatever their height: set again as it changes)
+function bar_height() { const b = document.getElementById("head"); if (b) document.documentElement.style.setProperty("--bar-h", (b.offsetHeight - 1) + "px"); }
+addEventListener("resize", bar_height);
+try { document.fonts.ready.then(bar_height); } catch (e) {}
+
+// ---- the rooms ----
+function copy_button(text) {
+	const b = el("button", "copy", T.copy);
+	b.type = "button";
+	b.addEventListener("click", () => {
+		try { navigator.clipboard.writeText(text).then(() => { b.textContent = T.copied; setTimeout(() => (b.textContent = T.copy), 1500); }, () => {}); } catch (e) {}
+	});
+	return b;
+}
+function how(r, what) {
+	const g = game_of(r.game), d = el("div", "how");
+	const code = what === "watch" ? r.watch : r.code;
+	const t = d.appendChild(el("div"));
+	t.textContent = mobile ? fill(what === "watch" ? T.on_pc_watch : T.on_pc, { game: g.name }) : fill(what === "watch" ? T.opening_watch : T.opening, { app: g.app });
+	const c = d.appendChild(el("div", "code"));
+	c.appendChild(el("b", "", dashed(code)));
+	c.appendChild(copy_button(dashed(code)));
+	return d;
+}
+function th(label, key, cls) {
+	const h = el("th", (cls || "") + (key ? " sort" : "") + (view.sort === key ? " on" + (view.up ? " up" : "") : ""), label);
+	if (key) h.addEventListener("click", () => { view.up = view.sort === key ? !view.up : false; view.sort = key; render_rooms(); });
+	return h;
+}
+const cols = () => (view.game === "all" ? 6 : 5);   // (the table's columns: the Game column only on All games)
+function render_rooms() {
+	const t = document.getElementById("rooms");
+	t.replaceChildren();
+	t.classList.toggle("one", view.game !== "all");
+	const head = t.appendChild(el("thead")).appendChild(el("tr"));
+	head.append(th(T.col_room, "room", "c-room"), th(T.col_game, "", "c-game"), th(T.col_host, "host", "c-host"), th(T.col_status, "status", "c-status"), th(T.col_watching, "watch", "num c-watch"), th("", "", "act"));
+	const body = t.appendChild(el("tbody"));
+	const list = shown();
+	if (!list.length) {
+		render_pager(0, 0, 1);
+		const td = body.appendChild(el("tr", "empty")).appendChild(el("td"));
+		td.colSpan = cols();
+		if (!data && failed) td.appendChild(state("bad", "plug", T.unreachable, T.unreachable_more, T.try_now, load));
+		else if (!data) td.appendChild(state("", "wait", T.looking));
+		else if (!(data.features && data.features.rooms)) td.appendChild(state("", "room", T.rooms_off, T.rooms_off_more));   // (switched off, or an older lobby)
+		else if (rooms().length) td.appendChild(state("", "find", view.find ? fill(T.none_for, { find: view.find.trim() }) : T.none_here, "", T.show_all,
+			() => { view.game = "all"; view.status = "all"; view.find = ""; keep_view(); }));
+		else td.appendChild(state("", "room", T.none_listed, T.none_listed_more));
+		return;
+	}
+	const pages = Math.max(1, Math.ceil(list.length / PER_PAGE));
+	view.page = Math.min(view.page, pages - 1);
+	const from = view.page * PER_PAGE;
+	render_pager(list.length, from, pages);
+	for (const r of list.slice(from, from + PER_PAGE)) {
+		const key = room_key(r);
+		const tr = body.appendChild(el("tr", "room" + (r.quick ? " quick" : "") + (fresh.has(key) ? " fresh" : "")));
+		const name = el("td", "c-room");
+		name.appendChild(r.quick ? el("span", "qm", T.quick_tag) : el("span", "rname", r.name));
+		const g = el("td", "c-game game", game_of(r.game).short);
+		const host = el("td", "c-host");
+		if (r.quick) host.appendChild(el("span", "dash", "\u2014"));   // (no host to speak of: the two players are in Status)
+		else host.appendChild(named(r.p1));
+		const st = el("td", "c-status st");
+		if (r.state === "playing") {
+			const live = st.appendChild(el("span", "live"));
+			live.appendChild(el("i", "dot"));
+			live.appendChild(named(r.p1, "p"));
+			live.appendChild(el("span", "sc", r.score[0] + "\u2013" + r.score[1]));
+			live.appendChild(named(r.p2, "p"));
+		} else {
+			const w = st.appendChild(el("span", "wait"));
+			w.appendChild(el("i", "dot"));
+			w.appendChild(document.createTextNode(T.open));
+		}
+		const watch = el("td", "c-watch num", r.watchers || "");
+		const act = el("td", "act");
+		// one button a room: Join one open, Watch a match; on a desktop the game's own link (it opens the game there) and
+		// the code beside; on a phone or tablet (the games don't run there) Get code: the code, for a PC or a Deck
+		const what = r.state === "playing" ? "watch" : "join", k = key + "|" + what;
+		const b = act.appendChild(el(mobile ? "button" : "a", "btn" + (what === "watch" || mobile ? " watch" : ""), mobile ? T.get_code : what === "watch" ? T.watch : T.join));
+		if (mobile) b.type = "button";
+		else b.href = game_link(r, what);
+		b.setAttribute("aria-expanded", view.open.has(k) ? "true" : "false");
+		b.addEventListener("click", () => { const was = view.open.has(k); view.open.clear(); if (!(mobile && was)) view.open.add(k); setTimeout(render_rooms, 0); });   // (the link followed, the code shown too)
+		const meta = el("td", "c-meta", (r.state === "playing" && r.watchers ? fill(T.n_watching, { n: r.watchers }) : "") + minutes(r.since));
+		tr.append(name, g, host, st, watch, act, meta);
+		if (view.open.has(k)) {
+			const td = body.appendChild(el("tr", "how")).appendChild(el("td"));
+			td.colSpan = cols();
+			td.appendChild(how(r, what));
+		}
+	}
+}
+// (nothing to list: an icon in the page's line style, one line, a quieter one, one action)
+const ICONS = {
+	wait: '<circle cx="20" cy="20" r="14" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="60 30" stroke-linecap="round" class="spin" style="transform-origin:20px 20px"/>',
+	plug: '<path d="M14 6v8M26 6v8M10 14h20v6a10 10 0 0 1-20 0zM20 30v6" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>',
+	find: '<circle cx="17" cy="17" r="10" fill="none" stroke="currentColor" stroke-width="3"/><path d="M25 25l9 9" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>',
+	room: '<rect x="6" y="9" width="28" height="22" rx="4" fill="none" stroke="currentColor" stroke-width="3"/><path d="M6 16h28M12 23h8" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>',
+};
+function state(kind, icon, line, small, action, act) {
+	const d = el("div", "state" + (kind ? " " + kind : ""));
+	d.insertAdjacentHTML("beforeend", '<svg viewBox="0 0 40 40" aria-hidden="true">' + ICONS[icon] + "</svg>");
+	d.appendChild(el("p", "", line));
+	if (small) d.appendChild(el("small", "", small));
+	if (action) {
+		const b = d.appendChild(el("button", "chip", action));
+		b.type = "button";
+		b.addEventListener("click", act);
+	}
+	return d;
+}
+function render_pager(count, from, pages) {
+	const p = document.getElementById("pager");
+	p.replaceChildren();
+	p.hidden = count <= PER_PAGE;
+	document.getElementById("rooms").classList.toggle("last", p.hidden);
+	if (p.hidden) return;
+	const prev = p.appendChild(el("button", "", T.previous));
+	prev.type = "button";
+	prev.disabled = view.page === 0;
+	prev.addEventListener("click", () => { view.page--; render_rooms(); document.getElementById("head").scrollIntoView(); });
+	p.appendChild(el("span", "", fill(T.pages, { from: from + 1, to: Math.min(count, from + PER_PAGE), n: count, page: view.page + 1, pages })));
+	const next = p.appendChild(el("button", "", T.next));
+	next.type = "button";
+	next.disabled = view.page + 1 >= pages;
+	next.addEventListener("click", () => { view.page++; render_rooms(); document.getElementById("head").scrollIntoView(); });
 }
 function ago() {
-	if (!data) return failed ? "can't reach the lobby" : "loading…";
+	if (!data) return failed ? T.cant_reach : T.loading;
 	const s = Math.max(0, Math.round(Date.now() / 1000 - n(data.updated)));
-	return (failed ? "can't reach the lobby · last " : "updated ") + (s < 5 ? "just now" : s < 120 ? s + "s ago" : Math.round(s / 60) + " min ago");
+	const a = s < 5 ? T.just_now : s < 120 ? fill(T.s_ago, { n: s }) : fill(T.min_ago, { n: Math.round(s / 60) });
+	return fill(failed ? T.cant_reach_last : T.updated, { ago: a });
 }
 function render() {
-	const cards = document.getElementById("cards");
-	cards.replaceChildren();
-	for (const g of GAMES) {
-		const d = (data && data.games && data.games[g.id]) || null;
-		const card = el("section", "card");
-		const head = el("div", "head");
-		const img = el("img");
-		img.src = g.icon;
-		img.alt = "";
-		img.width = 64;
-		img.height = 64;
-		head.appendChild(img);
-		head.appendChild(el("div", "name", g.name));
-		card.appendChild(head);
-		const total = d ? n(d.total) : null;
-		card.appendChild(el("div", "total", total === null ? "–" : total));
-		card.appendChild(el("div", "unit", total === 1 ? "player online" : "players online"));
-		if (d) card.appendChild(table(d));
-		else card.appendChild(el("div", "unit", "…"));
-		// (of them, those on an older version: they meet only the players who can play their version's way)
-		const older = d ? Math.min(n(d.older), n(d.total)) : 0;
-		if (older) card.appendChild(el("div", "older", (older === n(d.total) ? (older === 1 ? "On an older version" : "All on older versions") : older + " of them on an older version") + ": the latest version meets everyone"));
-		const cl = d && card_lands(d.countries);
-		if (cl) card.appendChild(cl);
-		card.appendChild(el("div", "ago" + (failed ? " down" : ""), ago()));
-		cards.appendChild(card);
-	}
-	render_countries();
+	render_strip();
+	const typing = document.activeElement && document.activeElement.classList.contains("search");
+	if (!typing) render_bar();   // (the box being typed in left as it is)
+	render_rooms();
 }
 async function load() {
 	try {
@@ -240,16 +635,23 @@ async function load() {
 		if (!r.ok) throw new Error();
 		const d = await r.json();
 		if (!d || typeof d !== "object" || !d.games) throw new Error();
+		const before = data ? new Set(rooms().map(room_key)) : null;
 		data = d;
 		failed = false;
+		fresh = before ? new Set(rooms().map(room_key).filter((k) => !before.has(k))) : new Set();
+		you = typeof d.you === "string" && REGIONS[d.you] ? d.you : "";
 	} catch (e) {
 		failed = true;
 	}
-	fetched = Date.now();
 	render();
+	fresh = new Set();
 }
+render();
 load();
-setInterval(load, 15000);
+// (the rooms every 15 s, as often as the lobby makes them anew; none while the page isn't seen, at once when it is)
+let loaded_at = Date.now();
+setInterval(() => { if (!document.hidden) { loaded_at = Date.now(); load(); } }, 15000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden && Date.now() - loaded_at > 15000) { loaded_at = Date.now(); load(); } });
 setInterval(() => { for (const a of document.querySelectorAll(".ago")) a.textContent = ago(); }, 1000);
 </script>
 </body>

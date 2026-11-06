@@ -1,4 +1,4 @@
-// GET /api/online: the lobby's who's-online counts (its GET /v1/online), for the page beside it. The lobby's address
+// GET /api/online: the lobby's who's-online counts and rooms list (its GET /v1/online), for the page beside it. The lobby's address
 // is the Pages project's LOBBY_URL variable (Settings > Variables and Secrets), never in the site's files; and nothing
 // from the lobby's answer passes through as it came: only the counts, read and written out again here, so its
 // address can't reach a browser in a header, an error or a field. Kept while the counts are under FRESH_S old (this
@@ -27,6 +27,30 @@ function lands(c) {
 	const ok = list.filter(([k, n]) => (k === '' || /^[A-Z]{2}$/.test(k)) && count(n) > 0).map(([k, n]) => [k, count(n)]);
 	return Object.fromEntries(ok.sort((x, y) => y[1] - x[1] || (x[0] < y[0] ? -1 : 1)).slice(0, MAX_COUNTRIES));
 }
+// (the rooms list: each field checked and written out again, nothing else of the lobby's passed on; a player's name
+// only the letters a game's names have)
+const NAME = /^[A-Z0-9 .!?-]{1,10}$/, ROOM = /^[A-Z0-9 .!?'-]{1,16}$/, CODE = /^[A-HJKMNP-Z2-9]{6}$/, REGION = /^(AF|AN|AS|EU|NA|OC|SA)$/, MAX_ROOMS = 400;
+function who(p) {
+	return p && typeof p === 'object' && typeof p.name === 'string' && NAME.test(p.name) ? { name: p.name, country: typeof p.country === 'string' && /^[A-Z]{2}$/.test(p.country) ? p.country : '' } : null;
+}
+function rooms(list) {
+	const out = [];
+	for (const r of Array.isArray(list) ? list : []) {
+		if (out.length >= MAX_ROOMS || !r || typeof r !== 'object' || !GAMES.includes(r.game)) continue;
+		const p1 = who(r.p1), locked = r.locked === true;
+		const base = { game: r.game, name: typeof r.name === 'string' && ROOM.test(r.name) ? r.name : '', locked, region: REGION.test(r.region) ? r.region : '', since: count(r.since),
+			older: r.older === true, queue: Math.min(count(r.queue), 99), watchers: count(r.watchers), ...(!locked && CODE.test(r.code) ? { code: r.code } : {}) };
+		if (!p1) continue;
+		if (r.state === 'waiting' && (base.code || locked)) out.push({ ...base, state: 'waiting', p1 });
+		else if (r.state === 'playing' && who(r.p2) && (CODE.test(r.watch) || base.code)) {
+			const score = Array.isArray(r.score) && r.score.length === 2 ? r.score.map((x) => Math.min(count(x), 99)) : [0, 0];
+			const { code: _, ...watch_only } = base;   // (a Quick match: to watch only, no code to join, no room name)
+			const quick = r.random === true && CODE.test(r.watch);
+			out.push({ ...(quick ? { ...watch_only, name: '', queue: 0, random: true } : base), state: 'playing', ...(CODE.test(r.watch) ? { watch: r.watch } : {}), p1, p2: who(r.p2), score, round: Math.min(count(r.round), 99) });
+		}
+	}
+	return out;
+}
 function clean(d) {
 	const games = {};
 	for (const g of GAMES) {
@@ -34,10 +58,22 @@ function clean(d) {
 		games[g] = { ...counts(src), older: count(src.older), countries: lands(src.countries) };   // (one count a game: who one can meet; older: of them, on an older version)
 	}
 	const t = d && d.updated;
-	return { updated: Number.isInteger(t) && t > 0 && t < 1e11 ? t : 0, games, countries: lands(d && d.countries) };
+	// (what the lobby has on, its switches': no rooms list from it, as from an older lobby, is rooms off)
+	const f = d && d.features && typeof d.features === 'object' ? d.features : null;
+	const has_rooms = !!d && Array.isArray(d.rooms) && (!f || f.rooms !== false);
+	return { updated: Number.isInteger(t) && t > 0 && t < 1e11 ? t : 0, games, countries: lands(d && d.countries), features: { rooms: has_rooms, watch: !!f && f.watch === true },
+		...(has_rooms ? { rooms: rooms(d.rooms) } : {}) };
 }
 
-export async function onRequestGet({ request, env, waitUntil }) {
+export async function onRequestGet(ctx) {
+	const r = await counts_kept(ctx);
+	// (the viewer's own continent, as Cloudflare places them, beside the kept answer: the rooms near them first)
+	const c = ctx.request.cf && typeof ctx.request.cf.continent === 'string' ? ctx.request.cf.continent : '';
+	if (r.status !== 200 || !REGION.test(c)) return r;
+	const body = await r.text();
+	return new Response(body.slice(0, -1) + ',"you":"' + c + '"}', { status: 200, headers: r.headers });
+}
+async function counts_kept({ request, env, waitUntil }) {
 	const ok = (body) => out(body, 200, `public, max-age=${MAX_AGE}`);
 	if (kept && fresh(kept.t)) return ok(kept.body);
 	const key = new Request(new URL('/api/online', request.url).toString());
