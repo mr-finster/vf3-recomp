@@ -6,6 +6,9 @@ compatibility_date = "2026-10-01"
 # for each version uploaded, an older version's rules among them) aren't used: off, here so a deploy keeps them off.
 workers_dev = true
 preview_urls = false
+# The variables set in the dashboard (the off switches, SWITCH_*, and MONTH_MATCH_HOURS: README, Off switches) kept by a
+# deploy: without this, every `wrangler deploy` drops each one not in this file, turning a feature switched off back on.
+keep_vars = true
 
 [[durable_objects.bindings]]
 name = "ROOMS"
@@ -24,6 +27,11 @@ class_name = "Queue"
 name = "STATS"
 class_name = "Stats"
 
+# Watching a match (POST/GET /v1/watch/...): one a watch code, the match on now in its memory
+[[durable_objects.bindings]]
+name = "WATCHES"
+class_name = "Watch"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["Room", "Limits"]
@@ -35,6 +43,10 @@ new_sqlite_classes = ["Queue"]
 [[migrations]]
 tag = "v3"
 new_sqlite_classes = ["Stats"]
+
+[[migrations]]
+tag = "v4"
+new_sqlite_classes = ["Watch"]
 
 # Tries per address (an IPv6 one by its /64) a minute: anything, opening rooms, joining, the relay's logins. Generous
 # for a house, a LAN party or a phone network's shared address; a flood or a code guessed at is stopped.
@@ -62,3 +74,101 @@ simple = { limit = 30, period = 60 }
 name = "WAIT_LIMIT"
 namespace_id = "1005"
 simple = { limit = 180, period = 60 }   # (the hosts' and searchers' waits: one each 20 s, many players behind one address)
+
+[[ratelimits]]
+name = "WATCH_LIMIT"
+namespace_id = "1006"
+simple = { limit = 60, period = 60 }   # (watchers starting from one address: a match's start, a checkpoint, a stream)
+
+[[ratelimits]]
+name = "WATCHING_LIMIT"
+namespace_id = "1007"
+simple = { limit = 1800, period = 60 }   # (watching's repeated asks from one address: a host's pushes over HTTPS, 5 a second; a
+                                         # watcher's pieces each second, its seen, the count. Apart from ANY_LIMIT: a crowd
+                                         # watching behind one address never blocks its players)
+
+[[ratelimits]]
+name = "CODE48_LIMIT"
+namespace_id = "1008"
+simple = { limit = 200, period = 60 }   # (codes tried, joins, peeks and new watch codes, from an IPv6 /48 all told: its /64s have
+                                        # JOIN_LIMIT's 20 each; a phone network's /48 is many players, a /48 of one's own isn't 65,536)
+
+# ---- Staging: the same code as its own Worker ("vf-lobby-staging"), with its own Durable Objects (its own rooms,
+# queues, counts and matches: nothing shared with the live lobby) and its own per-address limits, set high so one
+# machine can drive hundreds of simulated players at it (tools/lobbyload). Deployed with
+#   npx wrangler deploy --env staging
+# which never touches the live Worker. Its address is the live one's with "-staging" in its name; point a game at it
+# with VF_LOBBY=<that address>, and the tools with --lobby. Its secrets (the relay's TURN_KEY_ID and
+# TURN_KEY_API_TOKEN) are its own, set with --env staging if it should hand out relay logins; without them it answers
+# no_turn and matches connect directly. The off switches are variables here as on live (none set: all on).
+[env.staging]
+name = "vf-lobby-staging"
+workers_dev = true
+preview_urls = false
+
+# (Quick match's own per-address marks, in the queue: raised too, for the same reason)
+[env.staging.vars]
+RANDOM_PER_ADDRESS = "100000"
+RANDOM_MATCHES_PER_ADDRESS = "100000"
+WATCHERS_PER_IP = "100000"   # (watchers of one match from one address: src/index.js)
+ROOMS_PER_ADDRESS = "100000"   # (listed rooms from one address in the rooms list: src/index.js)
+
+[[env.staging.durable_objects.bindings]]
+name = "ROOMS"
+class_name = "Room"
+
+[[env.staging.durable_objects.bindings]]
+name = "LIMITS"
+class_name = "Limits"
+
+[[env.staging.durable_objects.bindings]]
+name = "QUEUES"
+class_name = "Queue"
+
+[[env.staging.durable_objects.bindings]]
+name = "STATS"
+class_name = "Stats"
+
+[[env.staging.durable_objects.bindings]]
+name = "WATCHES"
+class_name = "Watch"
+
+[[env.staging.ratelimits]]
+name = "ANY_LIMIT"
+namespace_id = "2001"
+simple = { limit = 100000, period = 60 }
+
+[[env.staging.ratelimits]]
+name = "HOST_LIMIT"
+namespace_id = "2002"
+simple = { limit = 100000, period = 60 }
+
+[[env.staging.ratelimits]]
+name = "JOIN_LIMIT"
+namespace_id = "2003"
+simple = { limit = 100000, period = 60 }
+
+[[env.staging.ratelimits]]
+name = "TURN_LIMIT"
+namespace_id = "2004"
+simple = { limit = 30, period = 60 }
+
+[[env.staging.ratelimits]]
+name = "WAIT_LIMIT"
+namespace_id = "2005"
+simple = { limit = 100000, period = 60 }
+
+[[env.staging.ratelimits]]
+name = "WATCH_LIMIT"
+namespace_id = "2006"
+simple = { limit = 100000, period = 60 }
+
+[[env.staging.ratelimits]]
+name = "WATCHING_LIMIT"
+namespace_id = "2007"
+simple = { limit = 100000, period = 60 }
+
+[[env.staging.ratelimits]]
+name = "CODE48_LIMIT"
+namespace_id = "2008"
+simple = { limit = 100000, period = 60 }

@@ -46,7 +46,8 @@ Everything runs on the Mac, from this folder.
 
 ## Changing it later
 
-`npx wrangler deploy` again after editing `src/index.js`. Rooms open at the time are dropped, nothing else.
+`npx wrangler deploy --env=` again after editing `src/index.js` (staging first: below). Rooms open at the time are
+dropped, nothing else.
 `npx wrangler tail` shows the requests as they come in.
 
 ## Testing on one's own computer
@@ -57,12 +58,119 @@ Everything runs on the Mac, from this folder.
 TURN_STATIC=[{"host":"127.0.0.1","port":3478,"username":"test","credential":"secret"}]
 ```
 
-and the games started with `VF_LOBBY=http://127.0.0.1:8787`.
+and the games started with `VF_LOBBY=http://127.0.0.1:8787`. Without wrangler, the Worker runs in Node with stand-ins
+for its Durable Objects (in memory, no TURN): `node test/serve.mjs src/index.js 8787` (its variables after the port,
+e.g. `SWITCH_WATCH=off`, and changed while it runs with `POST /__vars?SWITCH_WATCH=off`); `npm test` (`test/all.mjs`) runs the pairing,
+the rooms and watching tests, every combination of the off switches, and the pairing tests again under each switch
+(the routes the games before rooms and watching use, answered as they were), each file to its end, then lists every
+failed check with what it got and what it wanted. No test sleeps on the lobby's background work (the online count
+told, a socket's message handled): the stand-ins keep it, and `settle()` waits for exactly that, so a slow or busy
+machine can't change a result.
+
+## Off switches (an instant undo, no game release)
+
+Four Worker variables (Settings > Variables and Secrets, plain text; or `[vars]` here), read at every request, so a
+change is live in seconds. `off` turns one off; anything else, or none, leaves it on. Each leaves the games working
+as the builds before rooms and watching did: Quick match and room codes untouched, one plain line where a feature is
+off. (`ROOMS` and `WATCHES` are the Durable Objects' bindings, hence the `SWITCH_` names.)
+
+| variable | off |
+|---|---|
+| `SWITCH_ROOMS` | no rooms list, nothing listed, no room that stays: Create room makes a code-only room, as before. The games' browser says "Rooms aren't available right now. Quick match and Enter code still work." |
+| `SWITCH_LISTING` | rooms work (a room that stays, its line) but none is listed, nor any Quick match to watch: the same line in the browser |
+| `SWITCH_WATCH` | no match is sent or watched: a host is told `off` (its game stops sending, as at the month's ceiling), watchers on a socket are told and let go, a new one is told "Watching isn't available right now."; the rooms list keeps only the open rooms |
+| `SWITCH_WEBSOCKETS` | no WebSocket is taken (a host's room, its feed, a watcher's frames): each falls back to HTTPS as on a network that carries none; open ones are closed as they're next used (a room's within a minute) |
+
+`/v1/online` says what's on (`features: {rooms, watch}`); an older lobby says nothing, and the games and the site read
+that as both off. The games built before this see none of it.
+
+## Staging
+
+`wrangler.toml`'s `[env.staging]` is the same code as its own Worker, `vf-lobby-staging`, with its own Durable Objects
+(its own rooms, queues, counts and matches: nothing shared with live) and per-address limits set high for load tests:
+`npx wrangler deploy --env staging` (`npm run deploy:staging`); the live one stays `npx wrangler deploy --env=` (`npm
+run deploy`; plain `npx wrangler deploy` does the same with a warning that there are two). Its address is the live one's
+with `-staging` in the Worker's name. Point a game at it with `VF_LOBBY=<address>`, `tools/watchsim --lobby <address>`,
+`tools/lobbyload/load.mjs --lobby <address>`, the site with its `LOBBY_URL`. Its relay secrets are its own (`npx wrangler
+secret put TURN_KEY_ID --env staging`); without them it answers `no_turn` and matches connect directly.
+
+## A load test (tools/lobbyload)
+
+`node tools/lobbyload/load.mjs --lobby <address> --rooms 100 --quick 50 --watchers 400 --browsers 100 --seconds 60
+--https 0.2` (Node 22, nothing installed): hosts with rooms that stay and their guests, Quick match pairs, each match
+sent as the game sends it (its WebSocket, 5 a second while watched, every 30 s while not, woken by the first watcher;
+or HTTPS POSTs), watchers on WebSockets, the HTTPS stream and pieces, browsers reading the list every 15 s. It prints
+each route's requests, statuses and times (p50, p95), the sockets, and every error, and exits 1 on any error or 5xx.
+All from one address: the live lobby's per-address limits answer 429 past them (staging's are high). Against
+`test/serve.mjs` here, that run: 100 rooms and 31 Quick matches played, 400 watchers, ~7,800 requests and upgrades,
+~24,000 WebSocket messages to the lobby and ~87,000 from it in a minute, no errors. Its first run found a room held only by its host's socket for over 30 s
+being dropped the moment that socket closed (fixed, and tested).
+
+## Rooms and watching
+
+`/v1/online` also lists the rooms (`rooms`): rooms whose hosts listed them (Create room: listed, or listed with a lock,
+the code then left out), waiting or playing (a room that stays through its match, with its line), and the matches that
+may be watched, Quick match games among them (`random: true`: both players, the score, a watch code and no code to
+join; listed only once the host's game sends the match, and only when both players' games said `qm_listed: true`, Show
+my Quick Match games in Rooms On: so never with an older build's player, which never says; watchable by its code either way); and `you`, the asker's continent
+(the browser's "near me"). A match takes 400 watchers at most (`WATCH_MAX`): one more is answered `full` (429), which
+the game says as "Too many watching right now". Each match that may be watched has a
+`Watch` (a Durable Object for its watch code): the host sends it the match 5 times a second while anyone watches and
+every 30 s while nobody does (the first watcher to come has it woken at once, on its WebSocket), watchers get the
+frames from it (`src/net/watch.h` has the messages). No checkpoints: a state one watcher made, handed to
+others, could be forged to match the players' hashes, so the lobby takes none and gives none out (`/v1/watch/cp` answers
+410); a watcher who comes late runs the match from its start. A watcher on a WebSocket is told when the match is over
+(the host's last upload, even one with no new frames), and when the host goes quiet with no last word (its game closed,
+its connection gone): the `Watch`'s alarm looks 30 s after the host's last upload while anyone's on a socket, and
+tells each one from what its socket kept even if the match itself went with the object's memory. A reply's hashes reach back
+120 frames before its first frame (`HASH_BACK`): the players' hashes are made a few frames after their frames, so a
+watcher still gets (and checks) one whose frame it already has. Deploying adds the `Watch` class (`wrangler.toml`'s migration `v4`):
+nothing else changes for the games already out, which send none of the new fields and get none of it.
+
+What it costs (measured with `test/serve.mjs`'s counts; the whole table is in the design notes): a match nobody watches,
+its host on a WebSocket, about 120 small messages an hour (6 requests' worth: a WebSocket message in is billed as a
+twentieth of one) and its room held by one socket, no requests; a watched one 18,000 messages an hour (900 requests'
+worth); a watcher on a WebSocket about 4 requests a visit, the frames sent to it free. The HTTPS fallbacks (POSTs, the
+stream, polling pieces mostly answered by Cloudflare's edge) cost a request each. Nothing's charged for the bytes.
 
 ## What stops abuse
 
-- **Rate limits** per address (an IPv6 one by its /64), in `wrangler.toml`: 600 requests a minute in all, 60 rooms
-  opened or random searches, 20 joins, 30 relay logins, 180 waits; 6 random searches at once and 120 random
+- **Watching's caps** (`src/index.js`, the `Watch`): 400 watching a match (one more answered `full`); 8 streams or
+  WebSockets a match from one address, 32 watchers a match from one address however they watch (`WATCHERS_PER_IP`); 60 watchers starting a minute from one address (`WATCH_LIMIT`). All matches
+  together, as the `Stats` count them: past 4,000 watching, new watchers get no stream and ask for the frames every
+  3 s; past 8,000 they're answered `busy` ("Watching is busy right now"); past 500 watched matches the hosts send
+  every 400 ms, past 2,000 every second. The month's ceiling: past 2,200 watched match-hours this month (UTC; an
+  hour nobody watched counts 0.4; a `MONTH_MATCH_HOURS` variable on the Worker changes it) the hosts are told to stop sending and new watchers are told
+  busy. None of it reaches the players. `node test/serve.mjs` counts the requests by route and the WebSocket
+  messages (`GET /__counts`).
+- **The rooms list**: 6 listed rooms or listed matches from one address at most (by a hash of it; its newest,
+  `ROOMS_PER_ADDRESS`), so one address can't push everyone else's off the list (each game's 100 newest); a phone
+  network's shared address still lists six.
+- **Room codes aren't found by watching**: every new game's room is watchable by its code, so a code nobody has, a room
+  with no Watch and a Watch with no match on yet answer `/v1/watch/seen`, `/count`, `/frames` and `/start` alike, and a
+  code new to the asker counts as a join (above); a watcher asking again about the code it watches, or a guest its
+  count, doesn't.
+- **WebSockets**: the host's feed (`/v1/watch/feed`) and each watcher (`/v1/watch/ws`) on the `Watch`'s own
+  WebSockets, and a room code's host on its `Room`'s (`/v1/room/ws?code=&key=`: told `{guest}` the moment a player
+  joins, as a wait's answer, `{error: "no_room"}` if the room goes; while it's open the room's held, no `/v1/wait` or
+  `/v1/hold`, and an alarm tells the online count it's there once a minute), all with the Hibernation API (no new
+  binding or migration: the same classes); a ping answered by Cloudflare without waking them (set as each object is made, so after it hibernates too). A room's host socket with no
+  ping for 90 s (its game pings every 15 s: gone without a close) is closed at the room's next alarm and the room let go, off the list. The HTTPS routes stay,
+  for networks that won't carry a WebSocket.
+
+- **Names**: a room's name and every player's name the others see (a host, a guest, those in a line, a watched match's
+  two) are checked against a short list of words (`src/words.js`, English, Korean and Japanese romanised, Spanish,
+  Portuguese and French; edit it freely). On a hit, quietly: a room is listed under its host's name ("<HOST>'S ROOM"),
+  a player is shown as PLAYER; no error, so old games carry on. The host's answer says how its room is listed
+  (`listed_as`), and the game shows it. Matched word by word on the name made plain (digits and $ @ ! | for letters, each
+  word's marks out, one-letter words in a row joined, repeats cut short), never across two real words (SUMMER DAY, ORBIT
+  CHAMP and WHO REALLY are fine); the strong words with their endings too (SHITS, SHITTING, WANKER), the short ones only
+  as words of their own or their plurals, so CLASSIC, PASSION, SCUNTHORPE, ASSASSIN, MERDEKA and SIBALD are fine (`npm test` has the cases).
+
+- **Rate limits** per address (an IPv6 one by its /64), in `wrangler.toml`: 600 requests a minute in all (watching's repeated asks apart: a host's pushes over HTTPS, a watcher's
+  pieces, seen and count, 1,800 a minute, `WATCHING_LIMIT`, so a crowd watching never blocks its address's players), 60 rooms
+  opened or random searches, 20 joins (a join, an Enter code's peek, or a watch code new to the asker: a watcher's first seen, a
+  guest's first count; an IPv6 /48's /64s 200 all told, `CODE48_LIMIT`), 30 relay logins, 180 waits; 6 random searches at once and 120 random
   matches in 10 minutes; and 200 relay logins a day (an IPv4 address, or an IPv6 /48). High enough for a phone
   network's or a school's shared address (many players behind one); a flood, or a room code guessed at (31^6,
   about 900 million codes), is stopped.
@@ -156,7 +264,7 @@ everything else (`ANY_LIMIT`, 600 a minute).
 ### The online page (tools/online)
 
 `online.html` (and its icons, and the game's own Barlow Condensed font) fetches `/api/online` on its own site every
-30 s; `functions/api/online.js` there asks the lobby's `/v1/online` and passes on only the counts, read and written
+15 s while the page is seen (none while it's hidden, at once when it's shown again); `functions/api/online.js` there asks the lobby's `/v1/online` and passes on only the counts, read and written
 again (no header, error text or field of the lobby's answer reaches the browser; the countries only as two capital
 letters or `""` with a whole number, 250 at most), kept 30 s. Under each card's count, one row
 (Searching: in Random's queue; Waiting: hosting a room code; Playing: in a match, Random or room code) with its top
@@ -197,14 +305,21 @@ country, never read without `TURN_STATIC`), then `tools/online/.dev.vars` (untra
 
 ## What it keeps
 
-A room: the host's name, country, game, version and addresses, for as long as the host's game keeps asking (it's
+A room: the host's name, country, game, version and addresses (and a room that stays: its name and its line, each
+player in it by a hash of their address and name, and their name, let go 15 s after they stop asking), for as long
+as the host's game keeps asking (it's
 gone 30 seconds after the host stops, two hours at most); after that, for two hours, only its key (so its host
 alone can open the code again). The random queue, in memory only: each searcher's name, country, addresses and
 rough location (Cloudflare's, for the nearest; never sent to anyone), while they search and a minute after; how
 many matches each address had in the last 10 minutes; and when recent matches were made (for the count). Who's
 online (`Stats`): each player searching, hosting or in a match made in the last 10 minutes as a hash of their address
 and name (not the address), with their game, version, room code and country (the lobby's own, two letters), until
-the timeouts above; only the counts by country are given out. The
+the timeouts above; only the counts by country are given out, and the names of hosts and players in rooms their
+hosts listed or let be watched (the rooms list), with a hash of each listed host's address (6 listed rooms an
+address); each kept as an entry of its own in the object's storage, and the month's watched hours (the ceiling, kept
+through a restart). A watched match, in memory: its start, its inputs and hashes,
+the score, until it's over (and while nobody watches it, in its Watch's storage too,
+which Cloudflare's hibernation would otherwise lose between the idle uploads; gone 3 hours after the last); its watchers as random numbers their games pick, for the count. The
 relay's logins counted for the day, all told and per address (the address itself kept as the count's key, wiped
 each day). Requests are limited per IP address (Cloudflare's rate limiting, kept for a minute). No logs are
 written by the Worker.

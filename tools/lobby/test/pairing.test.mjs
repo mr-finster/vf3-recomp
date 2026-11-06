@@ -1,27 +1,9 @@
 // The lobby's pairing (terms(), rooms and Random), run in Node with stand-ins for Cloudflare's Durable Objects:
 //   cd tools/lobby && npm test   (node test/pairing.test.mjs src/index.js: no wrangler, nothing deployed)
-import { pathToFileURL } from 'node:url';
-const lobby = await import(pathToFileURL(process.argv[2]).href);
-const { default: worker, Room, Queue, Stats, Limits } = lobby;
-function ns(Cls, env) {
-	const objs = new Map();
-	return {
-		idFromName: (n) => ({ n, toString: () => n }),
-		get(id) {
-			if (!objs.has(id.n)) {
-				const store = new Map();
-				const ctx = { id, storage: { get: async (k) => store.get(k), put: async (k, v) => { if (typeof k === 'object') for (const [a, b] of Object.entries(k)) store.set(a, b); else store.set(k, v); }, delete: async (k) => store.delete(k), deleteAll: async () => store.clear(), setAlarm: async () => {} }, blockConcurrencyWhile: (f) => f(), waitUntil: () => {} };
-				objs.set(id.n, new Cls(ctx, env));
-			}
-			const o = objs.get(id.n);
-			return { fetch: (u, init) => o.fetch(new Request(u, init)) };
-		},
-		objs,
-	};
-}
-const env = { TURN_STATIC: '[]' };
-for (const k of ['ANY_LIMIT', 'HOST_LIMIT', 'JOIN_LIMIT', 'WAIT_LIMIT', 'TURN_LIMIT']) env[k] = { limit: async () => ({ success: true }) };
-env.ROOMS = ns(Room, env); env.QUEUES = ns(Queue, env); env.STATS = ns(Stats, env); env.LIMITS = ns(Limits, env);
+// (the Durable Objects' stand-ins, test/standin.mjs's: settle() waits for exactly what they left running, no sleeping)
+import { lobby, settle, queued } from './standin.mjs';
+const { worker, env } = await lobby(process.argv[2]);
+Object.assign(env, JSON.parse(process.env.LOBBY_VARS || '{}'));   // (LOBBY_VARS: the Worker's variables, e.g. the off switches)
 let ip = 1;
 async function post(path, body, from) {
 	const req = new Request('http://lobby' + path, { method: 'POST', body: JSON.stringify(body), headers: { 'cf-connecting-ip': from, 'x-test-country': 'JP' } });
@@ -37,7 +19,7 @@ async function random_pair(a, b) {
 	const ra = await post('/v1/random', a, a.from);
 	if (!ra.body.ticket) return { error: 'a: ' + JSON.stringify(ra.body) };
 	const wait = post('/v1/random/wait', { ...a, ticket: ra.body.ticket }, a.from);
-	await new Promise((ok) => setTimeout(ok, 20));
+	await queued(env, ra.body.ticket);   // (its wait taken in by the queue before the second comes)
 	const rb = await post('/v1/random', b, b.from);
 	if (rb.body.role) { const wa = await wait; return { a: wa.body, b: rb.body }; }
 	await post('/v1/random/leave', { ...b, ticket: rb.body.ticket }, b.from);
@@ -202,9 +184,10 @@ for (const [what, a, b, want] of cases) {
 {
 	const n = neu('N', B + '+dural+stage'), o = old('O', B + '+1v1'), v = { ...neu('V', 'v0.1.16+random', 'vf2', ['random']), pool: 'v0.1.16+mix1' };
 	const get = async () => (await worker.fetch(new Request('http://lobby/v1/online', { headers: { 'cf-connecting-ip': '192.0.2.9' } }), env)).json();
+	await settle();   // (every telling before this one in, so the difference is only these three's: found running the suite in a loop under load)
 	const d0 = await get();   // (the matrix's matches still counted, as playing: the change is what's checked)
 	const h1 = await post('/v1/host', n, n.from), h2 = await post('/v1/host', o, o.from), h3 = await post('/v1/host', v, v.from);
-	await new Promise((ok) => setTimeout(ok, 50));
+	await settle();   // (the online count told)
 	const d = await get();
 	const tb = d.games.vf3tb, tb0 = d0.games.vf3tb, g2 = d.games.vf2, g20 = d0.games.vf2;
 	check('online, the games counted', Object.keys(d.games || {}).sort().join(','), 'vf1,vf2,vf3,vf3tb');
