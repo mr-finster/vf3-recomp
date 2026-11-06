@@ -76,7 +76,7 @@ void unpack(uint16_t bits, int player, m3::Controls &c);
 
 // The select in lockstep (Session::set_lockstep) or not: off for VF3, which plays the select on guesses as every
 // public release has. On (hotfix 2, never released), a match against an older build or a far opponent through a
-// relay waited for the other side's inputs in the select and after blips of its byte mid-match, and reno saw fights
+// relay waited for the other side's inputs in the select and after blips of its byte mid-match, and a player saw fights
 // drop to 40 fps (28 Oct, v0.1.11-alpha's check, 180 ms to Japan) where v0.1.10-alpha held 57.5. VF1 and VF2, whose
 // online play every player gets with lockstep from its first release, keep it.
 constexpr bool SELECT_LOCKSTEP = false;

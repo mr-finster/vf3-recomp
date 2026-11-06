@@ -458,8 +458,8 @@ int Online::start_wait() const
 		// banner asked again there. A press, not a Start held through the match's end: up from not pressed.)
 		// (and a Start pressed in the 3 s before they went out counts too: from the KO on, a Start takes the loser out
 		// 2 frames later, straight to New Challenger and the character select (checked on the ROM), so a quick tap's
-		// up again by the time they're out (and out_from can be the input delay later still). Missed before: reno's
-		// log, a Korean opponent back in a second after losing, twice, with no press seen; reno mashing Start after
+		// up again by the time they're out (and out_from can be the input delay later still). Missed before: a player's
+		// log, a Korean opponent back in a second after losing, twice, with no press seen; the player mashing Start after
 		// a loss, the banner up over his own way back in)
 		if (out_scan[p] == SIZE_MAX) {
 			const size_t from = std::min(out_from[p], inputs.size());
@@ -1401,7 +1401,7 @@ void Online::room_poll()
 			job.reset();
 		}
 		if (!job && room->gathered() && started_with.hide_ip && room->relay_address().empty()) {
-			// (the relay asked again, twice, before Hide my IP gives up; reno's, 25 Oct: it didn't answer, and the next
+			// (the relay asked again, twice, before Hide my IP gives up; a player's, 25 Oct: it didn't answer, and the next
 			// try went through. Each time from a new port: a router's or firewall's state for the old one may be what
 			// lost the answers, and a relay that made the first allocation but whose answer was lost refuses a second
 			// from the same port (437). The last time on the relay's other port, 53: some networks drop UDP to 3478.)

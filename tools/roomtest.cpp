@@ -127,7 +127,7 @@ int main(int argc, char **argv)
 	late_ms = 7000;
 	if (!only || only == 5) failed += !run("the relay's login 7 s late", server, user, pass, true, true, false, false, true);
 	late_ms = 0;
-	hidden_guest = moved_host = true;   // (reno's, 5 Nov: the host's knocks through the guest's relay from a port it didn't give)
+	hidden_guest = moved_host = true;   // (5 Nov: the host's knocks through the guest's relay from a port it didn't give)
 	if (!only || only == 6) failed += !run("the host's port not the lobby's, the guest through its relay", server, user, pass, false, true, true, false, true);
 	hidden_guest = moved_host = false;
 	printf(failed ? "%d FAILED\n" : "all passed\n", failed);

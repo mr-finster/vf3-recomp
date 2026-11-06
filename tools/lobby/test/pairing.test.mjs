@@ -88,7 +88,7 @@ for (const [what, a, b, want] of cases) {
 	check('room,   ' + what, got, want);
 	await post('/v1/close', { code: h.body.code, key: h.body.key }, b.from);
 }
-// Every combination (reno's ask): vf3 (Revision D) and vf3tb, each side new or old (the v0.1.15 builds' version
+// Every combination: vf3 (Revision D) and vf3tb, each side new or old (the v0.1.15 builds' version
 // strings, as they send them: base, then +dural2 / Team Battle's +dural, +1v1, +stage), stage on or off, Dural on or
 // off, Team Battle's 1 vs 1 or 3 vs 3; Revision D's pre-v0.1.16 "+dural" too; and vf2's Normal, Random and Seed. Both
 // orders, Random and room codes. What each pair should play, worked out here on its own (not with terms()):

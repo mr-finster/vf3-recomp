@@ -266,8 +266,8 @@ game's continue countdown.
 
 What's built of this so far (direct play, before the lobby): however a match ends (the other player left, closed
 the game, the connection was lost, a desync, or you left), both games go back to playing on their own and open the
-menu on the Online page, under MATCH OVER: what ended it ("RENODECK left the match."), against whom, how long and
-the ping, and one row on the selection to play again: Host again for the host, Join RENODECK again for the guest
+menu on the Online page, under MATCH OVER: what ended it ("DENVERDAN left the match."), against whom, how long and
+the ping, and one row on the selection to play again: Host again for the host, Join DENVERDAN again for the guest
 (the same address). Closing the game in a match tells the other side at once, so they don't wait out a silence.
 While hosting or joining with the menu closed, the line at the bottom says so (Hosting, the address, the status); in
 a match it's the connection line, on both players' screens; "Connection back" after an interruption.

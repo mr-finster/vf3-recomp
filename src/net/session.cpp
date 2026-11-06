@@ -711,7 +711,7 @@ int auto_delay(double rtt_ms, double jitter_ms, double frame_ms, int target_roll
 
 // The most a rollback is planned to take back: max_rollback (7) less 4 frames for what the ping misses (its
 // jitter packet to packet, the frame each input waits to be sent, the two clocks' part-frame offset). Planned at 6,
-// a 180 ms match (reno's, 24 Oct, an American) rolled back to 7 and held frames back 4-8 a second all match,
+// a 180 ms match (24 Oct, an American) rolled back to 7 and held frames back 4-8 a second all match,
 // choppy and yellow, at delay 1; delay 3 held back under 2 a second. Told the other side too (rollback_room), so an
 // older build there takes its delay from it as well.
 static constexpr int ROOM_MAX = 3;
