@@ -321,7 +321,7 @@ bool R3dGpu::render(const video::Scene &scene, const video::Raster &prep, const 
 	// also in the quads buffer, its corners as prepared, for its pixels (FS_QUADS)
 	verts.clear();
 	quads.clear();
-	struct Range { size_t first, count; int draw; };
+	struct Range { size_t first, count; int draw; bool quads; };   // (quads: a whole quad in it, drawn by the FS_QUADS pipelines)
 	std::vector<Range> ranges;
 	size_t batch_first[24], batch_end[24];
 	for (int b = 0; b < 24; b++) {
@@ -352,7 +352,8 @@ bool R3dGpu::render(const video::Scene &scene, const video::Raster &prep, const 
 				quads.push_back(q);
 			}
 			if (ranges.size() == batch_first[b] || ranges.back().draw != t.draw)
-				ranges.push_back({ verts.size(), 0, t.draw });
+				ranges.push_back({ verts.size(), 0, t.draw, false });
+			if (t.quad) ranges.back().quads = true;
 			for (int f = 1; f + 1 < t.n; f++) {
 				verts.push_back(g[0]); verts.push_back(g[f]); verts.push_back(g[f + 1]);
 				ranges.back().count += 3;
@@ -367,7 +368,6 @@ bool R3dGpu::render(const video::Scene &scene, const video::Raster &prep, const 
 	const uint32_t dbytes = uint32_t(std::max<size_t>(1, gd.size()) * sizeof(GDraw));
 	const uint32_t pbytes = uint32_t(gv.size() * sizeof(GVp));
 	const bool quad_rendering = Raster::quad_rendering;
-	if (quad_rendering && quads.empty()) quads.push_back({});   // (the buffer bound has something in it)
 	static_assert(sizeof(GQuad) == 256, "as the shader's quads");
 	const uint32_t qbytes = uint32_t(quads.size() * sizeof(GQuad));
 	// texture RAM: whole rows of the areas written (all of it the first time, or after many changes)
@@ -538,8 +538,11 @@ bool R3dGpu::render(const video::Scene &scene, const video::Raster &prep, const 
 	if (!scene.blank) {
 		SDL_GPUBufferBinding vb = { vbuf, 0 };
 		SDL_GPUBuffer *storage[4] = { texram, dbuf, pbuf, qbuf };
-		const uint32_t nstorage = quad_rendering ? 4 : 3;
-		auto draw_batch = [&](SDL_GPURenderPass *rp, int b, SDL_GPUGraphicsPipeline *plain, SDL_GPUGraphicsPipeline *layered, SDL_GPUTexture *od) {
+		// The meshes with a whole quad in them by the FS_QUADS pipelines (quad rendering), the rest by the plain ones, in
+		// the same order: the quads' pipelines write the depth (SV_Depth), which turns the GPU's early depth test off for
+		// all they draw, and most of a stage's meshes (often most of the picture) have none
+		auto draw_batch = [&](SDL_GPURenderPass *rp, int b, SDL_GPUGraphicsPipeline *plain, SDL_GPUGraphicsPipeline *layered,
+				SDL_GPUGraphicsPipeline *plain_q, SDL_GPUGraphicsPipeline *layered_q, SDL_GPUTexture *od) {
 			SDL_BindGPUVertexBuffers(rp, 0, &vb, 1);
 			SDL_GPUTextureSamplerBinding sb = { od, sampler };
 			int last_vp = -1;
@@ -547,11 +550,12 @@ bool R3dGpu::render(const video::Scene &scene, const video::Raster &prep, const 
 			for (size_t r = batch_first[b]; r < batch_end[b]; r++) {
 				const Range &rg = ranges[r];
 				const Raster::Draw &d = prep.draws[rg.draw];
-				SDL_GPUGraphicsPipeline *p = d.mesh->layered ? layered : plain;
+				const bool q = quad_rendering && rg.quads;
+				SDL_GPUGraphicsPipeline *p = q ? (d.mesh->layered ? layered_q : plain_q) : (d.mesh->layered ? layered : plain);
 				if (p != bound) {
 					SDL_BindGPUGraphicsPipeline(rp, p);
 					SDL_BindGPUFragmentSamplers(rp, 0, &sb, 1);
-					SDL_BindGPUFragmentStorageBuffers(rp, 0, storage, nstorage);
+					SDL_BindGPUFragmentStorageBuffers(rp, 0, storage, q ? 4 : 3);
 					SDL_PushGPUFragmentUniformData(cmd, 0, frame_u, sizeof(frame_u));
 					SDL_SetGPUStencilReference(rp, 0);
 					bound = p;
@@ -576,8 +580,7 @@ bool R3dGpu::render(const video::Scene &scene, const video::Raster &prep, const 
 					SDL_GPUDepthStencilTargetInfo dt = depth_target();
 					SDL_GPURenderPass *rp = SDL_BeginGPURenderPass(cmd, c, 4, &dt);
 					// (the sampled texture must not be a target of this pass: the translucent layer's, unused here)
-					if (quad_rendering) draw_batch(rp, b, p_opq_q, p_opq_lq, out);
-					else draw_batch(rp, b, p_opq, p_opq_l, out);
+					draw_batch(rp, b, p_opq, p_opq_l, p_opq_q, p_opq_lq, out);
 					SDL_EndGPURenderPass(rp);
 				}
 				for (int layer = 1; layer <= 2; layer++) {
@@ -585,8 +588,7 @@ bool R3dGpu::render(const video::Scene &scene, const video::Raster &prep, const 
 					SDL_GPUColorTargetInfo c = colour(layer == 1 ? t1 : t2, false);
 					SDL_GPUDepthStencilTargetInfo dt = depth_target();
 					SDL_GPURenderPass *rp = SDL_BeginGPURenderPass(cmd, &c, 1, &dt);
-					if (quad_rendering) draw_batch(rp, b + layer, p_tr_q, p_tr_lq, odepth);
-					else draw_batch(rp, b + layer, p_tr, p_tr_l, odepth);
+					draw_batch(rp, b + layer, p_tr, p_tr_l, p_tr_q, p_tr_lq, odepth);
 					SDL_EndGPURenderPass(rp);
 				}
 				if (!prep.prio[pri].has_overlay) break;
