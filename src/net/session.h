@@ -158,6 +158,9 @@ public:
 	// Every frame's inputs so far, both players' (a replay: the blob and these)
 	const std::vector<uint16_t> &inputs(int player) const { return player == local_player() ? local : remote; }
 	const std::vector<uint8_t> &blob() const { return start_blob; }
+	// This side's desync check's hashes of late (frame: the state before it), the confirmed frames' only: what a match's
+	// watchers check their own game against (watch.h)
+	const std::map<uint32_t, uint64_t> &hashes() const { return my_hash; }
 	void set_local_flags(uint8_t f) { my_flags = f; }   // e.g. 1: in the menu (shown to the other player)
 	// The frames this side can run again in one step and still make its frame (told the other side: its input delay
 	// covers what this side can't, so a rollback here never makes a frame late; AutoDelay::rollback_room)

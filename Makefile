@@ -49,7 +49,7 @@ $(OBJ)/src/host/main.o: CXXFLAGS += -I$(OBJ)
 $(OBJ)/src/host/online.o: $(OBJ)/version.h
 $(OBJ)/src/host/online.o: CXXFLAGS += -I$(OBJ)
 # Netplay (src/net): rollback sessions and their links, nothing of the game's (shared with VF1 and VF2 Recomp)
-NET = src/net/session.cpp src/net/link.cpp src/net/room_link.cpp src/net/stun.cpp src/net/http.cpp
+NET = src/net/session.cpp src/net/link.cpp src/net/room_link.cpp src/net/stun.cpp src/net/http.cpp src/net/watch.cpp
 
 HOST = src/host/main.cpp src/host/menu.cpp src/host/online.cpp src/host/vf3_netplay.cpp src/host/sysinfo.cpp src/host/d3d11_map.cpp src/gpu/r3d_gpu.cpp $(NET)
 
@@ -96,6 +96,11 @@ $(BIN)/nettest: $(call objs,$(NET) tools/nettest.cpp)
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
+# watchsim: watching a match, simulated (no ROM): the players the same with 0, 1 or 50 watchers, each watcher's game theirs
+$(BIN)/watchsim: $(call objs,$(NET) tools/watchsim.cpp)
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
 # delaytest: Auto's input delay against simulated pings (full speed at any; raised and lowered as it should)
 $(BIN)/delaytest: $(call objs,$(NET) tools/delaytest.cpp)
 	@mkdir -p $(dir $@)
@@ -104,6 +109,11 @@ $(BIN)/delaytest: $(call objs,$(NET) tools/delaytest.cpp)
 $(BIN)/vf3net: $(call objs,$(CORE) $(NET) src/host/vf3_netplay.cpp tools/vf3net.cpp) $(SLJIT_OBJ)
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDLIBS)
+
+# wsfuzz: the WebSocket frame reader against anything a server could send, with AddressSanitizer and UBSan
+$(BIN)/wsfuzz: src/net/http.cpp tools/wsfuzz.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) -std=c++20 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer $^ -o $@ -lpthread
 
 # netfuzz: the session against a peer who sends anything, with AddressSanitizer and UBSan (its own objects)
 $(BIN)/netfuzz: $(NET) tools/netfuzz.cpp
