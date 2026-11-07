@@ -769,21 +769,35 @@ int main(int argc, char **argv)
 		o.forget_failure();
 	}
 
-	// Create room: on Create (unlisted, the code only, as ever), its name filled in, Listed in Rooms a switch
+	// Create room: on Create (unlisted, the code only, as ever), its name filled in, Listed in Rooms a switch; with Rooms
+	// off at the lobby (or an older lobby, without them), no Listed in Rooms: a room with its code only
 	{
 		again();
+		// (the lobby's word on Rooms had first: the page's rows follow it, and so do these checks)
+		for (const uint64_t t0 = SDL_GetTicks(); SDL_GetTicks() - t0 < 8000 && o.rooms_state() == 0;) { o.rooms_list(s); SDL_Delay(10); }
 		const std::string lobby_was = s.lobby;
 		s.lobby = "none";   // (no room opened by these pages' presses)
 		gm.select_row(2);
 		key(SDL_SCANCODE_RETURN);   // (Create room: the name's set)
-		check(top() == tr::P_CREATE_ROOM.c_str() && gm.selected() == 2 && s.room_who == 0, "Create room: on Create, not listed (the code only) as ever");
+		const bool listing = o.rooms_state() != 3;   // (as create_room_page has it: Rooms off, no row to be listed by)
+		const int c_listed = listing ? 1 : -1, c_go = listing ? 2 : 1;
+		printf("Create room: Rooms %s at the lobby, so %s\n", listing ? "on (or not known)" : "off", listing ? "Listed in Rooms offered" : "no Listed in Rooms");
+		check(top() == tr::P_CREATE_ROOM.c_str() && gm.selected() == c_go && s.room_who == 0, "Create room: on Create, not listed (the code only) as ever");
+		gm.select_row(c_go + 1);
+		check(gm.selected() == c_go, listing ? "Create room: its name, Listed in Rooms and Create" : "Rooms off: Create room has its name and Create only, no Listed in Rooms");
 		shot("create_room.png", w, h);
-		gm.select_row(1);
-		key(SDL_SCANCODE_RETURN);
-		check(s.room_who == 2, "Listed in Rooms: on");
-		shot("create_listed.png", w, h);
-		key(SDL_SCANCODE_RETURN);
-		check(s.room_who == 0, "and off");
+		if (c_listed >= 0) {
+			gm.select_row(c_listed);
+			key(SDL_SCANCODE_RETURN);
+			check(s.room_who == 2, "Listed in Rooms: on");
+			shot("create_listed.png", w, h);
+			key(SDL_SCANCODE_RETURN);
+			check(s.room_who == 0, "and off");
+		} else {
+			gm.select_row(0);
+			gm.select_row(c_go);
+			check(s.room_who == 0 && gm.selected() == c_go, "Rooms off: nothing switches listing on, the room has its code only");
+		}
 		gm.select_row(0);
 		key(SDL_SCANCODE_RETURN);
 		check(top() == tr::P_ROOM_NAME.c_str(), "Name: typed");
