@@ -401,9 +401,16 @@ dialog .x:hover{background:rgba(255,255,255,.2)}
       <div class="pop" role="dialog" aria-label="Changelog">
         <p><b>%VERSION%</b> &middot; %DATE%</p>
         <ul>
+          <li><b>Online is a room browser.</b> Menu &gt; Online lists the open rooms and the matches being played, with the players, the score and how many are watching. CREATE ROOM (unlisted, code only, unless you list it; a name if you like), ENTER CODE and QUICK MATCH.</li>
+          <li><b>Watch any match.</b> WATCH on a match in the list, or its code: a watcher never slows the players down, however many watch (up to 400) and whatever their ping. The players see how many are watching. Join late and it catches up from the start, unseen.</li>
+          <li><b>13 languages</b> in every menu: Game &gt; Language (or <code>language =</code> in settings.ini).</li>
+          <li><b>The Online page</b> (vf-online.pages.dev/online): every game&rsquo;s rooms and matches; JOIN and WATCH open the game.</li>
+          <li>No update is forced: builds from v0.1.7-online-preview on still play this one (they just don&rsquo;t see rooms).</li>
+        </ul>
+        <details><summary>v0.1.17-alpha</summary><ul>
           <li><b>Two Durals reflect right</b> (issue #23). With Play as Dural, a mirror match with gold Dural on player 1 and chrome on player 2 drew half of each one&rsquo;s chrome with an old reflection (bronze, striped legs). It was in the game&rsquo;s own code, never seen on the arcade, where you can&rsquo;t have two Durals; Revision D and Team Battle. Online, Dural still plays against v0.1.16-alpha, that version&rsquo;s way on both sides (the fix needs this version on both); everyone else plays v0.1.16-alpha as before.</li>
           <li><b>Also since v0.1.16-alpha&rsquo;s first download:</b> the 2D sky no longer smears at the top and sides (#35); on Windows, Fullscreen is a borderless window (#7); Wolf&rsquo;s desert grade and ranking boards run at full speed; Cheats &gt; Dural&rsquo;s stage is Guard only, so Start does the game&rsquo;s own thing (#36).</li>
-        </ul>
+        </ul></details>
         <details><summary>v0.1.16-alpha</summary><ul>
           <li><b>Online: everyone meets everyone</b> (issues #25, #32). Random and room codes no longer split players by stage select, Dural or Team Battle&rsquo;s 1 vs 1 or 3 vs 3: a match plays the host&rsquo;s stage select and mode, Dural is on the select when either player has her on, and both players are told the match&rsquo;s settings as it starts. Players on older versions are still met, played their version&rsquo;s way.</li>
           <li><b>Stage select online is on</b>, turned on once for everyone; turned off after that, it stays off.</li>
