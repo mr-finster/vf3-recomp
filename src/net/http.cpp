@@ -237,7 +237,7 @@ struct Curl
 		URL = 10002, POSTFIELDS = 10015, POSTFIELDSIZE = 60, HTTPHEADER = 10023, WRITEFUNCTION = 20011, WRITEDATA = 10001,
 		TIMEOUT_MS = 155, CONNECTTIMEOUT_MS = 156, NOSIGNAL = 99, USERAGENT = 10018, CUSTOMREQUEST = 10036, HTTPGET = 80,
 		NOPROGRESS = 43, XFERINFOFUNCTION = 20219, XFERINFODATA = 10057, LOW_SPEED_LIMIT = 19, LOW_SPEED_TIME = 20,
-		RESPONSE_CODE = 0x200002, GLOBAL_ALL = 3,
+		RESPONSE_CODE = 0x200002, GLOBAL_ALL = 3, HTTP_VERSION = 84, HTTP_VERSION_1_1 = 2,
 	};
 };
 
@@ -408,9 +408,15 @@ Reply stream(const std::string &url, const std::function<bool(const char *, size
 // ---- a WebSocket (Socket) ----
 FrameReader::Got FrameReader::take(std::string &buf, const std::function<void(std::string &&, bool)> &on_message, const std::function<void(const std::string &)> &on_ping)
 {
+	// (the frames taken off the front all at once as it returns, not each as it's read: thousands of tiny ones in the
+	// buffer, each moving the rest down, would take ages)
+	size_t at = 0;
+	struct Eat { std::string &buf; const size_t &at; ~Eat() { buf.erase(0, at); } } eat{ buf, at };
 	for (;;) {
-		if (buf.size() < 2) return Got::more;
-		const uint8_t b0 = uint8_t(buf[0]), b1 = uint8_t(buf[1]);
+		const size_t left = buf.size() - at;
+		const char *f = buf.data() + at;
+		if (left < 2) return Got::more;
+		const uint8_t b0 = uint8_t(f[0]), b1 = uint8_t(f[1]);
 		const bool fin = b0 & 0x80, masked = b1 & 0x80;
 		const uint8_t op = b0 & 15;
 		if (b0 & 0x70) { why = "a reserved bit set"; return Got::closed; }
@@ -419,20 +425,20 @@ FrameReader::Got FrameReader::take(std::string &buf, const std::function<void(st
 		uint64_t n = b1 & 127;
 		size_t hl = 2;
 		if (n == 126) {
-			if (buf.size() < 4) return Got::more;
-			n = (uint64_t(uint8_t(buf[2])) << 8) | uint8_t(buf[3]);
+			if (left < 4) return Got::more;
+			n = (uint64_t(uint8_t(f[2])) << 8) | uint8_t(f[3]);
 			hl = 4;
 		} else if (n == 127) {
-			if (buf.size() < 10) return Got::more;
+			if (left < 10) return Got::more;
 			n = 0;
-			for (int i = 0; i < 8; i++) n = (n << 8) | uint8_t(buf[2 + i]);
+			for (int i = 0; i < 8; i++) n = (n << 8) | uint8_t(f[2 + i]);
 			hl = 10;
 		}
 		if (op >= 8 && (!fin || n > 125)) { why = "a control frame fragmented or too long"; return Got::closed; }
 		if (n > max || (op == 0 && msg.size() + n > max)) { why = "a message too long"; return Got::closed; }
-		if (buf.size() - hl < n) return Got::more;
-		std::string data = buf.substr(hl, size_t(n));
-		buf.erase(0, hl + size_t(n));
+		if (left - hl < n) return Got::more;
+		std::string data(f + hl, size_t(n));
+		at += hl + size_t(n);
 		if (op == 8) { why = "the lobby closed it"; return Got::closed; }
 		if (op == 9) { on_ping(data); continue; }
 		if (op == 10) continue;
@@ -461,11 +467,24 @@ struct Socket::Impl
 	mutable std::mutex lock;
 	std::condition_variable wake;
 	std::deque<Message> out, in;
+	size_t in_bytes = 0;   // (what's come and not been taken, its bytes: a bound, as its count)
 	State st = State::connecting;
 	int status = 0;
 	std::string error;
 	std::atomic<bool> stop{ false };
 	std::thread worker;
+#ifdef _WIN32
+	// (WinHTTP's: the request the connecting waits on, closed by the thread letting it go so the wait ends at once, not
+	// at its timeout; cut once it has been)
+	std::mutex wait_lock;
+	HINTERNET waiting_on = nullptr;
+	bool cut = false;
+	void cut_short()
+	{
+		std::lock_guard<std::mutex> l(wait_lock);
+		if (waiting_on) { WinHttpCloseHandle(waiting_on); waiting_on = nullptr; cut = true; }
+	}
+#endif
 	void closed(const std::string &why)
 	{
 		std::lock_guard<std::mutex> l(lock);
@@ -476,7 +495,9 @@ struct Socket::Impl
 	{
 		if (!binary && (data == "pong" || data == "ping")) return;   // (the keeping alive)
 		std::lock_guard<std::mutex> l(lock);
-		if (in.size() < 4096) in.push_back({ std::move(data), binary });
+		if (in.size() >= 4096 || in_bytes + data.size() > (16u << 20)) return;
+		in_bytes += data.size();
+		in.push_back({ std::move(data), binary });
 	}
 	bool next_out(Message &m, int wait_ms)
 	{
@@ -499,6 +520,9 @@ Socket::~Socket()
 {
 	m->stop = true;
 	m->wake.notify_all();
+#ifdef _WIN32
+	m->cut_short();
+#endif
 	if (m->worker.joinable()) m->worker.join();
 	delete m;
 }
@@ -517,6 +541,7 @@ bool Socket::take(Message &msg)
 	if (m->in.empty()) return false;
 	msg = std::move(m->in.front());
 	m->in.pop_front();
+	m->in_bytes -= std::min(m->in_bytes, msg.data.size());
 	return true;
 }
 Socket::State Socket::state() const { std::lock_guard<std::mutex> l(m->lock); return m->st; }
@@ -536,6 +561,7 @@ void Socket::Impl::run()
 	INTERNET_PORT port = 0;
 	bool secure = false;
 	if (cancelled || !crack(url, host, port, secure, target)) { closed("a bad address for the online service"); return; }
+	if (stop) { closed(""); return; }
 	Handle session(open_session(8000, IDLE_MS));
 	if (!session.h) { closed("Windows' HTTP couldn't start"); return; }
 	Handle conn(WinHttpConnect(session.h, host.c_str(), port, 0));
@@ -543,7 +569,20 @@ void Socket::Impl::run()
 	Handle req(WinHttpOpenRequest(conn.h, L"GET", target.c_str(), nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, secure ? WINHTTP_FLAG_SECURE : 0));
 	if (!req.h) { closed("couldn't reach the online service"); return; }
 	WinHttpSetOption(req.h, WINHTTP_OPTION_UPGRADE_TO_WEB_SOCKET, nullptr, 0);
-	if (!WinHttpSendRequest(req.h, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, 0, 0) || !WinHttpReceiveResponse(req.h, nullptr)) {
+	// (the connecting, its TLS and the upgrade's answer: let go meanwhile, its request closed under it, the wait ends)
+	{
+		std::lock_guard<std::mutex> l(wait_lock);
+		if (stop) { closed(""); return; }
+		waiting_on = req.h;
+	}
+	const bool answered = WinHttpSendRequest(req.h, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, 0, 0) && WinHttpReceiveResponse(req.h, nullptr);
+	{
+		std::lock_guard<std::mutex> l(wait_lock);
+		waiting_on = nullptr;
+		if (cut) req.h = nullptr;   // (closed already)
+	}
+	if (stop) { closed(""); return; }
+	if (!answered) {
 		closed("couldn't reach the online service");
 		return;
 	}
@@ -556,16 +595,17 @@ void Socket::Impl::run()
 	{ std::lock_guard<std::mutex> l(lock); st = State::open; }
 	// (a receive waits on its own thread; WinHTTP lets one send go on meanwhile)
 	std::atomic<bool> reading{ true };
-	std::thread reader([&] {
+	const HINTERNET wsh = ws.h;
+	std::thread reader([&, wsh] {
 		std::string msg;
 		std::vector<char> buf(65536);
 		for (;;) {
 			DWORD n_read = 0;
 			WINHTTP_WEB_SOCKET_BUFFER_TYPE type{};
-			if (WinHttpWebSocketReceive(ws.h, buf.data(), DWORD(buf.size()), &n_read, &type) != NO_ERROR) break;
+			if (WinHttpWebSocketReceive(wsh, buf.data(), DWORD(buf.size()), &n_read, &type) != NO_ERROR) break;
 			if (type == WINHTTP_WEB_SOCKET_CLOSE_BUFFER_TYPE) break;
 			msg.append(buf.data(), n_read);
-			if (msg.size() > (32u << 20)) break;
+			if (msg.size() > FrameReader::MOST) break;
 			if (type == WINHTTP_WEB_SOCKET_BINARY_MESSAGE_BUFFER_TYPE || type == WINHTTP_WEB_SOCKET_UTF8_MESSAGE_BUFFER_TYPE) {
 				got(std::move(msg), type == WINHTTP_WEB_SOCKET_BINARY_MESSAGE_BUFFER_TYPE);
 				msg.clear();
@@ -587,7 +627,11 @@ void Socket::Impl::run()
 			WinHttpWebSocketSend(ws.h, WINHTTP_WEB_SOCKET_UTF8_MESSAGE_BUFFER_TYPE, ping, 4);
 		}
 	}
-	WinHttpWebSocketClose(ws.h, WINHTTP_WEB_SOCKET_SUCCESS_CLOSE_STATUS, nullptr, 0);   // (the reader's receive ends with it)
+	// (the close said, not waited for; then the handle closed under the reader's receive, which ends with it at once:
+	// WinHttpWebSocketClose would wait for the lobby's close, and with a receive on its way may never return)
+	WinHttpWebSocketShutdown(wsh, WINHTTP_WEB_SOCKET_SUCCESS_CLOSE_STATUS, nullptr, 0);
+	WinHttpCloseHandle(wsh);
+	ws.h = nullptr;
 	reader.join();
 	closed(stop ? "" : "the connection ended");
 }
@@ -660,6 +704,9 @@ void Socket::Impl::run()
 	struct Done { Curl &c; void *h; ~Done() { c.easy_cleanup(h); } } done{ c, h };
 	c.easy_setopt(h, Curl::URL, (std::string(secure ? "https://" : "http://") + hostport + "/").c_str());
 	c.easy_setopt(h, CurlRaw::CONNECT_ONLY, 1L);
+	// (HTTP/1.1 offered, nothing else: the upgrade below is written here as HTTP/1.1, and a curl with HTTP/2 (macOS's,
+	// most Linux's) would offer h2 too, the lobby's TLS take it, and the connection be HTTP/2's, the upgrade refused)
+	c.easy_setopt(h, Curl::HTTP_VERSION, long(Curl::HTTP_VERSION_1_1));
 	c.easy_setopt(h, Curl::NOSIGNAL, 1L);
 	c.easy_setopt(h, Curl::CONNECTTIMEOUT_MS, 8000L);
 	// (its connecting and TLS given up at a quit or once it's let go, as a request's: not up to 8 s later, a thread still
@@ -686,11 +733,16 @@ void Socket::Impl::run()
 		return off == b.size();
 	};
 	std::string buf;   // (what's come and not yet made a message)
+	FrameReader reader;
 	auto fill = [&](int wait_ms) {   // false: closed
 		char tmp[16384];
 		for (bool waited = false;;) {
+			// (no more than a frame at its longest held: the rest left with the connection till this is taken; a frame
+			// longer than that, or a head that never ends, is refused below)
+			const size_t room = reader.room(buf);
+			if (room == 0) return true;
 			size_t n = 0;
-			const int rc = rw.recv(h, tmp, sizeof tmp, &n);
+			const int rc = rw.recv(h, tmp, std::min(sizeof tmp, room), &n);
 			if (rc == 0 && n == 0) return false;   // (the other end closed it)
 			if (rc == 0) { buf.append(tmp, n); waited = true; continue; }
 			if (rc != CurlRaw::AGAIN) return false;
@@ -737,7 +789,6 @@ void Socket::Impl::run()
 		for (size_t i = 0; i < n; i++) f += char(uint8_t(data[i]) ^ mask[i & 3]);
 		return send_all(f);
 	};
-	FrameReader reader;
 	auto last_in = std::chrono::steady_clock::now(), last_ping = last_in;
 	std::string why = "the connection ended";
 	while (!stop && !cancelled) {

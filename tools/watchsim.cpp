@@ -140,6 +140,7 @@ struct Relay
 	std::vector<uint8_t> start;
 	std::vector<uint16_t> in;
 	std::map<uint32_t, uint64_t> hashes;
+	std::map<uint32_t, double> hash_at;   // (when each hash came)
 	vw::Info info;
 	double seen = 0;
 	std::map<std::string, std::pair<double, double>> watchers;
@@ -155,7 +156,7 @@ struct Relay
 	{
 		vw::Start s;
 		if (!vw::decode(b, s)) return false;
-		have = true; match = s.match; start = b; in.clear(); hashes.clear(); info = {}; seen = now; edge.clear();
+		have = true; match = s.match; start = b; in.clear(); hashes.clear(); hash_at.clear(); info = {}; seen = now; edge.clear();
 		return true;
 	}
 	// -> has (NONE: send it all), the watchers
@@ -168,7 +169,7 @@ struct Relay
 		if (!have || f.match != match) return vw::NONE;
 		const uint32_t n = uint32_t(in.size() / 2);
 		if (f.first <= n && f.first + f.count() > n) in.insert(in.end(), f.in.begin() + ptrdiff_t(n - f.first) * 2, f.in.end());
-		for (auto &[fr, h] : f.hashes) if (fr <= in.size() / 2) hashes[fr] = h;
+		for (auto &[fr, h] : f.hashes) if (fr <= in.size() / 2) { hashes[fr] = h; hash_at.emplace(fr, now); }
 		info = f.info;
 		seen = now;
 		return uint32_t(in.size() / 2);
@@ -214,6 +215,9 @@ struct Watcher
 	double most_behind = 0, behind_sum = 0;   // (behind the players' last confirmed frame, in s: the most, and summed every 100 ms watched)
 	uint64_t behind_n = 0;
 	std::vector<double> behinds;               // (every sample, for the 95th percentile)
+	std::vector<double> ran_at;                // (when it ran each frame)
+	std::map<uint32_t, double> hash_got;       // (when each of the players' hashes reached it)
+	void got(const vw::Reply &r, double at) { for (const auto &[fr, h] : r.frames.hashes) hash_got.emplace(fr, at); }
 	bool connected = false;                    // (on the stream: the frames sent as they come)
 	uint32_t sent = 0;                         // (the stream's: frames sent it so far)
 	double stream_last = 0;
@@ -290,6 +294,8 @@ Result play(int n_watchers, double seconds, bool &ok, double lobby_gone_ms = 0)
 	vw::Feed feed;
 	feed.interval_ms = FEED_MS;
 	bool feed_begun = false;
+	std::map<uint32_t, double> made;   // (the host's hashes, when it made each: every one the lobby's to have)
+	double acked_built = -1;           // (when the last upload the lobby took was made)
 	double guest_ask_at = 15000;
 	double step_ms[2] = {};
 	uint64_t steps[2] = {};
@@ -340,7 +346,7 @@ Result play(int n_watchers, double seconds, bool &ok, double lobby_gone_ms = 0)
 			w.sent = n;
 			w.stream_last = w.way.one(now, w.stream_last);
 			w.bytes_in += vw::encode_reply(r).size() + 4;
-			ev.at(w.stream_last, [&w, r, at = w.stream_last] { w.sp.reply(r, at); });
+			ev.at(w.stream_last, [&w, r, at = w.stream_last] { if (w.sp.reply(r, at)) w.got(r, at); });
 		}
 	};
 	const double fms = cfg.frame_ms;
@@ -366,6 +372,7 @@ Result play(int n_watchers, double seconds, bool &ok, double lobby_gone_ms = 0)
 				feed_begun = true;
 			}
 			feed.take(a);
+			for (const auto &[fr, hh] : a.hashes()) made.emplace(fr, t);
 			vw::Info info;
 			info.wins[0] = uint8_t(a.confirmed() / 2000);
 			info.rounds[1] = uint8_t(a.confirmed() / 700 % 3);
@@ -384,13 +391,16 @@ Result play(int n_watchers, double seconds, bool &ok, double lobby_gone_ms = 0)
 			double there, back;
 			const bool through = host_way.trip(t, there, back);
 			if (!through) ev.at(t + TIMEOUT_MS, [&feed, up, t] { feed.done(up, false, 0, 0, t + TIMEOUT_MS); });
-			else ev.at(there, [&, up, there, back] {
+			else ev.at(there, [&, up, there, back, built = t] {
 				int w = 0;
 				uint32_t has = 0;
 				bool good = true;
 				if (up.start) good = relay.post_start(up.body, there);
 				else { has = relay.push(up.body, there, w); fan(there); }
-				ev.at(back, [&feed, up, good, has, w, back] { feed.done(up, good, has, w, back); });
+				ev.at(back, [&feed, &acked_built, up, good, has, w, back, built] {
+					feed.done(up, good, has, w, back);
+					if (good && !up.start && has != vw::NONE) acked_built = std::max(acked_built, built);
+				});
 			});
 		}
 		// the guest asks the count every 15 s (shown in its match), on a thread in the game
@@ -441,12 +451,13 @@ Result play(int n_watchers, double seconds, bool &ok, double lobby_gone_ms = 0)
 						Watcher &x = *wptr;
 						x.bytes_in += out.size();
 						if (want == "start") { vw::Start s; if (vw::decode(out, s)) x.sp.start(s); }
-						else if (want == "frames") { vw::Reply r; if (vw::decode_reply(out, r)) x.sp.reply(r, back); }
+						else if (want == "frames") { vw::Reply r; if (vw::decode_reply(out, r) && x.sp.reply(r, back)) x.got(r, back); }
 						x.sp.answered(back);
 					});
 				});
 			}
 			w.sp.run(t);
+			while (w.ran_at.size() < w.sp.frame()) w.ran_at.push_back(t);
 			if (trace_watcher == int(&wp - &ws[0]) && std::fmod(t, 1000.0) < 1)
 				printf("      t %.0f s: frame %u, held to %u, the lobby %u, the players %u, state %d, %.1f s behind the players; the relay has %zu, the feed acked %u\n", (t - 1000) / 1000, w.sp.frame(), w.sp.ask_from(),
 				       w.sp.total(), a.confirmed(), int(w.sp.state()), double(a.confirmed() - std::min(a.confirmed(), w.sp.frame())) * fms / 1000, relay.in.size() / 2, feed.acked());
@@ -477,6 +488,14 @@ Result play(int n_watchers, double seconds, bool &ok, double lobby_gone_ms = 0)
 		return res;
 	}
 	if (feed.acked() + 60 < confirmed) { printf("  FAIL the lobby has %u frames of %u\n", feed.acked(), confirmed); ok = false; }
+	// every one of the players' hashes at the lobby: each made before an upload it took (of a frame it has), the last few
+	// made after the host's last upload the only ones it can't have
+	uint32_t hashes_due = 0, hashes_got = 0;
+	for (const auto &[fr, at] : made) {
+		hashes_got += relay.hashes.count(fr) != 0;
+		hashes_due += at <= acked_built && fr <= feed.acked();
+	}
+	if (hashes_got < hashes_due) { printf("  FAIL the lobby has %u of the players' %u hashes (%u made before its last upload)\n", hashes_got, uint32_t(made.size()), hashes_due); ok = false; }
 
 	// every watcher: its game frame for frame the players' (the host's state after each frame, as it last ran: the
 	// confirmed one), to the end of the match
@@ -491,10 +510,15 @@ Result play(int n_watchers, double seconds, bool &ok, double lobby_gone_ms = 0)
 		uint32_t first_bad = 0;
 		for (uint32_t f = 0; f < ran && f < confirmed; f++)
 			if (f >= w.game.after.size() || w.game.after[f] != ga.after[f]) { same = false; first_bad = f; break; }
-		// (one come late ran the match from its start: every one of the players' hashes in it checked, none skipped)
+		// (one come late ran the match from its start: every one of the players' hashes in it checked, none skipped; and
+		// at the live edge, as for everyone watching live, every one that reached it before it ran the hash's frame: one
+		// made late and come just after can't be checked)
 		uint32_t hashes_there = 0;
-		for (const auto &[fr, h] : relay.hashes) hashes_there += fr + vw::HASH_PARTS < ran;
-		const bool came_late = w.prof.join_s >= 30, all_hashes = !came_late || w.sp.hashes_checked >= hashes_there;
+		for (const auto &[fr, h] : relay.hashes) {
+			const auto got = w.hash_got.find(fr);
+			hashes_there += fr + vw::HASH_PARTS < ran && got != w.hash_got.end() && fr < w.ran_at.size() && got->second <= w.ran_at[fr];
+		}
+		const bool came_late = w.prof.join_s >= 30, all_hashes = w.sp.hashes_checked >= hashes_there;
 		const bool done = w.sp.state() == vw::Spectator::State::over && ran + 30 >= relay.in.size() / 2;   // (to the end: the match said over a few frames before the players stopped)
 		finished += done;
 		late += came_late;
@@ -513,11 +537,11 @@ Result play(int n_watchers, double seconds, bool &ok, double lobby_gone_ms = 0)
 			       w.behind_n ? w.behind_sum / double(w.behind_n) : 0.0, w.most_behind, (unsigned long long)w.requests, (unsigned long long)w.bytes_in);
 	}
 	printf("  %d watchers: players' frames %u/%u, rollbacks %llu/%llu (%llu/%llu frames run again), held back %llu/%llu, waits %llu/%llu, sent each other %llu/%llu bytes,"
-	       " host to the lobby %llu bytes in %llu uploads, the guest's count asked %llu times; a step %.4f/%.4f ms\n",
+	       " host to the lobby %llu bytes in %llu uploads (%u of its %u hashes), the guest's count asked %llu times; a step %.4f/%.4f ms\n",
 	       n_watchers, res.frames[0], res.frames[1], (unsigned long long)res.rollbacks[0], (unsigned long long)res.rollbacks[1], (unsigned long long)res.resim[0],
 	       (unsigned long long)res.resim[1], (unsigned long long)res.stalls[0], (unsigned long long)res.stalls[1], (unsigned long long)res.waits[0],
 	       (unsigned long long)res.waits[1], (unsigned long long)res.wire_bytes[0], (unsigned long long)res.wire_bytes[1], (unsigned long long)res.feed_bytes,
-	       (unsigned long long)res.feed_uploads, (unsigned long long)res.guest_asks, res.step_ms[0], res.step_ms[1]);
+	       (unsigned long long)res.feed_uploads, hashes_got, uint32_t(made.size()), (unsigned long long)res.guest_asks, res.step_ms[0], res.step_ms[1]);
 	if (n_watchers)
 		printf("     watchers: %d of %d saw the whole match, the players' game frame for frame (%d came late: from the start, every hash checked); the host was told up to %d watch;"
 		       " each asked the lobby %.2f times a second, %.0f bytes a second each; the Watch itself answered %llu of %llu asks (the edge the rest)\n",
@@ -830,8 +854,8 @@ bool play_lobby(const std::string &lobby, int n_watchers, double seconds, bool q
 		if ((w.stream || w.ws) && w.streamed < 10) fail("the stream brought almost nothing");
 	}
 	if (n_watchers && !say_quick) fail(std::string("a watcher wasn't told rightly whether it's a Quick match's (") + (quick ? "it is" : "it isn't") + ")");
-	printf("  through the lobby: %d of %d watchers saw the players' game frame for frame; the host sent %llu uploads (%llu bytes, %llu on its WebSocket, woken %llu times); %llu requests in all\n",
-	       good, n_watchers, (unsigned long long)feed.uploads, (unsigned long long)feed.bytes, (unsigned long long)ws_uploads, (unsigned long long)wakes, (unsigned long long)requests);
+	printf("  through the lobby: %d of %d watchers saw the players' game frame for frame; the host sent %llu uploads (%llu bytes, %llu on its WebSocket, woken %llu times), the players made %zu hashes; %llu requests in all\n",
+	       good, n_watchers, (unsigned long long)feed.uploads, (unsigned long long)feed.bytes, (unsigned long long)ws_uploads, (unsigned long long)wakes, made.size(), (unsigned long long)requests);
 	return ok;
 }
 
@@ -957,6 +981,77 @@ bool unit()
 		if (verbose)
 			printf("  (the late watcher: shown from frame %u, %llu frames silent, %llu unseen, %llu extra, %llu jumps, %u hashes checked)\n", shown_at, (unsigned long long)t.silent,
 			       (unsigned long long)sp.frames_unseen, (unsigned long long)sp.extra_frames, (unsigned long long)sp.jumps, sp.hashes_checked);
+	}
+	// asking for the frames (no stream): at once while catching up and each answer brings more; after one that failed
+	// (nothing came: the lobby busy, down, or a reply that couldn't be read) not again at once, but poll_ms later, then
+	// twice that each time it fails again, to retry_most_ms; and a late one's catching up not taken for jitter
+	{
+		const double FMS = vw::Spectator::Config{}.frame_ms;
+		vw::Start st0 = s;
+		st0.blob = blob;
+		auto piece = [&](uint32_t from, uint32_t total) {   // (the lobby's answer: from there, at most a reply's frames)
+			vw::Reply rr;
+			rr.match = rr.frames.match = st0.match;
+			rr.state = 1;
+			rr.total = total;
+			rr.frames.first = std::min(from, total);
+			rr.frames.in.assign(size_t(std::min(total - rr.frames.first, vw::MAX_REPLY)) * 2, 1);
+			return rr;
+		};
+		Toy t;
+		vw::Spectator sp(t, vw::Spectator::Config{});
+		const double poll = vw::Spectator::Config{}.poll_ms, most = vw::Spectator::Config{}.retry_most_ms;
+		sp.start(st0);
+		sp.asked(0);
+		sp.reply(piece(0, 5000), 50);
+		sp.answered(50);
+		bool fast = sp.want(51) == "frames";   // (more there, and that one brought some: at once)
+		// the lobby failing from now on: each ask's answer nothing at all
+		std::vector<double> gaps;
+		double now = 51, last = 51;
+		int asks = 0;
+		for (; now < 61000; now += 1) {
+			if (sp.want(now) != "frames") continue;
+			gaps.push_back(now - last);
+			sp.asked(now);
+			sp.answered(now + 30);
+			last = now + 30;
+			asks++;
+		}
+		bool backs_off = gaps.size() >= 4 && gaps[0] < 2;
+		for (size_t i = 1; i < gaps.size(); i++) backs_off = backs_off && gaps[i] >= std::min(most, poll * std::pow(2.0, double(i - 1))) && gaps[i] <= std::min(most, poll * std::pow(2.0, double(i - 1))) + 2;
+		check("a failed ask for the frames: the next not at once, but a second later, then less often, to every 10 s", backs_off && asks < 12);
+		// the lobby back: the next answer that brings frames, and the rest of the catching up at once again
+		sp.asked(now);
+		sp.reply(piece(sp.ask_from(), 5000), now + 30);
+		sp.answered(now + 30);
+		fast = fast && sp.want(now + 31) == "frames";
+		sp.asked(now + 31);
+		sp.reply(piece(sp.ask_from(), 5000), now + 60);   // (all of it now: caught up, poll_ms till the next)
+		sp.answered(now + 60);
+		check("an answer that brings frames: the next at once while there's more, poll_ms once caught up", fast && sp.have() == 5000 && sp.want(now + 61).empty() && sp.want(now + 60 + poll) == "frames");
+		// a late watcher asking (no stream): the players 75 s in, each answer 60 ms after the ask, its catching up fast and
+		// its buffer the link's, not the backlog's (a reply short of the lobby's last frame says nothing of its jitter)
+		Toy t2;
+		vw::Spectator late(t2, vw::Spectator::Config{});
+		late.start(st0);
+		bool pending = false, caught = false;
+		double ask_at = 0, caught_at = -1, most_buffer = 0, most_behind = 0;
+		int catch_asks = 0;
+		for (now = 75000; now < 105000; now += 1) {
+			const uint32_t lobby = uint32_t(now / FMS);
+			if (pending && now >= ask_at + 60) { late.reply(piece(late.ask_from(), lobby), now); late.answered(now); pending = false; }
+			if (!pending && late.want(now) == "frames") { late.asked(now); ask_at = now; pending = true; catch_asks += !caught; }
+			late.run(now);
+			if (!caught && late.state() == vw::Spectator::State::playing) { caught = true; caught_at = now; }
+			if (caught && now > caught_at + 3000) {
+				most_buffer = std::max(most_buffer, late.buffer_ms());
+				most_behind = std::max(most_behind, double(lobby - std::min(lobby, late.frame())) * FMS);
+			}
+		}
+		check("a late watcher asking: caught up at once (an ask after each answer), then as far behind as its asking makes it", caught && caught_at < 75000 + 3000 && catch_asks <= 4 && most_buffer < 1000 && most_behind < 2500);
+		if (verbose)
+			printf("  (failing: %d asks in 61 s; the late one: shown %.1f s in after %d asks, from 3 s after its buffer at most %.0f ms, %.0f ms behind)\n", asks, (caught_at - 75000) / 1000, catch_asks, most_buffer, most_behind);
 	}
 	// a lobby (or anyone between) sending anything: every message spoilt every way, read without a crash or a lie
 	{

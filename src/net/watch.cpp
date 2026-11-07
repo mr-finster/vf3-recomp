@@ -212,7 +212,7 @@ void Feed::take(const Session &s)
 	// (each hash once, as it's made: a few frames after its frame's confirmed, so often after the lobby has the frame
 	// itself; sent with the next upload all the same, so a watcher checks every one of them, a late one too)
 	for (const auto &[f, h] : s.hashes())
-		if (f <= upto && f > last_hash) { hashes[f] = h; last_hash = f; }
+		if (f <= upto && int64_t(f) > last_hash) { hashes[f] = h; last_hash = f; }
 }
 
 bool Feed::next(double now, Upload &u)
@@ -236,6 +236,7 @@ bool Feed::next(double now, Upload &u)
 		u = {};
 		u.body = encode_push(f);
 		u.upto = to;
+		if (!f.hashes.empty()) u.hashed = f.hashes.back().first;
 	}
 	in_flight++;
 	last_at = now;
@@ -257,7 +258,9 @@ void Feed::done(const Upload &u, bool ok, uint32_t has, int w, double now)
 	if (u.start) { start_sent = true; return; }
 	if (has == NONE) { start_sent = false; lobby_has = 0; return; }   // (the lobby lost the match: it all again)
 	lobby_has = std::max(lobby_has, std::min(has, confirmed()));   // (two on their way: the later answer can be the smaller)
-	for (auto it = hashes.begin(); it != hashes.end() && it->first <= std::min(u.upto, lobby_has);) it = hashes.erase(it);
+	// (only the hashes this one carried: one taken since it was made has a later frame, and goes with the next)
+	const int64_t sent = std::min<int64_t>(u.hashed, lobby_has);
+	for (auto it = hashes.begin(); it != hashes.end() && int64_t(it->first) <= sent;) it = hashes.erase(it);
 	info_sent = info;
 }
 
@@ -282,6 +285,7 @@ bool Spectator::reply(const Reply &r, double now)
 		if (started && r.match && r.match != start_.match) { st = State::over; why = "next"; }   // (a new match on the same watch: the host program starts it)
 		return false;
 	}
+	replied = true;
 	lobby_total = std::max(lobby_total, r.total);
 	lobby_state = r.state;
 	watching = int(std::min<uint32_t>(r.watchers, 1000000));
@@ -291,8 +295,10 @@ bool Spectator::reply(const Reply &r, double now)
 	if (first <= end && first + n > end) {
 		const size_t from = size_t(end - first) * 2;
 		in.insert(in.end(), r.frames.in.begin() + ptrdiff_t(from), r.frames.in.end());
-		// (how late these came against the best any have lately: the jitter the buffer's to cover)
-		if (now >= 0) {
+		// (how late these came against the best any have lately: the jitter the buffer's to cover; only a reply to the
+		// lobby's last frame says it: one short of that is a piece of what was there before (a late watcher catching up),
+		// as late as the backlog is long, nothing to do with this one's connection)
+		if (now >= 0 && first + n >= r.total) {
 			const double offset = now - double(first + n) * cfg.frame_ms;
 			arrivals.push_back({ now, offset });
 			while (!arrivals.empty() && now - arrivals.front().first > 10000) arrivals.pop_front();
@@ -307,14 +313,27 @@ bool Spectator::reply(const Reply &r, double now)
 	return true;
 }
 
+void Spectator::answered(double now)
+{
+	in_flight = false;
+	answered_at = now;
+	// (one that brought frames: the next at once while there's more; one that brought none: poll_ms later; one that
+	// failed (nothing came: the lobby busy or down, or a reply that couldn't be read): poll_ms, then twice that each
+	// time it fails again, to retry_most_ms, not asked again at once every pass)
+	if (have() > had_at_ask) again_ms = 0;
+	else if (replied || again_ms < cfg.poll_ms) again_ms = cfg.poll_ms;
+	else again_ms = std::min(again_ms * 2, std::max(cfg.retry_most_ms, cfg.poll_ms));
+}
+
 std::string Spectator::want(double now) const
 {
 	if (in_flight || st == State::failed || st == State::out_of_step) return "";
 	if (!started) return now - asked_at >= 2000 ? "start" : "";
 	if (live) return "";   // (a stream: the frames come by themselves)
-	if (lobby_state == 2 && have() >= lobby_total && answered_at > asked_at - 1) return st == State::over ? "" : (now - answered_at >= cfg.poll_ms ? "frames" : "");
-	if (have() < lobby_total) return "frames";   // (more there: at once)
-	return now - answered_at >= cfg.poll_ms ? "frames" : "";
+	const double since = now - answered_at, poll = std::max(cfg.poll_ms, again_ms);
+	if (lobby_state == 2 && have() >= lobby_total && answered_at > asked_at - 1) return st == State::over ? "" : (since >= poll ? "frames" : "");
+	if (have() < lobby_total) return since >= again_ms ? "frames" : "";   // (more there: at once, unless the last ask failed)
+	return since >= poll ? "frames" : "";
 }
 
 double Spectator::behind_s() const
@@ -385,7 +404,7 @@ int Spectator::tick(bool *shown, double budget_ms)
 	const double want_ms = std::clamp(jitter + cfg.frame_ms, cfg.buffer_min_ms, cfg.buffer_max_ms);
 	if (target_ms < want_ms) target_ms = want_ms;
 	else if (clock_now - steady_since > 3000) target_ms -= (target_ms - want_ms) * 0.003;   // (down to it over some seconds once steady)
-	const int64_t want = frames(target_ms), held = int64_t(end) - int64_t(at);
+	const int64_t want = frames(target_ms);
 	const int64_t lag = int64_t(std::max(lobby_total, end)) - int64_t(at);
 	int ran = 0;
 	// far behind (joining late, or after a long spell cut off): unseen, as fast as the pass allows, to the buffer
@@ -404,6 +423,9 @@ int Spectator::tick(bool *shown, double budget_ms)
 		if (st != State::catching_up) return ran;
 		if (int64_t(std::max(lobby_total, end)) - int64_t(at) > want && at + 1 < end) return ran;   // (still catching up: no picture yet)
 	}
+	// (what's held now, after any run unseen above: a catching up stopped only for want of the frames past these isn't
+	// over, nor shown from there with the lobby's latest still far ahead)
+	const int64_t held = int64_t(end) - int64_t(at);
 	if (at >= end) {   // (ran dry: the buffer a little more, from now on)
 		if (lobby_state == 2 && at >= lobby_total) { st = State::over; why = "over"; return ran; }
 		if (st == State::playing) { underruns++; target_ms = std::min(cfg.buffer_max_ms, target_ms + 2 * cfg.frame_ms); steady_since = clock_now; }

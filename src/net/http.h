@@ -67,10 +67,15 @@ private:
 // the connection, as a close frame does.
 struct FrameReader
 {
-	size_t max = 32u << 20;
+	// (a message at most: the lobby's longest is a reply of 2,048 frames and their hashes, some 35 KB)
+	static constexpr size_t MOST = 1u << 20;
+	size_t max = MOST;
 	enum class Got { more, closed };
 	// each message whole to on_message (its bytes, binary or not); a ping's payload to on_ping (to be sent back as a pong)
 	Got take(std::string &buf, const std::function<void(std::string &&, bool)> &on_message, const std::function<void(const std::string &)> &on_ping);
+	// how much more buf may hold before take: a frame's head and max, no more (the rest left unread till it's taken;
+	// with this much held and still no whole frame, take has ended it: a frame past max)
+	size_t room(const std::string &buf) const { return buf.size() < max + 14 ? max + 14 - buf.size() : 0; }
 	std::string why;   // (closed: what ended it, for the log)
 private:
 	std::string msg;

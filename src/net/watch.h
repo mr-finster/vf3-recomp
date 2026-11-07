@@ -111,7 +111,8 @@ public:
 	void take(const Session &s);           // after each step (cheap: only frames confirmed since)
 	void set_info(const Info &i) { info = i; }
 	void over() { info.flags |= 1; }       // the match is over: said with the next push
-	struct Upload { bool start = false; std::vector<uint8_t> body; uint32_t upto = 0; };
+	// (upto: the frames it has; hashed: the last of the hashes in it, -1 none: those taken since aren't in it, kept)
+	struct Upload { bool start = false; std::vector<uint8_t> body; uint32_t upto = 0; int64_t hashed = -1; };
 	bool next(double now, Upload &u);      // an upload due now (none in flight)
 	// its answer: ok, and what the lobby has (frames) and how many watch
 	void done(const Upload &u, bool ok, uint32_t lobby_has, int watchers, double now);
@@ -132,7 +133,7 @@ private:
 	uint32_t lobby_has = 0;
 	double last_at = -1e18, reached_at = 0;
 	int watching = 0;
-	uint32_t last_hash = 0;
+	int64_t last_hash = -1;                // (the last hash taken: frame 0's, the match's start, one too)
 };
 
 // ---- a watcher ----
@@ -150,6 +151,7 @@ public:
 		double buffer_min_ms = 50, buffer_max_ms = 8000;
 		double jump_ms = 8000;        // further behind than the buffer and this: unseen to it again (else a quarter faster)
 		double poll_ms = 1000;        // asking the lobby for more, once caught up (no stream)
+		double retry_most_ms = 10000; // after an ask that failed: poll_ms, twice that each time again, to this at most
 		double frame_ms = 1000.0 / 57.524160;
 		double catch_up_ms = 8;       // a pass's time for frames run unseen, catching up
 		int catch_up_frames = 600;    // and their most in a pass (tests count frames, not time)
@@ -162,8 +164,8 @@ public:
 	bool reply(const Reply &r, double now = -1);   // (now: when it came, ms: the buffer's from how evenly they come)
 	// What to ask the lobby for next: "" nothing now, "start", "frames" (from what's had)
 	std::string want(double now) const;
-	void asked(double now) { asked_at = now; in_flight = true; }
-	void answered(double now) { in_flight = false; answered_at = now; }
+	void asked(double now) { asked_at = now; in_flight = true; had_at_ask = have(); replied = false; }
+	void answered(double now);                   // (its reply, if any came, given first)
 	void time(double now) { clock_now = now; }   // (the host program's clock, ms, before tick)
 	bool live = false;                           // (the frames come on a stream, as they're sent: no asking for them)
 	void ask_every(double ms) { cfg.poll_ms = ms; }   // (the lobby busy: asking for the frames less often)
@@ -208,6 +210,9 @@ private:
 	uint8_t lobby_state = 0;
 	int watching = 0;
 	double asked_at = -1e18, answered_at = -1e18, clock = -1, clock_now = 0;
+	double again_ms = 0;                  // (after the last answer: the next ask no sooner than this)
+	uint32_t had_at_ask = 0;              // (the frames held when it was asked)
+	bool replied = false;                 // (a reply to this match since it was asked)
 	double target_ms = 100, last_arrival = -1, steady_since = 0;
 	std::deque<std::pair<double, double>> arrivals;       // (when frames came, against when they'd have come at best: the last 10 s)
 	uint64_t ticks = 0;
