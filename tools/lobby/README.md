@@ -288,17 +288,31 @@ memory or the edge it costs a request each however often it's asked.
 
 ### The online page (tools/online)
 
-`online.html` (and its icons, and the game's own Barlow Condensed font) fetches `/api/online` on its own site every
-15 s while the page is seen (none while it's hidden, at once when it's shown again); `functions/api/online.js` there asks the lobby's `/v1/online` and passes on only the counts, read and written
-again (no header, error text or field of the lobby's answer reaches the browser; the countries only as two capital
-letters or `""` with a whole number, 250 at most), kept 30 s. Under each card's count, one row
-(Searching: in Random's queue; Waiting: hosting a room code; Playing: in a match, Random or room code) with its top
-countries, and "By country": all the games together, flag and name (the browser's own name for it), the top 12
-and how many more. The flags are the Twemoji Country Flags font in `site/fonts` (flags only, so Windows, which
-has none, shows them too; from the npm package country-flag-emoji-polyfill 0.1.10; the art Twemoji's, by Twitter,
-Inc. and contributors, CC BY 4.0, credited on the page; `fonts/TwemojiCountryFlags-LICENSE.md`). The lobby's address is
-the Pages project's `LOBBY_URL` secret, never in the files; the page's content security policy allows only its own
-site. If the lobby can't be reached it answers `{"error":"unavailable"}` (502) and the page says so.
+`online.html` (and its icons, and the game's own Barlow Condensed font) fetches `/api/online` on its own site 15 s
+after each answer while the page is seen (none while it's hidden, at once when it's shown again if one was missed;
+one at a time, given up after 8 s); `functions/api/online.js` there asks the lobby's `/v1/online` and passes on only
+the counts and the rooms, read and written again (no header, error text or field of the lobby's answer reaches the
+browser; the countries only as two capital letters or `""` with a whole number, 250 at most), kept 15 s by the
+counts' own time. Each copy of the function asks the lobby once at a time (everyone waiting shares the answer),
+gives it 4 s, and if it fails passes on its last answer up to 2 minutes old marked `"stale": true` (the page shows
+the rooms with "can't reach the lobby · last updated ..."), not asking again for 5 s; the answer with the viewer's
+continent (`you`) is kept private. Rooms are listed only when the lobby's `features.rooms` is `true`, matches only
+when `features.watch` is (no `features`, an older lobby's: neither). At the top, each game's players online and
+its Quick match count, and the top 8 countries, flag and number (the browser's own name for it on hover). The flags
+are the Twemoji Country Flags font in `site/fonts` (flags only, so Windows, which has none, shows them too; from the
+npm package country-flag-emoji-polyfill 0.1.10; the art Twemoji's, by Twitter, Inc. and contributors, CC BY 4.0,
+credited on the page; `fonts/TwemojiCountryFlags-LICENSE.md`). Barlow there is three subsets of `assets/fonts`'
+(Latin and Latin Extended-A, for Polish and Turkish too: `pyftsubset BarlowCondensed-Medium.ttf
+--unicodes=U+0020-007E,U+00A0-017F,U+0218-021B,U+02C6,U+02DA,U+02DC,U+2013-2014,U+2018-201A,U+201C-201E,U+2020-2022,U+2026,U+2030,U+2039-203A,U+20AC,U+2122,U+2212
+--layout-features=kern,liga,locl,frac,numr,dnom --flavor=woff2`, and the same for SemiBold and BoldItalic). The
+lobby's address is the Pages project's `LOBBY_URL` secret, never in the files. The page's content security policy
+allows its own site, Google Fonts (the Noto fonts for Korean, Japanese, Chinese and Russian) and only the page's one
+script, by its hash: after changing the script, `node sitelang.mjs --csp` puts the new hash in `site/_headers`.
+`node sitelang.mjs` checks every language's lines, that the three fonts have every letter each language shows, and
+the hash; `node fntest.mjs` the function (what it passes on, the timeout, the stale answer, one fetch at a time). If
+the lobby can't be reached and there's no answer under 2 minutes old, the function answers
+`{"error":"unavailable"}` (502) and the page says so; after 2 minutes unreachable the page drops the rooms it showed
+(their links likely gone) and says so too.
 
 Setting it up (once; the project's name is its address, `vf-online.pages.dev`: another, if that's taken, in
 `tools/online/wrangler.toml` and the commands). Deploy the lobby first (it has `/v1/online` from then):
@@ -313,11 +327,12 @@ the page up:
 ```
 cd ~/vf3-recomp/tools/online && ../lobby/node_modules/.bin/wrangler pages project create vf-online --production-branch main
 cd ~/vf3-recomp/tools/online && ../lobby/node_modules/.bin/wrangler pages secret put LOBBY_URL --project-name vf-online
-cd ~/vf3-recomp/tools/online && ../lobby/node_modules/.bin/wrangler pages deploy --branch main
+cd ~/vf3-recomp/tools/online && node sitelang.mjs && ../lobby/node_modules/.bin/wrangler pages deploy --branch main
 ```
 
 (It's run with the lobby's wrangler, from `tools/online`: inside `tools/lobby` wrangler would mix the lobby's
-settings into the page's.) The page is then at `https://vf-online.pages.dev/online` (`/` sends there). After
+settings into the page's; `node sitelang.mjs` first, so a page whose script's hash isn't in `_headers`, which
+wouldn't run, never goes up.) The page is then at `https://vf-online.pages.dev/online` (`/` sends there). After
 changing the page, the last command again; after changing `LOBBY_URL`, the secret and the deploy again. The
 dashboard's way to the same: Workers & Pages > vf-online > Settings > Variables and Secrets > Add, type Secret,
 `LOBBY_URL`.
