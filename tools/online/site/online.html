@@ -123,9 +123,10 @@ table.rooms { width: 100%; border-collapse: collapse; table-layout: fixed; backg
 .rooms th { position: sticky; top: var(--bar-h, 104px); z-index: 1; height: 36px; padding: 2px 12px 0; text-align: left; vertical-align: middle; background: var(--panel); box-shadow: inset 0 -1px 0 var(--line), 0 1px 0 var(--line);
 	font-size: 13px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); white-space: nowrap; user-select: none; }
 .rooms th.sort { cursor: pointer; }
+.rooms th .sorter { display: block; width: calc(100% + 12px); margin: 0 -6px; padding: 0 6px; font: inherit; line-height: inherit; letter-spacing: inherit; text-transform: inherit; text-align: inherit; color: inherit; background: none; border: 0; border-radius: var(--r-s); cursor: pointer; }
 .rooms th.sort:hover, .rooms th.on { color: var(--ink); }
-.rooms th.on::after { content: " \25BE"; }
-.rooms th.on.up::after { content: " \25B4"; }
+.rooms th.on .sorter::after { content: " \25BE"; }
+.rooms th.on.up .sorter::after { content: " \25B4"; }
 .rooms td { height: 52px; padding: 0 12px; font-size: 17px; line-height: 1.2; border-top: 1px solid var(--line); vertical-align: middle; }
 .rooms .num { text-align: right; padding-right: 32px; }
 /* (the columns' widths set, so none takes all the room left: Status as wide as two names and a score, Watching beside it) */
@@ -172,10 +173,12 @@ tr.how td { padding: 12px 16px 16px; background: var(--well); border-top: 0; hei
 .state p { margin: 0; font-size: 20px; font-weight: 600; color: var(--ink); }
 .state small { font-size: 15px; font-weight: 500; color: var(--muted); }
 .state .chip { margin-top: 4px; }
+.chip[aria-disabled="true"] { opacity: 0.35; cursor: default; }   /* (Try now, while it tries) */
 .pager { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px; background: var(--panel); border: 1px solid var(--line); border-top: 0; border-radius: 0 0 var(--r-m) var(--r-m); font-size: 15px; font-weight: 500; color: var(--muted); }
-.pager button { display: inline-flex; align-items: center; height: var(--h); padding: 2px 14px 0; font: 600 17px/1 var(--font); color: var(--ink); background: var(--line); border: 1px solid var(--line-2); border-radius: var(--r-s); cursor: pointer; }
+.pager button { display: inline-flex; align-items: center; gap: 6px; height: var(--h); padding: 2px 14px 0; font: 600 17px/1 var(--font); color: var(--ink); background: var(--line); border: 1px solid var(--line-2); border-radius: var(--r-s); cursor: pointer; }
 .pager button:hover:not(:disabled) { border-color: var(--muted); }
 .pager button:disabled { opacity: 0.35; cursor: default; }
+.pager button svg { width: 8px; height: 12px; margin-top: -2px; flex: none; }   /* (the chevrons drawn: no font has them in every language) */
 .pager[hidden] { display: none; }
 table.rooms.last { border-radius: 0 0 var(--r-m) var(--r-m); }
 .note { margin-top: 24px; font-size: 15px; font-weight: 500; color: var(--muted); max-width: 820px; line-height: 1.4; }
@@ -186,7 +189,7 @@ table.rooms.last { border-radius: 0 0 var(--r-m) var(--r-m); }
    figures; its button on the right) */
 @media (max-width: 760px) {
 	main { padding: 24px 12px 40px; }
-	.lang { top: 24px; right: 12px; max-width: 128px; font-size: 13px; }
+	.lang { top: 24px; right: 12px; max-width: 128px; font-size: 16px; }   /* (16 px: iOS zooms into a smaller control) */
 	h1 { padding-right: 136px; }
 	h1 { font-size: 34px; }
 	.lede { margin: 8px 0 16px; font-size: 17px; }
@@ -262,7 +265,7 @@ const EN = {
 	online: "{n} online",
 	in_quick: " \u00b7 {n} in Quick match",
 	older: "{n} of them on an older version: the latest version meets everyone",
-	more_countries: "+{n} countries",
+	more_countries: "+{n} more",
 	unknown: "Unknown",
 	all_games: "All games",
 	all_short: "All",
@@ -304,8 +307,8 @@ const EN = {
 	show_all: "Show all rooms",
 	none_listed: "No listed rooms right now.",
 	none_listed_more: "In the game: Online > Create room, with Listed in Rooms on.",
-	previous: "\u2039 Previous",
-	next: "Next \u203a",
+	previous: "Previous",
+	next: "Next",
 	pages: "{from}\u2013{to} of {n} rooms \u00b7 page {page} of {pages}",
 	cant_reach: "can't reach the lobby",
 	cant_reach_last: "can't reach the lobby \u00b7 last updated {ago}",
@@ -369,8 +372,8 @@ const TR = {
 		show_all: "모든 방 보기",
 		none_listed: "지금 공개된 방이 없어요.",
 		none_listed_more: "게임에서 온라인 > 방 만들기, 방 목록에 공개를 켜고 만드세요.",
-		previous: "‹ 이전",
-		next: "다음 ›",
+		previous: "이전",
+		next: "다음",
 		pages: "방 {n}개 중 {from}–{to} · {pages}쪽 중 {page}쪽",
 		cant_reach: "로비에 연결할 수 없음",
 		cant_reach_last: "로비에 연결할 수 없음 · 마지막 업데이트 {ago}",
@@ -432,8 +435,8 @@ const TR = {
 		show_all: "すべてのルームを表示",
 		none_listed: "現在公開中のルームはありません。",
 		none_listed_more: "ゲームのオンライン > ルーム作成で、ルーム一覧に公開をオンにして作成。",
-		previous: "‹ 前へ",
-		next: "次へ ›",
+		previous: "前へ",
+		next: "次へ",
 		pages: "{n}ルーム中 {from}–{to} · {page}/{pages}ページ",
 		cant_reach: "ロビーに接続できません",
 		cant_reach_last: "ロビーに接続できません · 最終更新 {ago}",
@@ -495,8 +498,8 @@ const TR = {
 		show_all: "显示全部房间",
 		none_listed: "现在没有公开的房间。",
 		none_listed_more: "在游戏中：联机 > 创建房间，打开“在房间列表公开”。",
-		previous: "‹ 上一页",
-		next: "下一页 ›",
+		previous: "上一页",
+		next: "下一页",
 		pages: "{n} 个房间中的 {from}–{to} · 第 {page}/{pages} 页",
 		cant_reach: "无法连接大厅",
 		cant_reach_last: "无法连接大厅 · 上次更新 {ago}",
@@ -558,8 +561,8 @@ const TR = {
 		show_all: "顯示全部房間",
 		none_listed: "現在沒有公開的房間。",
 		none_listed_more: "在遊戲中：連線 > 建立房間，開啟「在房間列表公開」。",
-		previous: "‹ 上一頁",
-		next: "下一頁 ›",
+		previous: "上一頁",
+		next: "下一頁",
 		pages: "{n} 個房間中的 {from}–{to} · 第 {page}/{pages} 頁",
 		cant_reach: "無法連上大廳",
 		cant_reach_last: "無法連上大廳 · 上次更新 {ago}",
@@ -579,7 +582,7 @@ const TR = {
 		online: "{n} online",
 		in_quick: " · {n} en Partida rápida",
 		older: "{n} con una versión anterior: la última versión juega con todos",
-		more_countries: "+{n} países",
+		more_countries: "+{n} más",
 		unknown: "Desconocido",
 		all_games: "Todos los juegos",
 		all_short: "Todos",
@@ -621,8 +624,8 @@ const TR = {
 		show_all: "Ver todas las salas",
 		none_listed: "No hay salas públicas ahora.",
 		none_listed_more: "En el juego: Online > Crear sala, con Pública en Salas activado.",
-		previous: "‹ Anterior",
-		next: "Siguiente ›",
+		previous: "Anterior",
+		next: "Siguiente",
 		pages: "{from}–{to} de {n} salas · página {page} de {pages}",
 		cant_reach: "no se puede conectar con el lobby",
 		cant_reach_last: "no se puede conectar con el lobby · actualizado {ago}",
@@ -642,7 +645,7 @@ const TR = {
 		online: "{n} online",
 		in_quick: " · {n} em Partida rápida",
 		older: "{n} deles numa versão antiga: a versão mais nova joga com todos",
-		more_countries: "+{n} países",
+		more_countries: "+{n} mais",
 		unknown: "Desconhecido",
 		all_games: "Todos os jogos",
 		all_short: "Todos",
@@ -684,8 +687,8 @@ const TR = {
 		show_all: "Mostrar todas as salas",
 		none_listed: "Nenhuma sala pública agora.",
 		none_listed_more: "No jogo: Online > Criar sala, com Pública em Salas ativado.",
-		previous: "‹ Anterior",
-		next: "Próxima ›",
+		previous: "Anterior",
+		next: "Próxima",
 		pages: "{from}–{to} de {n} salas · página {page} de {pages}",
 		cant_reach: "não dá para alcançar o lobby",
 		cant_reach_last: "não dá para alcançar o lobby · atualizado {ago}",
@@ -747,8 +750,8 @@ const TR = {
 		show_all: "Voir tous les salons",
 		none_listed: "Aucun salon public pour l'instant.",
 		none_listed_more: "Dans le jeu : En ligne > Créer un salon, avec Public dans les salons activé.",
-		previous: "‹ Précédent",
-		next: "Suivant ›",
+		previous: "Précédent",
+		next: "Suivant",
 		pages: "{from}–{to} sur {n} salons · page {page} sur {pages}",
 		cant_reach: "lobby injoignable",
 		cant_reach_last: "lobby injoignable · mis à jour {ago}",
@@ -810,8 +813,8 @@ const TR = {
 		show_all: "Показать все комнаты",
 		none_listed: "Сейчас нет открытых комнат в списке.",
 		none_listed_more: "В игре: Онлайн > Создать комнату, с включённым «В списке комнат».",
-		previous: "‹ Назад",
-		next: "Далее ›",
+		previous: "Назад",
+		next: "Далее",
 		pages: "{from}–{to} из {n} комнат · страница {page} из {pages}",
 		cant_reach: "лобби недоступно",
 		cant_reach_last: "лобби недоступно · обновлено {ago}",
@@ -831,7 +834,7 @@ const TR = {
 		online: "{n} online",
 		in_quick: " · {n} im Schnellen Match",
 		older: "{n} davon mit einer älteren Version: die neueste Version trifft alle",
-		more_countries: "+{n} Länder",
+		more_countries: "weitere: {n}",
 		unknown: "Unbekannt",
 		all_games: "Alle Spiele",
 		all_short: "Alle",
@@ -873,8 +876,8 @@ const TR = {
 		show_all: "Alle Räume zeigen",
 		none_listed: "Gerade keine gelisteten Räume.",
 		none_listed_more: "Im Spiel: Online > Raum erstellen, mit In Räumen gelistet an.",
-		previous: "‹ Zurück",
-		next: "Weiter ›",
+		previous: "Zurück",
+		next: "Weiter",
 		pages: "{from}–{to} von {n} Räumen · Seite {page} von {pages}",
 		cant_reach: "Lobby nicht erreichbar",
 		cant_reach_last: "Lobby nicht erreichbar · zuletzt aktualisiert {ago}",
@@ -894,7 +897,7 @@ const TR = {
 		online: "{n} online",
 		in_quick: " · {n} in partita rapida",
 		older: "{n} con una versione precedente: l'ultima versione gioca con tutti",
-		more_countries: "+{n} paesi",
+		more_countries: "altri: {n}",
 		unknown: "Sconosciuto",
 		all_games: "Tutti i giochi",
 		all_short: "Tutti",
@@ -936,8 +939,8 @@ const TR = {
 		show_all: "Mostra tutte le stanze",
 		none_listed: "Nessuna stanza pubblica ora.",
 		none_listed_more: "Nel gioco: Online > Crea stanza, con Pubblica in Stanze attivo.",
-		previous: "‹ Precedente",
-		next: "Successiva ›",
+		previous: "Precedente",
+		next: "Successiva",
 		pages: "{from}–{to} di {n} stanze · pagina {page} di {pages}",
 		cant_reach: "lobby non raggiungibile",
 		cant_reach_last: "lobby non raggiungibile · aggiornato {ago}",
@@ -957,7 +960,7 @@ const TR = {
 		online: "{n} online",
 		in_quick: " · w szybkim meczu: {n}",
 		older: "w tym na starszej wersji: {n}; najnowsza wersja gra ze wszystkimi",
-		more_countries: "+{n} krajów",
+		more_countries: "więcej: {n}",
 		unknown: "Nieznany",
 		all_games: "Wszystkie gry",
 		all_short: "Wszystkie",
@@ -999,8 +1002,8 @@ const TR = {
 		show_all: "Pokaż wszystkie pokoje",
 		none_listed: "Teraz brak publicznych pokojów.",
 		none_listed_more: "W grze: Online > Utwórz pokój, z włączonym Publiczny w Pokojach.",
-		previous: "‹ Poprzednia",
-		next: "Następna ›",
+		previous: "Poprzednia",
+		next: "Następna",
 		pages: "{from}–{to} z {n} pokojów · strona {page} z {pages}",
 		cant_reach: "lobby nieosiągalne",
 		cant_reach_last: "lobby nieosiągalne · ostatnia aktualizacja {ago}",
@@ -1062,8 +1065,8 @@ const TR = {
 		show_all: "Tüm odaları göster",
 		none_listed: "Şu an listelenen oda yok.",
 		none_listed_more: "Oyunda: Çevrimiçi > Oda kur, Odalar'da listele açık olarak.",
-		previous: "‹ Önceki",
-		next: "Sonraki ›",
+		previous: "Önceki",
+		next: "Sonraki",
 		pages: "{n} odadan {from}–{to} · sayfa {page}/{pages}",
 		cant_reach: "lobiye ulaşılamıyor",
 		cant_reach_last: "lobiye ulaşılamıyor · son güncelleme {ago}",
@@ -1172,7 +1175,7 @@ function flag(cc) {   // (the code's two regional indicator letters: a flag, by 
 	f.title = country_name(cc);
 	return f;
 }
-function who(p) { return p && typeof p === "object" && NAME.test(p.name) ? { name: p.name, country: CC.test(p.country) ? p.country : "" } : null; }
+function who(p) { return p && typeof p === "object" && typeof p.name === "string" && NAME.test(p.name) ? { name: p.name, country: typeof p.country === "string" && CC.test(p.country) ? p.country : "" } : null; }
 function named(p, cls) {
 	const s = el("span", cls);
 	s.title = p.name + (p.country ? " (" + country_name(p.country) + ")" : "");
@@ -1191,16 +1194,18 @@ function game_link(r, what) { return SCHEME[r.game] + "://" + r.game + "/" + wha
 
 // ---- the rooms, as the lobby lists them (each field checked) ----
 function rooms() {
-	const list = data && Array.isArray(data.rooms) ? data.rooms : [];
-	const out = [];
-	for (const r of list) {
+	// (each switch on only when the lobby says so: no features, an older lobby's, is no rooms; watching off, no matches)
+	const f = data && data.features && typeof data.features === "object" ? data.features : {};
+	if (f.rooms !== true || !Array.isArray(data.rooms)) return [];
+	const watch = f.watch === true, out = [];
+	for (const r of data.rooms) {
 		if (!r || typeof r !== "object" || !game_of(r.game) || r.older === true || r.locked === true) continue;   // (an older version's: not shown)
 		const p1 = who(r.p1), p2 = who(r.p2);
 		if (!p1) continue;
 		const base = { game: r.game, name: typeof r.name === "string" && ROOM.test(r.name) ? r.name : fill(HOSTS_ROOM, { name: p1.name }), p1, region: REGIONS[r.region] ? r.region : "",
 			since: n(r.since), watchers: n(r.watchers), code: CODE.test(r.code) ? r.code : "" };
 		if (r.state === "waiting" && base.code) out.push({ ...base, state: "waiting", p2: null, watch: "" });
-		else if (r.state === "playing" && p2 && (CODE.test(r.watch) || base.code)) out.push({ ...base, state: "playing", p2, watch: CODE.test(r.watch) ? r.watch : base.code,
+		else if (watch && r.state === "playing" && p2 && (CODE.test(r.watch) || base.code)) out.push({ ...base, state: "playing", p2, watch: CODE.test(r.watch) ? r.watch : base.code,
 			score: Array.isArray(r.score) && r.score.length === 2 ? r.score.map(n) : [0, 0],
 			// (a Quick match: its two players, to watch only; no room name, no code to join)
 			...(r.random === true && CODE.test(r.watch) ? { quick: true, name: "QUICK MATCH", code: "" } : {}) });
@@ -1252,9 +1257,10 @@ function render_strip() {
 }
 
 // ---- the filters ----
-function chip(label, on, act) {
+function chip(label, on, act, k) {
 	const b = el("button", "chip", label);
 	b.type = "button";
+	b.dataset.k = k;
 	b.setAttribute("aria-pressed", on ? "true" : "false");
 	b.addEventListener("click", act);
 	return b;
@@ -1272,6 +1278,7 @@ function tab(id, label, short, icon, count) {
 	const on = view.game === id, b = el("button", "tab");
 	b.type = "button";
 	b.setAttribute("role", "tab");
+	b.dataset.k = "tab:" + id;
 	b.setAttribute("aria-selected", on ? "true" : "false");
 	if (icon) { const i = b.appendChild(el("img")); i.src = icon; i.alt = ""; i.width = 28; i.height = 28; }
 	else { const i = b.appendChild(el("span", "all-icon")); for (let k = 0; k < 4; k++) i.appendChild(el("i")); }
@@ -1291,19 +1298,28 @@ function render_tabs() {
 	const on = t.querySelector('[aria-selected="true"]');
 	if (on && t.scrollWidth > t.clientWidth) t.scrollLeft = Math.max(0, on.offsetLeft - (t.clientWidth - on.offsetWidth) / 2);   // (a phone: the chosen tab in view)
 }
-function render_bar() {
+// (a control drawn again keeps the keyboard's focus: each has a key, data-k, and its new self takes the focus back)
+function with_focus(draw) {
+	const a = document.activeElement, k = a && a.dataset ? a.dataset.k : "";
+	draw();
+	if (!k || (document.activeElement && document.activeElement !== document.body)) return;
+	for (const e of document.querySelectorAll("[data-k]")) if (e.dataset.k === k) { e.focus({ preventScroll: true }); return; }
+}
+function render_bar() { with_focus(draw_bar); }
+function draw_bar() {
 	render_tabs();
 	const bar = document.getElementById("bar");
 	bar.replaceChildren();
 	const s = bar.appendChild(el("div", "chips"));
 	s.appendChild(el("span", "lbl", T.rooms_label));
 	for (const [id, label] of [["all", T.filter_all], ["waiting", T.filter_open], ["playing", T.filter_playing]])
-		s.appendChild(chip(label, view.status === id, () => { view.status = id; keep_view(); }));
+		s.appendChild(chip(label, view.status === id, () => { view.status = id; keep_view(); }, "chip:" + id));
 	const f = bar.appendChild(el("input", "search"));
 	f.type = "search";
 	f.placeholder = T.find;
 	f.value = view.find;
 	f.setAttribute("aria-label", T.find);
+	f.dataset.k = "find";
 	f.addEventListener("input", () => { view.find = f.value.slice(0, 16); view.page = 0; render_rooms(); });
 	bar.appendChild(el("span", "ago" + (failed ? " down" : ""), ago()));
 	bar_height();
@@ -1314,31 +1330,49 @@ addEventListener("resize", bar_height);
 try { document.fonts.ready.then(bar_height); } catch (e) {}
 
 // ---- the rooms ----
-function copy_button(text) {
+function copy_button(text, k) {
 	const b = el("button", "copy", T.copy);
 	b.type = "button";
+	b.dataset.k = "copy:" + k;
 	b.addEventListener("click", () => {
 		try { navigator.clipboard.writeText(text).then(() => { b.textContent = T.copied; setTimeout(() => (b.textContent = T.copy), 1500); }, () => {}); } catch (e) {}
 	});
 	return b;
 }
-function how(r, what) {
+function how(r, what, k) {
 	const g = game_of(r.game), d = el("div", "how");
 	const code = what === "watch" ? r.watch : r.code;
 	const t = d.appendChild(el("div"));
 	t.textContent = mobile ? fill(what === "watch" ? T.on_pc_watch : T.on_pc, { game: g.name }) : fill(what === "watch" ? T.opening_watch : T.opening, { app: g.app });
 	const c = d.appendChild(el("div", "code"));
 	c.appendChild(el("b", "", dashed(code)));
-	c.appendChild(copy_button(dashed(code)));
+	c.appendChild(copy_button(dashed(code), k));
 	return d;
 }
+// (a column's head: a button that sorts by it, again the other way; aria-sort on the one sorted by)
 function th(label, key, cls) {
-	const h = el("th", (cls || "") + (key ? " sort" : "") + (view.sort === key ? " on" + (view.up ? " up" : "") : ""), label);
-	if (key) h.addEventListener("click", () => { view.up = view.sort === key ? !view.up : false; view.sort = key; render_rooms(); });
+	const on = !!key && view.sort === key;
+	const h = el("th", (cls || "") + (key ? " sort" : "") + (on ? " on" + (view.up ? " up" : "") : ""), key ? undefined : label);
+	if (!key) return h;
+	const b = h.appendChild(el("button", "sorter", label));
+	b.type = "button";
+	b.dataset.k = "sort:" + key;
+	if (on) h.setAttribute("aria-sort", key === "status" ? "other" : (key === "watch") === view.up ? "ascending" : "descending");
+	b.addEventListener("click", () => { view.up = view.sort === key ? !view.up : false; view.sort = key; render_rooms(); });
+	h.addEventListener("click", (e) => { if (e.target === h) b.click(); });   // (the whole head, as before)
 	return h;
 }
 const cols = () => (view.game === "all" ? 6 : 5);   // (the table's columns: the Game column only on All games)
-function render_rooms() {
+function render_rooms() { held = false; with_focus(draw_rooms); }
+// (a poll doesn't move the rooms under the mouse: they're drawn again once it leaves the table, so a click lands on
+// the room it was aimed at)
+let over = false, held = false;
+{
+	const t = document.getElementById("rooms");
+	t.addEventListener("pointerenter", (e) => { over = e.pointerType === "mouse"; });
+	t.addEventListener("pointerleave", () => { over = false; if (held) render_rooms(); });
+}
+function draw_rooms() {
 	const t = document.getElementById("rooms");
 	t.replaceChildren();
 	t.classList.toggle("one", view.game !== "all");
@@ -1350,11 +1384,11 @@ function render_rooms() {
 		render_pager(0, 0, 1);
 		const td = body.appendChild(el("tr", "empty")).appendChild(el("td"));
 		td.colSpan = cols();
-		if (!data && failed) td.appendChild(state("bad", "plug", T.unreachable, T.unreachable_more, T.try_now, load));
+		if (!data && failed) td.appendChild(state("bad", "plug", T.unreachable, T.unreachable_more, T.try_now, load, "retry"));
 		else if (!data) td.appendChild(state("", "wait", T.looking));
-		else if (!(data.features && data.features.rooms)) td.appendChild(state("", "room", T.rooms_off, T.rooms_off_more));   // (switched off, or an older lobby)
+		else if (!(data.features && data.features.rooms === true)) td.appendChild(state("", "room", T.rooms_off, T.rooms_off_more));   // (switched off, or an older lobby)
 		else if (rooms().length) td.appendChild(state("", "find", view.find ? fill(T.none_for, { find: view.find.trim() }) : T.none_here, "", T.show_all,
-			() => { view.game = "all"; view.status = "all"; view.find = ""; keep_view(); }));
+			() => { view.game = "all"; view.status = "all"; view.find = ""; keep_view(); }, "show_all"));
 		else td.appendChild(state("", "room", T.none_listed, T.none_listed_more));
 		return;
 	}
@@ -1391,6 +1425,7 @@ function render_rooms() {
 		const b = act.appendChild(el(mobile ? "button" : "a", "btn" + (what === "watch" || mobile ? " watch" : ""), mobile ? T.get_code : what === "watch" ? T.watch : T.join));
 		if (mobile) b.type = "button";
 		else b.href = game_link(r, what);
+		b.dataset.k = "act:" + k;
 		b.setAttribute("aria-expanded", view.open.has(k) ? "true" : "false");
 		b.addEventListener("click", () => { const was = view.open.has(k); view.open.clear(); if (!(mobile && was)) view.open.add(k); setTimeout(render_rooms, 0); });   // (the link followed, the code shown too)
 		const meta = el("td", "c-meta", (r.state === "playing" && r.watchers ? fill(T.n_watching, { n: r.watchers }) : "") + minutes(r.since));
@@ -1398,7 +1433,7 @@ function render_rooms() {
 		if (view.open.has(k)) {
 			const td = body.appendChild(el("tr", "how")).appendChild(el("td"));
 			td.colSpan = cols();
-			td.appendChild(how(r, what));
+			td.appendChild(how(r, what, k));
 		}
 	}
 }
@@ -1409,7 +1444,7 @@ const ICONS = {
 	find: '<circle cx="17" cy="17" r="10" fill="none" stroke="currentColor" stroke-width="3"/><path d="M25 25l9 9" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>',
 	room: '<rect x="6" y="9" width="28" height="22" rx="4" fill="none" stroke="currentColor" stroke-width="3"/><path d="M6 16h28M12 23h8" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>',
 };
-function state(kind, icon, line, small, action, act) {
+function state(kind, icon, line, small, action, act, k) {
 	const d = el("div", "state" + (kind ? " " + kind : ""));
 	d.insertAdjacentHTML("beforeend", '<svg viewBox="0 0 40 40" aria-hidden="true">' + ICONS[icon] + "</svg>");
 	d.appendChild(el("p", "", line));
@@ -1417,23 +1452,31 @@ function state(kind, icon, line, small, action, act) {
 	if (action) {
 		const b = d.appendChild(el("button", "chip", action));
 		b.type = "button";
-		b.addEventListener("click", act);
+		b.dataset.k = k;
+		if (k === "retry" && loading) b.setAttribute("aria-disabled", "true");   // (Try now: once at a time)
+		b.addEventListener("click", () => { if (b.getAttribute("aria-disabled") !== "true") act(); });
 	}
 	return d;
 }
+const chevron = (d) => '<svg viewBox="0 0 8 12" aria-hidden="true"><path d="' + d + '" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 function render_pager(count, from, pages) {
 	const p = document.getElementById("pager");
 	p.replaceChildren();
 	p.hidden = count <= PER_PAGE;
 	document.getElementById("rooms").classList.toggle("last", p.hidden);
 	if (p.hidden) return;
-	const prev = p.appendChild(el("button", "", T.previous));
+	const prev = p.appendChild(el("button"));
 	prev.type = "button";
+	prev.dataset.k = "prev";
+	prev.insertAdjacentHTML("beforeend", chevron("M6.5 1.5 2 6l4.5 4.5"));
+	prev.appendChild(document.createTextNode(T.previous));
 	prev.disabled = view.page === 0;
 	prev.addEventListener("click", () => { view.page--; render_rooms(); document.getElementById("head").scrollIntoView(); });
 	p.appendChild(el("span", "", fill(T.pages, { from: from + 1, to: Math.min(count, from + PER_PAGE), n: count, page: view.page + 1, pages })));
 	const next = p.appendChild(el("button", "", T.next));
 	next.type = "button";
+	next.dataset.k = "next";
+	next.insertAdjacentHTML("beforeend", chevron("M1.5 1.5 6 6l-4.5 4.5"));
 	next.disabled = view.page + 1 >= pages;
 	next.addEventListener("click", () => { view.page++; render_rooms(); document.getElementById("head").scrollIntoView(); });
 }
@@ -1447,31 +1490,51 @@ function render() {
 	render_strip();
 	const typing = document.activeElement && document.activeElement.classList.contains("search");
 	if (!typing) render_bar();   // (the box being typed in left as it is)
-	render_rooms();
+	if (over && document.querySelector("#rooms tr.room")) held = true;
+	else render_rooms();
 }
+const POLL_MS = 15000, LOAD_MS = 8000, GIVE_UP_S = 120;
+let loading = false, poll = 0, seen_at = 0;   // (seen_at: when the lobby was last reached, by this browser's clock)
 async function load() {
+	if (loading) return;   // (one at a time)
+	loading = true;
+	for (const b of document.querySelectorAll('[data-k="retry"]')) b.setAttribute("aria-disabled", "true");
+	const ac = new AbortController(), stop = setTimeout(() => ac.abort(), LOAD_MS);   // (no answer in 8 s: unreachable)
 	try {
-		const r = await fetch("/api/online", { cache: "no-store" });
+		const r = await fetch("/api/online", { cache: "no-store", signal: ac.signal });
 		if (!r.ok) throw new Error();
 		const d = await r.json();
 		if (!d || typeof d !== "object" || !d.games) throw new Error();
-		const before = data ? new Set(rooms().map(room_key)) : null;
-		data = d;
-		failed = false;
-		fresh = before ? new Set(rooms().map(room_key).filter((k) => !before.has(k))) : new Set();
-		you = typeof d.you === "string" && REGIONS[d.you] ? d.you : "";
+		if (!data || n(d.updated) >= n(data.updated)) {   // (an answer older than the one shown isn't taken)
+			const before = data ? new Set(rooms().map(room_key)) : null;
+			data = d;
+			fresh = before ? new Set(rooms().map(room_key).filter((k) => !before.has(k))) : new Set();
+			you = typeof d.you === "string" && REGIONS[d.you] ? d.you : "";
+		}
+		// (stale: the site's last answer, the lobby not reached; as old as it says, at most GIVE_UP_S)
+		failed = d.stale === true;
+		const t = Date.now();
+		if (!failed) seen_at = t;
+		else if (!seen_at) seen_at = t - 1000 * Math.min(GIVE_UP_S, Math.max(0, t / 1000 - n(d.updated)));
 	} catch (e) {
 		failed = true;
+	} finally {
+		clearTimeout(stop);
+		loading = false;
 	}
+	// (2 min without the lobby: its rooms no longer shown, their links likely gone; unreachable instead)
+	if (failed && data && Date.now() - seen_at > GIVE_UP_S * 1000) data = null;
 	render();
 	fresh = new Set();
+	clearTimeout(poll);
+	poll = setTimeout(polled, POLL_MS);
 }
+// (the rooms every 15 s, as often as the lobby makes them anew, 15 s after the last answer; none while the page isn't
+// seen, at once when it is again if one was missed)
+function polled() { poll = 0; if (!document.hidden) load(); }
 render();
 load();
-// (the rooms every 15 s, as often as the lobby makes them anew; none while the page isn't seen, at once when it is)
-let loaded_at = Date.now();
-setInterval(() => { if (!document.hidden) { loaded_at = Date.now(); load(); } }, 15000);
-document.addEventListener("visibilitychange", () => { if (!document.hidden && Date.now() - loaded_at > 15000) { loaded_at = Date.now(); load(); } });
+document.addEventListener("visibilitychange", () => { if (!document.hidden && !poll) load(); });
 setInterval(() => { for (const a of document.querySelectorAll(".ago")) a.textContent = ago(); }, 1000);
 </script>
 </body>
