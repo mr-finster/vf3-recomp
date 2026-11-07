@@ -31,7 +31,8 @@
 //   {locked: true}    (listed) shown with a lock: its code isn't listed, a player needs it from the host
 //   {watchable: true} its matches may be watched (every new game's: by the room's own code, which is its watch code;
 //                     a listed room's in the list), and a Random match's too when its host's game sends it: a Quick
-//                     match's is listed once its start comes ({random: true}: its players, to watch, no code to join)
+//                     match's is listed once its start comes ({random: true}: its players, to watch, no code to join),
+//                     by a watch code of its own, never its room's (the code its Play again opens for the other player)
 //   {persist: true}   the room stays while its match is played (the host says it's there with /v1/hold), and holds a
 //                     queue: a player joining it then ({queue: true} in /v1/join) waits in line, and the first in line
 //                     gets it when the host opens it again after the match (/v1/host with its code and key: the host stays)
@@ -54,12 +55,13 @@
 //   GET  /v1/watch/live?w=WID&m=MATCH&from=F&s=SID -> the frames as they come (a response that streams: each message a
 //        u32 length then a reply as /frames' (length 0: still here), from F on; a few hundred at most a match, after
 //        which watchers ask /frames (Cloudflare's edge) as before)
-//   POST /v1/peek   {code}   -> {state: "open" | "playing", name, host, watch} or {error: no_room}: what a code is (Enter code)
+//   POST /v1/peek   {code}   -> {state: "open" | "playing", name, host, watch} or {error: no_room}: what a code is (Enter code;
+//        watch: its match may be watched by this code)
 //
 // Errors are {error: "<what>"} with a status: no_room 404, full 409, game / version / rom 412 (with the host's
 // version), busy 429, bad 400, no_turn 503. The games word them; nothing here is shown as it comes.
 
-import { ANYWHERE, STRONG, ENDINGS, WHOLE } from './words.js';
+import { ANYWHERE, STRONG, ENDINGS, WHOLE, COMPOUNDS } from './words.js';
 
 const PROTOCOL = 1;
 const LETTERS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';   // (no 0/O, 1/I/L: read out over voice chat, typed on a pad)
@@ -113,8 +115,18 @@ const plain = (word, root) => runs(word, doubled(root) ? 2 : 1);
 const forms = (roots, endings) => roots.map((r) => [r, ['', ...endings].map((e) => runs(r + e, doubled(r) ? 2 : 1))]);
 const ANY = ANYWHERE.map((w) => [w, runs(w, doubled(w) ? 2 : 1)]);
 const ALL_FORMS = [...forms(STRONG, ENDINGS), ...forms(WHOLE, ['S', 'ES'])];
-function name_words(s) {   // (made plain, its words; one-letter words in a row joined)
-	const t = String(s || '').toUpperCase().replace(/[013457!|$@]/g, (c) => SUBS[c] || c);
+// (across a space: only the whole run of words spelling a strong word or one of ANYWHERE's, with an ending or none, or one
+// of them with a COMPOUNDS word after it; never one inside two real words, nor WHOLE's short ones: PUT A, AS SOON)
+const SPAN_ENDINGS = ['S', 'ES', 'ER', 'ERS', 'ING', 'ED'];   // (ENDINGS but the rarer, which two real words make more often: BIT CHIN)
+const SPAN_FORMS = [...forms(ANYWHERE, SPAN_ENDINGS), ...forms(STRONG, SPAN_ENDINGS)];
+// (a word that's one of STRONG's, WHOLE's or ANYWHERE's then a COMPOUNDS word, plural or not: SHITFACE, COCKSUCK; never one
+// with anything else after it, COCKPIT, SHITAKE, nor before it, HANCOCK, SCUNTHORPE)
+const TAILS = COMPOUNDS.flatMap((c) => [c, c + 'S']);
+const compound = (word, roots) => roots.some((r) => { const w = plain(word, r), p = runs(r, doubled(r) ? 2 : 1); return w.startsWith(p) && TAILS.includes(w.slice(p.length)); });
+const WORD_ROOTS = [...STRONG, ...WHOLE, ...ANYWHERE], SPAN_ROOTS = [...STRONG, ...ANYWHERE];
+function name_words(s, vu = false) {   // (made plain, its words; one-letter words in a row joined; vu: V read as U too, FVCK)
+	let t = String(s || '').toUpperCase().replace(/[013457!|$@]/g, (c) => SUBS[c] || c);
+	if (vu) t = t.replace(/V/g, 'U');
 	const words = [];
 	let single = false;   // (the last word one letter: the next one-letter word goes with it)
 	for (const w of t.split(/\s+/).map((x) => x.replace(/[^A-Z]/g, '')).filter(Boolean)) {
@@ -125,9 +137,19 @@ function name_words(s) {   // (made plain, its words; one-letter words in a row 
 	return words;
 }
 export function name_ok(s) {   // (exported for test/watch.test.mjs)
-	for (const word of name_words(s)) {
-		if (ANY.some(([w, p]) => plain(word, w).includes(p))) return false;
-		if (ALL_FORMS.some(([r, fs]) => fs.includes(plain(word, r)))) return false;
+	for (const vu of /V/i.test(String(s || '')) ? [false, true] : [false]) {
+		const words = name_words(s, vu);
+		for (const word of words) {
+			if (ANY.some(([w, p]) => plain(word, w).includes(p))) return false;
+			if (ALL_FORMS.some(([r, fs]) => fs.includes(plain(word, r)))) return false;
+			if (compound(word, WORD_ROOTS)) return false;
+		}
+		// (a word with a space in it: NI GGER, FU CK, BIT CH; two to four words in a row, run together)
+		for (let i = 0; i < words.length; i++)
+			for (let j = i + 2; j <= Math.min(words.length, i + 4); j++) {
+				const run = words.slice(i, j).join('');
+				if (SPAN_FORMS.some(([r, fs]) => fs.includes(plain(run, r))) || compound(run, SPAN_ROOTS)) return false;
+			}
 	}
 	return true;
 }
@@ -329,9 +351,11 @@ async function limited(env, req, what, groups = 4) {   // (groups: an IPv6 addre
 	return !r.success;
 }
 // A player for the online count: their address (an IPv6 one by its /64) and name, hashed (two tickets, rooms or
-// searches of the same player are one; the address itself is never kept by the count)
-async function player_id(req, name) {
-	const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('vf-online|' + sender(req) + '|' + name));
+// searches of the same player are one; the address itself is never kept by the count). groups 3: an IPv6 one by its
+// /48, for what one address may have of something shared (listed rooms, a match's watchers), as CODE48_LIMIT counts:
+// a /48 of one's own is 65,536 /64s, not that many places
+async function player_id(req, name, groups = 4) {
+	const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('vf-online|' + sender(req, groups) + '|' + name));
 	return [...new Uint8Array(d).slice(0, 8)].map((x) => x.toString(16).padStart(2, '0')).join('');
 }
 
@@ -369,20 +393,28 @@ export default {
 				const want = normal_code(b.want), old_key = clean(b.key, 64);
 				for (let tries = 0; tries < 8; tries++) {   // (a code already in use: another)
 					const code = tries === 0 && code_ok(want) ? want : random_code();
-					const r = await room(env, code).fetch('https://room/open', { method: 'POST', body: JSON.stringify({ code, host: me, old_key: tries === 0 ? old_key : '', sid, aid: await player_id(req, '#room'), listed: b.listed === true, locked: b.listed === true && b.locked === true, watchable: b.watchable === true || b.listed === true, persist: b.persist === true, room: room_name(b.room), region: region_of(req) }) });
+					const r = await room(env, code).fetch('https://room/open', { method: 'POST', body: JSON.stringify({ code, host: me, old_key: tries === 0 ? old_key : '', sid, aid: await player_id(req, '#room', 3), listed: b.listed === true, locked: b.listed === true && b.locked === true, watchable: b.watchable === true || b.listed === true, persist: b.persist === true, room: room_name(b.room), region: region_of(req) }) });
 					if (r.status === 200) return r;
 				}
 				return json({ error: 'busy' }, 429);
 			}
 
 			if (path === '/v1/join') {
+				const b = await body_of(req), code = normal_code(b && b.code);
+				const guest = b && code_ok(code) ? who(b, req) : null;
+				const ask = guest && JSON.stringify({ guest, sid: await player_id(req, guest.name), queue: b.queue === true });
+				// (a player in a room's line asks again every 4 s: not a new code, so not charged as one (two in line behind
+				// one address used up its 20 a minute and fell out of it). The room asked first answers only for one in its
+				// line; anyone else, and any code with no room, gets the same "new" and is charged as before: no oracle)
+				if (ask && b.queue === true) {
+					const r = await room(env, code).fetch('https://room/join?inline=1', { method: 'POST', body: ask });
+					if (r.headers.get('x-new') !== '1') return r;
+					await r.body?.cancel();
+				}
 				if (await new_code_limited(env, req)) return json({ error: 'busy' }, 429);
-				const b = await body_of(req);
 				if (!b) return json({ error: 'bad' }, 400);
-				const code = normal_code(b.code);
 				if (!code_ok(code)) return json({ error: 'no_room' }, 404);
-				const guest = who(b, req);
-				return room(env, code).fetch('https://room/join', { method: 'POST', body: JSON.stringify({ guest, sid: await player_id(req, guest.name), queue: b.queue === true }) });
+				return room(env, code).fetch('https://room/join', { method: 'POST', body: ask });
 			}
 
 			if (path === '/v1/peek') {   // (Enter code: a room open to join, or its match on to watch)
@@ -439,7 +471,7 @@ export default {
 				}
 				return q.fetch('https://queue' + (path === '/v1/random' ? '/enter' : path.slice(10)), {
 					method: 'POST',
-					body: JSON.stringify({ me, geo: geo_of(req), region: region_of(req), from: sender(req), sid: path === '/v1/random' ? await player_id(req, me.name) : '', aid: path === '/v1/random' ? await player_id(req, '#room') : '', ticket: clean(b.ticket, 32), avoid: Array.isArray(b.avoid) ? b.avoid.slice(0, 8).map((c) => clean(c, 8)) : [] }),
+					body: JSON.stringify({ me, geo: geo_of(req), region: region_of(req), from: sender(req), sid: path === '/v1/random' ? await player_id(req, me.name) : '', aid: path === '/v1/random' ? await player_id(req, '#room', 3) : '', ticket: clean(b.ticket, 32), avoid: Array.isArray(b.avoid) ? b.avoid.slice(0, 8).map((c) => clean(c, 8)) : [] }),
 				});
 			}
 
@@ -455,6 +487,15 @@ function room(env, code) {
 }
 function watches(env, wid) {
 	return env.WATCHES.get(env.WATCHES.idFromName('w|' + wid));
+}
+async function arm(env, wid, b) {   // (a Watch armed for a room's matches: true; its object not reached or refusing: false)
+	try {
+		const a = await watches(env, wid).fetch('https://watch/arm', { method: 'POST', body: JSON.stringify(b) });
+		await a.body?.cancel();
+		return a.status === 200;
+	} catch (e) {
+		return false;
+	}
 }
 
 // Cloudflare's TURN: a login for TURN_TTL, from the TURN key (kept as this Worker's secrets)
@@ -504,7 +545,7 @@ export class Room {
 		const g = r.guest;
 		const listed = r.listed ? { listed: true, aid: r.aid || '', name: r.host.name, room: r.name || '', locked: !!r.locked, region: r.region || '', persist: !!r.persist, playing: !!r.playing,
 			p2: r.playing && g ? [g.name, g.country] : null, queue: (r.queue || []).length, wid: r.wid || '' } : {};
-		tell(this, { code: r.code, game: r.host.game, version: r.host.pool || r.host.version, ...listed, ...ev });   // (a pool's player counted as the pool's)
+		tell(this, { code: r.code, game: r.host.game, version: r.host.pool || r.host.version, playing: !!r.playing, ...listed, ...ev });   // (a pool's player counted as the pool's)
 	}
 	host_socket() { return this.ctx.getWebSockets ? this.ctx.getWebSockets('host').some((ws) => !this.quiet.has(ws)) : false; }
 	// (a host's socket with no ping for HOST_PING_GONE_MS: its game gone without a close (a cable pulled, a sleep): closed;
@@ -524,7 +565,8 @@ export class Room {
 		return last_of_quiet;
 	}
 	async load(held = false) {   // (held: its host's socket open till this moment, as when it's just closed)
-		if (this.r === undefined) this.r = (await this.ctx.storage.get('r')) || null;
+		const woke = this.r === undefined;
+		if (woke) this.r = (await this.ctx.storage.get('r')) || null;
 		if (this.gone === undefined) this.gone = (await this.ctx.storage.get('gone')) || null;
 		if (this.gone && Date.now() > this.gone.until) {
 			this.gone = null;
@@ -532,6 +574,14 @@ export class Room {
 		}
 		const r = this.r;
 		if (r && (held || this.host_socket())) r.seen = Date.now();   // (its host's socket open: it's there)
+		else if (r && woke && r.ws !== false) {
+			// (held by its host's socket when this object last ran, the socket gone with it: a deploy, a restart, a variable
+			// changed. Its seen is from when the socket came, maybe long ago: the host given HOST_GONE_MS from now to come
+			// back, on a socket or a wait, as after its socket's close; once: kept so, a wake after this one takes it as it is)
+			r.seen = Math.max(r.seen, Date.now());
+			r.ws = false;
+			await this.ctx.storage.put('r', r);
+		}
 		if (r && (Date.now() - r.seen > HOST_GONE_MS || Date.now() - r.born > ROOM_LIFE_MS)) await this.drop();
 		return this.r;
 	}
@@ -559,13 +609,16 @@ export class Room {
 		let r = await this.load();
 		if (r && quiet && !this.host_socket()) {   // (held by a socket gone quiet: there till its last ping, not till now)
 			r.seen = Math.min(r.seen, quiet);
+			r.ws = false;
 			if (Date.now() - r.seen > HOST_GONE_MS) { await this.drop(); r = null; }
+			else await this.ctx.storage.put('r', r);
 		}
 		// (its host on a socket: the online count told the room's still there, as a wait or a hold would have, every
 		// HOLD_TELL_MS; the alarm the only thing that wakes it meanwhile)
 		if (r && this.host_socket() && !sockets_on(this.env)) {   // (switched off: its host waits and holds over HTTPS)
 			for (const ws of this.ctx.getWebSockets('host')) try { ws.close(1012, 'off'); } catch (e) {}
 			r.seen = Date.now();
+			r.ws = false;
 			await this.save();
 		} else if (r && this.host_socket()) {
 			if (Date.now() - this.told > HOLD_TELL_MS - 5000) { this.tell({ op: r.playing ? 'hold' : 'host', sids: [r.sid], countries: [r.host.country] }); this.told = Date.now(); }
@@ -579,6 +632,7 @@ export class Room {
 	async webSocketClose(ws, code) {
 		try { ws.close(code === 1005 ? 1000 : code, 'closed'); } catch (e) {}
 		const r = await this.load(!this.quiet.has(ws));   // (there till now, however long since its last request: not taken for gone; one closed for silence, not)
+		if (r && !this.host_socket()) r.ws = false;
 		if (r) await this.save();   // (gone HOST_GONE_MS from now if no wait or new socket comes, as after its last wait)
 	}
 	async webSocketError(ws) { try { ws.close(1011, 'error'); } catch (e) {} }
@@ -592,6 +646,7 @@ export class Room {
 			this.ctx.acceptWebSocket(server, ['host']);
 			server.serializeAttachment({ at: Date.now() });   // (its pings counted from now)
 			r.seen = Date.now();
+			r.ws = true;   // (held by its socket: a restart meanwhile gives its host time to come back on it, load())
 			await this.ctx.storage.put('r', r);
 			await this.ctx.storage.setAlarm(Date.now() + HOLD_TELL_MS);
 			if (r.guest) server.send(JSON.stringify({ guest: r.guest }));
@@ -609,12 +664,14 @@ export class Room {
 				r.playing = false;
 				r.token = random_hex(8);
 				r.seen = Date.now();
+				r.born = Date.now();   // (a room that stays lives ROOM_LIFE_MS from its last match, not its first: one in use goes on)
 				r.queue_open = Date.now();
 				const out = { code: r.code, key: r.key, token: r.token, persist: true, ...(r.wid && watch_on ? { wid: r.wid } : {}), ...(r.listed && listing_on ? { listed_as: { room: r.name || '', name: b.host.name } } : {}) };
 				if (r.wid && watch_on) {
 					const wkey = random_hex(16);
-					const a = await watches(this.env, r.wid).fetch('https://watch/arm', { method: 'POST', body: JSON.stringify({ wid: r.wid, wkey, game: b.host.game, version: b.host.pool || b.host.version, listed: !!r.listed && !r.locked, region: r.region || '', aid: r.aid || '' }) });   // (a locked room's match never listed: its watch code is its code)
-					if (a.status === 200) out.wkey = wkey;
+					const a = await arm(this.env, r.wid, { wid: r.wid, wkey, game: b.host.game, version: b.host.pool || b.host.version, listed: !!r.listed && !r.locked, region: r.region || '', aid: r.aid || '' });   // (a locked room's match never listed: its watch code is its code)
+					if (a) out.wkey = wkey;
+					else delete out.wid;   // (its Watch not reached: the room open again all the same, its match not sent)
 				}
 				await this.save();
 				this.tell({ op: 'reopen', sids: [r.sid], countries: [r.host.country] });
@@ -627,7 +684,7 @@ export class Room {
 				this.gone = null;
 				await this.ctx.storage.delete('gone');
 			}
-			this.r = { code: b.code, host: b.host, key: random_hex(16), token: random_hex(8), guest: null, born: Date.now(), seen: Date.now(), random: !!b.random, sid: clean(b.sid, 16), aid: hex16(b.aid) };
+			this.r = { code: b.code, host: b.host, key: random_hex(16), token: random_hex(8), guest: null, born: Date.now(), seen: Date.now(), random: !!b.random, sid: clean(b.sid, 16), aid: hex16(b.aid), ws: false };
 			// a room whose matches may be watched: its watch code (the room's own from before, a Play again's) armed with a
 			// new key for its host to send with
 			const out = { code: b.code, key: this.r.key, token: this.r.token };
@@ -641,13 +698,22 @@ export class Room {
 				if (b.persist) out.persist = true;   // (the game keeps it through its match only when told: an older lobby doesn't)
 				if (b.listed && listing_on) out.listed_as = { room: this.r.name, name: b.host.name };   // (as the list shows it: a blocked name, its host's)
 			}
-			// a room whose matches may be watched (every new game's): watched by its own code, armed with a new key for its host
+			// a room whose matches may be watched (every new game's): watched by its own code, armed with a new key for its host.
+			// A Quick match's by a watch code of its own, never its room's: its watch code is in the rooms list for anyone, and
+			// its room's code is what its Play again opens, by its host's key, for the other player to join (by the room's code
+			// a stranger could take that room, and the host's addresses with it). Its own: one no Watch holds now (fresh), so
+			// it's no room's code in use; the room's own code never said to anyone but the two.
+			// (watching is extra: its Watch not reached, the room opens all the same, its matches not sent)
 			if (watch_on && (b.listed || b.watchable || (b.random && b.host && b.host.watch))) {
 				this.r.listed = !b.random && !!b.listed;
 				this.r.region = typeof b.region === 'string' ? b.region.slice(0, 2) : '';
-				const wid = b.code, wkey = random_hex(16);
-				const a = await watches(this.env, wid).fetch('https://watch/arm', { method: 'POST', body: JSON.stringify({ wid, wkey, game: b.host.game, version: b.host.pool || b.host.version, listed: !b.random && !!b.listed && !b.locked, random: !!b.random && b.quick_listed === true, quick: !!b.random, region: this.r.region, code: b.code, aid: this.r.aid || '' }) });
-				if (a.status === 200) { this.r.wid = wid; out.wid = wid; out.wkey = wkey; }
+				for (let tries = 0; tries < (b.random ? 4 : 1); tries++) {
+					const wid = b.random ? random_code() : b.code, wkey = random_hex(16);
+					if (await arm(this.env, wid, { wid, wkey, game: b.host.game, version: b.host.pool || b.host.version, listed: !b.random && !!b.listed && !b.locked, random: !!b.random && b.quick_listed === true, quick: !!b.random, fresh: !!b.random, region: this.r.region, aid: this.r.aid || '' })) {
+						this.r.wid = wid; out.wid = wid; out.wkey = wkey;
+						break;
+					}
+				}
 			}
 			await this.save();
 			this.tell({ op: 'host', sids: [this.r.sid], countries: [b.host.country] });
@@ -655,7 +721,12 @@ export class Room {
 		}
 		if (op === '/peek') {   // (what this code is now: watchable by it whenever a match is on, a room or a Random one's)
 			if (!r) return json({ error: 'no_room' }, 404);
-			return json({ state: r.guest ? 'playing' : 'open', name: r.name || '', host: r.host.name, country: r.host.country, game: r.host.game, watch: !!r.wid && switch_on(this.env, 'SWITCH_WATCH'), queue: (r.queue || []).length, random: !!r.random });
+			return json({ state: r.guest ? 'playing' : 'open', name: r.name || '', host: r.host.name, country: r.host.country, game: r.host.game, watch: !!r.wid && r.wid === r.code && switch_on(this.env, 'SWITCH_WATCH'), queue: (r.queue || []).length, random: !!r.random });
+		}
+		if (op === '/join' && new URL(req.url).searchParams.get('inline') === '1') {   // (the Worker's: one in this room's line asking again?)
+			const sid = clean(b.sid, 16), now = Date.now();
+			const inline = !!r && !!r.persist && sid.length > 0 && (r.queue || []).some((q) => q.sid === sid && now - q.seen < QUEUE_GONE_MS);
+			if (!inline) return new Response('{}', { headers: { 'content-type': 'application/json', 'x-new': '1' } });   // (nothing done: the same for any code)
 		}
 		if (!r) return json({ error: 'no_room' }, 404);
 		if (op === '/join') {
@@ -719,6 +790,7 @@ export class Room {
 		}
 		if (op === '/reopen') {
 			r.guest = null;
+			r.playing = false;   // (open again: listed waiting, not as a match on)
 			r.token = random_hex(8);   // (a new session: the last player's token no good for it)
 			await this.save();
 			this.tell({ op: 'reopen', sids: [r.sid], countries: [r.host.country] });   // (the player who joined didn't get going: no match after all)
@@ -731,7 +803,7 @@ export class Room {
 		if (op === '/hold') {   // (a persistent room's host, playing: still there; the rooms list told now and then)
 			r.playing = true;
 			await this.save();
-			if (Date.now() - this.told > 60000) this.tell({ op: 'hold', sids: [r.sid], countries: [r.host.country] });
+			if (Date.now() - this.told > 60000) { this.tell({ op: 'hold', sids: [r.sid], countries: [r.host.country] }); this.told = Date.now(); }
 			return json({ ok: true, queue: (r.queue || []).length });
 		}
 		return json({ error: 'bad' }, 400);
@@ -1065,9 +1137,11 @@ async function online(env, req) {
 	const you = region_of(req), add = ',"features":{"rooms":' + rooms_on + ',"watch":' + watch_on + '}' + (you ? ',"you":"' + you + '"' : '');
 	return new Response(body.endsWith('}') ? body.slice(0, -1) + add + '}' : body, { status: 200, headers: r.headers });
 }
+// (not limited per address: the online page's function asks from Cloudflare's own addresses, many visitors' asks from
+// one, and a game's from a phone network's shared one. Being asked often costs nothing more than a request each: each
+// Worker copy's memory and the edge answer it, the Stats asked about once a copy every ONLINE_FRESH_MS)
 async function online_counts(env, req) {
 	const headers = { 'content-type': 'application/json', 'cache-control': 'public, max-age=10', 'access-control-allow-origin': '*' };
-	if (await limited(env, req, 'ANY_LIMIT')) return new Response('{"error":"busy"}', { status: 429, headers: { ...headers, 'cache-control': 'no-store' } });
 	const kept_ok = !env.TURN_STATIC;   // (not on a test's own lobby: its counts checked as they change)
 	if (kept_ok && online_kept && Date.now() - online_kept.t < ONLINE_FRESH_MS) return new Response(online_kept.body, { headers });
 	const key = new Request('https://online.vf-lobby/v1');
@@ -1138,7 +1212,7 @@ export class Stats {
 	prune() {
 		const now = Date.now(), s = this.s;
 		for (const [k, q] of Object.entries(s.queues)) if (now > q.until) this.del('queues', k);
-		for (const [k, h] of Object.entries(s.hosts)) if (now - h.seen > ONLINE_HOST_MS || now - h.born > ROOM_LIFE_MS) this.del('hosts', k);
+		for (const [k, h] of Object.entries(s.hosts)) if (now - h.seen > ONLINE_HOST_MS) this.del('hosts', k);   // (a room that stays may outlive ROOM_LIFE_MS from its first match: its host's tellings keep it)
 		const old = s.matches.filter((m) => now - m.t >= ONLINE_PLAYING_MS).length, over = Math.max(0, s.matches.length - old - 20000);
 		if (old || over) { let i = 0; this.drop_matches((m) => now - m.t >= ONLINE_PLAYING_MS || (now - m.t < ONLINE_PLAYING_MS && i++ < over)); }
 		for (const [k, w] of Object.entries(s.watches)) if (now - w.seen > WATCH_LISTED_MS) this.del('watches', k);
@@ -1194,7 +1268,7 @@ export class Stats {
 			let watchers = 0;
 			for (const w of Object.values(s.watches)) watchers += w.watchers | 0;
 			const hours = s.month.ms / 3600e3;
-			return json({ matches: Object.keys(s.watches).length, watchers, month_hours: Math.round(hours * 10) / 10, over: hours >= (+this.env?.MONTH_MATCH_HOURS || MONTH_MATCH_HOURS) });   // (the load on watching, everywhere: the Watches shed it by this)
+			return json({ matches: Object.keys(s.watches).length, watchers, month_hours: Math.round(hours * 10) / 10, over: hours >= month_ceiling(this.env) });   // (the load on watching, everywhere: the Watches shed it by this)
 		} else if (b.op === 'host' || b.op === 'reopen' || b.op === 'hold' || (b.op === 'join' && b.persist === true && b.listed === true)) {
 			if (b.op === 'reopen') unmatch(code, 'room');
 			const [p] = pairs(b.sids, b.countries);
@@ -1207,8 +1281,10 @@ export class Stats {
 				const two = pairs(b.sids, b.countries).slice(0, 2);
 				this.add_match({ ...at, kind: 'room', code, sids: two.map((x) => x[0]), countries: two.map((x) => x[1]), t: now });
 			}
-			if (p && b.op !== 'join') this.set('hosts', code, { ...at, sid: p[0], country: p[1], seen: now, born: (s.hosts[code] && s.hosts[code].born) || now, ...listed });
-			else if (s.hosts[code]) { Object.assign(s.hosts[code], { seen: now }, listed); this.touch('hosts', code); }
+			// (playing: a room that stays, its match on; its host counted as in that match, not as hosting)
+			const playing = b.playing === true || b.op === 'join';
+			if (p && b.op !== 'join') this.set('hosts', code, { ...at, sid: p[0], country: p[1], seen: now, born: (s.hosts[code] && s.hosts[code].born) || now, in_match: playing, ...listed });
+			else if (s.hosts[code]) { Object.assign(s.hosts[code], { seen: now, in_match: playing }, listed); this.touch('hosts', code); }
 		} else if (b.op === 'join') {
 			this.del('hosts', code);
 			unmatch(code, 'room');
@@ -1267,7 +1343,10 @@ export class Stats {
 		};
 		const c_at = (l, i) => (Array.isArray(l) ? l[i] : '');   // (kept before countries were: none, so "")
 		for (const q of Object.values(s.queues)) q.sids.forEach((sid, i) => put(q.game, q.version, sid, 3, q.until, 'searching', c_at(q.countries, i)));
-		for (const h of Object.values(s.hosts)) put(h.game, h.version, h.sid, 2, h.seen, 'hosting', h.country);
+		for (const h of Object.values(s.hosts)) {   // (a room that stays, its match on: its host in a room's match, not hosting)
+			if (h.in_match) put(h.game, h.version, h.sid, 1, h.seen, 'room', h.country);
+			else put(h.game, h.version, h.sid, 2, h.seen, 'hosting', h.country);
+		}
 		for (const m of s.matches) m.sids.forEach((sid, i) => put(m.game, m.version, sid, 1, m.t, m.kind === 'random' ? 'random' : 'room', c_at(m.countries, i)));
 		const zero = () => ({ total: 0, searching: 0, random: 0, hosting: 0, room: 0 });
 		// (players by country, most first: a country's two letters, "" not known)
@@ -1313,6 +1392,11 @@ const WATCHERS_SOFT = 4000, WATCHERS_HARD = 8000, MATCHES_SOFT = 500, MATCHES_HA
 // awake (the worst case: a watched match-hour 536 GB-s, its Watch and its room); if the dashboard shows it billed only
 // while handling messages, it can be far higher.
 const MONTH_MATCH_HOURS = 2200, UNWATCHED_WEIGHT = 0.4;
+// (the ceiling, a MONTH_MATCH_HOURS variable on the Worker changing it: "0" no watching at all; empty or not a number, 2,200)
+function month_ceiling(env) {
+	const v = String((env && env.MONTH_MATCH_HOURS) ?? '').trim();
+	return v !== '' && Number.isFinite(+v) && +v >= 0 ? +v : MONTH_MATCH_HOURS;
+}
 // Nobody watching: the host sends every IDLE_EVERY_MS (one message, the frames since), so the object hibernates
 // between; the first watcher to come wakes it at once (a message down its socket, which costs nothing) and it's 5 a
 // second from then. (A host on HTTPS hears it at its next upload.) Quiet that long is no sign the match is over: it's
@@ -1327,6 +1411,8 @@ const KEPT_PART = 120 << 10, FRAME_BLOCK = 16384, START_PARTS = Math.ceil(START_
 const KEPT_KEYS = ['mm', ...Array.from({ length: START_PARTS }, (_, i) => 'ms' + i), ...Array.from({ length: FRAME_BLOCKS }, (_, i) => 'mf' + i)];   // (67: one get, one delete; 128 at most)
 const WATCH_QUIET_MS = 30000;      // no word from the host this long: the match is over (its game closed, its connection gone)
 const WATCHER_MS = 40000;          // a watcher not heard from this long has gone (they say they're there every 15 s)
+const WATCHER_PING_GONE_MS = 90000;   // (a watcher's WebSocket with no ping this long (its game pings every 15 s): gone, closed)
+const STREAM_STUCK_MS = 10000;     // (a stream that hasn't taken its last message this long: its watcher not reading, let go)
 const WATCH_IDLE_MS = 3 * 3600e3;  // a watch code nothing's used this long is forgotten
 const W_MAGIC = 0x31574656, W_START = 1, W_PUSH = 2, W_REPLY = 4;
 const HASH_BACK = 120;   // (frames: a reply's hashes reach back this far before its first frame)
@@ -1374,6 +1460,9 @@ async function looked(env, req, w, inner, method) {
 	}
 	return new Response(await r.text(), { status: r.status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
 }
+// (a watcher's address, hashed, for WATCHERS_PER_IP and STREAMS_PER_IP: an IPv6 one by its /48, so one /48's many /64s
+// can't fill a match's 400 between them)
+const watcher_ip = async (req) => (await player_id(req, 'watch', 3)).slice(0, 8);
 async function new_code_limited(env, req) {   // (an address, an IPv6 one by its /64, 20 a minute; and its /48 all told, 200)
 	return (await limited(env, req, 'JOIN_LIMIT')) || (await limited(env, req, 'CODE48_LIMIT', 3));
 }
@@ -1399,7 +1488,7 @@ async function watch_route(env, req, url) {
 		if (!body) return json({ error: 'bad' }, 400);
 		return w.fetch('https://watch/' + op + '?k=' + encodeURIComponent(clean(q('k'), 64)) + '&s=' + sid, { method: 'POST', body });
 	}
-	if (req.method === 'POST' && op === 'seen') return looked(env, req, w, 'https://watch/seen?s=' + sid + '&ip=' + (await player_id(req, 'watch')).slice(0, 8), 'POST');
+	if (req.method === 'POST' && op === 'seen') return looked(env, req, w, 'https://watch/seen?s=' + sid + '&ip=' + (await watcher_ip(req)), 'POST');
 	if (req.method !== 'GET') return json({ error: 'bad' }, 404);
 	// (WebSockets, the Watch's own and hibernating between messages: the host's feed, a watcher's frames as they come)
 	if (op === 'feed' || op === 'ws') {
@@ -1410,16 +1499,16 @@ async function watch_route(env, req, url) {
 		const m = hex16(q('m'));
 		if (!m) return json({ error: 'bad' }, 400);
 		const from = Math.min(Math.max(parseInt(q('from'), 10) || 0, 0), WATCH_FRAMES);
-		const ip = (await player_id(req, 'watch')).slice(0, 8);
+		const ip = await watcher_ip(req);
 		return w.fetch(new Request('https://watch/ws?m=' + m + '&from=' + from + '&s=' + sid + '&ip=' + ip, req));
 	}
-	if (op === 'count') return looked(env, req, w, 'https://watch/count?ip=' + (await player_id(req, 'watch')).slice(0, 8), 'GET');
+	if (op === 'count') return looked(env, req, w, 'https://watch/count?ip=' + (await watcher_ip(req)), 'GET');
 	if (op === 'live') {   // (the frames as they come: a response that streams, straight from the Watch, never kept)
 		if (await limited(env, req, 'WATCH_LIMIT')) return json({ error: 'busy' }, 429);
 		const m = hex16(q('m'));
 		if (!m) return json({ error: 'bad' }, 400);
 		const from = Math.min(Math.max(parseInt(q('from'), 10) || 0, 0), WATCH_FRAMES);
-		const ip = (await player_id(req, 'watch')).slice(0, 8);   // (the address, hashed: streams counted by it, never kept)
+		const ip = await watcher_ip(req);   // (the address, hashed: streams counted by it, never kept)
 		return w.fetch('https://watch/live?m=' + m + '&from=' + from + '&s=' + sid + '&ip=' + ip);
 	}
 	if (op !== 'start' && op !== 'frames') return json({ error: 'bad' }, 404);
@@ -1450,6 +1539,7 @@ export class Watch {
 		this.streams = new Set();    // the watchers the frames go to as they come: {writer, sent, sid}
 		this.told = { at: 0, sig: '' };
 		this.load = { matches: 0, watchers: 0 };   // (all matches', as the Stats last said)
+		this.quiet = new WeakSet();  // (watchers' sockets closed for silence: not counted while Cloudflare lets go of them)
 		auto_pong(ctx);
 		ctx.blockConcurrencyWhile(async () => {
 			this.arm = (await ctx.storage.get('arm')) || null;
@@ -1490,11 +1580,14 @@ export class Watch {
 		if (this.arm) puts.arm = this.arm;   // (its last use too: the alarm doesn't take a match still sent for idle)
 		this.ctx.storage.put(puts).catch(() => {});
 	}
-	restore() {   // (woken without the match: the one kept, if any; read once, everything after it waiting on that, in order)
-		if (!this.restoring) this.restoring = this.m ? Promise.resolve() : this.read_kept();
+	// (quiet: the alarm's, looking whether the host's gone quiet: the host's last word as kept. Anyone else's: from now, a
+	// restart (a deploy, a variable changed) or a sleep isn't the host gone quiet, it's over if it says so or nothing comes
+	// from it from here; the alarm's own look isn't put off so, or one woken by each alarm would never find it over)
+	restore(quiet = false) {   // (woken without the match: the one kept, if any; read once, everything after it waiting on that, in order)
+		if (!this.restoring) this.restoring = this.m ? Promise.resolve() : this.read_kept(quiet);
 		return this.restoring;
 	}
-	async read_kept() {
+	async read_kept(quiet) {
 		const got = await this.ctx.storage.get(KEPT_KEYS);
 		const mm = got.get('mm');
 		if (!mm || !mm.parts || this.m) return;
@@ -1513,21 +1606,24 @@ export class Watch {
 		}
 		n = Math.min(n, mm.n);
 		this.m = { id: mm.id, head: start.slice(0, 14), start, meta: mm.meta, frames, n, hashes, info: new Uint8Array(mm.info),
-			seen: mm.seen, born: mm.born, parts: mm.parts, kept: n, restored: true };
+			seen: quiet ? mm.seen : Math.max(mm.seen, Date.now()), born: mm.born, parts: mm.parts, kept: n, restored: true };
 	}
 	async alarm() {
 		this.quiet_at = 0;
+		this.quiet_watchers();
 		if (this.arm && Date.now() - (this.arm.used || 0) > WATCH_IDLE_MS) {
 			this.arm = null;
 			this.m = null;
 			this.restoring = Promise.resolve();
+			for (const st of [...this.streams]) this.end_stream(st);
 			await this.ctx.storage.deleteAll();
 			return;
 		}
-		if (!this.arm) return;
+		if (!this.arm) { for (const st of [...this.streams]) this.end_stream(st); return; }
+		if (this.m && this.over() && Date.now() - this.m.seen > WATCH_QUIET_MS) for (const st of [...this.streams]) this.end_stream(st);
 		// (watchers on WebSockets, the host quiet: told it's over; still sending, looked at again from its last word)
-		if (this.ctx.getWebSockets('w').length) {
-			await this.restore();
+		if (this.w_sockets().length) {
+			await this.restore(true);
 			if (!this.m || this.over()) this.quiet_to_sockets();
 			else { this.quiet_alarm(); if (this.quiet_at) return; }
 		}
@@ -1537,15 +1633,32 @@ export class Watch {
 		const now = Date.now();
 		for (const st of this.streams) { const x = this.watchers.get(st.sid); if (x) x.last = now; }   // (one on a stream is here)
 		for (const [s, x] of this.watchers) if (now - x.last > WATCHER_MS) this.watchers.delete(s);
-		return this.watchers.size + this.ctx.getWebSockets('w').length;   // (and those on a WebSocket, while it's open)
+		return this.watchers.size + this.w_sockets().length;   // (and those on a WebSocket, while it's open)
+	}
+	w_sockets(tag = 'w') { return this.ctx.getWebSockets(tag).filter((ws) => !this.quiet.has(ws)); }
+	// (a watcher's socket with no ping for WATCHER_PING_GONE_MS: its game gone without a close (a cable pulled, a sleep),
+	// closed, no longer counted; looked at by the alarm and every 15 s at most as the host sends)
+	quiet_watchers() {
+		const now = Date.now();
+		this.reaped = now;
+		for (const ws of this.ctx.getWebSockets('w')) {
+			if (this.quiet.has(ws)) continue;
+			const at = (ws.deserializeAttachment() || {}).t || 0, pong = this.ctx.getWebSocketAutoResponseTimestamp ? this.ctx.getWebSocketAutoResponseTimestamp(ws) : null;
+			if (now - Math.max(at, pong ? pong.getTime() : 0) <= WATCHER_PING_GONE_MS) continue;
+			this.quiet.add(ws);
+			try { ws.close(1001, 'quiet'); } catch (e) {}
+		}
 	}
 	// The streams: each sent what it hasn't had yet, as soon as it can take it (one slow to read gets more at once later,
 	// never anything dropped, and holds no one else up); every 5 s a length of 0 if nothing else went (still here)
 	flush(force) {
-		const m = this.m;
-		for (const st of this.streams) {
-			if (st.busy) continue;
-			if (!m || m.id !== st.m) { this.end_stream(st); continue; }
+		const m = this.m, now = Date.now();
+		for (const st of [...this.streams]) {
+			if (!m || m.id !== st.m) { this.end_stream(st); continue; }   // (its match gone: ended, taking its last message or not)
+			if (st.busy) {   // (not reading: let go after STREAM_STUCK_MS, its watcher asks the pieces if it's still there)
+				if (now - st.at > STREAM_STUCK_MS) this.end_stream(st);
+				continue;
+			}
 			let msg = null;
 			if (st.sent < m.n || (force && st.told !== this.over())) {
 				const r = new Uint8Array(this.reply(st.sent).body_bytes);
@@ -1565,7 +1678,9 @@ export class Watch {
 	}
 	end_stream(st) {
 		if (!this.streams.delete(st)) return;
-		try { st.writer.close().catch(() => {}); } catch (e) {}   // (a stream its watcher let go of: closed already, said nothing)
+		// (a stream its watcher let go of: closed already, said nothing; one still taking a message: aborted, as a close would
+		// wait on that message for ever)
+		try { (st.busy ? st.writer.abort() : st.writer.close()).catch(() => {}); } catch (e) {}
 	}
 	knows(s) {   // (a watcher counted here already: asking, on a stream, or on a WebSocket)
 		if (!s || s.length < 8) return false;
@@ -1575,7 +1690,7 @@ export class Watch {
 	}
 	from_ip(ip) {   // (watchers from one address: asking, on a stream, on a WebSocket)
 		this.count();
-		let n = this.ctx.getWebSockets('ip:' + ip).length;
+		let n = this.w_sockets('ip:' + ip).length;
 		for (const x of this.watchers.values()) if (x.ip === ip) n++;
 		return n;
 	}
@@ -1627,8 +1742,9 @@ export class Watch {
 		b.set(new Uint8Array(m.frames.buffer, first * 4, n * 4), at); at += n * 4;
 		v.setUint16(at, hs.length, true); at += 2;
 		for (const [fr, h] of hs) { v.setUint32(at, fr, true); b.set(h, at + 4); at += 12; }
-		// (a whole piece, or the end of a match that's over, never changes: kept a day; the piece still filling, a second)
-		return { b, keep: n === PIECE * PIECES || (over && first + n === m.n) ? 86400 : 1 };
+		// (a whole piece, or the end of a match its host said is over, never changes: kept a day; the piece still filling, a
+		// second; and so is an end taken for over only because the host's gone quiet: it may be a restart, the host sending on)
+		return { b, keep: n === PIECE * PIECES || ((m.info[4] & 1) === 1 && first + n === m.n) ? 86400 : 1 };
 	}
 	// A start or a push (bytes as src/net/watch.h makes them), from a POST or the host's WebSocket: [answer, status]
 	take(b, start) {
@@ -1684,6 +1800,7 @@ export class Watch {
 		}
 		m.info = b.slice(at, at + 5);
 		m.seen = now;
+		if (now - (this.reaped || 0) > 15000) this.quiet_watchers();
 		this.flush(m.info[4] & 1);   // (the new frames to every stream at once)
 		this.to_sockets();           // (and every watcher's WebSocket)
 		const watchers = this.count();
@@ -1774,7 +1891,15 @@ export class Watch {
 	}
 	async webSocketMessage(ws, msg) {
 		const tags = this.ctx.getTags ? this.ctx.getTags(ws) : [];
-		if (!tags.includes('host') || !this.arm || typeof msg === 'string') return;   // (a watcher sends nothing but its pings, answered without waking this)
+		if (!tags.includes('host')) {   // (a watcher sends nothing but its pings, answered without waking this: anything else, closed)
+			if (msg === 'ping') try { const at = ws.deserializeAttachment() || {}; at.t = Date.now(); ws.serializeAttachment(at); ws.send('pong'); } catch (e) {}
+			else try { ws.close(1008, 'no'); } catch (e) {}
+			return;
+		}
+		if (msg === 'ping') { try { ws.send('pong'); } catch (e) {} return; }
+		// (the feed of a key this Watch no longer has: a room armed it again since, a new key its host's now)
+		if (!this.arm || (ws.deserializeAttachment() || {}).k !== this.arm.wkey) { try { ws.close(1008, 'replaced'); } catch (e) {} return; }
+		if (typeof msg === 'string') return;
 		await this.restore();
 		if (!sockets_on(this.env)) { try { ws.close(1012, 'off'); } catch (e) {} return; }   // (switched off: the host on to HTTPS, its upload sent again there)
 		const b = new Uint8Array(msg);
@@ -1794,6 +1919,8 @@ export class Watch {
 		const now = Date.now();
 		if (op === '/arm') {
 			const b = await req.json();
+			if (b.fresh === true && this.arm && now - (this.arm.used || 0) <= WATCH_IDLE_MS) return json({ error: 'taken' }, 409);   // (another's)
+			for (const old of this.ctx.getWebSockets('host')) try { old.close(1000, 'replaced'); } catch (e) {}   // (the last key's feed: no more)
 			this.arm = { wid: String(b.wid).slice(0, 6), wkey: String(b.wkey), game: b.game, version: String(b.version).slice(0, 64), listed: !!b.listed, random: !!b.random, quick: !!b.quick, region: String(b.region || '').slice(0, 2), aid: hex16(b.aid), used: now };
 			await this.ctx.storage.put('arm', this.arm);
 			await this.ctx.storage.setAlarm(now + WATCH_IDLE_MS);
@@ -1822,6 +1949,7 @@ export class Watch {
 			for (const old of this.ctx.getWebSockets('host')) try { old.close(1000, 'replaced'); } catch (e) {}
 			const [client, server] = Object.values(new WebSocketPair());
 			this.ctx.acceptWebSocket(server, ['host']);
+			server.serializeAttachment({ k: a.wkey });   // (its messages taken only while this key's the Watch's)
 			return new Response(null, { status: 101, webSocket: client });
 		}
 		if (op === '/seen') {
@@ -1859,14 +1987,14 @@ export class Watch {
 			const sid = q('s'), ip = q('ip');
 			if (!this.watchers.has(sid) && this.count() >= WATCH_MAX) return json({ error: 'full' }, 429);
 			if (this.load.over) return json({ error: 'busy' }, 429);
-			if (this.ctx.getWebSockets('w').length >= STREAMS_MAX || this.load.watchers >= WATCHERS_SOFT || this.ctx.getWebSockets('ip:' + ip).length >= STREAMS_PER_IP)
+			if (this.w_sockets().length >= STREAMS_MAX || this.load.watchers >= WATCHERS_SOFT || this.w_sockets('ip:' + ip).length >= STREAMS_PER_IP)
 				return json({ error: 'busy' }, 429);   // (as a stream's: the rest ask the edge's pieces)
 			const x = this.watchers.get(sid);
 			if (this.count() === 0) this.wake_host();
 			this.watchers.delete(sid);   // (counted by its socket from now on)
 			const [client, server] = Object.values(new WebSocketPair());
 			this.ctx.acceptWebSocket(server, ['w', 'ip:' + ip]);
-			const at = { sid, m: m.id, sent: Math.min(Math.max(parseInt(q('from'), 10) || 0, 0), m.n), first: x ? x.first : now, over: false };
+			const at = { sid, m: m.id, sent: Math.min(Math.max(parseInt(q('from'), 10) || 0, 0), m.n), first: x ? x.first : now, over: false, t: now };   // (t: its pings counted from now)
 			server.serializeAttachment(at);
 			const over = this.over();
 			if (at.sent < m.n || over) this.to_socket(server, at, this.reply_bytes(at.sent).b, over);   // (what's there, or that it's over)
@@ -1875,16 +2003,15 @@ export class Watch {
 			return new Response(null, { status: 101, webSocket: client });
 		}
 		if (op === '/live') {
+			if (q('s').length < 8) return json({ error: 'bad' }, 400);   // (a watcher's own number, as its game sends: counted toward the 400)
 			if (!this.watchers.has(q('s')) && this.count() >= WATCH_MAX) return json({ error: 'full' }, 429);   // (one more than may watch)
 			const ip = q('ip');
-			if (this.streams.size >= STREAMS_MAX || this.load.watchers >= WATCHERS_SOFT || [...this.streams].filter((x) => x.ip === ip).length >= STREAMS_PER_IP)
+			if (this.load.over || this.streams.size >= STREAMS_MAX || this.load.watchers >= WATCHERS_SOFT || [...this.streams].filter((x) => x.ip === ip).length >= STREAMS_PER_IP)
 				return json({ error: 'busy' }, 429);   // (so many: the rest ask /frames, the edge answering)
 			const { readable, writable } = new TransformStream();
 			const st = { writer: writable.getWriter(), sent: Math.min(Math.max(parseInt(q('from'), 10) || 0, 0), m.n), m: m.id, sid: q('s'), ip, busy: false, at: 0, told: null };
-			if (st.sid.length >= 8) {
-				const x = this.watchers.get(st.sid);
-				if (x) x.last = now; else this.watchers.set(st.sid, { first: now, last: now, ip });
-			}
+			const x = this.watchers.get(st.sid);
+			if (x) x.last = now; else this.watchers.set(st.sid, { first: now, last: now, ip });
 			this.streams.add(st);
 			this.flush(true);
 			this.keepalive();

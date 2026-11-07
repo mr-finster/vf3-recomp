@@ -325,11 +325,15 @@ check('peek: no such room', (await call('POST', '/v1/peek', { code: 'ZZZ222' }))
 	const blocked = ['FUCK', 'FUUUCK', 'SH1THEAD', 'F*CK YOU', 'F.CK OFF', 'F U C K', 'F.U.C.K', 'PHUCK FUCKER', 'XFUCKX', 'SH1T', 'SH!T HEAD', 'A$$', 'ASS', 'ASSSS', '5H1T', 'BITCH3S', 'N1GGER', 'FAGGOT',
 		'SIBAL', 'SSIBAL', 'GAESAEKKI', 'KICHIGAI', 'MANKO', 'PUTA', 'MIERDA', 'CARALHO', 'MERDE', 'PUTAIN', 'C0CK', 'D1CK', 'TITS', 'KOREA CUNT',
 		// (plurals, -ING and -ER forms, spellings round it, | for I)
-		'SHITS', 'DICKS', 'COCKS', 'ASSES', 'SHITTING', 'SHITTER', 'SHIIIT', 'CUNTS', 'TWATS', 'WANKER', 'WANKING', 'SLUTS', 'FUCKING', 'FUCKER', 'FCUK', 'PHUCK', 'N|GGER', 'SH|T', 'FUK', 'FUKIN', 'MERDAS', 'SIBALS', 'S H I T HEAD'];
+		'SHITS', 'DICKS', 'COCKS', 'ASSES', 'SHITTING', 'SHITTER', 'SHIIIT', 'CUNTS', 'TWATS', 'WANKER', 'WANKING', 'SLUTS', 'FUCKING', 'FUCKER', 'FCUK', 'PHUCK', 'N|GGER', 'SH|T', 'FUK', 'FUKIN', 'MERDAS', 'SIBALS', 'S H I T HEAD',
+		// (a space or a mark inside a word, V for U, and one of them run into an insult)
+		'NI GGER', 'FU CK', 'BIT CH', 'BIT CHES', 'SH IT', 'FU-CK', 'FVCK', 'FVCKER', 'CUNTFACE', 'SHITFACE', 'COCKSUCK', 'DICKHEAD', 'ASSHAT', 'TWATFACE', 'FU CKFACE'];
 	const fine = ['CLASSIC', 'PASSION', 'SCUNTHORPE', 'ASSASSIN', 'SUSHI', 'SHIITAKE', 'COCKPIT', 'DICKENS', 'TITANIC', 'ESSEX', 'GRAPE', 'NIGERIA', 'MASSAGE',
 		'KOREA FINALS', 'AS ONE', 'BASS', 'SEOULKICK', 'KAGE-MARU', 'SARAH.B', "AKIRA'S DOJO", 'COMPUTADORA', 'SPICY', 'PEDRO', 'CONOR', 'MANKIND', 'MATSUTAKE',
 		// (words that hold a short one, and two real words that would make one run together)
-		'MERDEKA', 'MERDAN', 'AAS', 'SIBALD', 'SUMMER DAY', 'ORBIT CHAMP', 'WHO REALLY', 'HAMMER DEN', 'TOP ORNATE', 'SUMMERDAYS', 'CUMIN', 'MIDDLESEX', 'CUMBERLAND', 'HANCOCK', 'SHITAKE'];
+		'MERDEKA', 'MERDAN', 'AAS', 'SIBALD', 'SUMMER DAY', 'ORBIT CHAMP', 'WHO REALLY', 'HAMMER DEN', 'TOP ORNATE', 'SUMMERDAYS', 'CUMIN', 'MIDDLESEX', 'CUMBERLAND', 'HANCOCK', 'SHITAKE',
+		// (words that would be one of them with a space taken out, or a V read as U, or with something after it)
+		'MISTER', 'SUSSEX', 'TITAN', 'PUT A COIN', 'AS SOON', 'FUKUOKA', 'WANKEL', 'DAVE', 'VIVA', 'EVIL KNIGHT', 'SPICE HEAD', 'BASSHEAD'];
 	const hit = blocked.filter((x) => ok_fn(x));
 	check('the filter: every blocked name blocked (substitutions, spaces, runs, endings)', hit, []);
 	const miss = fine.filter((x) => !ok_fn(x));
