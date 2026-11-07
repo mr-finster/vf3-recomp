@@ -3,13 +3,13 @@
 // from the lobby's answer passes through as it came: only the counts, read and written out again here, so its
 // address can't reach a browser in a header, an error or a field. Kept while the counts are under FRESH_S old (this
 // place's cache, and this copy's memory: by the counts' own time, so the lobby's copies and these never add up).
-// The lobby asked once at a time by this copy (everyone waiting shares the answer), given TIMEOUT_MS; when it fails
-// the last answer is passed on up to STALE_S old marked "stale", and it isn't asked again for FAIL_S.
+// The lobby given TIMEOUT_MS; when it fails the last answer is passed on up to STALE_S old marked "stale", and it isn't
+// asked again for FAIL_S. (Only plain data is kept between requests, never a promise: on Workers one request can't
+// safely wait on another's fetch, so each request that misses asks for itself.)
 const GAMES = ['vf1', 'vf2', 'vf3', 'vf3tb'];
 const STATES = ['total', 'searching', 'random', 'hosting', 'room'];
 const FRESH_S = 15, MAX_AGE = 10, STALE_S = 120, FAIL_S = 5, TIMEOUT_MS = 4000;
 let kept = null;   // ({t, body}: this copy's last answer, t when the counts were made)
-let asking = null;   // (the lobby's answer on its way, for everyone who asks meanwhile)
 let failed_at = 0;   // (when the lobby last couldn't be reached: not asked again for FAIL_S)
 const age = (t) => Date.now() - t;
 const fresh = (t) => age(t) < FRESH_S * 1000;
@@ -96,29 +96,21 @@ async function counts_kept({ request, env, waitUntil }) {
 	if (kept && fresh(kept.t)) return ok(kept.body);
 	const key = new Request(new URL('/api/online', request.url).toString());
 	const cache = caches.default;
-	if (!asking) {
-		const hit = await cache.match(key).catch(() => null);
-		if (hit) {
-			const body = await hit.text(), t = made_at(body);
-			if (!kept || t > kept.t) kept = { t, body };   // (another copy's, newer: kept here too, if only to pass on stale)
-			if (fresh(t)) return ok(body);
-		}
+	const hit = await cache.match(key).catch(() => null);
+	if (hit) {
+		const body = await hit.text(), t = made_at(body);
+		if (!kept || t > kept.t) kept = { t, body };   // (another copy's, newer: kept here too, if only to pass on stale)
+		if (fresh(t)) return ok(body);
 	}
 	// (the last answer, up to STALE_S old, marked stale, while the lobby can't be reached; else unavailable)
 	const stale = () => (kept && age(kept.t) < STALE_S * 1000 ? out(kept.body.slice(0, -1) + ',"stale":true}', 200, 'no-store') : unavailable());
 	if (Date.now() - failed_at < FAIL_S * 1000) return stale();
 	const base = typeof env.LOBBY_URL === 'string' ? env.LOBBY_URL.trim().replace(/\/+$/, '') : '';
 	if (!/^https?:\/\/[^/?#\s]+$/.test(base)) return unavailable();
-	if (!asking) {
-		asking = ask(base).then((body) => {
-			if (body === null) { failed_at = Date.now(); return null; }
-			failed_at = 0;
-			kept = { t: made_at(body) || Date.now(), body };
-			waitUntil(cache.put(key, out(body, 200, `public, max-age=${STALE_S}`)).catch(() => {}));   // (kept there as long as it may be passed on stale; fresh by its own time)
-			return body;
-		}).finally(() => { asking = null; });
-	}
-	// (waited for no longer than its own time: an answer another request asked for, should that request end first)
-	const body = await Promise.race([asking, new Promise((ok) => setTimeout(ok, TIMEOUT_MS + 1000, null))]);
-	return body === null ? stale() : ok(body);
+	const body = await ask(base);
+	if (body === null) { failed_at = Date.now(); return stale(); }
+	failed_at = 0;
+	kept = { t: made_at(body) || Date.now(), body };
+	waitUntil(cache.put(key, out(body, 200, `public, max-age=${STALE_S}`)).catch(() => {}));   // (kept there as long as it may be passed on stale; fresh by its own time)
+	return ok(body);
 }

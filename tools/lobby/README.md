@@ -293,8 +293,8 @@ after each answer while the page is seen (none while it's hidden, at once when i
 one at a time, given up after 8 s); `functions/api/online.js` there asks the lobby's `/v1/online` and passes on only
 the counts and the rooms, read and written again (no header, error text or field of the lobby's answer reaches the
 browser; the countries only as two capital letters or `""` with a whole number, 250 at most), kept 15 s by the
-counts' own time. Each copy of the function asks the lobby once at a time (everyone waiting shares the answer),
-gives it 4 s, and if it fails passes on its last answer up to 2 minutes old marked `"stale": true` (the page shows
+counts' own time. A request that finds nothing fresh asks the lobby itself (no request waits on another's), gives
+it 4 s, and if it fails passes on its last answer up to 2 minutes old marked `"stale": true` (the page shows
 the rooms with "can't reach the lobby · last updated ..."), not asking again for 5 s; the answer with the viewer's
 continent (`you`) is kept private. Rooms are listed only when the lobby's `features.rooms` is `true`, matches only
 when `features.watch` is (no `features`, an older lobby's: neither). At the top, each game's players online and
@@ -309,7 +309,7 @@ lobby's address is the Pages project's `LOBBY_URL` secret, never in the files. T
 allows its own site, Google Fonts (the Noto fonts for Korean, Japanese, Chinese and Russian) and only the page's one
 script, by its hash: after changing the script, `node sitelang.mjs --csp` puts the new hash in `site/_headers`.
 `node sitelang.mjs` checks every language's lines, that the three fonts have every letter each language shows, and
-the hash; `node fntest.mjs` the function (what it passes on, the timeout, the stale answer, one fetch at a time). If
+the hash; `node fntest.mjs` the function (what it passes on, the timeout, the stale answer, the failure remembered). If
 the lobby can't be reached and there's no answer under 2 minutes old, the function answers
 `{"error":"unavailable"}` (502) and the page says so; after 2 minutes unreachable the page drops the rooms it showed
 (their links likely gone) and says so too.

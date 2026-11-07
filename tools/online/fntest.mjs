@@ -1,5 +1,5 @@
 // fntest: functions/api/online.js against a stand-in lobby (fetch and the edge cache replaced): what it passes on,
-// and how it asks: once at a time, given 4 s, its last answer kept up to 2 min while the lobby fails.
+// and how it asks: given 4 s, its last answer kept up to 2 min while the lobby fails, a failure remembered 5 s.
 //   node tools/online/fntest.mjs
 import { fileURLToPath } from "node:url";
 
@@ -63,14 +63,15 @@ await reset("ok", answer({ updated: now_s() + 86400 * 365 }));
 r = await run();
 check(r.json.updated <= now_s(), "a time from the future taken as now", r.json.updated - now_s());
 
-// one fetch at a time: 30 at once
+// 30 at once with nothing kept: each asks for itself (no promise shared between requests), all answered
 await reset("ok");
 lobby.delay = 50;
 let all = await Promise.all(Array.from({ length: 30 }, () => run("EU")));
-check(lobby.fetches === 1 && all.every((x) => x.status === 200), "30 requests at once: one fetch", lobby.fetches);
+check(all.every((x) => x.status === 200), "30 requests at once with nothing kept: all answered", lobby.fetches);
+lobby.fetches = 0;
 // (kept: the next 10 none)
 for (let i = 0; i < 10; i++) await run("EU");
-check(lobby.fetches === 1, "while fresh: no fetch", lobby.fetches);
+check(lobby.fetches === 0, "while fresh: no fetch", lobby.fetches);
 
 // a hung lobby: given up at 4 s
 await reset("hang");
