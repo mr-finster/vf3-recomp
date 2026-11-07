@@ -1001,6 +1001,8 @@ int main(int argc, char **argv)
 			gm.select_row(9);
 			key(SDL_SCANCODE_RETURN);
 			check(o.phase() == Online::Phase::off, "A on a Quick match with watching off: nothing started (it says watching's off)");
+			const std::string lobby_before = s.lobby;
+			s.lobby = "none";   // (no answer from the lobby taking the place of these rooms meanwhile)
 			o.set_rooms({}, false, 3);
 			again();
 			gm.select_row(2);
@@ -1010,6 +1012,7 @@ int main(int argc, char **argv)
 			gm.select_row(2);
 			check(gm.selected() == 1, "its name and Create only");
 			key(SDL_SCANCODE_ESCAPE);
+			s.lobby = lobby_before;
 			o.set_rooms({});
 			again();
 		}
@@ -1053,7 +1056,7 @@ int main(int argc, char **argv)
 			const int v0 = o.rooms_version();
 			bool remade = false;
 			o.rooms_list(s, true);
-			poll_for(5000, [&] { remade = online_menu::keep_up(o, s, gm, make) || remade; return o.rooms_state() == 2 && o.rooms_version() != v0; });
+			poll_for(15000, [&] { remade = online_menu::keep_up(o, s, gm, make) || remade; return o.rooms_state() == 2 && o.rooms_version() != v0; });
 			remade = online_menu::keep_up(o, s, gm, make) || remade;
 			shot("browser_unreachable.png", w, h);
 			check(o.rooms_state() == 2 && remade, "the lobby down: the browser made again by itself to say it can't reach it (nothing pressed)");

@@ -213,7 +213,7 @@ public:
 	bool lobby_watches() const { return lobby_watch_on; }   // (the lobby's last word: watching on; an older lobby's none)
 	int rooms_version() const { return rooms_seen; }   // (the list, or whether the lobby was reached, changed: the browser made again)
 	// (tests: a list made up, as a lobby with watching gives; or without it, or with rooms off: said 3)
-	void set_rooms(std::vector<RoomRow> r, bool watch = true, int said = 1) { rooms_rows = std::move(r); rooms_said = said; rooms_fails = 0; rooms_seen++; lobby_watch_on = watch; }
+	void set_rooms(std::vector<RoomRow> r, bool watch = true, int said = 1) { rooms_job.reset(); rooms_rows = std::move(r); rooms_said = said; rooms_fails = 0; rooms_seen++; lobby_watch_on = watch; }
 	int local_port() const { return port; }
 	static std::string lobby_default();   // the built-in lobby's address
 
