@@ -2,6 +2,7 @@
 #include "i18n.h"
 #include <SDL3/SDL.h>
 #include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <cstring>
 #include <set>
@@ -196,8 +197,19 @@ const char *choice_key(choice c) { return c.automatic() ? "auto" : info(c.l()).c
 
 bool choice_from(const std::string &key, choice &c)
 {
+	// (as a person might write it in settings.ini: JA, zh-hans, pt_br, spaces round it)
+	const size_t a = key.find_first_not_of(" \t\r\n"), b = key.find_last_not_of(" \t\r\n");
+	const std::string k = a == std::string::npos ? "" : key.substr(a, b - a + 1);
+	auto same = [&](const char *code) {
+		if (k.size() != strlen(code)) return false;
+		for (size_t i = 0; i < k.size(); i++) {
+			const char x = k[i] == '_' ? '-' : char(tolower((unsigned char)k[i]));
+			if (x != tolower((unsigned char)code[i])) return false;
+		}
+		return true;
+	};
 	for (int i = 0; i < CHOICES; i++)
-		if (key == choice_key(choice{ i })) { c = choice{ i }; return true; }
+		if (same(choice_key(choice{ i }))) { c = choice{ i }; return true; }
 	return false;
 }
 
@@ -220,8 +232,22 @@ bool from_locale_known(const char *language)
 lang from_locale(const char *language, const char *country)
 {
 	const std::string l = language ? language : "", c = country ? country : "";
-	if (l == "zh" || l.rfind("zh-", 0) == 0 || l.rfind("zh_", 0) == 0) {   // (by the region; a script given, by it)
-		if (l.find("Hant") != std::string::npos || c == "TW" || c == "HK" || c == "MO") return lang::zh_hant;
+	if (l == "zh" || l.rfind("zh-", 0) == 0 || l.rfind("zh_", 0) == 0) {   // (a script given, by it; else by the region)
+		// (its parts after zh, in the language and the country both: SDL's macOS locale is cut at its last '-', so
+		// a bare zh-Hant comes as zh and Hant, zh-Hant-TW as zh-Hant and TW)
+		std::vector<std::string> parts;
+		std::string part;
+		for (const char ch : l.substr(2) + "-" + c) {
+			if (ch == '-' || ch == '_') { if (!part.empty()) parts.push_back(part); part.clear(); }
+			else part += char(tolower((unsigned char)ch));
+		}
+		if (!part.empty()) parts.push_back(part);
+		for (const std::string &p : parts) {
+			if (p == "hant") return lang::zh_hant;
+			if (p == "hans") return lang::zh_hans;
+		}
+		for (const std::string &p : parts)
+			if (p == "tw" || p == "hk" || p == "mo") return lang::zh_hant;
 		return lang::zh_hans;   // (CN, SG, none)
 	}
 	if (l == "pt") return lang::pt_br;   // (Portugal's Portuguese reads Brazil's well enough: the only one there is)

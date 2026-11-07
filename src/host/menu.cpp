@@ -317,8 +317,8 @@ void game_menu::set_footer(const std::string &text)
 		if (Rml::Element *e = m->doc->GetElementById("ver")) e->SetInnerRML(escape(text));
 }
 
-// The language on (tr::current) into the documents: their body's class (the .cjk and lang- styles), the key hints,
-// and the fallback fonts' order (the glyphs taken from them looked for again)
+// The language on (tr::current) into the documents: their body's class (tr::css_class: for styles by language, none
+// yet), the key hints, and the fallback fonts' order (the glyphs taken from them looked for again)
 void game_menu::set_language()
 {
 	if (!m->ctx) return;
@@ -403,9 +403,11 @@ std::vector<std::string> game_menu::misaligned()
 		if (!t) continue;
 		const auto &ln = t->GetLines().front();
 		const std::string &s = ln.text;
+		size_t cut = std::min<size_t>(s.size(), 40);   // (the label's first 40 bytes, back to a whole letter)
+		while (cut > 0 && cut < s.size() && ((unsigned char)s[cut] & 0xC0) == 0x80) cut--;
 		if (!s.empty() && (s[0] == ' ' || s.rfind("\xE3\x80\x80", 0) == 0 || s.rfind("\xC2\xA0", 0) == 0))
-			out.push_back("\"" + s.substr(0, std::min<size_t>(s.size(), 40)) + "\" starts with a space");
-		if (plain) at.push_back({ t->GetAbsoluteOffset(Rml::BoxArea::Border).x + ln.position.x, s.substr(0, std::min<size_t>(s.size(), 40)) });
+			out.push_back("\"" + s.substr(0, cut) + "\" starts with a space");
+		if (plain) at.push_back({ t->GetAbsoluteOffset(Rml::BoxArea::Border).x + ln.position.x, s.substr(0, cut) });
 	}
 	if (at.size() < 2) return out;
 	std::vector<float> xs;

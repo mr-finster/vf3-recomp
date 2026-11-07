@@ -9,8 +9,6 @@
 #include "FontFamily.h"
 #include "FreeTypeInterface.h"
 #include <algorithm>
-
-#include <algorithm>
 #include <tuple>
 
 namespace Rml {

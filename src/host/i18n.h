@@ -83,20 +83,23 @@ struct choice
 };
 constexpr int CHOICES = 1 + REAL_LANGS;
 const char *choice_key(choice c);                 // "auto", or the language's code (settings.ini)
-bool choice_from(const std::string &key, choice &c);
+bool choice_from(const std::string &key, choice &c);   // (any case, - or _, spaces round it: JA, zh_hans)
 std::string choice_name(choice c);                // as the setting shows it: Auto (in the language on), or its own name
 choice step(choice c, int d);                     // (Left / Right on the setting)
 lang system();                                    // the system's preferred language, if one of these (else English)
-// (one locale's: zh-TW, zh-HK, zh-MO Traditional, other zh Simplified; pt-* Brazilian; the rest by language; English
-// for none of these)
+// (one locale's: zh with Hant (zh-Hant, zh-Hant-TW, or zh and Hant as SDL's macOS gives a bare zh-Hant) Traditional,
+// with Hans Simplified, else zh-TW, zh-HK, zh-MO Traditional, other zh Simplified; pt-* Brazilian; the rest by
+// language; English for none of these)
 lang from_locale(const char *language, const char *country);
 bool from_locale_known(const char *language);
 lang resolve(choice c);                           // (VF_LANG in the environment over it: a code, or pseudo)
 void set(lang l);
 lang current();
 const char *code(lang l);
-bool cjk();                                       // (Chinese, Japanese or Korean on: assets/ui's .cjk styles)
-std::string css_class();                          // the documents' body class: "lang-<code>", and "cjk" for Chinese, Japanese, Korean
+bool cjk();                                       // (Chinese, Japanese or Korean on)
+// the documents' body class: "lang-<code>", and "cjk" for Chinese, Japanese, Korean (for assets/ui's styles by
+// language: none has any yet, the fallback fonts doing what's needed)
+std::string css_class();
 
 // ---- the tables (text.cpp, the game's own) and checking them (tools/langtest) ----
 struct entry { uint16_t id; const char *text; };

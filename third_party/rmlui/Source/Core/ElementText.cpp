@@ -591,7 +591,8 @@ static bool NoBreakBefore(char32_t c)
 {
 	static const char32_t list[] = {0x3001, 0x3002, 0xFF0C, 0xFF0E, 0xFF1A, 0xFF1B, 0xFF1F, 0xFF01, 0xFF09, 0x300D, 0x300F, 0x3011, 0x3015, 0x3009, 0x300B,
 		0x30FC, 0x30FB, 0x3005, 0x301C, 0x2026, 0x2025, 0x3041, 0x3043, 0x3045, 0x3047, 0x3049, 0x3063, 0x3083, 0x3085, 0x3087, 0x308E, 0x30A1, 0x30A3,
-		0x30A5, 0x30A7, 0x30A9, 0x30C3, 0x30E3, 0x30E5, 0x30E7, 0x30EE, 0x30F5, 0x30F6, '.', ',', ':', ';', '!', '?', ')', ']', '}', '%', 0xB7};
+		0x30A5, 0x30A7, 0x30A9, 0x30C3, 0x30E3, 0x30E5, 0x30E7, 0x30EE, 0x30F5, 0x30F6, '.', ',', ':', ';', '!', '?', ')', ']', '}', '%', 0xB7,
+		0x201D, 0x2019, 0xA0};
 	for (char32_t l : list)
 		if (c == l)
 			return true;
@@ -599,7 +600,13 @@ static bool NoBreakBefore(char32_t c)
 }
 static bool NoBreakAfter(char32_t c)
 {
-	return c == 0xFF08 || c == 0x300C || c == 0x300E || c == 0x3010 || c == 0x3014 || c == 0x3008 || c == 0x300A || c == '(' || c == '[' || c == '{';
+	return c == 0xFF08 || c == 0x300C || c == 0x300E || c == 0x3010 || c == 0x3014 || c == 0x3008 || c == 0x300A || c == '(' || c == '[' || c == '{' ||
+		c == 0x201C || c == 0x2018 || c == 0xA0;
+}
+// (a number and what follows it kept together: its digits, full-width ones too, and a unit after it, 3回, 10秒)
+static bool IsDigit(char32_t c)
+{
+	return (c >= '0' && c <= '9') || (c >= 0xFF10 && c <= 0xFF19);
 }
 
 static bool BuildToken(String& token, const char*& token_begin, const char* string_end, bool first_token, bool collapse_white_space,
@@ -705,11 +712,12 @@ static bool BuildToken(String& token, const char*& token_begin, const char* stri
 		}
 
 		// (vf3-recomp) a break between two letters of which one is Chinese or Japanese: this token ends before this one
+		// (an escape's letter is the one it stands for, &nbsp; a no-break space, not its ';')
 		if (!white_space && ((unsigned char)character & 0xC0) != 0x80)
 		{
-			const char32_t current = DecodeAt(token_begin, string_end);
+			const char32_t current = token_begin == escape_begin ? DecodeAt(token_begin, string_end) : force_non_whitespace ? 0xA0 : (unsigned char)character;
 			if (previous && (IsCJKBreakable(previous) || IsCJKBreakable(current)) && !NoBreakBefore(current) && !NoBreakAfter(previous) &&
-				!(previous < 0x80 && current < 0x80))
+				!(previous < 0x80 && current < 0x80) && !(IsDigit(previous) && (IsDigit(current) || IsCJKBreakable(current))))
 			{
 				token_begin = escape_begin;
 				return false;

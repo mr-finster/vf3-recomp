@@ -6,7 +6,8 @@
 // - a line's English and its translation rendered both ways (tr::line: shown in the language on, logged in English),
 //   src/net's sentences mapped (tr::from_net), the fill of places;
 // - the settings' language codes both ways (settings.ini's language = ...), the system's locales picked as they should
-//   be (zh-TW/zh-HK Traditional, zh-CN/zh-SG Simplified, pt-PT Brazilian, the first known one), pseudo's length.
+//   be (zh-TW/zh-HK Traditional, zh-CN/zh-SG Simplified, a script given by it (zh-Hant, and zh and Hant as SDL's macOS
+//   gives that), pt-PT Brazilian, the first known one), pseudo's length.
 // Exit 1 if anything's wrong. With --list, each language's strings that are the same as the English (to look at).
 #include "../src/host/text.h"
 #include <ft2build.h>
@@ -181,15 +182,30 @@ int main(int argc, char **argv)
 	}
 	tr::choice junk{ 3 };
 	check(!tr::choice_from("klingon", junk) && junk.i == 3, "an unknown language code isn't taken");
+	{   // (as a person might write it: any case, _ for -, spaces round it; written back as its code)
+		struct { const char *written; tr::lang want; } as[] = { { "JA", tr::lang::ja }, { "zh-hans", tr::lang::zh_hans }, { " zh_HANT ", tr::lang::zh_hant },
+			{ "pt-br", tr::lang::pt_br }, { "ko ", tr::lang::ko }, { "\tDE\r", tr::lang::de } };
+		for (const auto &a : as) {
+			tr::choice c;
+			check(tr::choice_from(a.written, c) && c == tr::choice::of(a.want) && !strcmp(tr::choice_key(c), tr::code(a.want)),
+			      std::string("language = \"") + a.written + "\" read as " + tr::code(a.want));
+		}
+		tr::choice c{ 3 };
+		check(tr::choice_from(" AUTO", c) && c.automatic(), "language = AUTO read as auto");
+		check(!tr::choice_from("ja-", junk) && !tr::choice_from("", junk) && junk.i == 3, "nor a code with more to it, nor none");
+	}
 	check(tr::step(tr::choice{ 0 }, -1).i == tr::CHOICES - 1 && tr::step(tr::choice{ tr::CHOICES - 1 }, 1).i == 0, "Left and Right go round the list");
 	struct { const char *lang, *country; tr::lang want; } locales[] = {
 		{ "ko", "KR", tr::lang::ko }, { "ja", "JP", tr::lang::ja }, { "zh", "CN", tr::lang::zh_hans }, { "zh", "SG", tr::lang::zh_hans },
 		{ "zh", "TW", tr::lang::zh_hant }, { "zh", "HK", tr::lang::zh_hant }, { "zh", "MO", tr::lang::zh_hant }, { "zh", nullptr, tr::lang::zh_hans },
-		{ "zh-Hant", nullptr, tr::lang::zh_hant }, { "pt", "PT", tr::lang::pt_br }, { "pt", "BR", tr::lang::pt_br }, { "es", "MX", tr::lang::es },
+		{ "zh-Hant", nullptr, tr::lang::zh_hant }, { "zh", "Hant", tr::lang::zh_hant }, { "zh", "Hant_TW", tr::lang::zh_hant },
+		{ "zh-Hant", "TW", tr::lang::zh_hant }, { "zh-Hant", "HK", tr::lang::zh_hant }, { "zh", "Hans", tr::lang::zh_hans }, { "zh", "Hans_CN", tr::lang::zh_hans },
+		{ "zh-Hans", "HK", tr::lang::zh_hans }, { "zh-Hans", nullptr, tr::lang::zh_hans }, { "zh_TW", nullptr, tr::lang::zh_hant }, { "zh", "hant", tr::lang::zh_hant },
+		{ "pt", "PT", tr::lang::pt_br }, { "pt", "BR", tr::lang::pt_br }, { "es", "MX", tr::lang::es },
 		{ "fr", "CA", tr::lang::fr }, { "ru", "RU", tr::lang::ru }, { "de", "AT", tr::lang::de }, { "it", "IT", tr::lang::it }, { "pl", "PL", tr::lang::pl },
 		{ "tr", "TR", tr::lang::tr }, { "en", "GB", tr::lang::en }, { "nl", "NL", tr::lang::en } };
 	for (const auto &l : locales)
-		check(tr::from_locale(l.lang, l.country) == l.want, std::string("the locale ") + l.lang + (l.country ? std::string("-") + l.country : "") + ": " + tr::code(l.want));
+		check(tr::from_locale(l.lang, l.country) == l.want, std::string("the locale ") + l.lang + (l.country ? std::string(", ") + l.country : "") + ": " + tr::code(l.want));
 
 	// ---- pseudo: about 40% longer, its places kept ----
 	{
