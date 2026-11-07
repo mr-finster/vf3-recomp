@@ -252,12 +252,20 @@ bool hand_over(const std::string &data, const std::string &url)
 	std::error_code ec;
 	if (ok) std::filesystem::rename(part, link_file(data), ec);   // (in place whole: take never reads half of it)
 	if (!ok || ec) { std::filesystem::remove(part, ec); return false; }
+#ifdef _WIN32
+	AllowSetForegroundWindow(DWORD(pid));   // (this copy has the foreground, the link's: the one running may come to the front with it)
+#endif
 	return true;
 #endif
 }
 
 void running(const std::string &data)
 {
+	// (another copy on this data folder running already: it stays the one links are handed to, this one never
+	// taking its place, so a link never starts a third; this one takes over once that's gone: take)
+#ifndef __APPLE__   // (a Mac's links come from the system, to the app it has running: the file only its own)
+	if (alive(atol(read_file(pid_file(data)).c_str()))) return;
+#endif
 	std::ofstream f(pid_file(data), std::ios::binary | std::ios::trunc);
 	f << own_pid();
 }
@@ -270,6 +278,7 @@ void stopped(const std::string &data)
 
 bool take(const std::string &data, std::string &url)
 {
+	if (atol(read_file(pid_file(data)).c_str()) != own_pid()) running(data);   // (the copy links went to gone: this one's now)
 	std::error_code ec;
 	if (!std::filesystem::exists(link_file(data), ec)) return false;
 	const auto at = std::filesystem::last_write_time(link_file(data), ec);

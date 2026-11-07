@@ -886,7 +886,7 @@ std::filesystem::path set_zip(const std::filesystem::path &dir)
 // program's own (the Steam Deck package): a copy of the zips is kept there too, so an update unpacked into a new
 // folder doesn't ask for them again (as VF1's). The zip's path in `out` (the others beside it: game_zips); false if
 // they cancel.
-bool first_launch(const std::string &data, const std::string &keep, const std::string &folder, std::string &out)
+bool first_launch(const std::string &data, const std::string &keep, const std::string &folder, std::string &out, std::string &first_link)
 {
 	namespace fs = std::filesystem;
 	const fs::path own = fs::path(data) / "roms";
@@ -957,7 +957,12 @@ bool first_launch(const std::string &data, const std::string &keep, const std::s
 			else for (; *list; list++) c->files.push_back(*list);
 			c->done.store(true, std::memory_order_release);
 		}, &chosen, nullptr, filters, 1, nullptr, false);
-		while (!chosen.done.load(std::memory_order_acquire)) { SDL_Event e; while (SDL_PollEvent(&e)) {} SDL_Delay(10); }
+		while (!chosen.done.load(std::memory_order_acquire)) {
+			SDL_Event e;
+			while (SDL_PollEvent(&e))   // (a link that started the app, a Mac's open-URL event, kept for once the game's up)
+				if (e.type == SDL_EVENT_DROP_FILE && e.drop.data && links::is_link(e.drop.data)) first_link = std::string(e.drop.data).substr(0, 64);
+			SDL_Delay(10);
+		}
 		if (chosen.failed) {
 			fs::create_directories(roms, ec);
 			message_box(SDL_MESSAGEBOX_INFORMATION, title, tr::fill(tr::ROMS_NO_PICKER, { { "folder", roms.string() } }));
@@ -1709,7 +1714,9 @@ int main(int argc, char **argv)
 		else if (!cfg.roms_folder.empty()) roms_folder = player_folder(cfg.roms_folder, data), from = "settings.ini";
 		if (!roms_folder.empty()) fprintf(stderr, "ROM folder (%s): %s\n", from.c_str(), roms_folder.c_str());
 		else fprintf(stderr, "ROM folder: %s\n", (std::filesystem::path(data) / "roms").string().c_str());
-		if (!first_launch(data, keep_data, roms_folder, zip)) return hidden ? 1 : 0;
+		std::string first_link;   // (a link that came while the ROM was being chosen: a Mac's, the app started by it)
+		if (!first_launch(data, keep_data, roms_folder, zip, first_link)) return hidden ? 1 : 0;
+		if (arg_link.empty() && !first_link.empty()) arg_link = first_link;
 	}
 	static Game game;   // (large: not on the stack)
 	// The program: the one last played (Game > Version) if the zips hold it, else the first they hold (Revision D's
@@ -4164,6 +4171,7 @@ int main(int argc, char **argv)
 			menu.set_notice(tr::fill(tr::BANNER_WAITING_FOR, { { "name", online.opponent() } }), tr::fill(tr::NOTICE_DROPPED, { { "n", std::to_string(online.hold_left()) } }),
 			                tr::NOTICE_CARRIES_ON);
 		else if (online.starting()) menu.set_notice(tr::NOTICE_STARTING, online.status());
+		else if (online.watch_between()) menu.set_notice(tr::MATCH_OVER, online.watch_status());   // (a watched match over: not its last picture, still)
 		else menu.set_notice("");
 		std::string line;
 		if (cfg.online.show_connection && online.waiting() && !online.starting())   // (playing alone meanwhile: still waiting, and where)
@@ -4200,14 +4208,10 @@ int main(int argc, char **argv)
 			static std::string said;
 			if (const std::string now = online.status(); now != said) { said = now; menu.refresh(); }
 		}
-		else if (menu.is_open() && online.phase() == Online::Phase::off && menu.top_name() == tr::P_ONLINE.c_str() && !menu.capturing()) {
-			// (the Online screen, the room browser: the rooms asked for every 10 s and the page made again as they come,
-			// the room selected kept; how many play at random, as the lobby says)
-			static int said = -2, seen = -1;
-			online.rooms_list(cfg.online);
-			if (online.rooms_version() != seen) { seen = online.rooms_version(); menu.replace(online_page(), -1); }
-			else if (const int n = online.players_online(cfg.online); n != said) { said = n; menu.refresh(); }
-		}
+		else if (menu.is_open() && online.phase() == Online::Phase::off && menu.top_name() == tr::P_ONLINE.c_str() && !menu.capturing())
+			// (the Online screen, the room browser: the rooms asked for every 15 s and the page made again as they change,
+			// the room selected kept; how many play at random, as the lobby says. Not a match's end, nor a try that failed)
+			online_menu::keep_up(online, cfg.online, menu, online_page);
 		online_was = online.phase();
 		if (!menu.capturing()) online_code_was = online.room_code();
 	};
@@ -4322,17 +4326,18 @@ int main(int argc, char **argv)
 			const std::string url = arg_link;
 			arg_link.clear();
 			if (!links::parse(url, l)) fprintf(stderr, "links: not a link this game takes: %s\n", Online::log_masked(url.substr(0, 40)).c_str());
-			else if (online.playing() && !online.watching()) menu.toast(tr::LINK_FINISH_FIRST);
+			else if (const tr::line no = online_menu::link_refused(online); !no.empty()) { menu.toast(no.str()); fprintf(stderr, "links: %s %s: not now (%s)\n", l.action.c_str(), l.code.c_str(), no.en().c_str()); }
 			else if (l.game != board.profile->set) menu.toast(l.game == "vf3tb" ? tr::LINK_IS_TEAM_BATTLE : tr::LINK_IS_REVISION_D);
 			else {
 				online_page();   // (the identity, as opening the Online page sets it)
 				tr::line err;
-				const bool ok = l.action == "watch" ? online.watch(cfg.online, l.code, err) : online.enter_code(cfg.online, l.code, err);
-				fprintf(stderr, "links: %s %s%s\n", l.action.c_str(), l.code.c_str(), ok ? "" : (": " + err.en()).c_str());
-				if (menu.is_open()) menu.close();
-				menu.open(main_page());
-				menu.select_row(online_row());
-				menu.push(online_page());
+				const bool ok = online_menu::follow_link(online, cfg.online, menu, [&] { cfg_dirty = true; }, l.action, l.code, [&] {
+					if (menu.is_open()) menu.close();
+					menu.open(main_page());
+					menu.select_row(online_row());
+					menu.push(online_page());
+				}, err);
+				fprintf(stderr, "links: %s %s%s%s\n", l.action.c_str(), l.code.c_str(), ok ? "" : (": " + err.en()).c_str(), ok && cfg.online.name.empty() && l.action != "watch" ? " (a name asked for first)" : "");
 				SDL_RaiseWindow(win);
 			}
 		}

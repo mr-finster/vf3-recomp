@@ -186,6 +186,7 @@ public:
 	bool watching_quick() const { return watching() && watch_quick; }   // (a Quick match's: no room to play next in)
 	bool watch_showing() const { return watching() && watch_shown; }   // (its picture up: caught up)
 	std::string watch_status() const;   // (watching: how it's going, in words)
+	bool watch_between() const { return watching() && watch_ended(); }   // (the match watched is over: waiting for their next one)
 	int watch_progress() const;         // (catching up: 0-100)
 	int watch_step() const;             // (0 finding the match, 1 its start, 2 catching up, 3 watching)
 	// Who plays (player 1 the host): a match's or a watched one's, for the HUD and the screens
@@ -210,8 +211,9 @@ public:
 	const std::string &listed_as_name() const { return listed_as; }
 	int rooms_state() const { return rooms_said; }   // (-1 not asked yet, 0 asking, 1 have, 2 couldn't reach the lobby, 3 no rooms there)
 	bool lobby_watches() const { return lobby_watch_on; }   // (the lobby's last word: watching on; an older lobby's none)
-	int rooms_version() const { return rooms_seen; }   // (a new list each time it comes: its page made again)
-	void set_rooms(std::vector<RoomRow> r) { rooms_rows = std::move(r); rooms_said = 1; rooms_seen++; lobby_watch_on = true; }   // (tests: a list made up, as a lobby with watching gives)
+	int rooms_version() const { return rooms_seen; }   // (the list, or whether the lobby was reached, changed: the browser made again)
+	// (tests: a list made up, as a lobby with watching gives; or without it, or with rooms off: said 3)
+	void set_rooms(std::vector<RoomRow> r, bool watch = true, int said = 1) { rooms_rows = std::move(r); rooms_said = said; rooms_fails = 0; rooms_seen++; lobby_watch_on = watch; }
 	int local_port() const { return port; }
 	static std::string lobby_default();   // the built-in lobby's address
 
@@ -360,12 +362,17 @@ private:
 	void watch_poll();
 	void watch_failed(const tr::line &why);
 	void watch_over(const tr::line &why);
+	// (the match watched done with: over, or gone at the lobby (a newer one in its place, or none) and what came of it run)
+	bool watch_ended() const;
+	bool watch_gone = false;            // (the lobby answered "no_match" for it: it has no more of it)
+	uint32_t watch_got = 0;             // (frames had of it, and when that last grew: none for a while, a newer match on, done)
+	double watch_got_at = 0, spec_at = 0;   // (spec_at: when it was begun: its start and first frames given two minutes)
 	bool watch_start(const vfnet::watch::Start &s, tr::line &why);
 	// the rooms list
 	std::shared_ptr<Fetch> rooms_job;
 	std::vector<RoomRow> rooms_rows;
 	double rooms_at = -1e18;
-	int rooms_said = -1, rooms_seen = 0;
+	int rooms_said = -1, rooms_seen = 0, rooms_fails = 0;   // (rooms_fails: the lobby not reached, times in a row)
 	bool lobby_watch_on = false;
 	std::shared_ptr<Fetch> peek_job;
 	std::string peek_code;
@@ -382,6 +389,18 @@ namespace online_menu {
 menu_page page(Online &o, OnlineSettings &s, game_menu &menu, std::function<void()> changed);
 // Online > Rooms: public rooms to join and matches to watch, this game's (made again as the list comes: rooms_version)
 menu_page rooms_page(Online &o, OnlineSettings &s, game_menu &menu, std::function<void()> changed);
+// The Online page on top, nothing on (the host program's, each pass): while it's the room browser (not a match's end,
+// nor a try that failed: their selection left alone), the rooms asked for, and its page made again (make) when the
+// list or the lobby's state has changed (true); refreshed when the count playing at random has.
+bool keep_up(Online &o, OnlineSettings &s, game_menu &menu, const std::function<menu_page()> &make);
+// A link (links.h) refused now, and why (a toast): a match played or starting, or a room hosted or being joined, isn't
+// dropped for one. Empty: it may be followed
+tr::line link_refused(const Online &o);
+// A link followed: its match watched, or its code taken as Enter code takes it (a room open joined, a match on
+// watched), a name asked for first if there's none, as every join; show puts the Online page on top (the host
+// program's: the menu opened on it). False, and why, if it couldn't start (for the log)
+bool follow_link(Online &o, OnlineSettings &s, game_menu &menu, std::function<void()> changed, const std::string &action, const std::string &code,
+                 const std::function<void()> &show, tr::line &error);
 // The menu's rows in a match (the game goes on under it): who and how the connection is, input delay, the
 // connection display, leaving the match
 void match_rows(Online &o, OnlineSettings &s, game_menu &menu, std::function<void()> changed, std::vector<menu_item> &rows);

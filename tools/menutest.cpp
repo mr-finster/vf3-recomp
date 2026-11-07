@@ -12,11 +12,28 @@
 #include "../src/host/png.h"
 #include <SDL3/SDL.h>
 #include <algorithm>
+#include <atomic>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <functional>
+#include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
+#ifndef _WIN32
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <poll.h>
+#include <signal.h>
+#include <sys/socket.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#ifndef MSG_NOSIGNAL
+#define MSG_NOSIGNAL 0   // (a Mac's: SIGPIPE ignored instead, FakeLobby::open)
+#endif
+#endif
 
 namespace {
 
@@ -76,6 +93,76 @@ void settle_check(const char *name, int w, int h)
 	for (int i = 0; i < 8; i++) { shot("", w, h); SDL_Delay(40); }
 	for (const std::string &o : menu->misaligned()) misaligned.push_back(std::string(name) + ": " + o);
 }
+
+#ifndef _WIN32
+// A lobby of the test's own on this machine (plain HTTP, one request a connection): each request's first line kept, and
+// answered as answer() says (a status and a JSON body). For what the real one does only now and then (a watched match
+// replaced by the next before it was over, a start that never comes), each time.
+struct FakeLobby
+{
+	int fd = -1, port = 0;
+	std::mutex lock;
+	std::vector<std::string> asked;
+	std::function<std::pair<int, std::string>(const std::string &line)> answer;
+	std::atomic<bool> stop{ false };
+	std::thread thread;
+	bool open()
+	{
+		signal(SIGPIPE, SIG_IGN);   // (a watcher that let go before its answer: not this test's end)
+		fd = socket(AF_INET, SOCK_STREAM, 0);
+		sockaddr_in a{};
+		a.sin_family = AF_INET;
+		a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+		socklen_t n = sizeof a;
+		if (fd < 0 || bind(fd, reinterpret_cast<sockaddr *>(&a), sizeof a) != 0 || listen(fd, 16) != 0 || getsockname(fd, reinterpret_cast<sockaddr *>(&a), &n) != 0) return false;
+		port = ntohs(a.sin_port);
+		thread = std::thread([this] {
+			while (!stop) {
+				pollfd p{ fd, POLLIN, 0 };
+				if (poll(&p, 1, 50) <= 0) continue;
+				const int c = accept(fd, nullptr, nullptr);
+				if (c < 0) continue;
+				std::string req;
+				char buf[4096];
+				size_t want = std::string::npos;
+				for (int i = 0; i < 100 && (want == std::string::npos || req.size() < want); i++) {
+					pollfd q{ c, POLLIN, 0 };
+					if (poll(&q, 1, 20) <= 0) continue;
+					const ssize_t got = recv(c, buf, sizeof buf, 0);
+					if (got <= 0) break;
+					req.append(buf, size_t(got));
+					if (const size_t end = req.find("\r\n\r\n"); end != std::string::npos && want == std::string::npos) {
+						size_t len = 0;
+						for (const char *h : { "Content-Length:", "content-length:" })
+							if (const size_t at = req.find(h); at != std::string::npos && at < end) len = size_t(atol(req.c_str() + at + strlen(h)));
+						want = end + 4 + len;
+					}
+				}
+				const std::string line = req.substr(0, req.find("\r\n"));
+				{ std::lock_guard<std::mutex> l(lock); asked.push_back(line); }
+				const auto [status, body] = answer ? answer(line) : std::pair<int, std::string>{ 404, "{\"error\":\"bad\"}" };
+				const std::string out = "HTTP/1.1 " + std::to_string(status) + " X\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(body.size()) +
+				                        "\r\nConnection: close\r\n\r\n" + body;
+				send(c, out.data(), out.size(), MSG_NOSIGNAL);
+				close(c);
+			}
+		});
+		return true;
+	}
+	bool was_asked(const std::string &part)
+	{
+		std::lock_guard<std::mutex> l(lock);
+		for (const std::string &a : asked) if (a.find(part) != std::string::npos) return true;
+		return false;
+	}
+	~FakeLobby()
+	{
+		stop = true;
+		if (thread.joinable()) thread.join();
+		if (fd >= 0) close(fd);
+	}
+};
+#endif
 
 void key(SDL_Scancode sc)
 {
@@ -832,6 +919,103 @@ int main(int argc, char **argv)
 		gm.push(online_menu::page(o, s, gm, changed));
 		// watching: a match's code typed; the screen while it's found and caught up with
 		s.lobby = "http://127.0.0.1:9";   // (nobody there: it goes on looking)
+		{   // links (main.cpp's, through online_menu): refused while a match is on its way, followed otherwise; with no name
+			// yet, the name asked for first, as every join (the host, the rooms list and the watchers show it)
+			auto show = [&] { gm.close(); gm.open(root()); gm.push(online_menu::page(o, s, gm, changed)); };
+			check(online_menu::link_refused(o).empty(), "a link with nothing on: followed");
+			if (!o.host(s, err)) fprintf(stderr, "menutest: hosting: %s\n", err.en().c_str());
+			check(!online_menu::link_refused(o).empty() && o.waiting(), "a link while hosting: refused, the room kept (as in a match)");
+			o.stop();
+			if (!o.join_room(s, "KXQ4M7", err)) fprintf(stderr, "menutest: join: %s\n", err.en().c_str());
+			check(!online_menu::link_refused(o).empty(), "a link while joining a room: refused");
+			o.stop();
+			if (!o.watch(s, "QX7KMP", err)) fprintf(stderr, "menutest: watch: %s\n", err.en().c_str());
+			check(online_menu::link_refused(o).empty(), "a link while watching: followed (the watch left for it)");
+			o.stop();
+			s.name.clear();
+			tr::line lerr;
+			const bool ok = online_menu::follow_link(o, s, gm, changed, "join", "KXQ4M7", show, lerr);
+			shot("link_name_first.png", w, h);
+			check(ok && top() == tr::P_YOUR_NAME.c_str() && o.phase() == Online::Phase::off, "a link's join with no name yet: the name asked for first");
+			text("AKIRA");
+			key(SDL_SCANCODE_RETURN);
+			check(s.name == "AKIRA" && top() == tr::P_ONLINE.c_str() && gm.depth() == 2 && o.phase() == Online::Phase::joining && o.room_code() == "KXQ-4M7",
+			      ("then on into the link's room, one Online page (" + o.room_code() + ", " + std::to_string(gm.depth()) + " deep)").c_str());
+			o.stop();
+			// the watcher's Play next, with no name yet: the same
+			s.name.clear();
+			if (!o.watch(s, "QX7KMP", err)) fprintf(stderr, "menutest: watch: %s\n", err.en().c_str());
+			menu_page mm{ "", "", {} };
+			online_menu::match_rows(o, s, gm, changed, mm.items);
+			gm.close();
+			gm.open(mm);
+			gm.select_row(1);   // (Play next)
+			key(SDL_SCANCODE_RETURN);
+			check(top() == tr::P_YOUR_NAME.c_str() && o.watching(), "Play next with no name yet: the name asked for first, still watching");
+			text("AKIRA");
+			key(SDL_SCANCODE_RETURN);
+			check(s.name == "AKIRA" && !gm.is_open() && o.phase() == Online::Phase::joining && o.room_code() == "QX7-KMP",
+			      ("then the room joined to play next (" + o.room_code() + ")").c_str());
+			o.stop();
+			o.forget_failure();
+			s.name = "MRFINSTER";
+			show();
+		}
+		{   // watching off at the lobby: a match on joined to play next, not watched; Rooms off: Create room lists nothing
+			Online::RoomRow pr;
+			pr.playing = true; pr.room = "NIGHT SET"; pr.name[0] = "SEOULKICK"; pr.name[1] = "DENVERDAN"; pr.country[0] = "KR"; pr.country[1] = "US";
+			pr.code = pr.watch = "KXQ4MD";
+			Online::RoomRow qr = pr;
+			qr.quick = true; qr.room.clear(); qr.code.clear(); qr.name[0] = "QUICKA"; qr.watch = "KXQ4ME";
+			o.set_rooms({ pr, qr }, false);
+			again();
+			gm.select_row(8);
+			pad(SDL_GAMEPAD_BUTTON_NORTH);   // (Y: the room's own page)
+			shot("room_view_no_watch.png", w, h);
+			check(top() == tr::P_ROOM.c_str() && gm.selected() == 0, "watching off: a match's own page opens on Play next, no Watch");
+			gm.select_row(2);
+			check(gm.selected() == 0, "Play next and Back only");
+			key(SDL_SCANCODE_RETURN);
+			check(o.phase() == Online::Phase::joining && !o.watching() && top() == tr::P_ONLINE.c_str(), "and Play next joins its room");
+			o.stop();
+			again();
+			gm.select_row(8);
+			key(SDL_SCANCODE_RETURN);
+			check(o.phase() == Online::Phase::joining && !o.watching(), "A on a match with watching off: its room joined to play next, not watched");
+			o.stop();
+			again();
+			gm.select_row(9);
+			key(SDL_SCANCODE_RETURN);
+			check(o.phase() == Online::Phase::off, "A on a Quick match with watching off: nothing started (it says watching's off)");
+			o.set_rooms({}, false, 3);
+			again();
+			gm.select_row(2);
+			key(SDL_SCANCODE_RETURN);   // (Create room)
+			shot("create_room_unlisted.png", w, h);
+			check(top() == tr::P_CREATE_ROOM.c_str() && gm.selected() == 1, "Rooms off at the lobby: Create room has no Listed in Rooms (on Create)");
+			gm.select_row(2);
+			check(gm.selected() == 1, "its name and Create only");
+			key(SDL_SCANCODE_ESCAPE);
+			o.set_rooms({});
+			again();
+		}
+		{   // a locked room joined from its own page: its code typed, then one Online page under it, not two
+			Online::RoomRow lk;
+			lk.locked = true; lk.room = "PRIVATE"; lk.name[0] = "LOCKER"; lk.country[0] = "KR";
+			o.set_rooms({ lk });
+			again();
+			const size_t depth = gm.depth();
+			gm.select_row(8);
+			pad(SDL_GAMEPAD_BUTTON_NORTH);
+			key(SDL_SCANCODE_RETURN);   // (Join: an open room's first)
+			check(top() == tr::P_ENTER_CODE.c_str(), "Join on a locked room's page: its code asked for");
+			text("KXQ4M7");
+			check(top() == tr::P_ONLINE.c_str() && gm.depth() == depth && o.phase() == Online::Phase::joining,
+			      ("the code typed: joining, one Online page (" + std::to_string(gm.depth()) + " deep, " + std::to_string(depth) + " before)").c_str());
+			o.stop();
+			o.set_rooms({});
+			again();
+		}
 		if (!o.watch(s, "QX7KMP", err)) fprintf(stderr, "menutest: watch: %s\n", err.en().c_str());
 		again();
 		check(o.watching() && o.playing(), "watching: a match on, as the host program sees it (its frames through step)");
@@ -850,16 +1034,100 @@ int main(int argc, char **argv)
 			shot("quick_unavailable.png", w, h);
 			check(o.join_failure() == std::string(tr::ONLINE_UNAVAILABLE), ("the lobby down: Quick match says Online is unavailable (" + o.join_failure() + ")").c_str());
 			o.forget_failure();
+			// (as the game keeps it up to date, nothing pressed: keep_up, main.cpp's, made again only when it's changed)
+			auto make = [&] { return online_menu::page(o, s, gm, changed); };
+			const int v0 = o.rooms_version();
+			bool remade = false;
 			o.rooms_list(s, true);
-			poll_for(5000, [&] { o.rooms_list(s); return o.rooms_state() == 2; });
-			again();
+			poll_for(5000, [&] { remade = online_menu::keep_up(o, s, gm, make) || remade; return o.rooms_state() == 2 && o.rooms_version() != v0; });
+			remade = online_menu::keep_up(o, s, gm, make) || remade;
 			shot("browser_unreachable.png", w, h);
-			check(o.rooms_state() == 2, "the lobby down: the browser shows it can't reach it");
+			check(o.rooms_state() == 2 && remade, "the lobby down: the browser made again by itself to say it can't reach it (nothing pressed)");
+			check(!online_menu::keep_up(o, s, gm, make), "and not again while nothing's changed");
+			{   // (a list had, then the lobby gone: kept through one miss, then gone, not shown as if it were there still)
+				std::vector<Online::RoomRow> had(2);
+				had[0].name[0] = "OLDHOST"; had[0].code = "KXQ4MA";
+				had[1].name[0] = "OLDHOST2"; had[1].code = "KXQ4MB";
+				o.set_rooms(had);
+				online_menu::keep_up(o, s, gm, make);
+				size_t after[2] = {};
+				bool made[2] = {};
+				for (int miss = 0; miss < 2; miss++) {
+					const int v = o.rooms_version();
+					o.rooms_list(s, true);
+					poll_for(5000, [&] { made[miss] = online_menu::keep_up(o, s, gm, make) || made[miss]; return o.rooms_version() != v; });
+					made[miss] = online_menu::keep_up(o, s, gm, make) || made[miss];
+					after[miss] = o.rooms_list(s).size();
+				}
+				shot("browser_unreachable_after.png", w, h);
+				check(after[0] == 2 && after[1] == 0 && made[0] && made[1] && o.rooms_state() == 2,
+				      ("the lobby gone after a list: its rooms kept through one miss, then the browser says it can't reach it (" + std::to_string(after[0]) + ", " + std::to_string(after[1]) + ")").c_str());
+			}
 			if (!o.watch(s, "QX7KMP", err)) fprintf(stderr, "menutest: watch: %s\n", err.en().c_str());
 			until_off(40000);
 			check(o.join_failure() == std::string(tr::WATCH_LOBBY_GONE), ("the lobby down: a watcher told once, plainly (" + o.join_failure() + ")").c_str());
 			o.forget_failure();
 		}
+#ifndef _WIN32
+		{   // watching, against a lobby of the test's own (what the real one does now and then, each time), on a clock of
+			// the test's (minutes in seconds)
+			FakeLobby fl;
+			std::atomic<int> mode{ 0 }, seens{ 0 };
+			const std::string A = "00000000000000a1", B = "00000000000000b2";
+			fl.answer = [&](const std::string &line) -> std::pair<int, std::string> {
+				const auto seen = [](const std::string &m) {
+					return std::pair<int, std::string>{ 200, "{\"watchers\":1,\"keeper\":false,\"match\":\"" + m + "\",\"checkpoint\":-1,\"random\":false,\"live\":true,\"poll_ms\":1000}" };
+				};
+				if (line.find("/v1/watch/seen") != std::string::npos) return seen(mode == 1 && seens++ > 0 ? B : A);
+				if (mode >= 1 && line.find("/v1/watch/start") != std::string::npos && line.find("m=" + A) != std::string::npos) return { 404, "{\"error\":\"no_match\"}" };
+				return { 503, "{\"error\":\"x\"}" };   // (its start never had: 0)
+			};
+			check(fl.open(), "a lobby of the test's own");
+			static m3::Model3 board3;
+			board3.backup.assign(0x20000, 0);
+			// (a watcher of its own each time, on the test's clock: how long it took, in its seconds)
+			double t = 0;
+			auto watch_until = [&](Online &w3, double most_s, const std::function<bool()> &until) {
+				OnlineSettings s3 = s;
+				s3.lobby = "http://127.0.0.1:" + std::to_string(fl.port);
+				t = 1e6;
+				w3.identity = o.identity;
+				w3.poll(t);
+				tr::line e3;
+				if (!w3.watch(s3, "QX7KMP", e3)) fprintf(stderr, "menutest: watch: %s\n", e3.en().c_str());
+				for (; t - 1e6 < most_s * 1000 && !until(); t += 250) { w3.poll(t); SDL_Delay(4); }
+				return (t - 1e6) / 1000;
+			};
+			{   // its start never had: after two minutes it says no match started, not "Starting the match" for ever
+				mode = 0;
+				Online w3(board3);
+				const double took = watch_until(w3, 200, [&] { return w3.phase() == Online::Phase::off; });
+				printf("watching, its start never had: %s after %.0f s\n", w3.join_failure().c_str(), took);
+				check(w3.phase() == Online::Phase::off && w3.join_failure() == tr::fill(tr::WATCH_NONE_STARTED, { { "code", "QX7-KMP" } }) && took > 110 && took < 135,
+				      "a watched match whose start never comes: given up after two minutes, said");
+			}
+			{   // the match watched gone at the lobby ("no_match"), the next in its place: on to the next
+				mode = 1;
+				seens = 0;
+				Online w3(board3);
+				const double took = watch_until(w3, 60, [&] { return fl.was_asked("/v1/watch/start?w=QX7KMP&m=" + B); });
+				printf("watching, the match replaced by the next: its start asked for after %.0f s\n", took);
+				check(fl.was_asked("/v1/watch/start?w=QX7KMP&m=" + B) && w3.watching(), "a watched match replaced by the next before it was over: on to the next one");
+			}
+			{   // the match watched gone, none after it: said over (the notice), then back to the Online page
+				mode = 2;
+				Online w3(board3);
+				watch_until(w3, 20, [&] { return w3.watch_between(); });
+				check(w3.watch_between() && w3.watch_status() == std::string(tr::WATCH_BETWEEN), ("a watched match gone at the lobby: over, waiting for their next (" + w3.watch_status() + ")").c_str());
+				const double from = t;
+				for (; t - from < 60000 && w3.phase() != Online::Phase::off; t += 250) { w3.poll(t); SDL_Delay(4); }
+				const Online::LastMatch &lm = w3.last_match();
+				printf("watching, the match gone: back to the Online page after %.0f s more (%s)\n", (t - from) / 1000, lm.why.en().c_str());
+				check(w3.phase() == Online::Phase::off && lm.any && lm.watched && lm.why.str() == std::string(tr::WATCH_MATCH_OVER) && t - from > 40000,
+				      "and with no next one, its end said once the while for one is up");
+			}
+		}
+#endif
 		s.lobby = lobby_was;
 		// a watched match over
 		Online::LastMatch wm;
@@ -890,6 +1158,21 @@ int main(int argc, char **argv)
 	o.set_last_match(lm);
 	again();
 	shot("match_over.png", w, h);
+	{   // (the rooms list changing meanwhile: this page left as it is, Back still selected, not Play again)
+		gm.select_row(1);
+		Online::RoomRow r;
+		r.name[0] = "NEWHOST"; r.code = "KXQ4MC";
+		o.set_rooms({ r });
+		const bool made = online_menu::keep_up(o, s, gm, [&] { return online_menu::page(o, s, gm, changed); });
+		check(!made && gm.selected() == 1, "a match over: a new rooms list doesn't make its page again (Back stays selected)");
+		o.tell_failure(tr::ONLINE_DOWN);
+		again();
+		gm.select_row(1);
+		o.set_rooms({});
+		check(!online_menu::keep_up(o, s, gm, [&] { return online_menu::page(o, s, gm, changed); }) && gm.selected() == 1, "nor a try that failed's (Back stays selected)");
+		o.forget_failure();
+		again();
+	}
 	m.wins[0] = m.wins[1] = 0;   // (no match finished: VS in its circle between the names)
 	o.set_last_match(lm);
 	again();
@@ -991,6 +1274,30 @@ int main(int argc, char **argv)
 		                         "http://vf3/join/KXQ4M7", "vf3recomp://vf3/join/../../KXQ4M7", "vf3recomp://vf3//join/KXQ4M7", "vf3recomp://vf3/join/KXQ--4M7", "vf3recomp://vf3/join/KX-Q4M7" })
 			check(!links::parse(bad, l), (std::string("not a link: ") + bad).c_str());
 	}
+#ifndef _WIN32
+	{   // two copies on one data folder: the one running first stays the one links are handed to (a link never starts a
+		// third); once it's gone, the other takes its place
+		namespace fs = std::filesystem;
+		const fs::path dir = fs::path(out) / "links-data";
+		std::error_code ec;
+		fs::create_directories(dir, ec);
+		fs::remove(dir / "running.pid", ec);
+		fs::remove(dir / "link.txt", ec);
+		auto pid_in = [&] { std::ifstream f(dir / "running.pid"); long p = 0; f >> p; return p; };
+		const pid_t first = fork();   // (a copy of this program, running)
+		if (first == 0) { pause(); _exit(0); }
+		{ std::ofstream f(dir / "running.pid"); f << long(first); }
+		links::running(dir.string());
+		check(pid_in() == long(first), "a second copy on the data folder: the first left as the one links go to");
+		check(links::hand_over(dir.string(), "vf3recomp://vf3/join/KXQ4M7"), "a link handed to the first");
+		kill(first, SIGKILL);
+		waitpid(first, nullptr, 0);
+		std::string url;
+		links::take(dir.string(), url);
+		check(pid_in() == long(getpid()), "the first gone: the second takes its place");
+		fs::remove_all(dir, ec);
+	}
+#endif
 	pages(gm, w, h);
 	// Game > Language changed with a page open (as main.cpp's set_language: tr::set, then the menu's set_language): the
 	// page at once in the other language, its letters' fonts first; and back, exactly the picture it was
