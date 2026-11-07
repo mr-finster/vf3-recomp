@@ -1288,7 +1288,7 @@ int main(int argc, char **argv)
 		                         "http://vf3/join/KXQ4M7", "vf3recomp://vf3/join/../../KXQ4M7", "vf3recomp://vf3//join/KXQ4M7", "vf3recomp://vf3/join/KXQ--4M7", "vf3recomp://vf3/join/KX-Q4M7" })
 			check(!links::parse(bad, l), (std::string("not a link: ") + bad).c_str());
 	}
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__APPLE__)   // (a Mac's links come from the system to the running app: no pid file)
 	{   // two copies on one data folder: the one running first stays the one links are handed to (a link never starts a
 		// third); once it's gone, the other takes its place
 		namespace fs = std::filesystem;
