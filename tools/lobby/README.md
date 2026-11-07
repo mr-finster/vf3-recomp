@@ -279,8 +279,8 @@ name), so asking again doesn't add anything, and a flood from one address is hel
 else. Entries go on the lobby's own timeouts: a host gone quiet 30 s (its room dropped), a queue not heard from in a
 minute, a match after 10 minutes. The endpoint only reads.
 
-**What it costs:** a page view reads the count kept at the edge (30 s, and each Worker copy's memory 30 s), so the
-`Stats` object is asked about twice a minute a Cloudflare location, not once a viewer. The rooms tell it when a room
+**What it costs:** a page view reads the count kept at the edge (15 s, and each Worker copy's memory 15 s), so the
+`Stats` object is asked about four times a minute a Cloudflare location, not once a viewer. The rooms tell it when a room
 opens, is joined, reopens or goes, and a waiting host once a minute; each queue tells it when who's searching
 changes, at most every 2 s, and every 15 s while anyone searches. `GET /v1/online` isn't limited per address: the
 online page's function asks it from Cloudflare's own addresses, many visitors' asks from one, and being answered from
