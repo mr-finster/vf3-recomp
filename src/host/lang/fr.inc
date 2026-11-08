@@ -484,7 +484,7 @@ T(OS_MAX_PING_HELP, "L'aléatoire n'écarte qu'un adversaire dont le ping dépas
 T(OS_STAGE_SELECT, "Choix du stage")
 T(OS_STAGE_SELECT_HELP, "Oui\xC2\xA0: l'écran des stages de l'arcade, comme au Japon\xC2\xA0: le challenger choisit, donc à chaque revanche c'est le perdant. Non\xC2\xA0: le stage suivant du jeu. Un match joue le choix de l'hôte (annoncé au début), donc tu affrontes tout le monde\xC2\xA0; contre une ancienne version, le sien. Pas pendant que tu héberges, rejoins ou joues.")
 T(OS_CHIME, "Son de match trouvé")
-T(OS_CHIME_HELP, "Un son quand un match en ligne est trouvé (et la fenêtre clignote si elle n'est pas devant), pour attendre dans une autre fenêtre.")
+T(OS_CHIME_HELP, "Le son de pièce du jeu lui-même quand un match en ligne est trouvé (et la fenêtre clignote si elle n'est pas devant), pour attendre dans une autre fenêtre.")
 T(QUICK_LISTED, "Montrer mes matchs rapides dans les salons")
 T(QUICK_LISTED_HELP, "Oui\xC2\xA0: tout le monde peut trouver tes matchs rapides dans les salons et les regarder. Non\xC2\xA0: ils ne sont pas listés (listés seulement si les deux joueurs ont Oui).")
 

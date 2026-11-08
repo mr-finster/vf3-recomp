@@ -484,7 +484,7 @@ T(OS_MAX_PING_HELP, "Losowy pomija tylko rywala z pingiem wyższym niż to: mier
 T(OS_STAGE_SELECT, "Wybór areny")
 T(OS_STAGE_SELECT_HELP, "Wł.: ekran aren automatu, jak w Japonii: wybiera wyzywający, więc przy rewanżu przegrany. Wył.: następna arena gry. Mecz idzie z wyborem hosta (podanym na starcie), więc grasz z każdym; ze starszą wersją wg jej ustawienia. Nie w trakcie hostowania, dołączania ani gry.")
 T(OS_CHIME, "Dźwięk znalezienia meczu")
-T(OS_CHIME_HELP, "Dźwięk, gdy znajdzie się mecz online (a okno miga, jeśli nie jest z przodu), więc możesz czekać w innym oknie.")
+T(OS_CHIME_HELP, "Dźwięk monety z samej gry, gdy znajdzie się mecz online (a okno miga, jeśli nie jest z przodu), więc możesz czekać w innym oknie.")
 T(QUICK_LISTED, "Pokazuj moje szybkie mecze w Pokojach")
 T(QUICK_LISTED_HELP, "Wł.: każdy znajdzie twoje szybkie mecze w Pokojach i je obejrzy. Wył.: nie są widoczne (tylko gdy obaj gracze mają Wł.).")
 

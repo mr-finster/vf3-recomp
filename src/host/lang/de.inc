@@ -484,7 +484,7 @@ T(OS_MAX_PING_HELP, "Zufällig überspringt nur einen Gegner mit höherem Ping: 
 T(OS_STAGE_SELECT, "Stage-Wahl")
 T(OS_STAGE_SELECT_HELP, "An: der Stage-Bildschirm des Automaten wie in Japan: der Herausforderer wählt, bei jeder Revanche also der Verlierer. Aus: die nächste Stage des Spiels. Ein Match spielt die Wahl des Hosts (am Anfang gesagt), so triffst du jeden; gegen eine ältere Version deren Wahl. Nicht beim Hosten, Beitreten oder Spielen.")
 T(OS_CHIME, "Ton bei gefundenem Match")
-T(OS_CHIME_HELP, "Ein Ton, wenn ein Online-Match gefunden ist (und das Fenster blinkt, wenn es nicht vorn ist), damit du in einem anderen Fenster warten kannst.")
+T(OS_CHIME_HELP, "Der Münzton des Spiels selbst, wenn ein Online-Match gefunden ist (und das Fenster blinkt, wenn es nicht vorn ist), damit du in einem anderen Fenster warten kannst.")
 T(QUICK_LISTED, "Meine Schnellen Matches in Räumen zeigen")
 T(QUICK_LISTED_HELP, "An: jeder findet deine Schnellen Matches in Räumen und kann zusehen. Aus: sie sind nicht gelistet (nur gelistet, wenn beide Spieler An haben).")
 

@@ -484,7 +484,7 @@ T(OS_MAX_PING_HELP, "La casuale salta solo un avversario con ping più alto di c
 T(OS_STAGE_SELECT, "Scelta stage")
 T(OS_STAGE_SELECT_HELP, "Sì: la schermata degli stage dell'arcade, come in Giappone: lo sfidante sceglie, quindi a ogni rivincita sceglie chi perde. No: il prossimo stage del gioco. Un incontro usa la scelta dell'host (detta all'inizio), così giochi con tutti; contro una versione vecchia, la sua. Non mentre ospiti, entri o giochi.")
 T(OS_CHIME, "Suono partita trovata")
-T(OS_CHIME_HELP, "Un suono quando si trova un incontro online (e la finestra lampeggia se non è in primo piano), così puoi aspettare in un'altra finestra.")
+T(OS_CHIME_HELP, "Il suono del gettone del gioco stesso quando si trova un incontro online (e la finestra lampeggia se non è in primo piano), così puoi aspettare in un'altra finestra.")
 T(QUICK_LISTED, "Mostra le mie partite rapide in Stanze")
 T(QUICK_LISTED_HELP, "Sì: chiunque trova le tue partite rapide in Stanze e le guarda. No: non sono elencate (solo se entrambi i giocatori hanno Sì).")
 

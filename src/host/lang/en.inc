@@ -489,7 +489,7 @@ T(OS_MAX_PING_HELP, "Random only passes over an opponent whose ping is higher th
 T(OS_STAGE_SELECT, "Stage select")
 T(OS_STAGE_SELECT_HELP, "On: the arcade's stage screen, as in Japan's arcades: the challenger picks the stage, so on every rematch the loser does. Off: the game's next stage each match. A match plays the host's choice (said as it starts), so you meet everyone; against an older version, the same as theirs. Not while hosting, joining or playing.")
 T(OS_CHIME, "Match found chime")
-T(OS_CHIME_HELP, "A chime when an online match is found (and the game's window flashes if it isn't the one in front), so you can wait in another window.")
+T(OS_CHIME_HELP, "The game's own coin sound when an online match is found (and the game's window flashes if it isn't the one in front), so you can wait in another window.")
 T(QUICK_LISTED, "Show my Quick Match games in Rooms")
 T(QUICK_LISTED_HELP, "On: anyone can find your Quick Match games in Rooms and watch them. Off: they're not listed (listed only if both players have it On).")
 

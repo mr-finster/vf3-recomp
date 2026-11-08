@@ -485,7 +485,7 @@ T(OS_MAX_PING_HELP, "Rastgele yalnızca pingi bundan yüksek olan rakibi atlar: 
 T(OS_STAGE_SELECT, "Sahne seçimi")
 T(OS_STAGE_SELECT_HELP, "Açık: Japon salonlarındaki gibi salon makinesinin sahne ekranı: sahneyi meydan okuyan seçer, yani her rövanşta kaybeden seçer. Kapalı: her maçta oyunun sıradaki sahnesi. Maç kurucunun seçimiyle oynanır (başlarken söylenir), böylece herkesle karşılaşırsın; eski bir sürüme karşı onunkiyle aynı. Kurarken, katılırken ya da oynarken değiştirilemez.")
 T(OS_CHIME, "Eşleşme sesi")
-T(OS_CHIME_HELP, "Çevrimiçi maç bulununca bir ses çalar (oyun penceresi önde değilse yanıp söner), böylece başka bir pencerede bekleyebilirsin.")
+T(OS_CHIME_HELP, "Çevrimiçi maç bulununca oyunun kendi jeton sesi çalar (oyun penceresi önde değilse yanıp söner), böylece başka bir pencerede bekleyebilirsin.")
 T(QUICK_LISTED, "Hızlı Maçlarımı Odalar'da göster")
 T(QUICK_LISTED_HELP, "Açık: herkes Hızlı Maç oyunlarını Odalar'da bulup izleyebilir. Kapalı: listelenmezler (yalnızca iki oyuncuda da Açık ise listelenir).")
 

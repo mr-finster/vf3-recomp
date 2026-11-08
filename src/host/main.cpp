@@ -102,6 +102,7 @@
 //   VF3_TEST_LOAD=ms:s   each picture ms longer (by the scale's square, from 1x) for the first s seconds after the
 //                        start's grace (the governor's tests)
 //   VF3_TEST_RAM_LOG=f   the game's RAM hashed every 30 game frames to f (a display setting changes no frame)
+//   VF3_TEST_CHIME_WAV=f the match found chime's sound (the game's coin, made at the start) to f, a .wav
 #include "version.h"      // VF3_VERSION, VF3_DATE (made by the Makefile from git)
 #include "online.h"
 #include "links.h"
@@ -114,6 +115,7 @@
 #include "../machine/romset.h"
 #include "../rec/ppc_rec.h"
 #include "../sound/soundboard.h"
+#include "../sound/coin_sound.h"
 #include "../video/tilegen.h"
 #include "../video/tile_worker.h"
 #include "../video/sky_lead.h"
@@ -145,6 +147,7 @@ __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
 #include <array>
 #include <chrono>
 #include <condition_variable>
+#include <future>
 #include <mutex>
 #include <cmath>
 #include <cstring>
@@ -1144,6 +1147,8 @@ struct Game
 	float bg_dx = 0, bg_dy = 0;   // the newest frame's 3D drawn full width (a stage)
 	video::SkyLead sky;           // how far the stage's sky is behind the 3D camera (sky_lead.h)
 	std::vector<int16_t> audio;
+	std::shared_future<std::vector<int16_t>> coin;   // the game's coin sound (coin_sound.h: the match found chime), made at load
+	const std::vector<int16_t> &coin_pcm() const { static const std::vector<int16_t> none; return coin.valid() ? coin.get() : none; }
 	uint64_t frame = 0;
 	bool tiles_on = true;   // (off for the boot run unseen: the 2D layers drawn a line at a time for nothing)
 
@@ -1161,6 +1166,9 @@ struct Game
 			} else fprintf(stderr, "couldn't recompile the game (no executable memory?): running it on the slower interpreter instead\n");
 		}
 		sound.attach(&board.sound_rom, &board.samples);
+		// the match found chime: the game's coin sound, made by a sound board of its own on a thread of its own (about
+		// 0.4 s of work, done long before any match; the ROM's sound program and samples stay as loaded)
+		coin = std::async(std::launch::async, [this] { return coin_sound::make(board.sound_rom, board.samples, LEVEL); }).share();
 		board.on_line = [this](unsigned y) {
 			if (!tiles_on) return;
 			tile_worker.line(y);
@@ -1745,6 +1753,18 @@ int main(int argc, char **argv)
 	{
 		std::string err;
 		if (!game.load(zip, err, arg_interp)) return fail(err);
+	}
+	if (const char *cw = getenv("VF3_TEST_CHIME_WAV")) {   // (tests: the match found chime's sound, the game's coin, to a .wav)
+		const std::vector<int16_t> &pcm = game.coin_pcm();
+		if (FILE *wf = fopen(cw, "wb")) {
+			const uint32_t rate = coin_sound::RATE, br = rate * 4, db = uint32_t(pcm.size() * 2), sz = 36 + db, sixteen = 16;
+			const uint16_t fmt = 1, ch = 2, al = 4, bits = 16;
+			fwrite("RIFF", 1, 4, wf); fwrite(&sz, 4, 1, wf); fwrite("WAVEfmt ", 1, 8, wf); fwrite(&sixteen, 4, 1, wf); fwrite(&fmt, 2, 1, wf);
+			fwrite(&ch, 2, 1, wf); fwrite(&rate, 4, 1, wf); fwrite(&br, 4, 1, wf); fwrite(&al, 2, 1, wf); fwrite(&bits, 2, 1, wf);
+			fwrite("data", 1, 4, wf); fwrite(&db, 4, 1, wf); fwrite(pcm.data(), 2, pcm.size(), wf);
+			fclose(wf);
+		}
+		fprintf(stderr, "(test) the match found chime: the game's coin sound, %.2f s\n", double(pcm.size() / 2) / coin_sound::RATE);
 	}
 	m3::Model3 &board = game.board;
 	const uint64_t BOOT_FRAMES = uint64_t(board.profile->boot_frames);   // the boot, up to the SEGA logo (the PC way: unseen)
@@ -4116,7 +4136,7 @@ int main(int argc, char **argv)
 		while (online.next_notice(n)) {
 			if (n.kind == Online::Notice::joined || n.kind == Online::Notice::watching) {
 				const bool watching = n.kind == Online::Notice::watching;
-				if (cfg.online.chime && !watching) chime::play(chime_stream, win, audio && !hidden ? float(cfg.volume) / 100.0f : 0.0f);
+				if (cfg.online.chime && !watching) chime::play(chime_stream, win, audio && !hidden ? float(cfg.volume) / 100.0f : 0.0f, game.coin_pcm(), coin_sound::RATE);
 				match_on = true;
 				late_midi.clear();
 				game.take_midi = [&](std::vector<uint8_t> &out) {

@@ -484,7 +484,7 @@ T(OS_MAX_PING_HELP, "La aleatoria solo descarta a un rival con más ping que est
 T(OS_STAGE_SELECT, "Selección de escenario")
 T(OS_STAGE_SELECT_HELP, "Sí: la pantalla de escenarios del arcade, como en Japón: el retador elige, así que en cada revancha elige quien pierde. No: el siguiente escenario del juego. Se juega lo que elija el anfitrión (se avisa al empezar), así juegas con todos; con versiones antiguas, como la suya. No mientras eres anfitrión, entras o juegas.")
 T(OS_CHIME, "Aviso de partida encontrada")
-T(OS_CHIME_HELP, "Un sonido al encontrar una partida online (y la ventana parpadea si no está delante), para esperar en otra ventana.")
+T(OS_CHIME_HELP, "El sonido de moneda del propio juego al encontrar una partida online (y la ventana parpadea si no está delante), para esperar en otra ventana.")
 T(QUICK_LISTED, "Mostrar mis partidas rápidas en Salas")
 T(QUICK_LISTED_HELP, "Sí: cualquiera puede encontrar tus partidas rápidas en Salas y verlas. No: no aparecen (solo aparecen si los dos lo tienen en Sí).")
 
