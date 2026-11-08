@@ -7,6 +7,7 @@ const lobby = process.argv[2] || 'src/index.js';
 const files = ['pairing.test.mjs', 'watch.test.mjs', 'ws-over.test.mjs', 'switches.test.mjs', 'pairing-switched.mjs', 'review.test.mjs', 'counts.test.mjs', 'score.test.mjs'];
 const quiet = process.argv.includes('--quiet');   // (only the failures and the summary)
 const failed = [];
+files.push('snap.test.mjs');   // (watching's snapshots: their own line, so the list above can grow apart)
 for (const f of files) {
 	const code = await new Promise((done) => {
 		const p = spawn(process.execPath, [fileURLToPath(new URL('./' + f, import.meta.url)), lobby], { stdio: ['ignore', 'pipe', 'pipe'] });

@@ -84,6 +84,13 @@ off. (`ROOMS` and `WATCHES` are the Durable Objects' bindings, hence the `SWITCH
 | `SWITCH_WATCH` | no match is sent or watched: a host is told `off` (its game stops sending, as at the month's ceiling), watchers on a socket are told and let go, a new one is told "Watching isn't available right now."; the rooms list keeps only the open rooms |
 | `SWITCH_WEBSOCKETS` | no WebSocket is taken (a host's room, its feed, a watcher's frames): each falls back to HTTPS as on a network that carries none; open ones are closed as they're next used (a room's within a minute) |
 
+One the other way round: `SWITCH_SNAP` is off unless it's `on`. On, a watcher come late (the match more than ~35 s in)
+gets the host's latest snapshot (its game's state at a confirmed frame, a few MB, asked of the host when none is fresh:
+`/v1/watch/snap`, src/net/watch.h's Snapper) and runs only the frames after it, a few seconds, not the whole match;
+off, or with an older build on either side, the watcher runs the match from its start as before. Off by default: a
+snapshot is a state the host's game made, loaded by every late watcher's game, so it stays off until each game's
+state loading has been checked against states made to do harm.
+
 `/v1/online` says what's on (`features: {rooms, watch}`); an older lobby says nothing, and the games and the site read
 that as both off. The games built before this see none of it.
 

@@ -55,6 +55,15 @@
 //   POST /v1/watch/cp, GET /v1/watch/cp: no more (a watcher's checkpoint, a state made by a watcher and handed to others,
 //        could be forged to the players' hash: refused, 410 {error: "gone"}; a late watcher runs from the match's start)
 //   GET  /v1/watch/count?w=WID          -> {watchers} (the guest's: the count shown in the match)
+//   GET  /v1/watch/snap?w=WID&m=MATCH   -> {frame, size}: the match's latest snapshot (the host's state at a confirmed
+//        frame, watch.h's SNAP), if it's within SNAP_FRESH frames of the latest; else {frame (-1 none), pending: true}
+//        and the host asked for one (its next push's answer, or at once on its socket: {snap: true}), or {frame: -1} if
+//        its host's game makes none (an older build's: no "snap" in its start's meta). A watcher come late loads it and
+//        runs only the frames after it; without, the match from its start, as before. In memory only, the latest one.
+//   GET  /v1/watch/snap?w=WID&m=MATCH&f=F -> that snapshot (binary; kept at the edge: a snapshot never changes)
+//   POST /v1/watch/snap?w=WID&k=WKEY&m=MATCH&f=F&i=I&n=N (the host's, binary) -> {ok, got}: part I of N (SNAP_PART
+//        bytes each, the last less) of its snapshot at frame F, paced by the host (watch.h's Snapper); whole, it's the
+//        match's latest, checked: its head the match's, its frame F
 //   GET  /v1/watch/live?w=WID&m=MATCH&from=F&s=SID -> the frames as they come (a response that streams: each message a
 //        u32 length then a reply as /frames' (length 0: still here), from F on; a few hundred at most a match, after
 //        which watchers ask /frames (Cloudflare's edge) as before)
@@ -88,6 +97,9 @@ function auto_pong(ctx) {
 // (ROOMS and WATCHES are the Durable Objects' bindings, so the switches are SWITCH_ names.)
 const switch_on = (env, k) => String((env && env[k]) ?? 'on').trim().toLowerCase() !== 'off';
 const sockets_on = (env) => switch_on(env, 'SWITCH_WEBSOCKETS');
+// (snapshots, a watcher come late dropping straight in: on only when SWITCH_SNAP is "on". Off, as by default, no host is
+// asked for one and a watcher is told there's none: it runs the match from its start, as before)
+const snaps_on = (env) => String((env && env.SWITCH_SNAP) ?? '').trim().toLowerCase() === 'on';
 const off = () => json({ error: 'off' }, 503);
 // The relay's logins a day, all players together, past which none are given out until the next day (UTC) and the
 // games connect directly or not at all. A game asks for one at every try (direct or not), so it's about two a
@@ -1490,8 +1502,12 @@ const WATCHER_MS = 40000;          // a watcher not heard from this long has gon
 const WATCHER_PING_GONE_MS = 90000;   // (a watcher's WebSocket with no ping this long (its game pings every 15 s): gone, closed)
 const STREAM_STUCK_MS = 10000;     // (a stream that hasn't taken its last message this long: its watcher not reading, let go)
 const WATCH_IDLE_MS = 3 * 3600e3;  // a watch code nothing's used this long is forgotten
-const W_MAGIC = 0x31574656, W_START = 1, W_PUSH = 2, W_REPLY = 4;
+const W_MAGIC = 0x31574656, W_START = 1, W_PUSH = 2, W_REPLY = 4, W_SNAP = 5;
 const HASH_BACK = 120;   // (frames: a reply's hashes reach back this far before its first frame)
+// Snapshots (watch.h's SNAP): the host's state, deflated, at most SNAP_MAX, in parts of SNAP_PART; one counts as fresh
+// within SNAP_FRESH frames of the match's latest (35 s: a watcher loading it runs that many at most, a few seconds),
+// else the host's asked for a new one, no more than once every SNAP_ASK_MS while a watcher's asked within SNAP_WANT_MS
+const SNAP_MAX = (16 << 20) + 64, SNAP_PART = 128 << 10, SNAP_FRESH = 2000, SNAP_ASK_MS = 15000, SNAP_WANT_MS = 30000, SNAP_HEAD = 42;
 
 async function bytes_of(req, max) {
 	if ((req.headers.get('content-length') | 0) > max || !req.body) return null;
@@ -1545,10 +1561,11 @@ async function new_code_limited(env, req) {   // (an address, an IPv6 one by its
 }
 async function watch_route(env, req, url) {
 	const op = url.pathname.slice('/v1/watch/'.length);
+	const q0 = (k) => url.searchParams.get(k) || '';
 	// (what a match's host and its watchers ask again and again: a push 5 a second, the pieces each second, the seen and the
 	// count; limited apart from everything else, so watching from behind a shared address never uses up its players'
 	// ANY_LIMIT, their hosting, joining and searching)
-	const again = (req.method === 'POST' && (op === 'push' || op === 'seen')) || (req.method === 'GET' && (op === 'frames' || op === 'count'));
+	const again = (req.method === 'POST' && (op === 'push' || op === 'seen' || op === 'snap')) || (req.method === 'GET' && (op === 'frames' || op === 'count' || (op === 'snap' && !q0('f'))));
 	if (await limited(env, req, again ? 'WATCHING_LIMIT' : 'ANY_LIMIT')) return json({ error: 'busy' }, 429);
 	const q = (k) => url.searchParams.get(k) || '';
 	const wid = normal_code(q('w'));
@@ -1564,6 +1581,27 @@ async function watch_route(env, req, url) {
 		const body = await bytes_of(req, op === 'start' ? START_MAX : 64 << 10);
 		if (!body) return json({ error: 'bad' }, 400);
 		return w.fetch('https://watch/' + op + '?k=' + encodeURIComponent(clean(q('k'), 64)) + '&s=' + sid, { method: 'POST', body });
+	}
+	if (req.method === 'POST' && op === 'snap') {   // (a part of the host's snapshot)
+		const body = await bytes_of(req, SNAP_PART);
+		const m = hex16(q('m')), f = parseInt(q('f'), 10), i = parseInt(q('i'), 10), n = parseInt(q('n'), 10);
+		if (!body || !body.length || !m || !(f >= 0 && f <= WATCH_FRAMES) || !(n >= 1 && n <= Math.ceil(SNAP_MAX / SNAP_PART)) || !(i >= 0 && i < n)) return json({ error: 'bad' }, 400);
+		return w.fetch('https://watch/snap?k=' + encodeURIComponent(clean(q('k'), 64)) + '&m=' + m + '&f=' + f + '&i=' + i + '&n=' + n, { method: 'POST', body });
+	}
+	if (req.method === 'GET' && op === 'snap') {   // (a watcher's: is there one, then the one, kept at the edge by its frame)
+		const m = hex16(q('m'));
+		if (!m) return json({ error: 'bad' }, 400);
+		if (!q('f')) return w.fetch('https://watch/snap?m=' + m);
+		const f = parseInt(q('f'), 10);
+		if (!(f >= 0 && f <= WATCH_FRAMES)) return json({ error: 'bad' }, 400);
+		if (await limited(env, req, 'WATCH_LIMIT')) return json({ error: 'busy' }, 429);
+		const key = new Request('https://watch.vf-lobby/snap/' + wid + '/' + m + '/' + f);
+		const kept = edge && (await caches.default.match(key));
+		if (kept) return kept;
+		const r = await w.fetch('https://watch/snap?m=' + m + '&f=' + f);
+		const out = new Response(r.body, { status: r.status, headers: r.status === 200 ? { 'content-type': 'application/octet-stream', 'cache-control': 'public, max-age=86400' } : { 'content-type': 'application/json', 'cache-control': 'no-store' } });
+		if (edge && r.status === 200) await caches.default.put(key, out.clone());
+		return out;
 	}
 	if (req.method === 'POST' && op === 'seen') return looked(env, req, w, 'https://watch/seen?s=' + sid + '&ip=' + (await watcher_ip(req)), 'POST');
 	if (req.method !== 'GET') return json({ error: 'bad' }, 404);
@@ -1845,7 +1883,7 @@ export class Watch {
 			if (!meta || typeof meta !== 'object' || b.length !== 20 + ml + bl) return [{ error: 'bad' }, 400];
 			const name = (x) => { const raw = clean(x, 10).toUpperCase(), n = raw.replace(/[^A-Z0-9 .!?-]/g, ''); return n && !name_ok(raw) ? 'PLAYER' : player_name(n); };
 			for (const st of [...this.streams]) this.end_stream(st);   // (a new match: the streams of the last one ended; theirs ask anew)
-			this.m = { id: h.m, head: b.slice(0, 14), start: b, meta: { p1: name(meta.p1), p2: name(meta.p2), c1: country_ok(meta.c1), c2: country_ok(meta.c2) },
+			this.m = { id: h.m, head: b.slice(0, 14), start: b, meta: { p1: name(meta.p1), p2: name(meta.p2), c1: country_ok(meta.c1), c2: country_ok(meta.c2), ...(meta.snap === 1 ? { snap: 1 } : {}) },
 				frames: new Uint16Array(4096), n: 0, hashes: new Map(), info: new Uint8Array(5), seen: now, born: now };
 			this.keep_start(b);
 			this.tell_stats(true);
@@ -1888,7 +1926,7 @@ export class Watch {
 		this.status_to_sockets(false);
 		const every = watchers === 0 ? IDLE_EVERY_MS : this.load.matches > MATCHES_HARD ? 1000 : this.load.matches > MATCHES_SOFT ? 400 : 200;   // (5 a second while anyone watches; slower under load; idle with none)
 		if (this.load.over) return [{ has: m.n, watchers, off: true }, 200];   // (the month's ceiling reached: the host sends no more)
-		return [{ has: m.n, watchers, ...(every > 200 ? { every } : {}) }, 200];
+		return [{ has: m.n, watchers, ...(every > 200 ? { every } : {}), ...(this.snap_ask() ? { snap: true } : {}) }, 200];
 	}
 	// The watchers' WebSockets: each sent what it hasn't had of this match, and whether it's over whenever that changes
 	// (a last push with no new frames, or the host gone quiet: the alarm's), its place kept with it so it outlives the
@@ -1964,9 +2002,45 @@ export class Watch {
 		for (const w of ws) try { w.send(JSON.stringify({ watchers: this.count(), keeper: false, match: m ? m.id : '', checkpoint: -1, random: quick })); } catch (e) {}
 	}
 	// (a watcher come while the host sends idly: told at once, on its socket, to send as it should; free)
-	wake_host() {
+	wake_host(snap = false) {
 		this.woke = Date.now();
-		for (const h of this.ctx.getWebSockets('host')) try { h.send(JSON.stringify({ wake: true, every: 200 })); } catch (e) {}
+		for (const h of this.ctx.getWebSockets('host')) try { h.send(JSON.stringify({ wake: true, every: 200, ...(snap ? { snap: true } : {}) })); } catch (e) {}
+	}
+	// Snapshots: is one wanted of the host now (a watcher asked lately, none fresh, none coming, not asked just now):
+	// asking marks it asked
+	snap_fresh() {
+		const m = this.m;
+		return !!(m && m.snap && m.n - m.snap.frame <= SNAP_FRESH);
+	}
+	snap_ask() {
+		const m = this.m, now = Date.now();
+		if (!snaps_on(this.env) || !m || !m.meta || m.meta.snap !== 1 || !m.snap_want || now - m.snap_want > SNAP_WANT_MS || this.snap_fresh()) return false;
+		if (now - (m.snap_asked || 0) < SNAP_ASK_MS) return false;
+		if (m.snap_in && now - m.snap_in.at < SNAP_ASK_MS) return false;   // (one coming: its parts still arriving)
+		m.snap_asked = now;
+		return true;
+	}
+	// A part of the host's snapshot: whole, checked and kept as the match's latest
+	snap_part(f, i, n, b) {
+		const m = this.m;
+		if (!m.snap_in || m.snap_in.f !== f || m.snap_in.n !== n) m.snap_in = { f, n, parts: new Array(n), got: 0, size: 0, at: Date.now() };
+		const s = m.snap_in;
+		s.at = Date.now();
+		if (!s.parts[i]) {
+			if (s.size + b.length > SNAP_MAX || (i < n - 1 && b.length !== SNAP_PART)) { m.snap_in = null; return { error: 'bad' }; }
+			s.parts[i] = b;
+			s.got++;
+			s.size += b.length;
+		}
+		if (s.got < n) return { ok: true, got: s.got };
+		m.snap_in = null;
+		const all = new Uint8Array(s.size);
+		let at = 0;
+		for (const p of s.parts) { all.set(p, at); at += p.length; }
+		const h = w_head(all, W_SNAP);
+		if (!h || h.m !== m.id || all.length < SNAP_HEAD || h.v.getUint32(14, true) !== f || h.v.getUint32(38, true) !== all.length - SNAP_HEAD) return { error: 'bad' };
+		if (!m.snap || f > m.snap.frame) m.snap = { frame: f, b: all };
+		return { ok: true, got: s.got };
 	}
 	async webSocketMessage(ws, msg) {
 		const tags = this.ctx.getTags ? this.ctx.getTags(ws) : [];
@@ -2058,8 +2132,30 @@ export class Watch {
 			if (q('ip') && this.askers.size < 1000) this.askers.set(q('ip'), now);
 			return json({ watchers: this.count() });
 		}
+		if (req.method === 'POST' && op === '/snap') {
+			if (q('k') !== a.wkey) return json({ error: 'no_watch' }, 404);
+			if (!snaps_on(this.env)) return json({ error: 'off' }, 503);
+			const m = this.m;
+			if (!m || q('m') !== m.id) return json({ error: 'no_match' }, 404);
+			const out = this.snap_part(parseInt(q('f'), 10), parseInt(q('i'), 10), parseInt(q('n'), 10), new Uint8Array(await req.arrayBuffer()));
+			return json(out, out.error ? 400 : 200);
+		}
 		const m = this.m;
 		if (!m || (req.method !== 'POST' && q('m') !== m.id)) return json({ error: 'no_match' }, 404);
+		if (op === '/snap' && !q('f')) {   // (is there a snapshot: the latest if fresh, else one asked of the host if it makes them)
+			if (!snaps_on(this.env)) return json({ frame: -1 });   // (switched off: none, none to come)
+			if (this.snap_fresh()) return json({ frame: m.snap.frame, size: m.snap.b.length });
+			if (!m.meta || m.meta.snap !== 1) return json({ frame: -1 });
+			if (m.n <= SNAP_FRESH) return json({ frame: -1, n: m.n });   // (a match just begun: its start's as near)
+			m.snap_want = now;
+			if (this.ctx.getWebSockets('host').length && this.snap_ask()) this.wake_host(true);   // (on its socket at once; over HTTPS, its next push's answer)
+			return json({ frame: m.snap ? m.snap.frame : -1, ...(m.snap ? { size: m.snap.b.length } : {}), pending: true });
+		}
+		if (op === '/snap') {
+			const f = parseInt(q('f'), 10);
+			if (!snaps_on(this.env) || !m.snap || m.snap.frame !== f) return json({ error: 'no_snap' }, 404);
+			return binary(m.snap.b, 86400);
+		}
 		if (op === '/start') return binary(m.start, 86400);
 		if (op === '/frames') return this.reply(Math.max(0, parseInt(q('from'), 10) || 0)).response();
 		if (op === '/ws') {
