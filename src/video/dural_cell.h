@@ -31,7 +31,9 @@ struct DuralWide
 // screen (tile layer B's map: the grid's panel, rows 34-47, columns 0-61), as far as the 4:3 picture goes; wide: all
 // of it (the cell, and the cursor's frame when the game's is on her), for widescreen's right side. False if it isn't
 // there, or no picture.
-bool dural_cell(const m3::Model3 &board, std::vector<uint32_t> &above, DuralPicture &pic, DuralWide *wide = nullptr);
+class TileGen;
+// tiles: the generator that drew `above` (each line's registers as it drew it: her cell's lines shown as the grid's)
+bool dural_cell(const m3::Model3 &board, const TileGen &tiles, std::vector<uint32_t> &above, DuralPicture &pic, DuralWide *wide = nullptr);
 
 // (tests: the picture alone)
 bool dural_picture(const m3::Model3 &board, DuralPicture &pic);

@@ -31,6 +31,11 @@ public:
 	// 32-pixel columns, this frame): what moved, for smooth motion's pictures between frames
 	struct Scroll { int16_t sx[4][H] = {}, sy[4][H] = {}; int below_columns[4] = {}; };
 	Scroll scroll;
+	// The registers each line was drawn with (drawn false: a line not drawn this frame): what's drawn over the layers afterwards
+	// (Dural's spot on the select, dural_cell) shown as the game's own lines were, not as the registers are at the
+	// frame's end (the game sets the next frame's fade before it ends: a frame ahead)
+	struct LineRegs { uint32_t order = 0, offset_b = 0, layer[4] = {}; bool drawn = false; };
+	LineRegs drawn_regs[H];
 	// The layer below the 3D that drew most of it and how far it moved from `before` to `now` (in its pixels;
 	// false: none, another layer, or a jump: a cut)
 	// The registers hold the layer's scroll within a tile, the game moving the rest by rewriting the map, so the

@@ -20,6 +20,8 @@ constexpr int FRAME_X0 = 462, FRAME_X1 = 531, FRAME_Y0[2] = { 270, 317 }, FRAME_
 // and the part of her picture in it: her face (x 166-357, y 50-306 of the 496 x 384), its middle in the cell's first
 // 32 pixels (what the 4:3 picture shows of it)
 constexpr int CROP_X = 166, CROP_Y = 50, CROP_W = 191, CROP_H = 257;
+// her ring's white: the grid's own (28 of 31, as Kage's ring)
+constexpr uint32_t RING = 28 * 255 / 31;
 // the 2P marker in its frame (its lower right: the frame's x + 44-66, y + 26-43), kept from where the game draws it
 // (on Kage's, or any of the 12) for hers, where the game's is past the picture's edge
 constexpr int MARK_DX = 44, MARK_DY = 26, MARK_W = 23, MARK_H = 18;
@@ -163,14 +165,31 @@ bool dural_picture(const m3::Model3 &board, DuralPicture &pic)
 	return true;
 }
 
-bool dural_cell(const m3::Model3 &board, std::vector<uint32_t> &above, DuralPicture &pic, DuralWide *wide)
+bool dural_cell(const m3::Model3 &board, const TileGen &tiles, std::vector<uint32_t> &above, DuralPicture &pic, DuralWide *wide)
 {
 	if (wide) wide->on = false;
 	if (board.tile_ram.size() < 0x120000 || above.size() < size_t(W) * H) return false;
 	const uint32_t *vram = reinterpret_cast<const uint32_t *>(board.tile_ram.data());
-	// layer B (2): on and unscrolled, its map the grid's panel: rows 34-47, columns 0-61, nothing round it
-	const uint32_t reg = board.tile_regs[0x68 / 4];
-	if (!(reg & 0x80000000u) || (reg & 0x3FF) || ((reg >> 16) & 0x1FF)) return false;
+	// Each of her lines as the game's own were drawn: with the registers the tile generator had at that line (the game
+	// sets the next frame's before its frame ends: read then, her cell was a frame ahead of the grid's fade, there a
+	// frame before it, gone a frame before it). The aligned picture's y is the line's less 2.
+	auto regs_at = [&](int y) -> const TileGen::LineRegs * {
+		const int line = y + 2;
+		return line >= 0 && line < H && tiles.drawn_regs[line].drawn ? &tiles.drawn_regs[line] : nullptr;
+	};
+	// layer B (2) on and unscrolled on the line
+	auto b_on = [&](int y) {
+		const TileGen::LineRegs *l = regs_at(y);
+		if (!l) return false;
+		const uint32_t reg = l->layer[2];
+		return (reg & 0x80000000u) && !(reg & 0x3FF) && !((reg >> 16) & 0x1FF);
+	};
+	{
+		bool any = false;
+		for (int y = WIDE_Y; y < WIDE_Y + WIDE_H && !any; y++) any = b_on(y);
+		if (!any) return false;
+	}
+	// its map the grid's panel: rows 34-47, columns 0-61, nothing round it
 	const uint32_t *names = vram + (0xF8000 + 2 * 0x2000) / 4;
 	auto ent = [&](const uint32_t *nm, int row, int col) { const uint32_t w = nm[row * 32 + col / 2]; return (col & 1) ? (w & 0xFFFF) : (w >> 16); };
 	for (int row = 33; row <= 48; row++)
@@ -179,24 +198,26 @@ bool dural_cell(const m3::Model3 &board, std::vector<uint32_t> &above, DuralPict
 			if ((ent(names, row, col) == 0x20) == panel) return false;
 		}
 	if (!dural_picture(board, pic)) return false;
-	// shown as layer B is: its pair's colour offset (the select's fades), where the line's mask shows B, not B'
-	const uint32_t off_reg = board.tile_regs[0x44 / 4];
-	const int off[3] = { int(int8_t(off_reg)) * 2, int(int8_t(off_reg >> 8)) * 2, int(int8_t(off_reg >> 16)) * 2 };
-	auto faded = [&](uint32_t v) {
+	// shown as layer B is on that line: its pair's colour offset (the select's fades), where the line's mask shows B, not B'
+	auto faded = [&](uint32_t v, int y) {
+		const uint32_t off_reg = regs_at(y)->offset_b;
+		const int off[3] = { int(int8_t(off_reg)) * 2, int(int8_t(off_reg >> 8)) * 2, int(int8_t(off_reg >> 16)) * 2 };
 		uint32_t o = 0xFF000000u;
 		for (int c = 0; c < 3; c++) o |= uint32_t(std::clamp(int((v >> (8 * c)) & 0xFF) + off[c], 0, 255)) << (8 * c);
 		return o;
 	};
 	auto b_shows = [&](int x, int y) {   // (the line's mask: bit 15 the leftmost 32 pixels, the B pair's in the low half)
 		const int py = y + 2, px = x + 2;
-		return py >= 0 && py < 384 && ((vram[0xF7000 / 4 + py] >> (15 - px / 32)) & 1);
+		return py >= 0 && py < 384 && b_on(y) && ((vram[0xF7000 / 4 + py] >> (15 - px / 32)) & 1);
 	};
 	// over the grid's panel, under layer A's (0) cursor frame and its marker: layer A's texel seen-through or not
 	const uint32_t *layer_a = vram + 0xF8000 / 4, *palette = vram + 0x40000;
-	const uint32_t reg_a = board.tile_regs[0x60 / 4];
-	const bool a_on = (reg_a & 0x80000000u) && !(reg_a & 0x3FF) && !((reg_a >> 16) & 0x1FF), a_four = (board.tile_regs[0x20 / 4] >> 12) & 1;
 	auto a_shows = [&](int x, int y) {   // (the aligned picture's x, y: the layers' 2 pixels on)
-		if (!a_on) return false;
+		const TileGen::LineRegs *l = regs_at(y);
+		if (!l) return false;
+		const uint32_t reg_a = l->layer[0];
+		if (!(reg_a & 0x80000000u) || (reg_a & 0x3FF) || ((reg_a >> 16) & 0x1FF)) return false;
+		const bool a_four = (l->order >> 12) & 1;
 		const int px = x + 2, py = y + 2;
 		const uint32_t e = ent(layer_a, (py / 8) & 63, (px / 8) & 63);
 		const int fy = py & 7, fx = px & 7;
@@ -210,16 +231,16 @@ bool dural_cell(const m3::Model3 &board, std::vector<uint32_t> &above, DuralPict
 		}
 		return !(c & 0x8000);
 	};
-	// the cell's pixel: the face, its white ring, the black round that
+	// the cell's pixel: the face, its white ring (the grid's own white: 28 of 31, as Kage's ring), the black round that
 	auto cell_px = [&](int x, int y) -> uint32_t {
 		if (x >= CELL_X && x < CELL_X + CELL_W && y >= CELL_Y && y < CELL_Y + CELL_H) return pic.cell[size_t(y - CELL_Y) * CELL_W + (x - CELL_X)];
-		if (x >= CELL_X - 1 && x <= CELL_X + CELL_W && y >= CELL_Y - 1 && y <= CELL_Y + CELL_H) return 0xFFFFFFFFu;
+		if (x >= CELL_X - 1 && x <= CELL_X + CELL_W && y >= CELL_Y - 1 && y <= CELL_Y + CELL_H) return 0xFF000000u | RING * 0x010101u;
 		return 0xFF000000u;
 	};
 	for (int y = WIDE_Y; y < WIDE_Y + WIDE_H; y++)
 		for (int x = WIDE_X; x < W; x++) {
 			if (a_shows(x, y) || !b_shows(x, y)) continue;
-			above[size_t(y) * W + x] = faded(cell_px(x, y));
+			above[size_t(y) * W + x] = faded(cell_px(x, y), y);
 		}
 	// the 2P marker as the game draws it in player 2's frame (layer A's texels, as shown), kept for hers
 	const uint32_t at = board.profile->select_cursor;
@@ -244,7 +265,7 @@ bool dural_cell(const m3::Model3 &board, std::vector<uint32_t> &above, DuralPict
 				uint32_t &o = wide->px[size_t(y - WIDE_Y) * WIDE_W + (x - WIDE_X)];
 				if (x < W) { o = above[size_t(y) * W + x]; continue; }
 				if (!b_shows(W - 1, y)) continue;
-				o = faded(cell_px(x, y));
+				o = faded(cell_px(x, y), y);
 				if (x > FRAME_X1) continue;
 				for (int r = 0; r < 2; r++) {
 					const int y0 = FRAME_Y0[r], y1 = y0 + FRAME_H - 1;

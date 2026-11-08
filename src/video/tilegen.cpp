@@ -33,6 +33,7 @@ void TileGen::clear()
 	std::fill(above.begin(), above.end(), 0);
 	std::fill(below_wide.begin(), below_wide.end(), 0);
 	std::fill(std::begin(scroll.below_columns), std::end(scroll.below_columns), 0);
+	for (LineRegs &l : drawn_regs) l.drawn = false;
 }
 
 bool TileGen::scrolled(const Scroll &b, const Scroll &n, const std::vector<uint32_t> &bp, const std::vector<uint32_t> &np,
@@ -735,6 +736,12 @@ void TileGen::line(const m3::Model3 &board, unsigned y, const uint32_t *line_reg
 	const uint32_t *vram = reinterpret_cast<const uint32_t *>(board.tile_ram.data());
 	const uint32_t *pal = vram + 0x40000;
 	const uint32_t *regs = regs_of(board);
+	{
+		LineRegs &l = drawn_regs[y];
+		l.order = regs[0x20 / 4]; l.offset_b = regs[0x44 / 4];
+		for (int k = 0; k < 4; k++) l.layer[k] = regs[0x60 / 4 + k];
+		l.drawn = true;
+	}
 	// B/B' first, then A/A' over it
 	for (int pair = 1; pair >= 0; pair--) {
 		const int prim = pair * 2;

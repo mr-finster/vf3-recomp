@@ -928,7 +928,7 @@ int main(int argc, char **argv)
 				}
 				if (dural && board.dural_on()) {   // (her spot's picture, as the host draws it)
 					static video::DuralPicture dural_pic;
-					video::dural_cell(board, above, dural_pic);
+					video::dural_cell(board, tiles, above, dural_pic);
 				}
 				if (getenv("VF3_VP")) {
 					for (int x : { 0, video::W - 3 }) {

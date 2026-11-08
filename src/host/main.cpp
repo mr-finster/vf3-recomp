@@ -1404,7 +1404,7 @@ struct Game
 			} else
 				for (auto &a : hud_flag_at) a[0] = a[1] = -1;
 			dural_wide.on = false;
-			if (dural_players.load(std::memory_order_relaxed)) video::dural_cell(board, above, dural_pic, &dural_wide);   // (her spot's picture)
+			if (dural_players.load(std::memory_order_relaxed)) video::dural_cell(board, tiles, above, dural_pic, &dural_wide);   // (her spot's picture)
 			tiles.aligned_wide(below_wide);
 		});
 		t = SDL_GetTicksNS();
