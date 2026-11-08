@@ -34,7 +34,8 @@ public:
 	// height (false, the default): the level by distance alone, the same at any size, left the distance's textures
 	// a level coarser for each doubling of the render scale than the arcade showed them on its screen
 	static bool arcade_lod;
-	// Quads drawn as quads (on by default): each pixel's depth and attributes from all four corners (mean value
+	// Quads drawn as quads (always: the game's Display > Quad rendering is gone, issue #39; false only in tests, vf3run's
+	// VF3_QUADS=0): each pixel's depth and attributes from all four corners (mean value
 	// coordinates, see draw_tri), as the Real3D draws them, not from one of the two triangles that split it; a quad
 	// that isn't flat (clothes and skin, bent by the joints) is then one surface whichever way it would be split
 	static bool quad_rendering;

@@ -13,7 +13,7 @@
 // VF3_TILE_LAG=1: the tile layers' lines drawn at the frame's end from the registers each line had (the host's tile
 // worker at its latest); VF3_TILE_EVERY=n: the tile layers drawn every n-th frame only (a netplay match's frames run
 // again unseen after a rollback), the sky audit then of those frames.
-// VF3_VERSUS_COUNT=n: the versus count set after the boot (the first match's stage, as the host's). VF3_QUADS=0: the quads drawn as two triangles (Display > Quad rendering Off).
+// VF3_VERSUS_COUNT=n: the versus count set after the boot (the first match's stage, as the host's). VF3_QUADS=0: the quads drawn as two triangles (as the game did with the old Display > Quad rendering Off).
 // VF3_RENDER_TIME=n: with VF3_BIGSHOT, n more renders of each shot's 3D at its scale, timed.
 // VF3_LOG_BYTES=addr,...: those RAM bytes each frame ("bytes FRAME v..."). VF3_DURAL_STAGE=1 (Guard) or 2 (Start): Cheats > Dural's stage on both players' inputs (VF3_DURAL_STAGE_ONLINE=1: inputs only, as online; VF3_DURAL_STAGE_LEAD=n: n frames' input delay). VF3_DEBUG_MODE=1: Arcade settings > Debug mode (Model3::debug_mode). VF3_DURAL=1: Dural on the select (as the cheat: the program's patches, and her spot's picture in --shots). (VF3_DURAL_ONLINE=1: without the offline patches, as online) VF3_BORROW=backdrops,coin,settings,test_menu,versus_count,scene,score,free_play_text: those addresses from
 // VF3_BORROW_FROM's profile (default vf3), to try them on another program; VF3_MAP_IN=file: more entry points (hex, a line each); VF3_MAP_OUT=file: appends every address the interpreter ran

@@ -659,7 +659,6 @@ struct settings
 	bool timings = false;    // F9: the timings in the title bar
 	bool smooth_bg = true;   // the 2D backgrounds (the layers below the 3D) scaled smoothly, not as blocks
 	bool sharp_textures = true;   // the 3D's textures' mipmap levels for the picture's size (false: the arcade's, video::Raster::arcade_lod)
-	bool quads = true;       // the 3D's quads drawn as quads, as the Real3D does (false: each as two triangles, video::Raster::quad_rendering)
 	int filter = 0;          // the screen filter: 0 off, 1 scanlines, 2 CRT
 	OnlineSettings online;   // the Online page's
 	int crt_colours = 0;     // an arcade monitor's colours: 0 off, 1-5 as Supermodel's (crt::PRESETS)
@@ -745,7 +744,8 @@ struct settings
 		flag("smooth_backgrounds", smooth_bg);
 		flag("background_filter", smooth_bg);   // (VF1's and VF2's name)
 		flag("sharp_textures", sharp_textures);
-		flag("quad_rendering", quads);
+		// (quad_rendering, Display > Quad rendering's (issue #39) up to v0.1.18-alpha: not read. The quads are always drawn
+		// as quads now, video::Raster::quad_rendering, an Off saved then too; the key isn't written again)
 		num("screen_filter", filter, 0, 2);
 		num("crt_colours", crt_colours, 0, crt::N_PRESETS - 1);
 		num("brightness", brightness, crt::BRIGHT_MIN, crt::BRIGHT_MAX);
@@ -833,7 +833,6 @@ struct settings
 		if (fs_exclusive) fprintf(f, "fullscreen_exclusive = 1\n");
 		if (!gpu3d_failed.empty()) fprintf(f, "gpu_3d_failed = %s\ngpu_3d_failed_build = %s\n", gpu3d_failed.c_str(), BUILD);
 		fprintf(f, "crt_colours = %d\nbrightness = %d\ngamma = %d\nsharp_textures = %d\n", crt_colours, brightness, gamma, int(sharp_textures));
-		fprintf(f, "quad_rendering = %d\n", int(quads));
 		fprintf(f, "hud = %d\nvsync = %d\nframe_limit = %d\n", int(hud), int(vsync), frame_limit);
 		if (graphics) fprintf(f, "graphics = %d\n", graphics);
 		fprintf(f, "window_scale = %d\n", window_scale);
@@ -2281,7 +2280,6 @@ int main(int argc, char **argv)
 	make_2d(tex_below, video::WW);
 	SDL_SetTextureScaleMode(tex_below, cfg.smooth_bg ? SDL_SCALEMODE_LINEAR : SDL_SCALEMODE_NEAREST);
 	video::Raster::arcade_lod = !cfg.sharp_textures;
-	video::Raster::quad_rendering = cfg.quads;
 	make_2d(tex_above, video::W);
 	// A picture into a streaming texture: on Direct3D 11 into the texture itself, mapped (d3d11_map.h: SDL's
 	// lock and update would make a new staging texture each time), else locked; write(pixels, pitch)
@@ -3184,9 +3182,6 @@ int main(int argc, char **argv)
 		p.items.push_back({ tr::D_TEXTURES, tr::D_TEXTURES_HELP,
 			[&] { return std::string(cfg.sharp_textures ? tr::D_SHARP : tr::D_ARCADE); },
 			[&](int) { cfg.sharp_textures = !cfg.sharp_textures; video::Raster::arcade_lod = !cfg.sharp_textures; cfg_dirty = true; } });
-		p.items.push_back({ tr::D_QUADS, tr::D_QUADS_HELP,
-			[&] { return on_off(cfg.quads); },
-			[&](int) { cfg.quads = !cfg.quads; video::Raster::quad_rendering = cfg.quads; cfg_dirty = true; } });
 		p.items.push_back({ tr::D_SMOOTH_MOTION, tr::D_SMOOTH_MOTION_HELP,
 			[&] { return cfg.smooth && gov.smooth_off ? std::string(tr::D_SMOOTH_BUSY) : on_off(cfg.smooth); },
 			[&](int) { cfg.smooth = !cfg.smooth; cfg_dirty = true; gov_fresh(); } });
