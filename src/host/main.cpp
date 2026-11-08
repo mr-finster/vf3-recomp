@@ -300,6 +300,7 @@ hotkey read_inputs(m3::Controls &c, SDL_Gamepad *pads[2], pad_state ps[2], const
 			if (k.what == SK_SERVICE) c.service[0] = true;
 		}
 	auto key = [&](SDL_Scancode k) { return k != SDL_SCANCODE_UNKNOWN && ks[k]; };
+	auto keys = [&](const player_controls &c, int a) { return key(c.key[a]) || key(c.key2[a]); };   // (either of a control's keys)
 	hotkey hk = hotkey::none;
 	static bool key_start_was[2], key_coin_was[2], pad_coin_was[2], key_menu_was[2];
 	for (int p = 0; p < 2; p++) {
@@ -326,16 +327,16 @@ hotkey read_inputs(m3::Controls &c, SDL_Gamepad *pads[2], pad_state ps[2], const
 			st.start_seq = 0;
 		};
 		for (int a = 0; a < C_START; a++)
-			if (key(ctl[p].key[a])) act(a);
-		const bool kstart = key(ctl[p].key[C_START]);
+			if (keys(ctl[p], a)) act(a);
+		const bool kstart = keys(ctl[p], C_START);
 		bool start_held = kstart;   // (held, as the cabinet's: a character chosen with Start held is in the 2P outfit)
 		if (kstart && !key_start_was[p]) press_start();
 		key_start_was[p] = kstart;
-		const bool kcoin = key(ctl[p].key[C_COIN]);
+		const bool kcoin = keys(ctl[p], C_COIN);
 		if (kcoin && !key_coin_was[p] && !g_pc_mode) st.coin_frames = 6;
 		key_coin_was[p] = kcoin;
 		// a key set as Menu opens it too (Esc always does)
-		const bool kmenu = key(ctl[p].key[C_MENU]);
+		const bool kmenu = keys(ctl[p], C_MENU);
 		if (kmenu && !key_menu_was[p]) hk = hotkey::menu;
 		key_menu_was[p] = kmenu;
 		if (SDL_Gamepad *gp = pads[p]) {
@@ -343,13 +344,13 @@ hotkey read_inputs(m3::Controls &c, SDL_Gamepad *pads[2], pad_state ps[2], const
 			const int lx = SDL_GetGamepadAxis(gp, SDL_GAMEPAD_AXIS_LEFTX), ly = SDL_GetGamepadAxis(gp, SDL_GAMEPAD_AXIS_LEFTY);
 			const int dead = 12000;
 			const bool back = btn(SDL_GAMEPAD_BUTTON_BACK);
-			const bool start = player_controls::pad_down(gp, ctl[p].pad[C_START]);
+			const bool start = ctl[p].pad_either(gp, C_START);
 			// Coin and Menu on View are its tap (below), so View + LB and the like stay hotkeys
 			const int coin_code = ctl[p].pad[C_COIN], menu_code = ctl[p].pad[C_MENU];
-			const bool pcoin = coin_code != SDL_GAMEPAD_BUTTON_BACK && player_controls::pad_down(gp, coin_code);
+			const bool pcoin = (coin_code != SDL_GAMEPAD_BUTTON_BACK && player_controls::pad_down(gp, coin_code)) || player_controls::pad_down(gp, ctl[p].pad2[C_COIN]);
 			if (pcoin && !pad_coin_was[p] && !g_pc_mode) st.coin_frames = 6;
 			pad_coin_was[p] = pcoin;
-			const bool pmenu = menu_code != SDL_GAMEPAD_BUTTON_BACK && player_controls::pad_down(gp, menu_code);
+			const bool pmenu = (menu_code != SDL_GAMEPAD_BUTTON_BACK && player_controls::pad_down(gp, menu_code)) || player_controls::pad_down(gp, ctl[p].pad2[C_MENU]);
 			if (pmenu && !st.menu_was && !back) hk = hotkey::menu;   // (View held: LB and RB are its hotkeys)
 			st.menu_was = pmenu;
 			// L3 + R3 and the touchpad click (a PlayStation pad's) always open the menu as well, so a
@@ -358,7 +359,7 @@ hotkey read_inputs(m3::Controls &c, SDL_Gamepad *pads[2], pad_state ps[2], const
 			if (sticks && !st.sticks_was) hk = hotkey::menu;
 			st.sticks_was = sticks;
 			bool touch_bound = false;
-			for (int a = C_GUARD; a < C_COUNT; a++) touch_bound |= ctl[p].pad[a] == SDL_GAMEPAD_BUTTON_TOUCHPAD;
+			for (int a = C_GUARD; a < C_COUNT; a++) touch_bound |= ctl[p].pad[a] == SDL_GAMEPAD_BUTTON_TOUCHPAD || ctl[p].pad2[a] == SDL_GAMEPAD_BUTTON_TOUCHPAD;
 			const bool touch = !touch_bound && btn(SDL_GAMEPAD_BUTTON_TOUCHPAD);
 			if (touch && !st.touch_was) hk = hotkey::menu;
 			st.touch_was = touch;
@@ -376,7 +377,7 @@ hotkey read_inputs(m3::Controls &c, SDL_Gamepad *pads[2], pad_state ps[2], const
 				lb_was[p] = lb; rb_was[p] = rb;
 			} else {
 				for (int a = C_GUARD; a < C_START; a++)
-					if (player_controls::pad_down(gp, ctl[p].pad[a])) act(a);
+					if (ctl[p].pad_either(gp, a)) act(a);
 				if (start && !st.start_was) press_start();
 				start_held |= start;
 			}
@@ -3493,58 +3494,68 @@ int main(int argc, char **argv)
 		cfg_dirty = true;
 		open_pads();
 	};
-	auto keys_page = [&](int p) {
-		menu_page pg{ p ? tr::P_P2_KEYBOARD : tr::P_P1_KEYBOARD, "", {} };
+	// (slot 0 a control's key or button, 1 its second: Controls > Second keys, Second pad buttons)
+	auto key_of = [&](int p, int slot, int a) -> SDL_Scancode & { return slot ? cfg.ctl[p].key2[a] : cfg.ctl[p].key[a]; };
+	auto pad_of = [&](int p, int slot, int a) -> int & { return slot ? cfg.ctl[p].pad2[a] : cfg.ctl[p].pad[a]; };
+	auto keys_page = [&](int p, int slot) {
+		menu_page pg{ slot ? (p ? tr::P_P2_KEYBOARD2 : tr::P_P1_KEYBOARD2) : (p ? tr::P_P2_KEYBOARD : tr::P_P1_KEYBOARD), "", {} };
 		for (int a = 0; a < C_COUNT; a++)
 			pg.items.push_back({ control_name(a), a == C_COIN ? tr::CTL_KEY_HELP_COIN : a == C_MENU ? tr::CTL_KEY_HELP_MENU : tr::CTL_KEY_HELP,
-				[&, p, a] { return key_name(cfg.ctl[p].key[a]); }, {},
-				[&, p, a] {
+				[&, p, slot, a] { return key_name(key_of(p, slot, a)); }, {},
+				[&, p, slot, a] {
 					menu.capture(tr::fill(p ? tr::CTL_PRESS_KEY_P2 : tr::CTL_PRESS_KEY_P1, { { "control", control_name(a) } }),
-						[&, p, a](const SDL_Event &e) {
+						[&, p, slot, a](const SDL_Event &e) {
 							if (e.type != SDL_EVENT_KEY_DOWN) return false;
 							const SDL_Scancode k = e.key.scancode == SDL_SCANCODE_BACKSPACE || e.key.scancode == SDL_SCANCODE_DELETE ? SDL_SCANCODE_UNKNOWN : e.key.scancode;
 							static const SDL_Scancode RESERVED[] = { SDL_SCANCODE_P, SDL_SCANCODE_TAB, SDL_SCANCODE_F3,
 								SDL_SCANCODE_F5, SDL_SCANCODE_F9, SDL_SCANCODE_F6, SDL_SCANCODE_F11, SDL_SCANCODE_F12 };
 							for (SDL_Scancode r : RESERVED) if (k == r) return false;
 							for (const auto &sk : SYS_KEYS) if (k == sk.key) return false;
-							if (k) for (auto &c : cfg.ctl) for (auto &x : c.key) if (x == k) x = SDL_SCANCODE_UNKNOWN;
-							cfg.ctl[p].key[a] = k;
+							// (a key does one thing: taken from wherever else it was, either player's, first or second)
+							if (k) for (auto &c : cfg.ctl) { for (auto &x : c.key) if (x == k) x = SDL_SCANCODE_UNKNOWN; for (auto &x : c.key2) if (x == k) x = SDL_SCANCODE_UNKNOWN; }
+							key_of(p, slot, a) = k;
 							cfg_dirty = true;
 							return true;
 						});
-				}, false, [&, p, a] { cfg.ctl[p].key[a] = SDL_SCANCODE_UNKNOWN; cfg_dirty = true; } });
+				}, false, [&, p, slot, a] { key_of(p, slot, a) = SDL_SCANCODE_UNKNOWN; cfg_dirty = true; } });
 		pg.items.push_back(back_item());
 		return pg;
 	};
-	auto pad_buttons_page = [&](int p) {
-		menu_page pg{ p ? tr::P_P2_PAD : tr::P_P1_PAD, "", {} };
+	auto pad_buttons_page = [&](int p, int slot) {
+		menu_page pg{ slot ? (p ? tr::P_P2_PAD2 : tr::P_P1_PAD2) : (p ? tr::P_P2_PAD : tr::P_P1_PAD), "", {} };
 		for (int a = C_GUARD; a < C_COUNT; a++)
 			pg.items.push_back({ control_name(a), a == C_COIN ? tr::CTL_PADB_HELP_COIN : a == C_MENU ? tr::CTL_PADB_HELP_MENU : tr::CTL_PADB_HELP,
-				[&, p, a] { return pad_label(cfg.ctl[p].pad[a]); }, {},
-				[&, p, a] {
-					menu.capture(tr::fill(a >= C_COIN ? (p ? tr::CTL_PRESS_PAD_P2 : tr::CTL_PRESS_PAD_P1) : (p ? tr::CTL_PRESS_PAD_VIEW_P2 : tr::CTL_PRESS_PAD_VIEW_P1), { { "control", control_name(a) } }),
-						[&, p, a](const SDL_Event &e) {
+				[&, p, slot, a] { return pad_label(pad_of(p, slot, a)); }, {},
+				[&, p, slot, a] {
+					// (View is the first Coin's or Menu's alone: a second button never takes it, it's the menu's hotkeys)
+					const bool view_ok = a >= C_COIN && !slot;
+					menu.capture(tr::fill(view_ok ? (p ? tr::CTL_PRESS_PAD_P2 : tr::CTL_PRESS_PAD_P1) : (p ? tr::CTL_PRESS_PAD_VIEW_P2 : tr::CTL_PRESS_PAD_VIEW_P1), { { "control", control_name(a) } }),
+						[&, p, slot, a, view_ok](const SDL_Event &e) {
 							int code = PAD_NONE;
 							if (e.type == SDL_EVENT_KEY_DOWN) {
 								if (e.key.scancode != SDL_SCANCODE_DELETE && e.key.scancode != SDL_SCANCODE_BACKSPACE) return false;
-								cfg.ctl[p].pad[a] = PAD_NONE;
+								pad_of(p, slot, a) = PAD_NONE;
 								cfg_dirty = true;
 								return true;
 							}
 							if (e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
 								// View: keep it (View is for the menu's hotkeys, not moves), unless it's for Coin or Menu
-								if (e.gbutton.button == SDL_GAMEPAD_BUTTON_BACK && a < C_COIN) return true;
+								if (e.gbutton.button == SDL_GAMEPAD_BUTTON_BACK && !view_ok) return true;
 								code = e.gbutton.button;
 							} else if (e.type == SDL_EVENT_GAMEPAD_AXIS_MOTION && e.gaxis.value > 16000 &&
 									   (e.gaxis.axis == SDL_GAMEPAD_AXIS_LEFT_TRIGGER || e.gaxis.axis == SDL_GAMEPAD_AXIS_RIGHT_TRIGGER))
 								code = e.gaxis.axis == SDL_GAMEPAD_AXIS_LEFT_TRIGGER ? PAD_LT : PAD_RT;
 							else return false;
-							for (int b = C_GUARD; b < C_COUNT; b++) if (cfg.ctl[p].pad[b] == code) cfg.ctl[p].pad[b] = PAD_NONE;
-							cfg.ctl[p].pad[a] = code;
+							// (a button does one thing for a player: taken from wherever else it was, first or second)
+							for (int b = C_GUARD; b < C_COUNT; b++) {
+								if (cfg.ctl[p].pad[b] == code) cfg.ctl[p].pad[b] = PAD_NONE;
+								if (cfg.ctl[p].pad2[b] == code) cfg.ctl[p].pad2[b] = PAD_NONE;
+							}
+							pad_of(p, slot, a) = code;
 							cfg_dirty = true;
 							return true;
 						});
-				}, false, [&, p, a] { cfg.ctl[p].pad[a] = PAD_NONE; cfg_dirty = true; } });
+				}, false, [&, p, slot, a] { pad_of(p, slot, a) = PAD_NONE; cfg_dirty = true; } });
 		pg.items.push_back(back_item());
 		return pg;
 	};
@@ -3678,7 +3689,10 @@ int main(int argc, char **argv)
 			for (int i = SETUP_FIRST_BUTTON; i <= SETUP_START && i < int(setup.got.size()); i++) {
 				if (setup.got[i].empty()) continue;
 				const int code = CODE[i - SETUP_FIRST_BUTTON];
-				for (int b = C_GUARD; b < C_COUNT; b++) if (cfg.ctl[q].pad[b] == code) cfg.ctl[q].pad[b] = PAD_NONE;
+				for (int b = C_GUARD; b < C_COUNT; b++) {
+					if (cfg.ctl[q].pad[b] == code) cfg.ctl[q].pad[b] = PAD_NONE;
+					if (cfg.ctl[q].pad2[b] == code) cfg.ctl[q].pad2[b] = PAD_NONE;
+				}
 				cfg.ctl[q].pad[SETUP_STEPS[i].action] = code;
 			}
 		}
@@ -3755,9 +3769,12 @@ int main(int argc, char **argv)
 		menu_page pg{ p ? tr::P_PLAYER_2 : tr::P_PLAYER_1, "", {} };
 		pg.items.push_back({ tr::CTL_PAD, tr::CTL_PAD_HELP,
 							 [&, p] { return pad_name(p); }, [&, p](int d) { cycle_pad(p, d); } });
-		pg.items.push_back({ tr::CTL_KEYBOARD, tr::CTL_KEYBOARD_HELP, {}, {}, [&, p] { menu.push(keys_page(p)); } });
+		pg.items.push_back({ tr::CTL_KEYBOARD, tr::CTL_KEYBOARD_HELP, {}, {}, [&, p] { menu.push(keys_page(p, 0)); } });
+		pg.items.push_back({ tr::CTL_KEYBOARD2, tr::CTL_KEYBOARD2_HELP, {}, {}, [&, p] { menu.push(keys_page(p, 1)); } });
 		pg.items.push_back({ tr::CTL_PAD_BUTTONS, tr::CTL_PAD_BUTTONS_HELP,
-							 {}, {}, [&, p] { menu.push(pad_buttons_page(p)); } });
+							 {}, {}, [&, p] { menu.push(pad_buttons_page(p, 0)); } });
+		pg.items.push_back({ tr::CTL_PAD_BUTTONS2, tr::CTL_PAD_BUTTONS2_HELP,
+							 {}, {}, [&, p] { menu.push(pad_buttons_page(p, 1)); } });
 		pg.items.push_back({ tr::CTL_SETUP, tr::CTL_SETUP_HELP,
 							 {}, {}, [&, p] { setup_start(p); } });
 		pg.items.push_back({ tr::CTL_RESET, tr::CTL_RESET_HELP, {}, {},
@@ -3773,7 +3790,7 @@ int main(int argc, char **argv)
 								 }
 								 cfg.ctl[p] = player_controls::defaults(p);
 								 for (auto k : cfg.ctl[p].key)
-									 if (k) for (auto &x : cfg.ctl[1 - p].key) if (x == k) x = SDL_SCANCODE_UNKNOWN;
+									 if (k) { for (auto &x : cfg.ctl[1 - p].key) if (x == k) x = SDL_SCANCODE_UNKNOWN; for (auto &x : cfg.ctl[1 - p].key2) if (x == k) x = SDL_SCANCODE_UNKNOWN; }
 								 cfg_dirty = true;
 								 open_pads();
 							 } });

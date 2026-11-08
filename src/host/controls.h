@@ -1,6 +1,8 @@
 // The players' controls: keys and pad buttons for each of VF3's buttons (guard, punch, kick, escape) and the
 // usual pairs, and which pad each player
-// holds. Edited in the menu (Controls), kept in settings.ini.
+// holds. Edited in the menu (Controls), kept in settings.ini. Each control has a second key and a second pad button
+// as well (Controls > Second keys, Second pad buttons: none by default), either one working: settings.ini's
+// p1_key2_guard, p1_pad2_guard and so on, written only when set, so an older file loads as it did.
 #pragma once
 #include <SDL3/SDL.h>
 #include <algorithm>
@@ -27,6 +29,8 @@ struct player_controls
 {
 	SDL_Scancode key[C_COUNT];
 	int pad[C_COUNT];                  // the d-pad and left stick always move as well
+	SDL_Scancode key2[C_COUNT];        // a second key for each (SDL_SCANCODE_UNKNOWN: none)
+	int pad2[C_COUNT];                 // and a second pad button (PAD_NONE: none)
 	std::string pad_choice = "auto";   // "auto" (the next free pad), "none", or a pad's GUID
 
 	static player_controls defaults(int player)
@@ -49,6 +53,8 @@ struct player_controls
 		for (int a = 0; a < C_COUNT; a++) {
 			c.key[a] = (player ? k2 : k1)[a];
 			c.pad[a] = pad[a];
+			c.key2[a] = SDL_SCANCODE_UNKNOWN;
+			c.pad2[a] = PAD_NONE;
 		}
 		return c;
 	}
@@ -56,14 +62,20 @@ struct player_controls
 	void load(const std::map<std::string, std::string> &kv, int player)
 	{
 		const std::string p = player ? "p2_" : "p1_";
+		auto scancode = [](const std::string &v) {
+			return v == "none" ? SDL_SCANCODE_UNKNOWN
+				   : v.size() > 1 && v[0] == '#' && isdigit(uint8_t(v[1])) ? SDL_Scancode(std::clamp(atoi(v.c_str() + 1), 0, int(SDL_SCANCODE_COUNT) - 1))
+											 : SDL_GetScancodeFromName(v.c_str());
+		};
 		for (int a = 0; a < C_COUNT; a++) {
 			auto k = kv.find(p + "key_" + CONTROL_KEYS[a]);
-			if (k != kv.end())
-				key[a] = k->second == "none" ? SDL_SCANCODE_UNKNOWN
-					   : k->second.size() > 1 && k->second[0] == '#' && isdigit(uint8_t(k->second[1])) ? SDL_Scancode(std::clamp(atoi(k->second.c_str() + 1), 0, int(SDL_SCANCODE_COUNT) - 1))
-											 : SDL_GetScancodeFromName(k->second.c_str());
+			if (k != kv.end()) key[a] = scancode(k->second);
 			auto b = kv.find(p + "pad_" + CONTROL_KEYS[a]);
 			if (b != kv.end()) pad[a] = pad_from_name(b->second);
+			auto k2 = kv.find(p + "key2_" + CONTROL_KEYS[a]);
+			if (k2 != kv.end()) key2[a] = scancode(k2->second);
+			auto b2 = kv.find(p + "pad2_" + CONTROL_KEYS[a]);
+			if (b2 != kv.end()) pad2[a] = pad_from_name(b2->second);
 		}
 		auto c = kv.find(p + "pad");
 		if (c != kv.end()) pad_choice = c->second;
@@ -77,7 +89,14 @@ struct player_controls
 			fprintf(f, "%skey_%s = %s\n", p, CONTROL_KEYS[a], scancode_save_name(key[a]).c_str());
 		for (int a = C_GUARD; a < C_COUNT; a++)
 			fprintf(f, "%spad_%s = %s\n", p, CONTROL_KEYS[a], pad_save_name(pad[a]).c_str());
+		for (int a = 0; a < C_COUNT; a++)   // (the second ones only when set)
+			if (key2[a]) fprintf(f, "%skey2_%s = %s\n", p, CONTROL_KEYS[a], scancode_save_name(key2[a]).c_str());
+		for (int a = C_GUARD; a < C_COUNT; a++)
+			if (pad2[a] != PAD_NONE) fprintf(f, "%spad2_%s = %s\n", p, CONTROL_KEYS[a], pad_save_name(pad2[a]).c_str());
 	}
+
+	// either of a control's pad buttons down
+	bool pad_either(SDL_Gamepad *g, int a) const { return pad_down(g, pad[a]) || pad_down(g, pad2[a]); }
 
 	// a key as settings.ini keeps it: SDL's name, or "#n" for one without a name (not "key = ")
 	static std::string scancode_save_name(SDL_Scancode k)
