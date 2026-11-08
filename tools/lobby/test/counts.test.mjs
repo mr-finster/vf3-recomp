@@ -4,6 +4,8 @@
 // builds that send none of the rooms fields. Then time: a match in a room that stays going past 10 minutes, and
 // everyone gone. What counts as online: every player the lobby knows is there (searching, hosting, in a room's line,
 // in a match), each once a game; watchers apart (games[g].watching: watching, not playing; never in total).
+// And the games' "N online" by Quick match (POST /v1/random/count): that same total, the game's own, whatever build asks;
+// the queue's own count when the Stats can't be reached.
 //   cd tools/lobby && npm test   (node test/counts.test.mjs src/index.js; COUNTS_OUT=file writes the mix's /v1/online)
 import { lobby, settle, queued } from './standin.mjs';
 import { writeFileSync } from 'node:fs';
@@ -146,6 +148,45 @@ check('the mix: VF3 site (VF3 + Team Battle)', d.games.vf3.total + d.games.vf3tb
 const rooms_by = {};
 for (const r of d.rooms || []) if (!r.older && !r.locked) rooms_by[r.game] = (rooms_by[r.game] || 0) + 1;
 check('the mix: the rooms list, by game (the Online page\'s tabs)', { vf1: rooms_by.vf1 | 0, vf2: rooms_by.vf2 | 0, vf3: rooms_by.vf3 | 0, vf3tb: rooms_by.vf3tb | 0 }, listed);
+
+// ---- the games' "N online" by Quick match (POST /v1/random/count): the game's players, as the Online page has them ----
+// (asked as each game's builds ask: a new build and an older one of each; VF3 and Team Battle each their own)
+const askers = { vf1: [vf1('ASK1'), vf1('ASK16', { watchable: true, pool: '', accepts: [] })], vf2: [vf2('ASK2'), vf2_old('ASK2OLD')],
+	vf3: [vf3('ASK3'), vf3_old('ASK3OLD')], vf3tb: [tb('ASKTB'), tb('ASKTBOLD', { version: 'v0.1.7-online-preview', pool: undefined, accepts: undefined })] };
+const random_count = async (p) => { const r = await call('POST', '/v1/random/count', p, p.from); return [r.status, r.body]; };
+const shape = ([status, b]) => status === 200 && b && Object.keys(b).join() === 'players' && Number.isInteger(b.players) && b.players >= 0;
+{
+	const got = {}, page = {}, shapes = [];
+	for (const [g, ps] of Object.entries(askers)) {
+		got[g] = [];
+		for (const p of ps) { const r = await random_count(p); shapes.push(shape(r)); got[g].push(r[1].players); }
+		page[g] = [d.games[g].total, d.games[g].total];
+	}
+	check('"N online": each game\'s count is the Online page\'s total for that game, whatever build asks', got, page);
+	check('"N online": the same as who is really there (no Quick match counted twice, the rooms in it)', Object.fromEntries(Object.entries(got).map(([g, l]) => [g, l[0]])), truth);
+	check('"N online": Team Battle\'s its own, not VF3\'s', [got.vf3tb[0] === truth.vf3tb, got.vf3[0] === truth.vf3, truth.vf3tb !== truth.vf3], [true, true, true]);
+	check('"N online": the answer is {players: number}, as every released game reads it', shapes.every(Boolean), true);
+	// the Stats not answering (an error, a throw, no binding): the queue's own count, as before; never an error
+	const stats = env.STATS, failing = [
+		['an error', { idFromName: (n) => n, get: () => ({ fetch: async () => new Response('{"error":"server"}', { status: 500 }) }) }],
+		['a throw', { idFromName: (n) => n, get: () => ({ fetch: async () => { throw new Error('gone'); } }) }],
+		['none', undefined],
+	];
+	for (const [what, s] of failing) {
+		env.STATS = s;
+		const r3 = await random_count(askers.vf3[0]), rtb = await random_count(askers.vf3tb[0]);
+		env.STATS = stats;
+		// (VF3's queue: SEEK1, SEEK2 and OLDSEEK searching, QMA and QMB's match; Team Battle's: TBSEEK searching)
+		check('"N online", the Stats ' + what + ': the queue\'s count, {players}, 200', [shape(r3), r3[1].players, shape(rtb), rtb[1].players], [true, 5, true, 1]);
+	}
+	check('"N online": the Stats back, the page\'s total again', (await random_count(askers.vf3[0]))[1].players, truth.vf3);
+	// a Quick match played three times by the same two (a rematch each time, through the queue): still two players
+	const a = vf3('AGAINA'), b = vf3('AGAINB');
+	for (let i = 0; i < 3; i++) await quick_pair(a, b);
+	truth.vf3 += 2;
+	await settle();
+	check('"N online": the same two in three Quick matches, counted once each', [(await random_count(askers.vf3[0]))[1].players, (await online()).games.vf3.total], [truth.vf3, truth.vf3]);
+}
 
 // ---- time: the rooms that stay play on, 12 minutes (holds every 15 s, their lines asking every 5 s); everyone else quiet ----
 for (let s = 5; s <= 12 * 60; s += 5) {

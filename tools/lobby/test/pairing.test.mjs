@@ -169,16 +169,20 @@ for (const [what, a, b, want] of cases) {
 	console.log('\nmatrix: ' + table.length + ' pairs: ' + tally.matched + ' matched, ' + tally.refused + ' apart as they should be, ' + tally.failed + ' failed');
 }
 // an old lobby's way, a new game: no pool sent at all is today's (version) rule: covered by the old/old cases
-// the count: those one can be matched with
+// the queue's own count (/v1/random/count's answer when the Stats can't be reached: test/counts.test.mjs has the
+// usual one, the game's players online): those one can be matched with
 {
 	const a = old('A', B + '+stage'), b = neu('B', B), c = old('C', B + '+dural+stage'), d = old('D', 'v0.1.7-online-preview+bogus');
 	for (const x of [a, b, c, d]) x.content = 'fedcba9876543210';   // (a queue of its own: no matches made in it)
 	const t = [];
 	for (const x of [a, c, d]) t.push((await post('/v1/random', { ...x, cands: [] }, x.from)).body.ticket);
+	const stats = env.STATS;
+	env.STATS = undefined;   // (only while asking: the queue's own count)
 	const n = await post('/v1/random/count', b, b.from);
 	check('count, a new player sees the old players it can play (not +bogus)', n.body.players, 2);
 	const m = await post('/v1/random/count', a, a.from);
 	check('count, an old +stage player sees only its own (none else)', m.body.players, 1);
+	env.STATS = stats;
 }
 // /v1/online: one count a game (who one can meet), the older versions' players among them, no variants
 {

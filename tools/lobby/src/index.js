@@ -14,7 +14,10 @@
 //        (avoid: room codes of random matches lately, their other player not matched with this one again)
 //   POST /v1/random/wait  {ticket}  (waits up to 20 s) -> the same
 //   POST /v1/random/leave {ticket}
-//   POST /v1/random/count {game, version, content} -> {players}: searching, or in a random match made in the last 10 minutes
+//   POST /v1/random/count {game, version, content} -> {players}: the game's players online, as /v1/online counts them
+//        (its games[game].total: each player once, searching, hosting, in a room's line or in a match; no watchers).
+//        Stats not there or not answering: the queue's own count, as before (searching, or in a Quick match made in the
+//        last 10 minutes)
 //   A match: {role: "host", code, key, token, name, country} (the room's, opened as theirs, the other already in it)
 //   or {role: "guest", code, name, cands, relay, token, country} (as /v1/join's). Players meet the nearest first.
 //   Any of these may carry {pool, accepts} as well (a game that plays across settings: its version's base and a flag,
@@ -459,16 +462,7 @@ export default {
 				const me = who(b, req);
 				if (!GAMES.test(me.game) || !me.version) return json({ error: 'bad' }, 400);
 				const q = env.QUEUES.get(env.QUEUES.idFromName('q|' + me.game + '|' + base_of(me.version) + '|' + me.content));
-				if (path === '/v1/random/count') {   // (asked by everyone on the Online screen: kept 30 s at the edge, the queue asked once a place)
-					const key = new Request('https://count.vf-lobby/' + encodeURIComponent(me.game + '|' + me.version + '|' + me.content + '|' + me.pool + '|' + me.accepts.join(',')));
-					const edge = !env.TURN_STATIC;   // (not on a test's own lobby: its count's checked as it changes)
-					const kept = edge && (await caches.default.match(key));
-					if (kept) return kept;
-					const r = await q.fetch('https://queue/count', { method: 'POST', body: JSON.stringify({ me }) });
-					const out = new Response(await r.text(), { status: r.status, headers: { 'content-type': 'application/json', 'cache-control': 'max-age=30' } });
-					if (edge && r.status === 200) await caches.default.put(key, out.clone());
-					return out;
-				}
+				if (path === '/v1/random/count') return await random_count(env, me, q);
 				return q.fetch('https://queue' + (path === '/v1/random' ? '/enter' : path.slice(10)), {
 					method: 'POST',
 					body: JSON.stringify({ me, geo: geo_of(req), region: region_of(req), from: sender(req), sid: path === '/v1/random' ? await player_id(req, me.name) : '', aid: path === '/v1/random' ? await player_id(req, '#room', 3) : '', ticket: clean(b.ticket, 32), avoid: Array.isArray(b.avoid) ? b.avoid.slice(0, 8).map((c) => clean(c, 8)) : [] }),
@@ -482,6 +476,43 @@ export default {
 	},
 };
 
+// The "N online" a game shows by Quick match: the game's players online, the same number the Online page and the
+// sites show for it (/v1/online's games[game].total, as online_counts gets it: each Worker copy's memory and the edge
+// first, the Stats asked about once a copy every ONLINE_FRESH_MS). Kept 30 s at the edge a game (it no longer depends
+// on the version, ROM or pool asking), so it's worked out at most once a game a place every 30 s. The Stats not
+// there or not answering: the queue's own count, as before (searching it can meet, or in a Quick match lately), kept
+// as before by everything it depends on; never an error. Always {players: number}, as every released game reads it.
+// (Someone on the Online screen and not searching isn't counted, as on the page: the lobby doesn't know they're there.)
+async function random_count(env, me, q) {
+	const edge = !env.TURN_STATIC;   // (not on a test's own lobby: its count's checked as it changes)
+	const headers = { 'content-type': 'application/json', 'cache-control': 'max-age=30' };
+	const key = new Request('https://count.vf-lobby/v2/' + encodeURIComponent(me.game));
+	const kept = edge && (await caches.default.match(key));
+	if (kept) return kept;
+	let players = -1;
+	try {
+		if (env.STATS) {
+			const r = await online_counts(env);
+			if (r.status === 200) {
+				const g = (await r.json()).games?.[me.game];
+				if (g && Number.isInteger(g.total) && g.total >= 0) players = g.total;
+			} else await r.body?.cancel();
+		}
+	} catch (e) {}
+	if (players >= 0) {
+		const out = new Response(JSON.stringify({ players }), { headers });
+		if (edge) await caches.default.put(key, out.clone());
+		return out;
+	}
+	// (the queue's count, as the lobby gave it before: by game, version, ROM, pool and what it accepts)
+	const old = new Request('https://count.vf-lobby/' + encodeURIComponent(me.game + '|' + me.version + '|' + me.content + '|' + me.pool + '|' + me.accepts.join(',')));
+	const was = edge && (await caches.default.match(old));
+	if (was) return was;
+	const r = await q.fetch('https://queue/count', { method: 'POST', body: JSON.stringify({ me }) });
+	const out = new Response(await r.text(), { status: r.status, headers });
+	if (edge && r.status === 200) await caches.default.put(old, out.clone());
+	return out;
+}
 function room(env, code) {
 	return env.ROOMS.get(env.ROOMS.idFromName(code));
 }
