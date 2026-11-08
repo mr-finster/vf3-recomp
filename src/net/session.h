@@ -47,6 +47,13 @@ struct Game
 	// The other side's extra (Identity::extra), before begin on both sides: a game's choices that change how its
 	// match starts (VF1's: each player's fighter). Empty from a side that sends none
 	virtual void peer_extra(const std::string &) {}
+	// A watched match's snapshot (watch.h, Snap): what this build's states are (a number its own: another build's, or
+	// another layout, never the same), 0 if they can't go to another process; the game's own to go with one (the host's,
+	// for its frame: VF2's sound bytes before it); and one from another process loaded (a watcher's, the host's state
+	// and extra: load's, unless a game's states hold something of its own process's)
+	virtual uint32_t snap_format() const { return 0; }
+	virtual void snap_extra(uint32_t, std::vector<uint8_t> &out) { out.clear(); }
+	virtual bool load_snap(const std::vector<uint8_t> &state, const std::vector<uint8_t> &) { return load(state); }
 	virtual ~Game() = default;
 };
 
@@ -161,6 +168,11 @@ public:
 	// This side's desync check's hashes of late (frame: the state before it), the confirmed frames' only: what a match's
 	// watchers check their own game against (watch.h)
 	const std::map<uint32_t, uint64_t> &hashes() const { return my_hash; }
+	// The newest confirmed frame whose state (the state before it) this side still keeps: a watched match's snapshot
+	// is made from it (watch.h, Snapper), off this thread. Its bytes, nullptr if none; they stay as they are until the
+	// step that runs frame + kept_for() (that one may save over them), so they may be read meanwhile
+	const std::vector<uint8_t> *kept_state(uint32_t &frame) const;
+	uint32_t kept_for() const { return uint32_t(ring.size()); }
 	void set_local_flags(uint8_t f) { my_flags = f; }   // e.g. 1: in the menu (shown to the other player)
 	// The frames this side can run again in one step and still make its frame (told the other side: its input delay
 	// covers what this side can't, so a rollback here never makes a frame late; AutoDelay::rollback_room)

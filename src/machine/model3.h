@@ -51,6 +51,7 @@ public:
 	{
 		io.pod(regs); io.pod(CS); io.pod(CLK); io.pod(DI); io.pod(DO); io.pod(out); io.pod(in);
 		io.pod(bits_out); io.pod(receiving); io.pod(addr); io.pod(busy); io.pod(locked);
+		if constexpr (IO::loading) addr &= 0x3F;   // (a state from elsewhere: kept to the 64 words)
 	}
 private:
 	unsigned CS = 0, CLK = 0, DI = 0, DO = 0;
@@ -76,6 +77,11 @@ public:
 			io.pod(d.asic); io.pod(d.kind); io.pod(d.id); io.pod(d.shift); io.pod(d.size); io.pod(d.ir); io.pod(d.mode);
 		}
 		io.pod(state); io.pod(last_tck); io.pod(tdo); io.pod(modeword);
+		if constexpr (IO::loading)   // (a state from elsewhere: which ASIC and the shift's length kept in range)
+			for (Device &d : dev) {
+				if (d.kind < -1 || d.kind > 4) d.kind = -1;
+				d.size = d.size < 1 ? 1 : d.size > 64 ? 64 : d.size;
+			}
 	}
 private:
 	struct Device

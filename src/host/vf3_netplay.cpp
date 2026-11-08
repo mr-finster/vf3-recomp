@@ -220,6 +220,15 @@ uint64_t Adapter::hash(const std::vector<uint8_t> &state)
 	return vfnet::hash64(state.data() + skip, state.size() - skip);
 }
 
+uint32_t Adapter::snap_format() const
+{
+	const std::string k = std::string("vf3|") + NET_VERSION + "|" + board.profile->set + "|" + std::to_string(m3::Model3::STATE_VERSION) + "|" +
+	                      std::to_string(board.ram.size()) + "|" + std::to_string(board.backup.size()) + "|" + std::to_string(sizeof(void *));
+	uint32_t h = 2166136261u;
+	for (const char c : k) h = (h ^ uint8_t(c)) * 16777619u;
+	return h ? h : 1;
+}
+
 void Adapter::save(std::vector<uint8_t> &state)
 {
 	if (settle) settle();

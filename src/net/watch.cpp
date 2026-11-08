@@ -6,6 +6,7 @@
 #include <cstring>
 #include <random>
 #include <vector>
+#include <zlib.h>
 
 namespace vfnet::watch {
 
@@ -88,7 +89,7 @@ std::string meta_json(const Meta &m)
 {
 	using json::quote;
 	return "{\"game\":" + quote(m.game) + ",\"terms\":" + quote(m.terms) + ",\"content\":" + quote(m.content) + ",\"build\":" + quote(m.build) +
-	       ",\"p1\":" + quote(m.name[0]) + ",\"p2\":" + quote(m.name[1]) + ",\"c1\":" + quote(m.country[0]) + ",\"c2\":" + quote(m.country[1]) + "}";
+	       ",\"p1\":" + quote(m.name[0]) + ",\"p2\":" + quote(m.name[1]) + ",\"c1\":" + quote(m.country[0]) + ",\"c2\":" + quote(m.country[1]) + (m.snap ? ",\"snap\":1}" : "}");
 }
 
 bool parse_meta(const std::string &s, Meta &m)
@@ -103,6 +104,7 @@ bool parse_meta(const std::string &s, Meta &m)
 	m.name[1] = clean(v["p2"].str(), size_t(MAX_NAME));
 	m.country[0] = clean(v["c1"].str(), 2);
 	m.country[1] = clean(v["c2"].str(), 2);
+	m.snap = v["snap"].kind == json::Value::number && v["snap"].n == 1;
 	return !m.game.empty();
 }
 
@@ -173,6 +175,77 @@ bool decode_reply(const std::vector<uint8_t> &b, Reply &r)
 	if (!i.frames(r.frames, MAX_REPLY)) return false;
 	r.frames.match = r.match;
 	return i.ok && r.total <= MAX_FRAMES;
+}
+
+std::vector<uint8_t> encode_snap(const Snap &s, int level)
+{
+	if (s.state.size() > MAX_SNAP_STATE || s.extra.size() > MAX_SNAP_EXTRA || !s.match) return {};
+	Out o;
+	o.head(SNAP, s.match);
+	o.u32(s.frame);
+	o.u32(s.format);
+	o.u64(s.hash);
+	o.u32(uint32_t(s.state.size()));
+	o.u32(uint32_t(s.extra.size()));
+	o.u32(0);   // (the packed length, below)
+	z_stream z{};
+	if (deflateInit(&z, level) != Z_OK) return {};
+	const size_t head = o.b.size();
+	o.b.resize(head + deflateBound(&z, uLong(s.state.size() + s.extra.size())) + 64);
+	z.next_out = o.b.data() + head;
+	z.avail_out = uInt(o.b.size() - head);
+	z.next_in = const_cast<Bytef *>(s.state.data());
+	z.avail_in = uInt(s.state.size());
+	int r = deflate(&z, Z_NO_FLUSH);
+	if (r == Z_OK) {
+		z.next_in = const_cast<Bytef *>(s.extra.data());
+		z.avail_in = uInt(s.extra.size());
+		r = deflate(&z, Z_FINISH);
+	}
+	const size_t packed = z.total_out;
+	deflateEnd(&z);
+	if (r != Z_STREAM_END || packed > MAX_SNAP) return {};
+	o.b.resize(head + packed);
+	const uint32_t n = uint32_t(packed);
+	for (int k = 0; k < 4; k++) o.b[head - 4 + size_t(k)] = uint8_t(n >> (8 * k));
+	return o.b;
+}
+
+bool snap_head(const std::vector<uint8_t> &b, uint64_t &match, uint32_t &frame)
+{
+	In i(b);
+	if (!i.head(SNAP, match)) return false;
+	frame = i.u32();
+	return i.ok && match != 0;
+}
+
+bool decode_snap(const std::vector<uint8_t> &b, Snap &s)
+{
+	In i(b);
+	if (!i.head(SNAP, s.match)) return false;
+	s.frame = i.u32();
+	s.format = i.u32();
+	s.hash = i.u64();
+	const uint32_t sl = i.u32(), el = i.u32(), pl = i.u32();
+	if (!i.ok || !s.match || sl > MAX_SNAP_STATE || el > MAX_SNAP_EXTRA || pl > MAX_SNAP || size_t(i.e - i.p) != pl || s.frame > MAX_FRAMES) return false;
+	s.state.assign(sl, 0);
+	s.extra.assign(el, 0);
+	z_stream z{};
+	if (inflateInit(&z) != Z_OK) return false;
+	z.next_in = const_cast<Bytef *>(i.p);
+	z.avail_in = pl;
+	z.next_out = s.state.data();
+	z.avail_out = sl;
+	int r = sl ? inflate(&z, Z_NO_FLUSH) : Z_OK;
+	uint8_t spare = 0;   // (no extra: room for a byte, so the stream's end is read; one put there is too many)
+	if (r == Z_OK && z.avail_out == 0) {   // (the state whole: the extra after it)
+		z.next_out = el ? s.extra.data() : &spare;
+		z.avail_out = el ? el : 1;
+		r = inflate(&z, Z_FINISH);
+	}
+	const bool good = r == Z_STREAM_END && z.avail_in == 0 && z.total_out == uLong(sl) + el;
+	inflateEnd(&z);
+	return good;
 }
 
 uint64_t state_hash_part(const std::vector<uint8_t> &st, size_t skip, int part, uint64_t h)
@@ -264,6 +337,144 @@ void Feed::done(const Upload &u, bool ok, uint32_t has, int w, double now)
 	info_sent = info;
 }
 
+// ---- Snapper ----
+
+namespace {
+double ms_since(std::chrono::steady_clock::time_point t) { return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t).count(); }
+}
+
+void Snapper::want(double now)
+{
+	if (!wanted) wanted_at = now;
+	wanted = true;
+}
+
+void Snapper::let_go()
+{
+	if (!job) return;
+	job->cancel = true;
+	while (job->reading) std::this_thread::yield();   // (a megabyte's copy at most)
+	job.reset();
+}
+
+void Snapper::stop()
+{
+	let_go();
+	phase = Phase::idle;
+	in_flight = wanted = false;
+	std::vector<uint8_t>().swap(packed);
+}
+
+void Snapper::before_step(const Session &s)
+{
+	if (!job || !job->reading || s.frame() < frame + kept_for) return;   // (the next step leaves its state be)
+	const auto t0 = std::chrono::steady_clock::now();
+	let_go();   // (stopped at its next piece: tried again from a newer state)
+	phase = Phase::idle;
+	stall_ms += ms_since(t0);
+	wanted = true;
+	made_at = -1e18;
+}
+
+void Snapper::step(const Session &s, Game &g, uint64_t m, double now)
+{
+	if (phase == Phase::copying) {
+		if (!job->done) return;
+		last_copy_ms = job->copy_ms;
+		last_pack_ms = job->pack_ms;
+		last_raw = job->raw;
+		packed = std::move(job->packed);
+		job.reset();
+		if (packed.empty()) { failed++; phase = Phase::idle; return; }
+		phase = Phase::uploading;
+		part = tries = 0;
+		in_flight = false;
+		next_at = upload_at = now;
+		last_packed = packed.size();
+		last_frame = frame;
+		made++;
+		return;
+	}
+	if (phase == Phase::uploading) {
+		if (now - started_at > give_up_ms) { failed++; phase = Phase::idle; std::vector<uint8_t>().swap(packed); }
+		return;
+	}
+	if (!wanted || now - made_at < min_gap_ms || !g.snap_format() || !m) return;
+	uint32_t f = 0;
+	const std::vector<uint8_t> *st = s.kept_state(f);
+	if (!st || st->empty() || st->size() > MAX_SNAP_STATE || s.frame() + 2 > f + s.kept_for()) return;   // (none, or one about to go: the next)
+	wanted = false;
+	made_at = started_at = now;
+	frame = f;
+	kept_for = s.kept_for();
+	match = m;
+	std::vector<uint8_t> ex;
+	g.snap_extra(f, ex);
+	if (ex.size() > MAX_SNAP_EXTRA) ex.clear();
+	const uint8_t *p = st->data();
+	const size_t n = st->size(), skip = g.hash_skip();
+	const uint32_t format = g.snap_format();
+	job = std::make_shared<Job>();
+	phase = Phase::copying;
+	std::thread([j = job, p, n, skip, format, f, m, ex = std::move(ex)]() mutable {
+		const auto t0 = std::chrono::steady_clock::now();
+		Snap sn;
+		sn.match = m;
+		sn.frame = f;
+		sn.format = format;
+		sn.state.resize(n);
+		for (size_t at = 0; at < n; at += 1u << 20) {
+			if (j->cancel) { j->reading = false; j->done = true; return; }
+			memcpy(sn.state.data() + at, p + at, std::min<size_t>(1u << 20, n - at));
+		}
+		j->reading = false;   // (the session's state let go: the rest is this copy's)
+		j->copy_ms = ms_since(t0);
+		const auto t1 = std::chrono::steady_clock::now();
+		sn.hash = state_hash(sn.state, skip);
+		sn.extra = std::move(ex);
+		j->raw = n + sn.extra.size();
+		if (!j->cancel) j->packed = encode_snap(sn, 1);
+		j->pack_ms = ms_since(t1);
+		j->done = true;
+	}).detach();
+}
+
+bool Snapper::next(double now, Part &p)
+{
+	if (phase != Phase::uploading || in_flight || now < next_at) return false;
+	const uint32_t count = uint32_t((packed.size() + part_bytes - 1) / part_bytes);
+	if (part >= count) { phase = Phase::idle; std::vector<uint8_t>().swap(packed); return false; }
+	p = {};
+	p.index = part;
+	p.count = count;
+	p.frame = frame;
+	p.match = match;
+	const size_t a = size_t(part) * part_bytes, b = std::min(packed.size(), a + part_bytes);
+	p.body.assign(packed.begin() + ptrdiff_t(a), packed.begin() + ptrdiff_t(b));
+	in_flight = true;
+	return true;
+}
+
+void Snapper::done(const Part &p, bool ok, double ms, double now)
+{
+	in_flight = false;
+	if (phase != Phase::uploading || p.frame != frame || p.match != match || p.index != part) return;
+	if (!ok) {   // (again a little later; a fourth time, this one let go)
+		if (++tries >= 4) { failed++; phase = Phase::idle; std::vector<uint8_t>().swap(packed); return; }
+		next_at = now + 1000.0 * tries;
+		return;
+	}
+	tries = 0;
+	part++;
+	next_at = now + std::max(gap_ms, ms);   // (half of what the connection carried at most, whatever it is)
+	if (size_t(part) * part_bytes >= packed.size()) {
+		sent++;
+		last_upload_ms = now - upload_at;
+		phase = Phase::idle;
+		std::vector<uint8_t>().swap(packed);
+	}
+}
+
 // ---- Spectator ----
 
 bool Spectator::start(const Start &s)
@@ -276,6 +487,25 @@ bool Spectator::start(const Start &s)
 	if (!game.begin(s.blob)) { st = State::failed; why = "The match's start couldn't be loaded."; return false; }
 	started = true;
 	st = State::starting;   // (till its first frames come)
+	return true;
+}
+
+bool Spectator::snapshot(const Snap &s)
+{
+	if (!started || s.match != start_.match || st == State::failed || st == State::out_of_step || st == State::over) return false;
+	if (s.frame <= at || s.frame > MAX_FRAMES) { why = "behind"; return false; }
+	if (!game.snap_format() || s.format != game.snap_format()) { why = "another format"; return false; }
+	const size_t skip = game.hash_skip();
+	if (state_hash(s.state, skip) != s.hash) { why = "its hash isn't its state's"; return false; }
+	if (!game.load_snap(s.state, s.extra)) { st = State::out_of_step; why = "The match's snapshot couldn't be loaded."; return false; }
+	std::vector<uint8_t> now;   // (the board's own state after it: all of it taken)
+	game.save(now);
+	if (state_hash(now, skip) != s.hash) { st = State::out_of_step; why = "The match's snapshot wasn't taken whole."; return false; }
+	if (in.size() < size_t(s.frame) * 2) in.resize(size_t(s.frame) * 2, 0);   // (the frames before it: never run)
+	at = snap_from = s.frame;
+	hashing.on = false;
+	for (auto it = hashes.begin(); it != hashes.end() && it->first < at;) it = hashes.erase(it);
+	if (st == State::starting || st == State::waiting) st = State::catching_up;
 	return true;
 }
 
@@ -408,8 +638,10 @@ int Spectator::tick(bool *shown, double budget_ms)
 	const int64_t lag = int64_t(std::max(lobby_total, end)) - int64_t(at);
 	int ran = 0;
 	// far behind (joining late, or after a long spell cut off): unseen, as fast as the pass allows, to the buffer
-	if (lag > want + frames(cfg.jump_ms) || (st == State::catching_up && lag > want)) {
-		if (st != State::catching_up && st != State::waiting) jumps++;
+	// (and before its first picture, whatever it is now: one that ran dry catching up, or came in from a snapshot with
+	// none of the frames after it yet, catches up all the way, unseen, not a quarter faster with its sound)
+	if (lag > want + frames(cfg.jump_ms) || ((st == State::catching_up || !ticks) && lag > want)) {
+		if (st != State::catching_up && st != State::waiting && ticks) jumps++;
 		st = State::catching_up;
 		const auto t0 = std::chrono::steady_clock::now();
 		const double budget = budget_ms >= 0 ? budget_ms : cfg.catch_up_ms;

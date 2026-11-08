@@ -189,6 +189,9 @@ public:
 	bool watch_between() const { return watching() && watch_ended(); }   // (the match watched is over: waiting for their next one)
 	int watch_progress() const;         // (catching up: 0-100)
 	int watch_step() const;             // (0 finding the match, 1 its start, 2 catching up, 3 watching)
+	// (a watched match being caught up, unseen: none of it heard, the sound board fed what it's sent but kept from playing
+	// on to the real clock till the picture's up, so nothing's heard sped up or out of time)
+	bool watch_hushed() const { return ph == Phase::watching && (!spec || !watch_shown || spec->state() == vfnet::watch::Spectator::State::catching_up); }
 	// Who plays (player 1 the host): a match's or a watched one's, for the HUD and the screens
 	std::string player_name(int p) const;
 	std::string player_country(int p) const;
@@ -340,6 +343,14 @@ private:
 	bool room_ws_open() const;
 	void room_ws_drop();
 	bool room_ws_poll(vfnet::http::Reply &r);   // (a message on it, as a wait's answer: true, r it)
+	// (the host's snapshot for a watcher come late, made when the lobby asks: watch.h's Snapper; its parts sent one at a
+	// time, paced, on a connection of their own)
+	vfnet::watch::Snapper snapper;
+	std::shared_ptr<Fetch> snap_up;
+	vfnet::watch::Snapper::Part snap_part;
+	double snap_up_at = 0;
+	uint32_t snap_logged = 0;
+	void drop_session();                // (the session let go: none of it read for a snapshot any more first)
 	void feed_begin();
 	void feed_poll();
 	void feed_last();                   // (the match over: said to the lobby)
@@ -368,6 +379,17 @@ private:
 	uint32_t watch_got = 0;             // (frames had of it, and when that last grew: none for a while, a newer match on, done)
 	double watch_got_at = 0, spec_at = 0;   // (spec_at: when it was begun: its start and first frames given two minutes)
 	bool watch_start(const vfnet::watch::Start &s, tr::line &why);
+	// (a watcher come late: the host's snapshot asked for, fetched and loaded, the match run from there; snap_off once
+	// one went out of step, the match then from its start)
+	struct SnapGet;
+	std::shared_ptr<Fetch> snap_ask;
+	std::shared_ptr<SnapGet> snap_get;
+	int snap_step = 0;                  // (0 to ask, 1 asked, 2 fetching, 3 done with: loaded or none)
+	double snap_since = 0, snap_ask_at = 0;
+	int snap_old = -1;                  // (the lobby's last, too old for it to count as fresh: taken if no fresher comes)
+	bool snap_off = false;
+	void snap_poll();
+	bool snap_holds() const { return snap_step == 1 || snap_step == 2; }   // (the frames not asked for meanwhile: from the snapshot's)
 	// the rooms list
 	std::shared_ptr<Fetch> rooms_job;
 	std::vector<RoomRow> rooms_rows;

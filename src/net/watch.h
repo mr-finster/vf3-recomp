@@ -19,30 +19,48 @@
 //               hashes (u16 n, n x (frame u32, hash u64)), info (5 bytes: matches won 1, 2, rounds won 1, 2, flags)
 //   reply       magic, REPLY, 1, match, state (u8: 0 none yet, 1 on, 2 over), total frames (u32), watchers (u32),
 //               info (5), ~0 (u32: once a checkpoint's frame, none now), first (u32), n (u32), the pairs, hashes as push's
+//   snap        magic, SNAP, 1, match, frame (u32), format (u32: the game's, Game::snap_format), hash (u64: the state's,
+//               as the desync check makes it), state's length (u32), extra's length (u32), packed length (u32), the
+//               state and the extra (the game's own: VF2's sound bytes before it) deflated together (zlib)
+//
+// A snapshot (Snap, Snapper): the host's state at a confirmed frame, made when the lobby asks (a watcher come late), off
+// the game's thread, sent in parts a little at a time; a watcher who comes late loads it and runs only the frames after
+// it (seconds, not the whole match). Only from the match's host, as its start is (sent with the room's key): never a
+// state a watcher made. Checked as it's loaded (its hash, the board's own state's after it), then at every one of the
+// players' hashes after it as ever; a build whose states differ (snap_format) never takes it, nor one whose game can't
+// (0), and with none, or one that didn't take, the watcher runs the match from its start as before.
 #pragma once
 #include "session.h"
+#include <atomic>
 #include <cstdint>
 #include <deque>
 #include <functional>
 #include <map>
+#include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace vfnet::watch {
 
 constexpr uint32_t MAGIC = 0x31574656;   // "VFW1"
-enum : uint8_t { START = 1, PUSH = 2, REPLY = 4 };
+enum : uint8_t { START = 1, PUSH = 2, REPLY = 4, SNAP = 5 };
 constexpr uint32_t MAX_FRAMES = 500000;   // a match's most (2.4 hours): the lobby keeps no more
 constexpr uint32_t MAX_PUSH = 4096;       // frames in one push (the rest go in the next)
 constexpr uint32_t MAX_REPLY = 2048;      // frames in one reply
 constexpr size_t MAX_START = 4u << 20;    // a start's blob, at most (as a session's)
 constexpr uint32_t NONE = ~0u;
+constexpr size_t MAX_SNAP_STATE = 64u << 20;   // a snapshot's state at most (VF3's is 27 MB), its extra 1 MB
+constexpr size_t MAX_SNAP_EXTRA = 1u << 20;
+constexpr size_t MAX_SNAP = 16u << 20;         // and packed (the lobby keeps no bigger)
+constexpr size_t SNAP_PART = 128u << 10;       // its upload's parts (paced: Snapper)
 
 // The match's own: who plays, and what game (as the start carries it, JSON)
 struct Meta
 {
 	std::string game, terms, content, build;   // the lobby's game ("vf3"), the session's identity: terms (its build), ROM hash
 	std::string name[2], country[2];           // player 1's (the host's) and player 2's
+	bool snap = false;                         // (the host makes snapshots when asked: "snap":1, a newer build's)
 };
 
 // What the scoreboard says (the game's RAM, read by the host after each frame: VF3's Score)
@@ -83,6 +101,18 @@ struct Reply
 };
 std::vector<uint8_t> encode_reply(const Reply &r);
 bool decode_reply(const std::vector<uint8_t> &b, Reply &r);
+
+struct Snap
+{
+	uint64_t match = 0;
+	uint32_t frame = 0;    // the state before this frame
+	uint32_t format = 0;   // Game::snap_format's
+	uint64_t hash = 0;     // state_hash's, the game's hash_skip left out
+	std::vector<uint8_t> state, extra;
+};
+std::vector<uint8_t> encode_snap(const Snap &s, int level = 1);   // (deflated: VF3's 27 MB about 6)
+bool decode_snap(const std::vector<uint8_t> &b, Snap &s);
+bool snap_head(const std::vector<uint8_t> &b, uint64_t &match, uint32_t &frame);   // (the head alone: whose, which frame)
 
 std::string meta_json(const Meta &m);
 bool parse_meta(const std::string &s, Meta &m);
@@ -136,6 +166,58 @@ private:
 	int64_t last_hash = -1;                // (the last hash taken: frame 0's, the match's start, one too)
 };
 
+// ---- a match's host: a snapshot for watchers who come late ----
+// Asked for by the lobby (want: a watcher come late, the last one too old or none), one at most every min_gap_ms. After
+// each step, the newest confirmed state the session keeps (Session::kept_state) is copied on a thread of its own while
+// the session leaves it be (before_step stops it first if the next step could save over it: a millisecond's wait at
+// most, then tried again), then hashed and deflated there. Its upload's parts (next/done) go one at a time, each after a
+// pause as long as the last one took (at least gap_ms), so a snapshot uses half of what the host's connection carries
+// at most, a part of SNAP_PART at a time, and the players' packets never queue long behind it. Nothing the players do
+// waits on any of it.
+class Snapper
+{
+public:
+	double min_gap_ms = 15000, gap_ms = 50, give_up_ms = 120000;
+	size_t part_bytes = SNAP_PART;
+	~Snapper() { stop(); }
+	Snapper() = default;
+	Snapper(const Snapper &) = delete;
+	Snapper &operator=(const Snapper &) = delete;
+	void want(double now);
+	// after each step (the game's thread; the game's snap_extra asked for its frame as the copy starts)
+	void step(const Session &s, Game &g, uint64_t match, double now);
+	void before_step(const Session &s);    // (before each step)
+	void stop();                           // (the match over, its session to go: none copied or made from it any more)
+	struct Part { uint32_t index = 0, count = 0, frame = 0; uint64_t match = 0; std::vector<uint8_t> body; };
+	bool next(double now, Part &p);        // a part due now (none on its way)
+	void done(const Part &p, bool ok, double ms, double now);
+	bool busy() const { return phase != Phase::idle; }
+	// (the log's)
+	uint32_t made = 0, sent = 0, failed = 0;
+	uint32_t last_frame = 0;
+	size_t last_raw = 0, last_packed = 0;
+	double last_copy_ms = 0, last_pack_ms = 0, last_upload_ms = 0, stall_ms = 0;
+private:
+	enum class Phase { idle, copying, uploading };
+	// (the copy and its packing, on a thread of its own that may outlive this: let go, never waited for, once it has
+	// stopped reading the session's state)
+	struct Job
+	{
+		std::atomic<bool> cancel{ false }, reading{ true }, done{ false };
+		std::vector<uint8_t> packed;
+		double copy_ms = 0, pack_ms = 0;
+		size_t raw = 0;
+	};
+	std::shared_ptr<Job> job;
+	Phase phase = Phase::idle;
+	bool wanted = false, in_flight = false;
+	double wanted_at = 0, made_at = -1e18, started_at = 0, next_at = 0, upload_at = 0;
+	uint32_t frame = 0, kept_for = 0, part = 0, tries = 0;
+	uint64_t match = 0;
+	std::vector<uint8_t> packed;
+	void let_go();
+};
+
 // ---- a watcher ----
 // The match's frames as the lobby gives them, and the game run from them a few seconds behind. The host program
 // asks the lobby (what next_request says) and gives the answers back; each pass, run() runs the frames due (one a
@@ -162,6 +244,12 @@ public:
 	// The lobby's answers: the start (the game's begun from it), a reply
 	bool start(const Start &s);
 	bool reply(const Reply &r, double now = -1);   // (now: when it came, ms: the buffer's from how evenly they come)
+	// The host's snapshot (the lobby's latest): loaded if it's ahead of where this one is, its hash the state's and the
+	// board's after it, and this game takes its format; the frames from its frame then (ask_from), none before it
+	// needed. False if not taken (why says, the game as it was), or the board couldn't take it (out_of_step: from the
+	// start again, without)
+	bool snapshot(const Snap &s);
+	uint32_t snapped_at() const { return snap_from; }   // (the frame it came in at from a snapshot, 0 none)
 	// What to ask the lobby for next: "" nothing now, "start", "frames" (from what's had)
 	std::string want(double now) const;
 	void asked(double now) { asked_at = now; in_flight = true; had_at_ask = have(); replied = false; }
@@ -216,6 +304,7 @@ private:
 	double target_ms = 100, last_arrival = -1, steady_since = 0;
 	std::deque<std::pair<double, double>> arrivals;       // (when frames came, against when they'd have come at best: the last 10 s)
 	uint64_t ticks = 0;
+	uint32_t snap_from = 0;
 	// the hash being made (a part a frame, as the session's)
 	struct { bool on = false; uint32_t frame = 0; int part = 0; uint64_t h = 0; std::vector<uint8_t> state; } hashing;
 	void run_one(bool seen);

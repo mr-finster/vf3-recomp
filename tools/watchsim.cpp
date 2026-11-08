@@ -55,6 +55,7 @@ struct Toy : vfnet::Game
 	bool begin(const std::vector<uint8_t> &blob) override { s = {}; s.mix = vfnet::hash64(blob.data(), blob.size()); after.clear(); return true; }
 	void save(std::vector<uint8_t> &st) override { st.resize(sizeof s); memcpy(st.data(), &s, sizeof s); }
 	bool load(const std::vector<uint8_t> &st) override { if (st.size() != sizeof s) return false; memcpy(&s, st.data(), sizeof s); return true; }
+	uint32_t snap_format() const override { return 0x70f; }   // (a watched match's snapshot: its state as it is)
 	void advance(const uint16_t in[2], bool) override
 	{
 		for (int p = 0; p < 2; p++) {
@@ -910,6 +911,116 @@ bool unit()
 		straight.advance(in, false);
 	}
 	check("a watcher's state hash is the session's (every hash the host made)", matched > 20);
+	// a snapshot (a late watcher drops straight in): the host's state at a confirmed frame, copied off its thread while
+	// the session keeps it, sent in parts; a watcher loading it runs on from there as the players did, frame for frame
+	{
+		vw::Snapper sn;
+		sn.part_bytes = 16;   // (the toy's state in a few parts)
+		sn.min_gap_ms = 0;
+		sn.want(30000);
+		std::vector<uint8_t> up;
+		bool whole = false;
+		uint32_t parts = 0;
+		for (double t = 30000; t < 90000 && !whole; t += 1) {
+			wire.now = t;
+			a.poll(t);
+			b.poll(t);
+			if (std::fmod(t, 17.0) < 1) {
+				sn.before_step(a);
+				a.step(pa.next());
+				b.step(pb.next());
+				sn.step(a, ga, s.match, t);
+			}
+			vw::Snapper::Part pt;
+			if (sn.next(t, pt)) {
+				if (pt.index == 0) up.clear();
+				up.insert(up.end(), pt.body.begin(), pt.body.end());
+				parts++;
+				sn.done(pt, true, 5, t);
+				whole = pt.index + 1 == pt.count;
+			}
+			if (sn.busy()) std::this_thread::yield();
+		}
+		vw::Snap got;
+		const bool read = whole && vw::decode_snap(up, got);
+		check("a snapshot: made from a confirmed state, sent in its parts, read", read && got.match == s.match && got.format == 0x70f && got.frame >= 1400 && got.frame <= a.confirmed() && parts > 1);
+		// the watcher: its start, then the snapshot; the match from there with the players' inputs, the host's state frame
+		// for frame (the host's last run of each, every one of them confirmed)
+		for (double t = 90000; t < 95000; t += 1) { wire.now = t; a.poll(t); b.poll(t); if (std::fmod(t, 17.0) < 1) { a.step(pa.next()); b.step(pb.next()); } }
+		Toy w;
+		vw::Spectator sp(w, vw::Spectator::Config{});
+		vw::Start st0 = s;
+		st0.blob = blob;
+		bool same = read && sp.start(st0) && sp.snapshot(got) && sp.frame() == got.frame && sp.snapped_at() == got.frame;
+		uint32_t ran = 0;
+		for (uint32_t fr = got.frame; same && fr < a.confirmed(); fr++, ran++) {
+			const uint16_t in[2] = { a.inputs(0)[fr], a.inputs(1)[fr] };
+			w.advance(in, false);
+			same = w.after[fr] == ga.after[fr];
+		}
+		check("a watcher from the snapshot: the host's state after every frame from there", same && ran > 200);
+		// refused, the game as it was: behind the watcher, another format, a hash that isn't its state's
+		Toy w2;
+		vw::Spectator sp2(w2, vw::Spectator::Config{});
+		sp2.start(st0);
+		vw::Snap other = got;
+		other.format = 1;
+		const bool fmt = !sp2.snapshot(other) && sp2.why == "another format";
+		other = got;
+		other.hash ^= 1;
+		const bool hash = !sp2.snapshot(other) && sp2.state() != vw::Spectator::State::out_of_step;
+		other = got;
+		other.match ^= 1;
+		const bool match = !sp2.snapshot(other);
+		const bool took = sp2.snapshot(got) && !sp2.snapshot(got) && sp2.why == "behind";
+		check("a snapshot refused, the watcher as it was: another format, a hash not its state's, another match; one not ahead of it", fmt && hash && match && took);
+		// packed and read back, a big one with its extra; cut short or spoilt every way: refused or read within its limits
+		vw::Snap big;
+		big.match = 9;
+		big.frame = 77;
+		big.format = 3;
+		std::mt19937 r(11);
+		big.state.resize(1u << 20);
+		for (size_t k = 0; k < big.state.size(); k++) big.state[k] = uint8_t(k % 3 == 0 ? r() : 0);
+		big.extra.assign(5000, 0x42);
+		big.hash = vw::state_hash(big.state, 4);
+		const std::vector<uint8_t> enc = vw::encode_snap(big);
+		vw::Snap back;
+		check("a snapshot packed and read back, its extra too", vw::decode_snap(enc, back) && back.state == big.state && back.extra == big.extra && back.frame == 77 && back.format == 3 && back.hash == big.hash && enc.size() < big.state.size() / 2);
+		vw::Snap none;
+		none.match = 9;
+		check("a snapshot with no state and no extra: there and back", vw::decode_snap(vw::encode_snap(none), back) && back.state.empty() && back.extra.empty());
+		std::vector<uint8_t> cut = enc;
+		cut.resize(cut.size() - 1);
+		check("a snapshot cut short: refused", !vw::decode_snap(cut, back));
+		cut = enc;
+		cut.push_back(0);
+		check("a snapshot with a byte too many: refused", !vw::decode_snap(cut, back));
+		std::vector<uint8_t> lie = enc;
+		lie[30] = 0xff; lie[31] = 0xff; lie[32] = 0xff; lie[33] = 0x7f;   // (its state's length: past its limit)
+		check("a snapshot saying it's bigger than any may be: refused, nothing made that big", !vw::decode_snap(lie, back));
+		const std::vector<uint8_t> small = vw::encode_snap(got);
+		int read_ok = 0;
+		for (int i = 0; i < 20000; i++) {
+			std::vector<uint8_t> b2 = (i & 1) ? small : std::vector<uint8_t>(enc.begin(), enc.begin() + ptrdiff_t(std::min<size_t>(enc.size(), 600)));
+			const int how = int(r() % 4);
+			if (how == 0 && !b2.empty()) b2[r() % b2.size()] ^= uint8_t(1 + r() % 255);
+			else if (how == 1) b2.resize(r() % (b2.size() + 1));
+			else if (how == 2) for (int k = 0; k < 4 && !b2.empty(); k++) b2[r() % b2.size()] = 0xFF;
+			else b2.insert(b2.begin() + ptrdiff_t(r() % (b2.size() + 1)), uint8_t(r()));
+			vw::Snap x;
+			if (vw::decode_snap(b2, x)) {
+				read_ok++;
+				if (x.state.size() > vw::MAX_SNAP_STATE || x.extra.size() > vw::MAX_SNAP_EXTRA) { check("a spoilt snapshot read past its limits", false); break; }
+				Toy w3;
+				vw::Spectator sp3(w3, vw::Spectator::Config{});
+				sp3.start(st0);
+				sp3.snapshot(x);   // (taken only if it's whole and its hash its own)
+			}
+		}
+		check("20,000 spoilt snapshots: read or refused, nothing past its limits", true);
+		if (verbose) printf("  (the snapshot at frame %u in %u parts; %d spoilt ones still read)\n", got.frame, parts, read_ok);
+	}
 	// a late watcher: the match from its start, unseen and silent (on_catch_up says when), every one of the players'
 	// hashes checked, then shown; silent again catching up after a long spell cut off; and the odd extra frame run
 	// unseen to keep up never silenced (its sound handed on late, as a rollback's)

@@ -23,12 +23,19 @@
 // seconds behind; the first from the start, the others joining at --watch-late F (catching up from the start, unseen).
 // Each watcher's board must be the straight run's at every checkpoint, its own checks of the players' hashes all good;
 // the players' rollbacks and waits are printed as ever, to be compared with a run without watchers.
+// --watch-snap: the late watchers come in from the host's snapshot (watch.h's Snapper, asked for a little before they
+// come, as the lobby asks when one does), not from the match's start; --snap-out DIR: the last snapshot the stand-in
+// lobby had, the match's start blob and both players' inputs written to DIR (snap.bin, blob.bin, inputs.bin);
+// --replay DIR: none of the above, but a watcher in this process loading DIR's snapshot as the game does
+// (Spectator::snapshot) and running the inputs after it, its state hash every 30 frames to --hashes: another process's
+// (another build's, another machine's) run against the first's --hashes from the snapshot's frame on.
 #include "../src/host/input_script.h"
 #include "../src/host/dural_stage.h"
 #include "../src/host/vf3_netplay.h"
 #include "../src/machine/model3.h"
 #include "../src/net/session.h"
 #include "../src/net/watch.h"
+#include "watch_pace.h"
 #include "../src/rec/ppc_rec.h"
 #include <algorithm>
 #include <chrono>
@@ -38,11 +45,19 @@
 #include <cstdlib>
 #include <cstring>
 #include <deque>
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <vector>
 
 namespace {
+
+// --pace old|new (with --replay): a watcher come late timed as the game runs one (watch_pace.h), --behind S seconds
+// behind the match as it comes (from the snapshot's frame; --from-start: from the match's start, no snapshot), for
+// --cap S seconds at most
+const char *g_pace = nullptr;
+double g_behind = 60, g_cap = 120;
+bool g_from_start = false;
 
 using Clock = std::chrono::steady_clock;
 
@@ -77,6 +92,109 @@ struct Timing
 	void add(double ms) { total += ms; worst = std::max(worst, ms); n++; }
 };
 
+bool read_file(const std::string &path, std::vector<uint8_t> &out)
+{
+	FILE *f = fopen(path.c_str(), "rb");
+	if (!f) return false;
+	out.clear();
+	for (int ch; (ch = fgetc(f)) != EOF;) out.push_back(uint8_t(ch));
+	fclose(f);
+	return true;
+}
+
+bool write_file(const std::string &path, const std::vector<uint8_t> &v)
+{
+	FILE *f = fopen(path.c_str(), "wb");
+	if (!f) return false;
+	const bool ok = fwrite(v.data(), 1, v.size(), f) == v.size();
+	return fclose(f) == 0 && ok;
+}
+
+// --replay DIR: a watcher in a process of its own, from DIR's snapshot (another process's host made it), through the
+// game's own way (Spectator: start, snapshot, the frames after it), its state hashed every 30 frames
+int replay(const std::string &rom, const m3::Profile *profile, const std::string &dir, const char *hashes_path, bool use_rec, bool stage, bool dural, bool host_terms)
+{
+	namespace vw = vfnet::watch;
+	std::vector<uint8_t> blob, snap_bytes, in_bytes;
+	if (!read_file(dir + "/blob.bin", blob) || !read_file(dir + "/snap.bin", snap_bytes) || !read_file(dir + "/inputs.bin", in_bytes)) { fprintf(stderr, "vf3net: --replay: %s/blob.bin, snap.bin, inputs.bin\n", dir.c_str()); return 1; }
+	vw::Snap sn;
+	const auto d0 = Clock::now();
+	if (!vw::decode_snap(snap_bytes, sn)) { fprintf(stderr, "vf3net: --replay: the snapshot can't be read\n"); return 1; }
+	const double decode_ms = std::chrono::duration<double, std::milli>(Clock::now() - d0).count();
+	std::string error;
+	auto pb = std::make_unique<Board>();
+	Board &W = *pb;
+	W.use_rec = use_rec;
+	W.adapter.stage_select_on = stage;
+	W.adapter.dural = dural;
+	W.adapter.host_terms = host_terms;
+	if (!W.open(rom, profile, error)) { fprintf(stderr, "vf3net: %s\n", error.c_str()); return 1; }
+	W.adapter.checkpoint_every = 30;
+	vw::Spectator sp(W.adapter, vw::Spectator::Config{});
+	vw::Start st;
+	st.match = sn.match;
+	st.meta.game = "vf3";
+	st.blob = blob;
+	const auto b0 = Clock::now();
+	if (!sp.start(st)) { fprintf(stderr, "vf3net: --replay: the start blob didn't start\n"); return 1; }
+	const double begin_ms = std::chrono::duration<double, std::milli>(Clock::now() - b0).count();
+	if (g_pace) {   // (timed as the game runs a late watcher: from the match's start, or from the snapshot)
+		const uint32_t total_in = uint32_t(in_bytes.size() / 4);
+		std::vector<uint16_t> pin(size_t(total_in) * 2);
+		memcpy(pin.data(), in_bytes.data(), size_t(total_in) * 4);
+		const bool old_way = std::string(g_pace) == "old";
+		double snap_ms = 0;
+		uint32_t from = 0;
+		if (!g_from_start) {
+			const auto l1 = Clock::now();
+			if (!sp.snapshot(sn)) { fprintf(stderr, "--pace: the snapshot wasn't taken: %s\n", sp.why.c_str()); return 1; }
+			snap_ms = std::chrono::duration<double, std::milli>(Clock::now() - l1).count();
+			from = sn.frame;
+		}
+		const watch_pace::Result r = watch_pace::run(sp, pin, from + uint32_t(g_behind * 57.524160), sn.match, old_way, g_cap);
+		char what[200];
+		snprintf(what, sizeof what, "%s, %s (its start %.1f s before; the snapshot read in %.0f ms, loaded and checked in %.0f ms)", old_way ? "the old way" : "the new way",
+		         g_from_start ? "from the match's start" : "from the snapshot", begin_ms / 1000, g_from_start ? 0.0 : decode_ms, snap_ms);
+		watch_pace::say(what, r, g_behind);
+		return 0;
+	}
+	const auto l0 = Clock::now();
+	if (!sp.snapshot(sn)) { fprintf(stderr, "vf3net: --replay: the snapshot wasn't taken: %s\n", sp.why.c_str()); return 1; }
+	const double load_ms = std::chrono::duration<double, std::milli>(Clock::now() - l0).count();
+	const uint32_t total = uint32_t(in_bytes.size() / 4);
+	std::vector<uint16_t> in(size_t(total) * 2);
+	memcpy(in.data(), in_bytes.data(), size_t(total) * 4);
+	double t = 1000;
+	const auto r0 = Clock::now();
+	while (sp.frame() < total && sp.state() != vw::Spectator::State::out_of_step && sp.state() != vw::Spectator::State::failed) {
+		if (sp.want(t) == "frames") {
+			sp.asked(t);
+			vw::Reply r;
+			r.match = sn.match;
+			r.state = 2;
+			r.total = total;
+			r.frames.first = sp.ask_from();
+			const uint32_t n = std::min<uint32_t>(total - r.frames.first, vw::MAX_REPLY);
+			r.frames.in.assign(in.begin() + ptrdiff_t(r.frames.first) * 2, in.begin() + ptrdiff_t(r.frames.first + n) * 2);
+			sp.reply(r, t);
+			sp.answered(t);
+		}
+		sp.run(t);
+		t += 1;
+	}
+	const double run_ms = std::chrono::duration<double, std::milli>(Clock::now() - r0).count();
+	printf("replay: the snapshot at frame %u (%zu bytes packed, %zu its state), read in %.0f ms; the match's start %.0f ms, the snapshot loaded and checked in %.0f ms; %u frames after it in %.0f ms (%.2f ms a frame)\n",
+	       sn.frame, snap_bytes.size(), sn.state.size(), decode_ms, begin_ms, load_ms, sp.frame() - sn.frame, run_ms, run_ms / std::max(1u, sp.frame() - sn.frame));
+	if (sp.state() == vw::Spectator::State::out_of_step) { printf("replay: FAILED: %s\n", sp.why.c_str()); return 1; }
+	if (hashes_path) {
+		FILE *hf = fopen(hashes_path, "w");
+		if (!hf) return 1;
+		for (auto &[f, h] : W.adapter.checkpoints) fprintf(hf, "%u %016llx\n", f, (unsigned long long)h);
+		fclose(hf);
+	}
+	return 0;
+}
+
 } // namespace
 
 int main(int argc, char **argv)
@@ -96,7 +214,8 @@ int main(int argc, char **argv)
 	int vs_rounds = 0, watchers = 0;
 	long watch_late = 1500;
 	double watch_ms = 60;
-	const char *hashes_path = nullptr, *blob_out = nullptr, *blob_in = nullptr, *terms = nullptr;
+	const char *hashes_path = nullptr, *blob_out = nullptr, *blob_in = nullptr, *terms = nullptr, *snap_out = nullptr, *replay_dir = nullptr;
+	bool watch_snap = false;
 	for (int i = 1; i < argc; i++) {
 		std::string a = argv[i];
 		if (a == "--frames" && i + 1 < argc) frames = strtol(argv[++i], nullptr, 10);
@@ -126,12 +245,20 @@ int main(int argc, char **argv)
 		else if (a == "--watchers" && i + 1 < argc) watchers = std::clamp(atoi(argv[++i]), 0, 4);
 		else if (a == "--watch-late" && i + 1 < argc) watch_late = strtol(argv[++i], nullptr, 10);
 		else if (a == "--watch-ms" && i + 1 < argc) watch_ms = atof(argv[++i]);
+		else if (a == "--watch-snap") watch_snap = true;
+		else if (a == "--snap-out" && i + 1 < argc) snap_out = argv[++i];
+		else if (a == "--replay" && i + 1 < argc) replay_dir = argv[++i];
+		else if (a == "--pace" && i + 1 < argc) g_pace = argv[++i];
+		else if (a == "--behind" && i + 1 < argc) g_behind = atof(argv[++i]);
+		else if (a == "--cap" && i + 1 < argc) g_cap = atof(argv[++i]);
+		else if (a == "--from-start") g_from_start = true;
 		else if (a == "--set" && i + 1 < argc) {
 			if (!(profile = m3::find_profile(argv[++i]))) { fprintf(stderr, "vf3net: no such set %s\n", argv[i]); return 2; }
 		}
 		else if (a[0] != '-' && rom.empty()) rom = a;
 		else { fprintf(stderr, "vf3net: unknown argument %s\n%s", a.c_str(), usage); return 2; }
 	}
+	if (!rom.empty() && replay_dir) return replay(rom, profile, replay_dir, hashes_path, use_rec, stage, dural, host_terms);
 	if (rom.empty() || script_path.empty()) { fprintf(stderr, "%s", usage); return 2; }
 
 	auto pa = std::make_unique<Board>(), pb = std::make_unique<Board>();
@@ -224,10 +351,11 @@ int main(int argc, char **argv)
 	namespace vw = vfnet::watch;
 	vw::Feed feed;
 	bool feed_on = false;
-	struct Lobby { std::vector<uint8_t> start; std::vector<uint16_t> in; std::map<uint32_t, uint64_t> hashes; vw::Info info; uint64_t match = 0; } lobby;
+	struct Lobby { std::vector<uint8_t> start; std::vector<uint16_t> in; std::map<uint32_t, uint64_t> hashes; vw::Info info; uint64_t match = 0; std::vector<uint8_t> snap, snap_in; } lobby;
+	vw::Snapper snapper;   // (--watch-snap: the host's snapshots, as the game makes them)
 	struct Due { double at; std::function<void()> fn; };
 	std::deque<Due> dues;   // (the uploads and answers on their way, in the order sent: the same delay for all)
-	struct Watcher { std::unique_ptr<Board> b; std::unique_ptr<vw::Spectator> sp; long join = 0; bool on = false; std::vector<double> ran_at; };   // (ran_at: when it ran each frame)
+	struct Watcher { std::unique_ptr<Board> b; std::unique_ptr<vw::Spectator> sp; long join = 0; bool on = false; std::vector<double> ran_at; double on_at = 0; uint32_t snapped = 0, was_at = 0; };   // (ran_at: when it ran each frame)
 	std::map<const vw::Spectator *, std::map<uint32_t, double>> hash_got;   // (when each of the players' hashes reached each watcher)
 	std::vector<Watcher> ws;
 	for (int i = 0; i < watchers; i++) {
@@ -277,6 +405,7 @@ int main(int argc, char **argv)
 		if (t >= next_a) {
 			const auto s0 = Clock::now();
 			const uint64_t rb0 = sa.stats().resim_frames;
+			snapper.before_step(sa);
 			if (sa.step(own_word(pick_a, A.m, 0, vf3net::pack(real[std::min(na, real.size() - 1)], 0)))) { na++; score_a.frame(A.m); }
 			if (!feed_on && sa.state() == vfnet::Session::State::running) {   // (the host's match to the lobby, as the game sends it)
 				vw::Start st;
@@ -287,6 +416,11 @@ int main(int argc, char **argv)
 				feed_on = true;
 			}
 			feed.take(sa);
+			if (watch_snap) {
+				for (const Watcher &w : ws)   // (a late watcher about to come: asked for, as the lobby asks)
+					if (w.join && long(sa.frame()) == w.join - 240) snapper.want(t);
+				snapper.step(sa, A.adapter, feed.match(), t);
+			}
 			vw::Info info;
 			for (int q = 0; q < 2; q++) { info.wins[q] = uint8_t(score_a.matches[q]); info.rounds[q] = uint8_t(score_a.rounds[q]); }
 			feed.set_info(info);
@@ -319,12 +453,27 @@ int main(int argc, char **argv)
 				}
 				dues.push_back({ at + watch_ms, [&feed, up, has, done = at + watch_ms] { feed.done(up, true, has, int(0), done); } });
 			} });
+		vw::Snapper::Part part;
+		if (snapper.next(t, part))
+			dues.push_back({ t + watch_ms, [&, part, at = t + watch_ms] {
+				if (part.index == 0) lobby.snap_in.clear();
+				if (part.match == lobby.match && size_t(part.index) * snapper.part_bytes == lobby.snap_in.size()) lobby.snap_in.insert(lobby.snap_in.end(), part.body.begin(), part.body.end());
+				if (part.index + 1 == part.count) lobby.snap = lobby.snap_in;
+				dues.push_back({ at + watch_ms, [&snapper, part, done = at + watch_ms] { snapper.done(part, true, 2 * 60.0, done); } });
+			} });
 		while (!dues.empty() && dues.front().at <= t) { auto fn = dues.front().fn; dues.pop_front(); fn(); }
 		for (Watcher &w : ws) {
-			if (!w.on && long(sa.frame()) >= w.join && !lobby.start.empty()) w.on = true;
+			if (!w.on && long(sa.frame()) >= w.join && !lobby.start.empty()) { w.on = true; w.on_at = t; }
 			if (!w.on) continue;
+			const bool snap_wait = watch_snap && w.join && !w.snapped && t - w.on_at < 20000;   // (the frames from the snapshot's, as the game holds them)
+			if (snap_wait && !lobby.snap.empty() && w.sp->state() != vw::Spectator::State::waiting) {
+				vw::Snap sn;
+				w.was_at = w.sp->frame();
+				if (vw::decode_snap(lobby.snap, sn) && w.sp->snapshot(sn)) w.snapped = sn.frame;
+				else printf("watcher: the snapshot wasn't taken: %s\n", w.sp->why.c_str());
+			}
 			const std::string want = w.sp->want(t);
-			if (!want.empty()) {
+			if (!want.empty() && !(want == "frames" && snap_wait)) {
 				w.sp->asked(t);
 				dues.push_back({ t + watch_ms, [&, sp = w.sp.get(), want, at = t + watch_ms] {
 					auto answer = serve(*sp, want);
@@ -435,8 +584,10 @@ int main(int argc, char **argv)
 			const std::map<uint32_t, double> &got = hash_got[w.sp.get()];
 			for (auto &[f, h] : lobby.hashes) {
 				const auto at = got.find(f);
-				there += f + vw::HASH_PARTS < w.sp->frame() && at != got.end() && f < w.ran_at.size() && at->second <= w.ran_at[f];
+				there += f >= w.snapped && f + vw::HASH_PARTS < w.sp->frame() && at != got.end() && f < w.ran_at.size() && at->second <= w.ran_at[f];
 			}
+			if (w.snapped) printf("watcher %zu came in from the host's snapshot at frame %u (it had run %u from the start): %u frames run after it\n", i + 1, w.snapped, w.was_at, w.sp->frame() - w.snapped);
+			else if (watch_snap && w.join) { printf("watcher %zu: no snapshot taken\n", i + 1); failed = true; }
 			const bool all = w.sp->hashes_checked >= there;
 			printf("watcher %zu (from frame %ld): ran %u frames (%llu unseen, catching up), the straight run's board at %u checkpoints, %u of the players' hashes matched%s%s\n",
 			       i + 1, w.join, w.sp->frame(), (unsigned long long)w.sp->frames_unseen, same, w.sp->hashes_checked,
@@ -445,6 +596,22 @@ int main(int argc, char **argv)
 		}
 		if (!ws.empty()) {
 			printf("the host's uploads: %llu, %llu bytes\n", (unsigned long long)feed.uploads, (unsigned long long)feed.bytes);
+		}
+		if (watch_snap)
+			printf("the host's snapshots: %u made, %u sent; the last at frame %u: %.1f MB, %.2f MB packed, copied in %.0f ms and packed in %.0f ms on its own thread; the steps held for it %.2f ms in all\n",
+			       snapper.made, snapper.sent, snapper.last_frame, double(snapper.last_raw) / 1e6, double(snapper.last_packed) / 1e6, snapper.last_copy_ms, snapper.last_pack_ms, snapper.stall_ms);
+		if (snap_out) {
+			std::filesystem::create_directories(snap_out);
+			std::vector<uint8_t> ib(size_t(n) * 4);
+			for (uint32_t f = 0; f < n; f++) {
+				const uint16_t a = sa.inputs(0)[f], b = sa.inputs(1)[f];
+				memcpy(ib.data() + size_t(f) * 4, &a, 2);
+				memcpy(ib.data() + size_t(f) * 4 + 2, &b, 2);
+			}
+			if (lobby.snap.empty() || !write_file(std::string(snap_out) + "/snap.bin", lobby.snap) || !write_file(std::string(snap_out) + "/blob.bin", blob) || !write_file(std::string(snap_out) + "/inputs.bin", ib)) {
+				printf("--snap-out: nothing written (no snapshot)\n");
+				failed = true;
+			}
 		}
 	}
 	const auto &xa = sa.stats(), &xb = sb.stats();

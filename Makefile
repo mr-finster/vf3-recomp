@@ -94,17 +94,17 @@ $(BIN)/roomtest: $(call objs,$(NET) tools/roomtest.cpp)
 
 $(BIN)/nettest: $(call objs,$(NET) tools/nettest.cpp)
 	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) $^ -o $@
+	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDLIBS)
 
 # watchsim: watching a match, simulated (no ROM): the players the same with 0, 1 or 50 watchers, each watcher's game theirs
 $(BIN)/watchsim: $(call objs,$(NET) tools/watchsim.cpp)
 	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) $^ -o $@
+	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDLIBS)
 
 # delaytest: Auto's input delay against simulated pings (full speed at any; raised and lowered as it should)
 $(BIN)/delaytest: $(call objs,$(NET) tools/delaytest.cpp)
 	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) $^ -o $@
+	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDLIBS)
 
 $(BIN)/vf3net: $(call objs,$(CORE) $(NET) src/host/vf3_netplay.cpp tools/vf3net.cpp) $(SLJIT_OBJ)
 	@mkdir -p $(dir $@)
@@ -118,7 +118,7 @@ $(BIN)/wsfuzz: src/net/http.cpp tools/wsfuzz.cpp
 # netfuzz: the session against a peer who sends anything, with AddressSanitizer and UBSan (its own objects)
 $(BIN)/netfuzz: $(NET) tools/netfuzz.cpp
 	@mkdir -p $(dir $@)
-	$(CXX) -std=c++20 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer $^ -o $@
+	$(CXX) -std=c++20 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer $^ -o $@ $(LDLIBS)
 
 # menutest: the Online pages drawn offscreen to pictures (SDL_VIDEO_DRIVER=offscreen)
 $(BIN)/menutest: $(call objs,src/host/menu.cpp src/host/online.cpp src/host/i18n.cpp src/host/text.cpp src/host/links.cpp src/host/vf3_netplay.cpp src/machine/model3.cpp src/machine/dural.cpp src/machine/romset.cpp src/machine/profile.cpp src/rec/vf3_map.cpp src/rec/vf3tb_map.cpp src/ppc/ppc.cpp $(NET) tools/menutest.cpp $(RML_SRC))

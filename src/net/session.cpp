@@ -144,6 +144,21 @@ bool Session::next_event(Event &e)
 
 uint32_t Session::confirmed() const { return std::min<uint32_t>(cur, uint32_t(remote.size())); }
 
+const std::vector<uint8_t> *Session::kept_state(uint32_t &frame) const
+{
+	// (a slot holds the state before its frame as the inputs then had it: right once every frame before it is confirmed
+	// and no rollback is waiting to go back before it; a frame confirmed in a rollback that didn't keep it is UINT32_MAX)
+	const uint32_t R = uint32_t(ring.size()), c = confirmed();
+	const std::vector<uint8_t> *best = nullptr;
+	for (uint32_t i = 0; i < R; i++) {
+		const uint32_t f = ring_frame[i];
+		if (f == UINT32_MAX || f > c || f > rollback_from || cur - f >= R || (best && f <= frame)) continue;
+		best = &ring[i];
+		frame = f;
+	}
+	return best;
+}
+
 void Session::send_packet(const std::vector<uint8_t> &p)
 {
 	link.send(p.data(), p.size());

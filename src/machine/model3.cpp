@@ -543,7 +543,9 @@ void Model3::run_frame_end()
 
 namespace {
 
-template <class IO> void pairs(IO &io, std::vector<std::pair<uint32_t, uint32_t>> &v)
+// (writes waiting for a memory of `most` words: a state from elsewhere (a watched match's snapshot) with one past its
+// end isn't taken)
+template <class IO> void pairs(IO &io, std::vector<std::pair<uint32_t, uint32_t>> &v, size_t most)
 {
 	uint64_t n = v.size();
 	io.pod(n);
@@ -552,6 +554,9 @@ template <class IO> void pairs(IO &io, std::vector<std::pair<uint32_t, uint32_t>
 		v.resize(size_t(n));
 	}
 	for (auto &w : v) { io.pod(w.first); io.pod(w.second); }
+	if constexpr (IO::loading)
+		for (auto &w : v)
+			if (w.first >= most) { io.ok = false; v.clear(); return; }
 }
 
 } // namespace
@@ -586,8 +591,8 @@ template <class IO> void Model3::state(IO &io)
 	io.pod(r3d_config); io.pod(vrom_fifo); io.pod(vrom_fifo_n);
 	io.pod(ping_pong); io.pod(ping_pong_copy); io.pod(flushes); io.pod(command_written);
 	io.pod(dma_src); io.pod(dma_dst); io.pod(dma_len); io.pod(dma_data); io.pod(dma_status); io.pod(dma_config);
-	pairs(io, pending_hi);
-	pairs(io, pending_poly);
+	pairs(io, pending_hi, cull_hi.size());
+	pairs(io, pending_poly, poly_ram.size());
 	io.vec(tex_fifo);
 	io.section("end");
 }

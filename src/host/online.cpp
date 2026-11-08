@@ -163,13 +163,14 @@ vfnet::Config Online::config(const OnlineSettings &s) const
 
 bool Online::open_host(tr::line &error)
 {
-	session.reset();
+	drop_session();
 	link = std::make_unique<vfnet::UdpLink>();
 	std::string e;
 	if (!link->bind(uint16_t(port), e)) { error = e; link.reset(); return false; }
 	if (adapter.settle) adapter.settle();
 	identity.name = started_with.name;
 	use_terms("");
+	snapper.stop();
 	session = std::make_unique<vfnet::Session>(lagged(*link), adapter, match_identity(), config(started_with), true, adapter.host_blob());
 	session->trace = log_line;
 	ph = Phase::hosting;
@@ -278,6 +279,7 @@ bool Online::join(const OnlineSettings &s, tr::line &error)
 	if (std::string e; !link->connect(host, uint16_t(p), e)) { error = e; link.reset(); return false; }
 	identity.name = s.name;
 	use_terms("");
+	snapper.stop();
 	session = std::make_unique<vfnet::Session>(lagged(*link), adapter, match_identity(), config(s), false);
 	session->trace = log_line;
 	joining_to = host + (p != 7700 ? ":" + std::to_string(p) : "");
@@ -564,7 +566,7 @@ std::string Online::me_json(const std::string &extra) const
 
 vfnet::Link &Online::lagged(vfnet::Link &l)
 {
-	session.reset();   // (the session before, on the old lag link, gone first)
+	drop_session();   // (the session before, on the old lag link, gone first)
 	lag = vfnet::LagLink::from_env(l);   // (tests: VF3_NET_LAG)
 	if (!lag) return l;
 	log_line(lag->describe());
@@ -576,6 +578,7 @@ void Online::room_session(bool host)
 	if (adapter.settle) adapter.settle();
 	vfnet::Config c = config(started_with);
 	c.token = room_token;
+	snapper.stop();
 	session = std::make_unique<vfnet::Session>(lagged(*room), adapter, match_identity(), c, host, host ? adapter.host_blob() : std::vector<uint8_t>());
 	session->trace = log_line;
 }
@@ -630,7 +633,7 @@ void Online::room_failed(const tr::line &why)
 	fail_step = st;
 	notices.push_back({ Notice::refused, why });
 	close_room();
-	session.reset();
+	drop_session();
 	room.reset();
 	job.reset();
 	ph = Phase::off;
@@ -694,6 +697,13 @@ int Online::watchers() const
 	return std::max(guest_watchers, 0);
 }
 
+void Online::drop_session()
+{
+	snapper.stop();   // (a copy reading the session's state stopped first: a megabyte's wait at most)
+	snap_up.reset();
+	session.reset();
+}
+
 // The host's: the match's start (the session's blob, who plays, the terms), then its frames once a second
 void Online::feed_begin()
 {
@@ -708,6 +718,9 @@ void Online::feed_begin()
 		s.meta.country[p] = player_country(p);
 	}
 	s.blob = session->blob();
+	s.meta.snap = adapter.snap_format() != 0;   // (a watcher come late asks for its snapshot)
+	snapper.stop();
+	snap_logged = 0;
 	feed.begin(s, now);
 	log_line("this match may be watched: watch code " + watch_code());
 }
@@ -741,6 +754,7 @@ void Online::feed_poll()
 			const double has = v["has"].n;
 			feed.done(f.up, ok, has < 0 ? vfnet::watch::NONE : uint32_t(std::clamp(has, 0.0, 1e9)), int(std::clamp(v["watchers"].n, 0.0, 1e7)), now);
 			if (ok) feed.interval_ms = feed_every(v);   // (nobody watching, or the lobby busy: sending less often)
+			if (ok && v["snap"].kind == vfnet::json::Value::boolean && v["snap"].b) snapper.want(now);   // (a watcher come late)
 			if (lobby_off(v)) { f.job.reset(); return; }
 			if (!ok && feed.failed()) log_line("watching: the lobby wasn't reached for a minute: this match can't be watched any more (it goes on)");
 			f.job.reset();
@@ -753,6 +767,26 @@ void Online::feed_poll()
 			farewell(lobby_url("/v1/hold"), "{\"code\":" + vfnet::json::quote(code) + ",\"key\":" + vfnet::json::quote(key) + "}");
 		}
 	}
+	// (the snapshot's parts: one at a time on a connection of its own, the next after a pause as long as the last took)
+	if (snap_up && snap_up->done) {
+		const bool ok = snap_up->reply.status == 200;
+		snapper.done(snap_part, ok, now - snap_up_at, now);
+		if (!ok) log_line("watching: a part of the snapshot wasn't taken (" + std::to_string(snap_up->reply.status) + ")");
+		snap_up.reset();
+	}
+	if (!snap_up && feed.on() && !wid.empty() && snapper.next(now, snap_part)) {
+		snap_up_at = now;
+		snap_up = fetch("POST", lobby_url("/v1/watch/snap?w=" + wid + "&k=" + wkey + "&m=" + hex64(snap_part.match) + "&f=" + std::to_string(snap_part.frame) +
+		                                  "&i=" + std::to_string(snap_part.index) + "&n=" + std::to_string(snap_part.count)),
+		                std::string(snap_part.body.begin(), snap_part.body.end()), 20000, 4096);
+	}
+	if (snapper.sent != snap_logged) {
+		snap_logged = snapper.sent;
+		char b[220];
+		snprintf(b, sizeof b, "watching: a snapshot for a watcher come late, frame %u: %.1f MB, %.2f MB packed; copied in %.0f ms, packed in %.0f ms (on its own thread), sent in %.1f s",
+		         snapper.last_frame, double(snapper.last_raw) / 1e6, double(snapper.last_packed) / 1e6, snapper.last_copy_ms, snapper.last_pack_ms, snapper.last_upload_ms / 1000.0);
+		log_line(b);
+	}
 	if (feed.on() && !wid.empty() && !feed_ws && !feed_ws_failed)   // (the host's WebSocket: the uploads on it, from now on)
 		feed_ws = std::make_shared<vfnet::http::Socket>(lobby_url("/v1/watch/feed?w=" + wid + "&k=" + wkey));
 	if (feed_ws) {
@@ -762,6 +796,7 @@ void Online::feed_poll()
 			if (msg.binary) continue;
 			vfnet::json::Value v;
 			const bool parsed = vfnet::json::parse(msg.data, v);
+			if (parsed && v["snap"].kind == vfnet::json::Value::boolean && v["snap"].b) snapper.want(now);   // (a watcher come late: a snapshot)
 			if (parsed && v["wake"].kind == vfnet::json::Value::boolean && v["wake"].b) {   // (sent at once, not at the next idle upload)
 				feed.interval_ms = feed_every(v);
 				continue;
@@ -846,6 +881,7 @@ bool Online::watch(const OnlineSettings &s, const std::string &c, tr::line &erro
 	wid = w;
 	watch_sid = hex64(vfnet::watch::new_match_id());
 	watch_match = watch_next = 0;
+	snap_off = false;
 	watch_gone = false;
 	seen_at = -1e18;
 	watch_since = watch_heard = now;
@@ -993,6 +1029,10 @@ void Online::watch_poll()
 		spec = std::make_unique<Spectator>(adapter, c);
 		spec->on_catch_up = [this](bool on) { adapter.mute = on || !watch_shown; };   // (catching up, unseen: no sound, then none late)
 		watch_job.reset();
+		snap_ask.reset();
+		snap_get.reset();
+		snap_step = 0;
+		snap_old = -1;
 		watch_shown = false;
 		watch_gone = false;
 		watch_got = 0;
@@ -1005,6 +1045,7 @@ void Online::watch_poll()
 	}
 	switch (spec->state()) {
 	case Spectator::State::out_of_step:   // (once: from the match's start again, quietly; a second time, said)
+		if (spec->snapped_at()) snap_off = true;   // (from a snapshot: again from the match's start, without one)
 		if (watch_restarts++ == 0) { log_line("watching: " + spec->why + " From the start again"); stream_stop(); spec.reset(); watch_match = 0; return; }
 		watch_failed(tr::WATCH_OUT_OF_STEP); return;
 	case Spectator::State::failed: watch_failed(spec->why); return;
@@ -1018,7 +1059,9 @@ void Online::watch_poll()
 		if (!over_at) over_at = now;
 		if (now - over_at > 45000) { watch_over(tr::WATCH_MATCH_OVER); return; }   // (no next one: back to the Online screen)
 	}
-	stream_poll();   // (the frames as they come, once its start's in)
+	snap_poll();     // (a late watcher: the host's snapshot, the match from there)
+	if (ph != Phase::watching || !spec) return;
+	if (!snap_holds()) stream_poll();   // (the frames as they come, once its start's in)
 	if (ph != Phase::watching) return;   // (told watching's off on its socket: stopped)
 	// the lobby asked for what's next: the start, the frames from where this one is
 	if (watch_job && watch_job->done) {
@@ -1048,7 +1091,7 @@ void Online::watch_poll()
 	}
 	if (!watch_job && !watch_gone) {
 		const std::string w = spec->want(now);
-		if (!w.empty()) {
+		if (!w.empty() && !(w == "frames" && snap_holds())) {   // (the frames from the snapshot's, if there's one)
 			spec->asked(now);
 			watch_want = w;
 			const std::string q = "?w=" + wid + "&m=" + hex64(watch_match);
@@ -1063,6 +1106,82 @@ void Online::watch_poll()
 		snprintf(b, sizeof b, "watching: frame %u of the lobby's %u, %.1f s behind, %u of the players' hashes matched, %d watching, %llu frames run unseen",
 		         spec->frame(), spec->total(), spec->behind_s(), spec->hashes_checked, watch_watchers, (unsigned long long)spec->frames_unseen);
 		log_line(b);
+	}
+}
+
+// A watcher come late (the lobby has more than a few seconds of the match): the host's snapshot, if its game makes
+// them (the start's meta says), asked for once its start's in; the frames held off till the lobby says (one there:
+// fetched, then loaded, the frames from its frame on). One being made: asked again each second, the match caught up
+// from its start meanwhile, and taken when it comes if it's still well ahead (not once caught up). None, or one that
+// isn't taken: the match from its start, as ever. Its bytes inflated and checked on the fetch's own thread
+struct Online::SnapGet
+{
+	std::atomic<bool> done{ false };
+	int status = 0;
+	bool ok = false;
+	size_t bytes = 0;
+	vfnet::watch::Snap snap;
+};
+
+void Online::snap_poll()
+{
+	using vfnet::watch::Spectator;
+	if (!spec || snap_step == 3) return;
+	const Spectator::State st = spec->state();
+	if (st == Spectator::State::waiting || st == Spectator::State::failed || st == Spectator::State::out_of_step || st == Spectator::State::over) return;   // (its start first)
+	const std::string q = "/v1/watch/snap?w=" + wid + "&m=" + hex64(watch_match);
+	auto get = [&](int f) {
+		snap_step = 2;
+		snap_get = std::make_shared<SnapGet>();
+		const std::string url = lobby_url(q + "&f=" + std::to_string(f));
+		std::thread([g = snap_get, url] {
+			const vfnet::http::Reply r = vfnet::http::request("GET", url, "", 60000, vfnet::watch::MAX_SNAP + 4096);
+			g->status = r.status;
+			g->bytes = r.body.size();
+			g->ok = r.status == 200 && vfnet::watch::decode_snap(std::vector<uint8_t>(r.body.begin(), r.body.end()), g->snap);
+			g->done = true;
+		}).detach();
+	};
+	if (snap_step == 0) {
+		if (snap_off || !watch_meta.snap) { snap_step = 3; return; }   // (an older host's game: none)
+		snap_step = 1;
+		snap_since = now;
+		snap_ask = fetch("GET", lobby_url(q), "", 5000, 4096);
+		return;
+	}
+	if (snap_step == 4 && !snap_ask && now >= snap_ask_at) snap_ask = fetch("GET", lobby_url(q), "", 5000, 4096);
+	if ((snap_step == 1 || snap_step == 4) && snap_ask && snap_ask->done) {
+		vfnet::json::Value v;
+		const bool ok = snap_ask->reply.status == 200 && vfnet::json::parse(snap_ask->reply.body, v);
+		snap_ask.reset();
+		const int f = ok && v["frame"].kind == vfnet::json::Value::number ? int(std::clamp(v["frame"].n, -1.0, 1e9)) : -1;
+		const bool pending = ok && v["pending"].kind == vfnet::json::Value::boolean && v["pending"].b;
+		const bool ahead = f >= 0 && uint32_t(f) > spec->frame() + 600;   // (ten seconds or more ahead of this one: worth it)
+		if (f >= 0 && !pending && ahead) get(f);
+		else if (pending && !watch_shown && now - snap_since < 90000) { snap_old = f; snap_step = 4; snap_ask_at = now + 1000; }   // (till it's caught up from the start meanwhile)
+		else if (snap_old >= 0 && uint32_t(snap_old) > spec->frame() + 600) get(snap_old);
+		else {
+			snap_step = 3;
+			log_line(std::string("watching: ") + (pending ? "caught up from the start before the snapshot came" : ok ? "no snapshot needed" : "no snapshot (the lobby has none)") + ": the match from its start");
+		}
+		return;
+	}
+	if (snap_step == 2 && snap_get && snap_get->done) {
+		const std::shared_ptr<SnapGet> g = snap_get;
+		snap_get.reset();
+		snap_step = 3;
+		if (!g->ok) { log_line("watching: the snapshot couldn't be had (" + std::to_string(g->status) + "): the match from its start"); return; }
+		if (watch_shown) { log_line("watching: caught up from the start before the snapshot came"); return; }   // (no jump in what's shown)
+		const uint32_t was = spec->frame();
+		if (spec->snapshot(g->snap)) {
+			char b[220];
+			snprintf(b, sizeof b, "watching: from the host's snapshot at frame %u (%.2f MB, %.1f s after asking): the match from there, not from its start (this one was at frame %u)",
+			         g->snap.frame, double(g->bytes) / 1e6, (now - snap_since) / 1000.0, was);
+			log_line(b);
+			stream_stop();   // (the frames from its frame on)
+			stream_retry = 0;
+		} else
+			log_line("watching: the host's snapshot wasn't taken (" + spec->why + ")" + (spec->state() == Spectator::State::out_of_step ? "" : ": the match from its start"));
 	}
 }
 
@@ -1369,7 +1488,7 @@ void Online::host_again(const tr::line &why)
 {
 	notices.push_back({ Notice::refused, tr::line(tr::PLAYER_COULDNT_JOIN, { { "why", why } }) });
 	note = tr::line(tr::PLAYER_COULDNT_JOIN, { { "why", why } });
-	session.reset();
+	drop_session();
 	room->clear_peer();
 	if (random) {
 		close_room();
@@ -1582,7 +1701,7 @@ void Online::room_poll()
 					         ", relay " + mask(g["relay"].str()) + "; connecting");
 				}
 			} else if (r.status == 404 && random) {   // (a random match's room lost: another opponent)
-				session.reset();
+				drop_session();
 				room->clear_peer();
 				key.clear();
 				is_host = false;
@@ -1734,7 +1853,7 @@ void Online::search()
 void Online::search_again(const tr::line &why)
 {
 	close_room();
-	session.reset();
+	drop_session();
 	room->clear_peer();
 	checking = false;
 	is_host = false;
@@ -1807,7 +1926,7 @@ void Online::stop()
 	persist = false;
 	queue_at = queue_len = 0;
 	adapter.mute = false;
-	session.reset();
+	drop_session();
 	link.reset();
 	room.reset();
 	job.reset();
@@ -1903,7 +2022,7 @@ void Online::poll(double t)
 				notices.push_back({ Notice::refused, tr::line(tr::PLAYER_COULDNT_JOIN, { { "why", said } }) });
 				note = tr::line(tr::PLAYER_COULDNT_JOIN, { { "why", said } });
 				tr::line err;
-				if (!open_host(err)) { notices.push_back({ Notice::ended, err }); session.reset(); link.reset(); ph = Phase::off; }
+				if (!open_host(err)) { notices.push_back({ Notice::ended, err }); drop_session(); link.reset(); ph = Phase::off; }
 				return;
 			}
 			if (was_playing && why != vfnet::Session::End::quit) {
@@ -1916,7 +2035,7 @@ void Online::poll(double t)
 			if (room && !was_playing) log_line("didn't connect: " + room->report(mask));
 			// a random opponent never reached (gone meanwhile, or no way between the two): another, twice more at most
 			if (!was_playing && !is_host && rooms && random && room && why != vfnet::Session::End::quit && ++random_misses < 3) {
-				session.reset();
+				drop_session();
 				room->clear_peer();
 				ph = Phase::joining;
 				peer_name.clear();
@@ -1943,7 +2062,7 @@ void Online::poll(double t)
 			const std::string again_code = code;
 			if (again_room) { kept_code = code; kept_key = key; key.clear(); }
 			close_room();
-			session.reset();
+			drop_session();
 			link.reset();
 			room.reset();
 			job.reset();
@@ -2041,7 +2160,10 @@ bool Online::step(uint16_t input)
 		if (!spec) return false;
 		spec->time(now);
 		bool shown = false;
-		const int ran = spec->tick(&shown, 10.0);
+		// (catching up, unseen: as fast as it can, 40 ms a step (the passes' pictures just the line saying how far it is);
+		// watching, a frame's time at most)
+		const bool catching = !watch_shown || spec->state() == vfnet::watch::Spectator::State::catching_up;
+		const int ran = spec->tick(&shown, catching ? 40.0 : 10.0);
 		if (ran) score.frame(board);
 		if (shown && !watch_shown) {   // (caught up: its first picture, the sound from now on)
 			watch_shown = true;
@@ -2068,10 +2190,12 @@ bool Online::step(uint16_t input)
 			         " (frame " + std::to_string(f) + ", " + std::to_string(session->confirmed()) + " confirmed)");
 		}
 	}
+	if (session) snapper.before_step(*session);   // (a snapshot's copy the step could save over: stopped first, tried again)
 	if (!(ph == Phase::playing && session && session->step(input))) return false;
 	score.frame(board);   // (the score between the two, from the game's RAM: vf3net::Score)
 	if (feed.on()) {   // (the frames confirmed since, to go to the lobby with the score: nothing waits for it)
 		feed.take(*session);
+		snapper.step(*session, adapter, feed.match(), now);   // (a snapshot, if the lobby asked: copied and packed off this thread)
 		vfnet::watch::Info i;
 		for (int p = 0; p < 2; p++) {
 			i.wins[p] = uint8_t(std::clamp(score.matches[p], 0, 255));
