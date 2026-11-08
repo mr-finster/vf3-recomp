@@ -219,7 +219,7 @@ bool snap_head(const std::vector<uint8_t> &b, uint64_t &match, uint32_t &frame)
 	return i.ok && match != 0;
 }
 
-bool decode_snap(const std::vector<uint8_t> &b, Snap &s)
+bool decode_snap(const std::vector<uint8_t> &b, Snap &s, size_t least, size_t most)
 {
 	In i(b);
 	if (!i.head(SNAP, s.match)) return false;
@@ -227,7 +227,7 @@ bool decode_snap(const std::vector<uint8_t> &b, Snap &s)
 	s.format = i.u32();
 	s.hash = i.u64();
 	const uint32_t sl = i.u32(), el = i.u32(), pl = i.u32();
-	if (!i.ok || !s.match || sl > MAX_SNAP_STATE || el > MAX_SNAP_EXTRA || pl > MAX_SNAP || size_t(i.e - i.p) != pl || s.frame > MAX_FRAMES) return false;
+	if (!i.ok || !s.match || sl > MAX_SNAP_STATE || sl < least || sl > most || el > MAX_SNAP_EXTRA || pl > MAX_SNAP || size_t(i.e - i.p) != pl || s.frame > MAX_FRAMES) return false;
 	s.state.assign(sl, 0);
 	s.extra.assign(el, 0);
 	z_stream z{};
@@ -495,9 +495,11 @@ bool Spectator::snapshot(const Snap &s)
 	if (!started || s.match != start_.match || st == State::failed || st == State::out_of_step || st == State::over) return false;
 	if (s.frame <= at || s.frame > MAX_FRAMES) { why = "behind"; return false; }
 	if (!game.snap_format() || s.format != game.snap_format()) { why = "another format"; return false; }
+	const auto [least, most] = game.snap_state_bytes();
+	if (s.state.size() < least || s.state.size() > most) { why = "its state's length isn't this build's"; return false; }
 	const size_t skip = game.hash_skip();
 	if (state_hash(s.state, skip) != s.hash) { why = "its hash isn't its state's"; return false; }
-	if (!game.load_snap(s.state, s.extra)) { st = State::out_of_step; why = "The match's snapshot couldn't be loaded."; return false; }
+	if (!game.load_snap(s.state, s.extra, s.frame)) { st = State::out_of_step; why = "The match's snapshot couldn't be loaded."; return false; }
 	std::vector<uint8_t> now;   // (the board's own state after it: all of it taken)
 	game.save(now);
 	if (state_hash(now, skip) != s.hash) { st = State::out_of_step; why = "The match's snapshot wasn't taken whole."; return false; }

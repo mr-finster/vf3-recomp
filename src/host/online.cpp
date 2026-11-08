@@ -1134,11 +1134,12 @@ void Online::snap_poll()
 		snap_step = 2;
 		snap_get = std::make_shared<SnapGet>();
 		const std::string url = lobby_url(q + "&f=" + std::to_string(f));
-		std::thread([g = snap_get, url] {
+		const auto [least, most] = adapter.snap_state_bytes();   // (this build's states' lengths: nothing else inflated)
+		std::thread([g = snap_get, url, least, most] {
 			const vfnet::http::Reply r = vfnet::http::request("GET", url, "", 60000, vfnet::watch::MAX_SNAP + 4096);
 			g->status = r.status;
 			g->bytes = r.body.size();
-			g->ok = r.status == 200 && vfnet::watch::decode_snap(std::vector<uint8_t>(r.body.begin(), r.body.end()), g->snap);
+			g->ok = r.status == 200 && vfnet::watch::decode_snap(std::vector<uint8_t>(r.body.begin(), r.body.end()), g->snap, least, most);
 			g->done = true;
 		}).detach();
 	};

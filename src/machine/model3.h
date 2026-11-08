@@ -77,11 +77,13 @@ public:
 			io.pod(d.asic); io.pod(d.kind); io.pod(d.id); io.pod(d.shift); io.pod(d.size); io.pod(d.ir); io.pod(d.mode);
 		}
 		io.pod(state); io.pod(last_tck); io.pod(tdo); io.pod(modeword);
-		if constexpr (IO::loading)   // (a state from elsewhere: which ASIC and the shift's length kept in range)
+		if constexpr (IO::loading) {   // (a state from elsewhere: which ASIC and the shift's length kept in range)
 			for (Device &d : dev) {
 				if (d.kind < -1 || d.kind > 4) d.kind = -1;
 				d.size = d.size < 1 ? 1 : d.size > 64 ? 64 : d.size;
 			}
+			if (!io.check(state >= 0 && state < 16)) state = 0;   // (the TAP's state: a row of FSM)
+		}
 	}
 private:
 	struct Device
@@ -126,7 +128,9 @@ public:
 	uint8_t read(unsigned reg);
 	void write(unsigned reg, uint8_t data);
 private:
+	bool running = false;   // (not in the state: a frame never ends in a run)
 	void run(bool single);
+	void run_once(bool single);
 	bool exec();
 	uint32_t fetch(uint32_t off);
 };
@@ -212,6 +216,7 @@ public:
 	std::vector<uint32_t> cull_lo, cull_hi, poly_ram, tex_fifo;
 	uint32_t r3d_config[4] = {};
 	uint32_t vrom_fifo[2] = {};
+	bool dma_running = false;   // (a DMA's copy under way: not in the state, a frame never ends in one)
 	int vrom_fifo_n = 0;
 	bool ping_pong = false, ping_pong_copy = false;
 	unsigned flushes = 0;            // writes to 0x88000000 this frame
@@ -265,6 +270,7 @@ public:
 	// it) if it isn't one. The renderers are told which textures changed, and the recompiled code rechecks RAM.
 	void save_state(std::vector<uint8_t> &out, std::vector<StateSection> *sections = nullptr);
 	bool load_state(const uint8_t *p, size_t n);
+	size_t fixed_state_size() const;   // (the memories' part, and its header: a state's least)
 	static constexpr uint32_t STATE_MAGIC = 0x53334656, STATE_VERSION = 2;   // "VF3S"
 	// The state's first bytes are for this board's saves alone (which board, since which reset, which save): two
 	// boards in the same state have the same bytes after them, and only those are compared or hashed
@@ -304,6 +310,7 @@ private:
 	bool scsi_mapped(uint32_t addr) const;
 
 	template <class IO> void state(IO &io);
+	bool state_sane() const;   // (a loaded state's values used as an index, a count or an address: as the board makes them)
 	bool textures_loaded = false;
 	// Save states copy the device memories by the 4 KB pages written since (save_state): each page's save number
 	// when last written. The RAM is copied whole (the recompiled code writes it directly).
@@ -314,7 +321,6 @@ private:
 	uint32_t snap_id = 0, snap_epoch = 0, snap_gen = 1;
 	void touch(int r, size_t byte) { paged[r].gen[byte / PAGE] = snap_gen; }
 	void setup_pages();
-	size_t fixed_state_size() const;
 
 	uint32_t r3d_register(unsigned reg) const;
 	void r3d_flush();

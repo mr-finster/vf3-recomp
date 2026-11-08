@@ -21,6 +21,7 @@
 #include <functional>
 #include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace vfnet {
@@ -51,9 +52,14 @@ struct Game
 	// another layout, never the same), 0 if they can't go to another process; the game's own to go with one (the host's,
 	// for its frame: VF2's sound bytes before it); and one from another process loaded (a watcher's, the host's state
 	// and extra: load's, unless a game's states hold something of its own process's)
+	// A snapshot's state is made by a match's host, any host: its bytes may be anything (its hash proves nothing), so
+	// load_snap takes it only if the board would make it (every value used as an index, a size, a shift, a pointer in
+	// range, the frame it says the snapshot's frame), else refuses it and leaves the game as it was; and a snapshot's
+	// state is read (inflated) only if its length is one this build's states can have (snap_state_bytes: least, most)
 	virtual uint32_t snap_format() const { return 0; }
 	virtual void snap_extra(uint32_t, std::vector<uint8_t> &out) { out.clear(); }
-	virtual bool load_snap(const std::vector<uint8_t> &state, const std::vector<uint8_t> &) { return load(state); }
+	virtual bool load_snap(const std::vector<uint8_t> &state, const std::vector<uint8_t> &, uint32_t) { return load(state); }
+	virtual std::pair<size_t, size_t> snap_state_bytes() const { return { 0, SIZE_MAX }; }
 	virtual ~Game() = default;
 };
 

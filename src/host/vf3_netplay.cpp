@@ -229,6 +229,25 @@ uint32_t Adapter::snap_format() const
 	return h ? h : 1;
 }
 
+std::pair<size_t, size_t> Adapter::snap_state_bytes() const
+{
+	// (the memories, then the small parts (the CPU, the board's registers, the writes and texture words waiting: tens of MB
+	// at most), then the frame)
+	const size_t fixed = board.fixed_state_size();
+	return { fixed + 4, fixed + (32u << 20) };
+}
+
+bool Adapter::load_snap(const std::vector<uint8_t> &state, const std::vector<uint8_t> &, uint32_t snap_frame)
+{
+	const auto [least, most] = snap_state_bytes();
+	if (state.size() < least || state.size() > most) return false;
+	std::vector<uint8_t> was;   // (refused, the game as it was: its own state back, every part of it, not half another's)
+	save(was);
+	if (load(state) && frame == snap_frame) return true;
+	load(was);
+	return false;
+}
+
 void Adapter::save(std::vector<uint8_t> &state)
 {
 	if (settle) settle();

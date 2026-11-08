@@ -163,6 +163,10 @@ public:
 	// (a watched match's snapshot: this build's states, as its online version and the state's own version and layout
 	// make them; another number for any other)
 	uint32_t snap_format() const override;
+	// (a snapshot's state, any host's: refused unless the board would make it (Model3::state_sane, the reader's checks)
+	// and its frame is the snapshot's; refused, the board and this as they were)
+	bool load_snap(const std::vector<uint8_t> &state, const std::vector<uint8_t> &extra, uint32_t frame) override;
+	std::pair<size_t, size_t> snap_state_bytes() const override;
 	// The frame's MIDI bytes to send now (board.midi emptied): all of them the first time a frame runs; run again
 	// after a rollback, none if its bytes went already (the sound board can't take back what it played: a wrong
 	// guess's sound stays), and if it sent none and has some now, those (late)

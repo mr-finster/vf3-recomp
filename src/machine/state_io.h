@@ -52,6 +52,8 @@ public:
 		pod(n);
 		for (uint8_t b : d) out.push_back(b);
 	}
+	// (a loaded value's check: saving, always true)
+	bool check(bool) { return true; }
 
 private:
 	std::vector<uint8_t> &out;
@@ -71,11 +73,20 @@ public:
 		if (n) memcpy(q, p, n);
 		p += n;
 	}
+	// (a bool, or bools, read as 0 or 1 only: anything else isn't a bool (undefined behaviour to use), the state refused)
 	template <class T> void pod(T &v)
 	{
 		static_assert(std::has_unique_object_representations_v<T>);
 		bytes(&v, sizeof(T));
+		if constexpr (std::is_same_v<std::remove_all_extents_t<T>, bool>) {
+			const uint8_t *b = reinterpret_cast<const uint8_t *>(&v);
+			for (size_t i = 0; i < sizeof(T); i++)
+				if (b[i] > 1) { ok = false; memset(static_cast<void *>(&v), 0, sizeof(T)); break; }
+		}
 	}
+	// A loaded value's check (a state from another process, a watcher's snapshot, may hold anything): false refuses
+	// the state (its load fails)
+	bool check(bool good) { if (!good) ok = false; return good; }
 	// (a vector of the same size as now, as the board's memories always are, is read in place: no allocation)
 	template <class T> void vec(std::vector<T> &v)
 	{

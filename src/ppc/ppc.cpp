@@ -772,8 +772,8 @@ void Cpu::op19(uint32_t op)
 			s.lr = s.pc + 4;
 		return;
 	case 33: cr_op(s, op, [](int a, int b) { return (a | b) ^ 1; }); return;   // crnor
-	case 50:  // rfi
-		s.npc = s.srr0;
+	case 50:  // rfi (SRR0's low two bits not taken, as the 603e: a word-aligned address, never a fetch that runs past RAM's end)
+		s.npc = s.srr0 & ~3u;
 		set_msr(s.srr1);
 		check_pc(s.npc);
 		return;

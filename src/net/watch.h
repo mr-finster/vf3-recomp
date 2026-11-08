@@ -111,7 +111,9 @@ struct Snap
 	std::vector<uint8_t> state, extra;
 };
 std::vector<uint8_t> encode_snap(const Snap &s, int level = 1);   // (deflated: VF3's 27 MB about 6)
-bool decode_snap(const std::vector<uint8_t> &b, Snap &s);
+// (the state's length must be from least to most, a game's snap_state_bytes, and no more than MAX_SNAP_STATE: nothing
+// bigger is made, or inflated, whatever the snapshot says)
+bool decode_snap(const std::vector<uint8_t> &b, Snap &s, size_t least = 0, size_t most = MAX_SNAP_STATE);
 bool snap_head(const std::vector<uint8_t> &b, uint64_t &match, uint32_t &frame);   // (the head alone: whose, which frame)
 
 std::string meta_json(const Meta &m);
