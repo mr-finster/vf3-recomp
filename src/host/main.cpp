@@ -1173,7 +1173,7 @@ struct Game
 		sound.attach(&board.sound_rom, &board.samples);
 		// the match found chime: the game's coin sound, made by a sound board of its own on a thread of its own (about
 		// 0.4 s of work, done long before any match; the ROM's sound program and samples stay as loaded)
-		coin = std::async(std::launch::async, [this] { return coin_sound::make(board.sound_rom, board.samples, LEVEL); }).share();
+		coin = std::async(std::launch::async, [this] { return chime::coin_or_bell(coin_sound::make(board.sound_rom, board.samples, LEVEL), coin_sound::RATE); }).share();
 		board.on_line = [this](unsigned y) {
 			if (!tiles_on) return;
 			tile_worker.line(y);
