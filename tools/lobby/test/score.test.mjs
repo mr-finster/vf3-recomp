@@ -118,5 +118,20 @@ check('another player: from 0-0', said(await line(code)), ['playing', 'KOSMONAVT
 await later(30000); await push([1, 0, 3, 1, 0]);
 check('the host wins one: 1-0', said(await line(code)), ['playing', 'KOSMONAVT', 'NEONKID', [1, 0]]);
 
+// (6) the Stats' storage: a Watch's telling writes the room's entry only when its tally changed (a Watch tells every
+// 5-20 s while its match is watched; its entry holds the line's queue and the tally)
+await settle();
+const st = env.STATS.objs.get('all'), touch0 = st.touch.bind(st), touched = [];
+st.touch = (kind, id) => { if (kind === 'hosts' && id === W) touched.push(id); touch0(kind, id); };
+const tl = JSON.parse(JSON.stringify(st.s.hosts[W].tally)), two = tl.pair.split('|').map((name) => ({ name }));
+st.tally(W, two, tl.cur, tl.mid);
+st.tally(W, two, [0, 0], tl.mid);   // (a start sent again: 0-0 for a moment, not taken)
+check('the same tally told again, or less: the room\'s entry not written', [touched.length, st.s.hosts[W].tally], [0, tl]);
+st.tally(W, two, [tl.cur[0], tl.cur[1] + 1], tl.mid);
+check('a win more: written', touched.length, 1);
+st.tally(W, two, [tl.cur[0], tl.cur[1] + 1], 'ffffffffffffffff');
+check('a new match: written', touched.length, 2);
+st.touch = touch0;
+
 console.log(fails ? `\n${fails} FAILED` : '\nall passed');
 process.exit(fails ? 1 : 0);

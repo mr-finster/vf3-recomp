@@ -3,6 +3,10 @@
 // and none is fresh, never asked of a host whose game makes none (an older build's), and nothing changed for one that
 // doesn't know them. In Node with stand-ins for Cloudflare (test/standin.mjs):  cd tools/lobby && npm test
 import { lobby, settle } from './standin.mjs';
+const real_now = Date.now;
+let skew = 0;
+Date.now = () => real_now() + skew;   // (time moved on by later(): a snapshot nobody asks for, a stalled upload)
+const later = (ms) => { skew += ms; };
 const { worker, env } = await lobby(process.argv[2]);
 let fails = 0;
 function check(what, got, want) {
@@ -48,7 +52,7 @@ function snap_bytes(match, frame, packed) {
 	for (let i = 0; i < packed; i++) b[42 + i] = (i * 7) & 255;
 	return b;
 }
-const PART = 128 << 10;
+const PART = 32 << 10;
 async function send_snap(W, K, MH, bytes, frame, key = K) {
 	const n = Math.ceil(bytes.length / PART);
 	let r;
@@ -91,7 +95,7 @@ r = await call('POST', `/v1/watch/push?w=${W}&k=${K}`, push_bytes(M, 9000, 10), 
 check('the host\'s next push: a snapshot wanted', r.body.snap, true);
 r = await call('POST', `/v1/watch/push?w=${W}&k=${K}`, push_bytes(M, 9010, 10), '198.51.100.3');
 check('and not asked again at once', 'snap' in r.body, false);
-const S = snap_bytes(M, 8990, 300000);   // (three parts)
+const S = snap_bytes(M, 8990, 300000);   // (ten parts)
 r = await send_snap(W, K, MH, S, 8990, 'wrongkey');
 check('parts with the wrong key: refused', r.status, 404);
 r = await call('POST', `/v1/watch/snap?w=${W}&k=${K}&m=${MH}&f=8990&i=0&n=3`, S.slice(0, PART - 1), '198.51.100.3');
@@ -99,7 +103,7 @@ check('a part short of SNAP_PART (not the last): refused', r.status, 400);
 r = await call('POST', `/v1/watch/snap?w=${W}&k=${K}&m=${MH}&f=8990&i=0&n=3`, new Uint8Array(PART + 1), '198.51.100.3');
 check('a part over SNAP_PART: refused', r.status, 400);
 r = await send_snap(W, K, MH, S, 8990);
-check('the three parts: taken, whole', r.body, { ok: true, got: 3 });
+check('the ten parts: taken, whole', r.body, { ok: true, got: 10 });
 r = await call('GET', `/v1/watch/snap?w=${W}&m=${MH}`, undefined, '198.51.100.21');
 check('a watcher: the snapshot there, fresh', r.body, { frame: 8990, size: S.length });
 r = await call('GET', `/v1/watch/snap?w=${W}&m=${MH}&f=8990`, undefined, '198.51.100.21');
@@ -157,6 +161,66 @@ r = await call('GET', `/v1/watch/snap?w=${R3.wid}&m=${MH3}`, undefined, '198.51.
 await settle();
 check('a late watcher: the host told on its socket at once', heard.filter((m) => m.snap === true).length, 1);
 check('... the watcher told one is coming', r.body, { frame: -1, pending: true });
+
+// ---- memory: one snapshot at most in a Watch, put together in place, let go once nobody asks ----
+const R4 = await room('MEMHOST', '198.51.100.7');
+const W4 = R4.wid, K4 = R4.wkey, M4 = 0x4234abcd5678ef01n, MH4 = '4234abcd5678ef01', H4 = '198.51.100.7';
+let n4 = 0;
+const push4 = async (frames) => { const x = await call('POST', `/v1/watch/push?w=${W4}&k=${K4}`, push_bytes(M4, n4, frames), H4); n4 += frames; return x.body; };
+const ask4 = async () => (await call('GET', `/v1/watch/snap?w=${W4}&m=${MH4}`, undefined, '198.51.100.30')).body;
+const part4 = async (bytes, frame, i, n) => (await call('POST', `/v1/watch/snap?w=${W4}&k=${K4}&m=${MH4}&f=${frame}&i=${i}&n=${n}`, bytes.slice(i * PART, (i + 1) * PART), H4)).body;
+await call('POST', `/v1/watch/start?w=${W4}&k=${K4}`, start_bytes(M4, { p1: 'MEMHOST', p2: 'GUESTMEM', c1: 'FR', c2: 'US', snap: 1 }, new Uint8Array(100)), H4);
+for (let k = 0; k < 3; k++) await push4(3000);
+check('a late watcher: one asked for', await ask4(), { frame: -1, pending: true });
+const S4 = snap_bytes(M4, 8990, 300000);
+r = await send_snap(W4, K4, MH4, S4, 8990);
+check('a snapshot sent (ten parts): taken', r.body, { ok: true, got: 10 });
+const wobj = env.WATCHES.objs.get('w|' + W4);
+check('put together in one buffer (its parts not kept apart), nothing part-sent held', [wobj.m.snap.b.buffer.byteLength, wobj.m.snap.b.length, wobj.m.snap_in], [10 * PART, S4.length, null]);
+r = await call('GET', `/v1/watch/snap?w=${W4}&m=${MH4}&f=8990`, undefined, '198.51.100.30');
+check('fetched whole from that buffer', [r.status, r.body.length, r.body.every((x, i) => x === S4[i])], [200, S4.length, true]);
+later(50000); await push4(10);
+check('50 s on, asked for again: still there', (await ask4()).frame, 8990);
+later(50000); await push4(10);
+check('50 s after that (asked 50 s ago): still kept', (await ask4()).frame, 8990);
+later(61000); await push4(10);
+check('nobody asking for 61 s: let go (the edge keeps its copy), none said, a new one asked for', [wobj.m.snap, await ask4()], [null, { frame: -1, pending: true }]);
+// (a part-sent snapshot whose host stopped: let go after 30 s with no part)
+check('a new one\'s first two parts', [(await part4(snap_bytes(M4, 9000, 300000), 9000, 0, 10)).got, (await part4(snap_bytes(M4, 9000, 300000), 9000, 1, 10)).got], [1, 2]);
+later(31000); await push4(10);
+check('no part for 31 s: the part-sent one let go', wobj.m.snap_in, null);
+check('... a later part starts it anew', (await part4(snap_bytes(M4, 9000, 300000), 9000, 2, 10)).got, 1);
+const S5 = snap_bytes(M4, 9100, 300000);
+r = await send_snap(W4, K4, MH4, S5, 9100);
+check('a whole one, newer: taken', [r.body, (await ask4()).frame], [{ ok: true, got: 10 }, 9100]);
+r = await call('POST', `/v1/watch/snap?w=${W4}&k=${K4}&m=${MH4}&f=9110&i=0&n=10`, snap_bytes(M4, 9110, 300000).slice(0, PART), H4);
+check('another sent while that one\'s fresh (none asked for): refused, the fresh one kept', [r.status, (await ask4()).frame], [400, 9100]);
+await push4(2100);
+check('2,100 frames on: stale, said, a new one asked for', await ask4(), { frame: 9100, size: S5.length, pending: true });
+const S6 = snap_bytes(M4, 11200, 300000), bad6 = snap_bytes(0x77n, 11200, 300000);   // (the second's head another match's)
+await part4(bad6, 11200, 0, 10);
+check('a new one\'s first part: the stale one let go first (a Watch holds one at most)', [wobj.m.snap, await ask4()], [null, { frame: -1, pending: true }]);
+for (let i = 1; i < 10; i++) r = await call('POST', `/v1/watch/snap?w=${W4}&k=${K4}&m=${MH4}&f=11200&i=${i}&n=10`, bad6.slice(i * PART, (i + 1) * PART), H4);
+check('its head another match\'s: refused whole, nothing kept', [r.status, wobj.m.snap, wobj.m.snap_in], [400, null, null]);
+r = await send_snap(W4, K4, MH4, S6, 11200);
+check('sent again, right: taken', [r.body, (await ask4()).frame], [{ ok: true, got: 10 }, 11200]);
+
+// ---- switched off: none handed out, not even the edge's copy ----
+const kept = new Map();
+let hits = 0;
+globalThis.caches = { default: { match: async (k) => { const x = kept.get(k.url); if (x) hits++; return x && x.clone(); }, put: async (k, v) => { kept.set(k.url, v); } } };
+delete env.TURN_STATIC;   // (the edge's cache on, as on Cloudflare)
+r = await call('GET', `/v1/watch/snap?w=${W4}&m=${MH4}&f=11200`, undefined, '198.51.100.31');
+check('on: fetched, and kept at the edge', [r.status, r.body.length, kept.size], [200, S6.length, 1]);
+r = await call('GET', `/v1/watch/snap?w=${W4}&m=${MH4}&f=11200`, undefined, '198.51.100.32');
+check('... the next watcher\'s from the edge', [r.status, r.body.length, hits], [200, S6.length, 1]);
+env.SWITCH_SNAP = 'off';
+r = await call('GET', `/v1/watch/snap?w=${W4}&m=${MH4}&f=11200`, undefined, '198.51.100.33');
+check('switched off: the edge\'s copy not handed out either', [r.status, r.body.error, hits], [404, 'no_snap', 1]);
+check('... and none said to a watcher waiting on one', await ask4(), { frame: -1 });
+env.SWITCH_SNAP = 'on';
+env.TURN_STATIC = '[]';
+delete globalThis.caches;
 
 await settle();
 console.log(fails ? fails + ' FAILED' : 'all passed');

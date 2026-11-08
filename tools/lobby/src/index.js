@@ -1364,14 +1364,14 @@ export class Stats {
 	tally(wid, p, wins, mid) {
 		const h = this.s.hosts[wid];
 		if (!h || h.wid !== wid || p.length !== 2 || wins.length !== 2) return;
-		const pair = p.map((x) => same_name(x.name)).join('|');
+		const pair = p.map((x) => same_name(x.name)).join('|'), was = JSON.stringify(h.tally || null);
 		let t = h.tally;
 		if (!t || t.pair !== pair) t = { pair, done: [0, 0], cur: [0, 0], mid };
 		else if (mid && t.mid && t.mid !== mid) t = { pair, done: [0, 1].map((i) => Math.min(t.done[i] + t.cur[i], 9999)), cur: [0, 0], mid };
 		else if (mid) t.mid = mid;
 		t.cur = [0, 1].map((i) => Math.max(t.cur[i], wins[i]));   // (a match's score only goes up: a start sent again, 0-0 for a moment, isn't taken)
 		h.tally = t;
-		this.touch('hosts', wid);
+		if (JSON.stringify(t) !== was) this.touch('hosts', wid);   // (written only when it changed: a Watch tells every 5-20 s)
 	}
 	// The rooms list: public rooms waiting for an opponent (to join), and the matches anyone may watch, newest first,
 	// ROOMS_MAX a game at most. A player's name only where they chose to be listed (Create room: Listed), or played a
@@ -1504,10 +1504,15 @@ const STREAM_STUCK_MS = 10000;     // (a stream that hasn't taken its last messa
 const WATCH_IDLE_MS = 3 * 3600e3;  // a watch code nothing's used this long is forgotten
 const W_MAGIC = 0x31574656, W_START = 1, W_PUSH = 2, W_REPLY = 4, W_SNAP = 5;
 const HASH_BACK = 120;   // (frames: a reply's hashes reach back this far before its first frame)
-// Snapshots (watch.h's SNAP): the host's state, deflated, at most SNAP_MAX, in parts of SNAP_PART; one counts as fresh
-// within SNAP_FRESH frames of the match's latest (35 s: a watcher loading it runs that many at most, a few seconds),
-// else the host's asked for a new one, no more than once every SNAP_ASK_MS while a watcher's asked within SNAP_WANT_MS
-const SNAP_MAX = (16 << 20) + 64, SNAP_PART = 128 << 10, SNAP_FRESH = 2000, SNAP_ASK_MS = 15000, SNAP_WANT_MS = 30000, SNAP_HEAD = 42;
+// Snapshots (watch.h's SNAP): the host's state, deflated, at most SNAP_MAX, in parts of SNAP_PART (watch.h's: small, so
+// the host's upload never bursts long ahead of its players' packets); one counts as fresh within SNAP_FRESH frames of the
+// match's latest (35 s: a watcher loading it runs that many at most, a few seconds), else the host's asked for a new one,
+// no more than once every SNAP_ASK_MS while a watcher's asked within SNAP_WANT_MS. Memory: a Watch's objects may share
+// an isolate's 128 MB with many others, so a Watch holds one snapshot at most, put together in place (one buffer, the
+// last one let go as a new one's first part comes), and lets it go once nobody's asked for it for SNAP_IDLE_MS (the edge
+// keeps serving it by its frame: it's stale by then anyway), and a part-sent one with no part for SNAP_STALL_MS
+const SNAP_MAX = (16 << 20) + 64, SNAP_PART = 32 << 10, SNAP_FRESH = 2000, SNAP_ASK_MS = 15000, SNAP_WANT_MS = 30000, SNAP_HEAD = 42;
+const SNAP_IDLE_MS = 60000, SNAP_STALL_MS = 30000;
 
 async function bytes_of(req, max) {
 	if ((req.headers.get('content-length') | 0) > max || !req.body) return null;
@@ -1592,6 +1597,7 @@ async function watch_route(env, req, url) {
 		const m = hex16(q('m'));
 		if (!m) return json({ error: 'bad' }, 400);
 		if (!q('f')) return w.fetch('https://watch/snap?m=' + m);
+		if (!snaps_on(env)) return json({ error: 'no_snap' }, 404);   // (switched off: none, not even one the edge still keeps)
 		const f = parseInt(q('f'), 10);
 		if (!(f >= 0 && f <= WATCH_FRAMES)) return json({ error: 'bad' }, 400);
 		if (await limited(env, req, 'WATCH_LIMIT')) return json({ error: 'busy' }, 429);
@@ -1867,6 +1873,7 @@ export class Watch {
 	take(b, start) {
 		const a = this.arm, now = Date.now();
 		a.used = now;
+		this.snap_tidy(now);
 		if (!switch_on(this.env, 'SWITCH_WATCH')) {   // (switched off: the host sends no more; its watchers told, their sockets ended)
 			for (const w of this.ctx.getWebSockets('w')) try { w.send(JSON.stringify({ error: 'off' })); w.close(1000, 'off'); } catch (e) {}
 			for (const st of [...this.streams]) this.end_stream(st);
@@ -2020,26 +2027,39 @@ export class Watch {
 		m.snap_asked = now;
 		return true;
 	}
-	// A part of the host's snapshot: whole, checked and kept as the match's latest
-	snap_part(f, i, n, b) {
+	// (memory: the snapshot nobody's asked for in SNAP_IDLE_MS let go, as is a part-sent one stalled SNAP_STALL_MS)
+	snap_tidy(now = Date.now()) {
 		const m = this.m;
-		if (!m.snap_in || m.snap_in.f !== f || m.snap_in.n !== n) m.snap_in = { f, n, parts: new Array(n), got: 0, size: 0, at: Date.now() };
+		if (!m) return;
+		if (m.snap && now - m.snap.used > SNAP_IDLE_MS) m.snap = null;
+		if (m.snap_in && now - m.snap_in.at > SNAP_STALL_MS) m.snap_in = null;
+	}
+	// A part of the host's snapshot, put in its place in the one buffer it's put together in: whole, checked and kept as
+	// the match's latest. A new one's first part lets the last one go (a new one's asked for only once that's stale; one
+	// sent while it's fresh is refused), so a Watch never holds two
+	snap_part(f, i, n, b) {
+		const m = this.m, now = Date.now();
+		if (!(n >= 1 && n * SNAP_PART <= SNAP_MAX + SNAP_PART && i >= 0 && i < n) || !b.length || b.length > SNAP_PART || (i < n - 1 && b.length !== SNAP_PART)) return { error: 'bad' };
+		if (!m.snap_in || m.snap_in.f !== f || m.snap_in.n !== n) {
+			if (m.snap && (f <= m.snap.frame || this.snap_fresh())) return { error: 'bad' };   // (not newer, or the one kept still fresh: none asked for)
+			m.snap_in = null;   // (any part-sent one let go,
+			m.snap = null;      // and the stale one kept, before the new one's buffer is made)
+			m.snap_in = { f, n, buf: new Uint8Array(n * SNAP_PART), have: new Uint8Array(n), got: 0, size: (n - 1) * SNAP_PART, at: now };
+		}
 		const s = m.snap_in;
-		s.at = Date.now();
-		if (!s.parts[i]) {
-			if (s.size + b.length > SNAP_MAX || (i < n - 1 && b.length !== SNAP_PART)) { m.snap_in = null; return { error: 'bad' }; }
-			s.parts[i] = b;
+		s.at = now;
+		if (!s.have[i]) {
+			if (i === n - 1) { if (s.size + b.length > SNAP_MAX) { m.snap_in = null; return { error: 'bad' }; } s.size += b.length; }
+			s.buf.set(b, i * SNAP_PART);
+			s.have[i] = 1;
 			s.got++;
-			s.size += b.length;
 		}
 		if (s.got < n) return { ok: true, got: s.got };
 		m.snap_in = null;
-		const all = new Uint8Array(s.size);
-		let at = 0;
-		for (const p of s.parts) { all.set(p, at); at += p.length; }
+		const all = s.buf.subarray(0, s.size);
 		const h = w_head(all, W_SNAP);
 		if (!h || h.m !== m.id || all.length < SNAP_HEAD || h.v.getUint32(14, true) !== f || h.v.getUint32(38, true) !== all.length - SNAP_HEAD) return { error: 'bad' };
-		if (!m.snap || f > m.snap.frame) m.snap = { frame: f, b: all };
+		m.snap = { frame: f, b: all, used: now };
 		return { ok: true, got: s.got };
 	}
 	async webSocketMessage(ws, msg) {
@@ -2132,6 +2152,7 @@ export class Watch {
 			if (q('ip') && this.askers.size < 1000) this.askers.set(q('ip'), now);
 			return json({ watchers: this.count() });
 		}
+		if (op === '/snap') this.snap_tidy(now);
 		if (req.method === 'POST' && op === '/snap') {
 			if (q('k') !== a.wkey) return json({ error: 'no_watch' }, 404);
 			if (!snaps_on(this.env)) return json({ error: 'off' }, 503);
@@ -2144,6 +2165,7 @@ export class Watch {
 		if (!m || (req.method !== 'POST' && q('m') !== m.id)) return json({ error: 'no_match' }, 404);
 		if (op === '/snap' && !q('f')) {   // (is there a snapshot: the latest if fresh, else one asked of the host if it makes them)
 			if (!snaps_on(this.env)) return json({ frame: -1 });   // (switched off: none, none to come)
+			if (m.snap) m.snap.used = now;   // (said: kept a while yet, to be fetched)
 			if (this.snap_fresh()) return json({ frame: m.snap.frame, size: m.snap.b.length });
 			if (!m.meta || m.meta.snap !== 1) return json({ frame: -1 });
 			if (m.n <= SNAP_FRESH) return json({ frame: -1, n: m.n });   // (a match just begun: its start's as near)
@@ -2154,6 +2176,7 @@ export class Watch {
 		if (op === '/snap') {
 			const f = parseInt(q('f'), 10);
 			if (!snaps_on(this.env) || !m.snap || m.snap.frame !== f) return json({ error: 'no_snap' }, 404);
+			m.snap.used = now;
 			return binary(m.snap.b, 86400);
 		}
 		if (op === '/start') return binary(m.start, 86400);
