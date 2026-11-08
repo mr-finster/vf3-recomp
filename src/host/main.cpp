@@ -649,6 +649,8 @@ struct settings
 	std::string gpu3d_failed;   // SDL_GPU's drivers whose 3D failed here ("direct3d12 vulkan"): the next start tries the next
 	bool fullscreen = false, arcade = false, show_fps = false, smooth = true;
 	bool hud = true;    // Display > HUD: the 2D over a fight (energy bars, timer, names...) drawn; off: the 3D and the backdrop only
+	bool vsync = true;  // Display > V-Sync: each picture presented at a refresh (off: at once, maybe torn)
+	int frame_limit = 120;   // Display > Frame limit: the pictures a second at most, 30 60 120 (as before) 144; 0 none, -1 the screen's refresh rate
 	// Fullscreen as a borderless window a line taller than the screen, never the driver's own (issue #7: AMD's Vulkan
 	// on Windows froze in its exclusive fullscreen): the way on Windows unless fullscreen_exclusive = 1 (Display >
 	// Fullscreen mode); elsewhere the system's own (a Mac's Spaces, the Deck's gamescope) unless fullscreen_window = 1
@@ -736,6 +738,9 @@ struct settings
 		flag("frame_timings", timings);
 		flag("show_fps", show_fps);
 		flag("hud", hud);
+		flag("vsync", vsync);
+		num("frame_limit", frame_limit, -1, 1000);
+		if (frame_limit != -1 && frame_limit != 0 && frame_limit != 30 && frame_limit != 60 && frame_limit != 144) frame_limit = 120;
 		flag("smooth_motion", smooth);
 		flag("smooth_backgrounds", smooth_bg);
 		flag("background_filter", smooth_bg);   // (VF1's and VF2's name)
@@ -829,7 +834,7 @@ struct settings
 		if (!gpu3d_failed.empty()) fprintf(f, "gpu_3d_failed = %s\ngpu_3d_failed_build = %s\n", gpu3d_failed.c_str(), BUILD);
 		fprintf(f, "crt_colours = %d\nbrightness = %d\ngamma = %d\nsharp_textures = %d\n", crt_colours, brightness, gamma, int(sharp_textures));
 		fprintf(f, "quad_rendering = %d\n", int(quads));
-		fprintf(f, "hud = %d\n", int(hud));
+		fprintf(f, "hud = %d\nvsync = %d\nframe_limit = %d\n", int(hud), int(vsync), frame_limit);
 		if (graphics) fprintf(f, "graphics = %d\n", graphics);
 		fprintf(f, "window_scale = %d\n", window_scale);
 		if (window_w > 0) fprintf(f, "window_w = %d\nwindow_h = %d\nwindow_x = %d\nwindow_y = %d\nwindow_maximised = %d\n", window_w, window_h, window_x, window_y, int(window_max));
@@ -2139,7 +2144,9 @@ int main(int argc, char **argv)
 	}
 	if (!ren) ren = SDL_CreateRenderer(win, nullptr);
 	if (!ren) return fail(tr::line(tr::FAIL_GRAPHICS, { { "why", SDL_GetError() } }));
-	SDL_SetRenderVSync(ren, 1);
+	// (Display > V-Sync: SDL sets it for whichever renderer this is, its gpu renderer's Vulkan, Direct3D 12 or Metal
+	// swapchain, or Direct3D 11, OpenGL, Metal, the software one; a renderer without it says so)
+	if (!SDL_SetRenderVSync(ren, cfg.vsync ? 1 : 0)) fprintf(stderr, "vsync %s: not taken (%s)\n", cfg.vsync ? "on" : "off", SDL_GetError());
 	fprintf(stderr, "renderer: %s\n", SDL_GetRendererName(ren));
 
 	// ---- the picture ----
@@ -3218,6 +3225,30 @@ int main(int argc, char **argv)
 		p.items.push_back({ tr::D_HUD, tr::D_HUD_HELP,
 			[&] { return on_off(cfg.hud); },
 			[&](int) { cfg.hud = !cfg.hud; cfg_dirty = true; } });
+		p.items.push_back({ tr::D_VSYNC, tr::D_VSYNC_HELP,
+			[&] { return on_off(cfg.vsync); },
+			[&](int) {
+				cfg.vsync = !cfg.vsync; cfg_dirty = true;
+				const bool ok = SDL_SetRenderVSync(ren, cfg.vsync ? 1 : 0);
+				fprintf(stderr, "Display > V-Sync: %s%s%s\n", cfg.vsync ? "on" : "off", ok ? "" : " (not taken: ", ok ? "" : (std::string(SDL_GetError()) + ")").c_str());
+			} });
+		p.items.push_back({ tr::D_FRAME_LIMIT, tr::D_FRAME_LIMIT_HELP,
+			[&] {
+				if (cfg.frame_limit == 0) return std::string(tr::OFF);
+				if (cfg.frame_limit < 0) {
+					const SDL_DisplayMode *dm = SDL_GetCurrentDisplayMode(SDL_GetDisplayForWindow(win));
+					return tr::fill(tr::D_FRAME_LIMIT_SCREEN, { { "n", std::to_string(int(std::lround(dm && dm->refresh_rate > 0 ? dm->refresh_rate : 60.0f))) } });
+				}
+				return std::to_string(cfg.frame_limit);
+			},
+			[&](int d) {
+				static const int ORDER[] = { 0, 30, 60, 120, 144, -1 };
+				int i = 0;
+				while (i < 5 && ORDER[i] != cfg.frame_limit) i++;
+				cfg.frame_limit = ORDER[wrap(i + d, 6)];
+				cfg_dirty = true;
+				fprintf(stderr, "Display > Frame limit: %d (0 none, -1 the screen's)\n", cfg.frame_limit);
+			} });
 		p.items.push_back({ tr::D_WINDOW_SIZE, tr::D_WINDOW_SIZE_HELP,
 			[&] {
 				if (cfg.window_scale <= 0) return std::string(tr::D_FREE);
@@ -4026,6 +4057,14 @@ int main(int argc, char **argv)
 	// gets a picture at its refreshes up to that), none while the window can't be seen
 	double smooth_budget = 0;
 	uint64_t smooth_t = SDL_GetTicksNS();
+	// Display > Frame limit: the pictures a second at most (120 as before: the default), the screen's refresh rate for
+	// Screen's, none for Off (a very large number), 60 while the governor holds smooth motion there. Only the pictures:
+	// the game's frames go by its clock (and online, the session's) whatever it is, so the game's speed never changes
+	auto picture_cap = [&] {
+		double cap = cfg.frame_limit < 0 ? screen_hz : cfg.frame_limit > 0 ? double(cfg.frame_limit) : 1e9;
+		if (gov.smooth_off) cap = std::min(cap, 60.0);
+		return cap;
+	};
 	// the window's title: the scale and the picture's shape; F9, the timings every 2 s instead (and in the log)
 	std::string title_now;
 	struct { uint64_t t0 = 0; int frames = 0, pictures = 0; double emu_ms = 0, draw_ms = 0; } t9;
@@ -4572,7 +4611,7 @@ int main(int argc, char **argv)
 			pass_avg += (dt - pass_avg) * 0.05;
 			const double per = pass_avg * screen_hz, whole = std::round(per);
 			const bool unseen_now = !hidden && (SDL_GetWindowFlags(win) & (SDL_WINDOW_MINIMIZED | SDL_WINDOW_OCCLUDED));
-			if (!no_even && cfg.smooth && !hidden && !unseen_now && screen_hz <= (gov.smooth_off ? 60 : 120) * 1.05 &&
+			if (!no_even && cfg.smooth && !hidden && !unseen_now && screen_hz <= picture_cap() * 1.05 &&
 				whole >= 1 && std::fabs(per - whole) < 0.12) {
 				const double unit = 1.0 / screen_hz, step = std::max(1.0, std::round(dt * screen_hz)) * unit;
 				even_real += dt;
@@ -4820,7 +4859,8 @@ int main(int argc, char **argv)
 		// change as a ghost; and the in-between's time is better spent on the frames)
 		const bool smooth = cfg.smooth && !ff && !online.playing();
 		const uint64_t bt = SDL_GetTicksNS();
-		smooth_budget = std::min(2.0, smooth_budget + double(bt - smooth_t) * (gov.smooth_off ? 60 : 120) / 1e9);
+		const double cap = picture_cap();
+		smooth_budget = std::min(2.0, smooth_budget + double(bt - smooth_t) * std::min(cap, 1e6) / 1e9);
 		smooth_t = bt;
 		const bool unseen = !hidden && (SDL_GetWindowFlags(win) & (SDL_WINDOW_MINIMIZED | SDL_WINDOW_OCCLUDED));
 		// (a screen no faster than the pictures' limit: a picture each refresh, its vsync the pace. By the budget alone a
@@ -4840,12 +4880,16 @@ int main(int argc, char **argv)
 			vsync_on = vs_now;
 		}
 		// (hidden, or vsync off: nothing paces the passes to the screen, a picture each pass was ~500 a second; as VF1's)
-		const bool every_refresh = !hidden && vsync_on && screen_hz <= (gov.smooth_off ? 60 : 120) * 1.05;
+		const bool every_refresh = !hidden && vsync_on && screen_hz <= cap * 1.05;
+		// (a limit under the game's own 57.5 a second, 30: its new frames' pictures by the budget too, every other one)
+		const bool capped_low = cap < FRAME_HZ * 0.95;
 		// (tests: VF3_TEST_NO_PICTURES, two games at once on a small machine, the frames' cost alone: a picture only now
 		// and then)
 		static const bool no_pictures = getenv("VF3_TEST_NO_PICTURES") != nullptr;
 		const bool draw = no_pictures ? first_shown ? (pass % 120 == 0) : true
-		                              : rec.on || new_frame || (smooth && !stopped && !unseen && (smooth_budget >= 1 || every_refresh)) || !first_shown;
+		                              : rec.on || !first_shown ||
+		                                (smooth && !stopped && !unseen ? smooth_budget >= 1 || every_refresh   // (a new frame's in the in-between pictures: the limit holds)
+		                                                               : new_frame && (!capped_low || smooth_budget >= 1 || stopped));
 		if (draw) {
 			smooth_budget = std::max(0.0, smooth_budget - 1);
 			t9.pictures++;

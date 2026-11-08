@@ -113,6 +113,11 @@ T(D_SHOW_FPS, "Show FPS")
 T(D_SHOW_FPS_HELP, "Shows the frame rate in the top right corner.")
 T(D_HUD, "HUD")                              // Display > HUD: the game's 2D over a fight (energy bars, timer, names) drawn or not
 T(D_HUD_HELP, "Off hides the game's display over a fight: the energy bars, the timer, the names, the rounds won and the round calls. The fighters and the stage are still drawn, and the game plays exactly the same.")
+T(D_VSYNC, "V-Sync")                         // Display > V-Sync (ja/ko/zh: the usual words for it)
+T(D_VSYNC_HELP, "On: each picture waits for your screen's next refresh, so none tears. Off: each is shown as soon as it's ready, a little sooner, but a line can tear across it. The game's speed is the same either way.")
+T(D_FRAME_LIMIT, "Frame limit")              // Display > Frame limit: Off, 30, 60, 120, 144 or the screen's refresh rate
+T(D_FRAME_LIMIT_HELP, "The most pictures shown a second. Screen's: one for each refresh of your screen. Off: no limit. Only the pictures change: the game always runs at the arcade's own speed, online too.")
+T(D_FRAME_LIMIT_SCREEN, "Screen's ({n} Hz)") // (Frame limit's value: the screen's refresh rate, {n} in Hz)
 T(D_WINDOW_SIZE, "Window size")
 T(D_WINDOW_SIZE_HELP, "Sizes the window to a whole multiple of the arcade's 384 lines (1x: 512 x 384 for the 4:3 picture, wider for a wider shape), each arcade line that many of your screen's: Render scale 1x with Window size 1x shows the arcade's 384 lines one to one, Window size 2x with Render scale 1x doubles each of them. Only the sizes your screen holds; for playing in a window (in fullscreen it waits for the window). Resizing the window by hand sets it back to Free. The window's size and place are remembered either way.")
 T(D_FREE, "Free")
