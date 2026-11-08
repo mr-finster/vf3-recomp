@@ -545,7 +545,12 @@ export class Room {
 		const g = r.guest;
 		const listed = r.listed ? { listed: true, aid: r.aid || '', name: r.host.name, room: r.name || '', locked: !!r.locked, region: r.region || '', persist: !!r.persist, playing: !!r.playing,
 			p2: r.playing && g ? [g.name, g.country] : null, queue: (r.queue || []).length, wid: r.wid || '' } : {};
-		tell(this, { code: r.code, game: r.host.game, version: r.host.pool || r.host.version, playing: !!r.playing, ...listed, ...ev });   // (a pool's player counted as the pool's)
+		// (a room that stays, any (listed or not): its line's players still asking, and its match's other player while it's
+		// on, so the count has them as long as the room says it's there, not only the 10 minutes after the match began)
+		const now = Date.now(), line = r.persist ? (r.queue || []).filter((q) => now - q.seen < QUEUE_GONE_MS && q.sid) : [];
+		const stays = r.persist ? { persist: true, qsids: line.map((q) => q.sid), qcountries: line.map((q) => q.country || ''),
+			...(r.playing && r.gsid ? { gsid: r.gsid, gcountry: (g && g.country) || '' } : {}) } : {};
+		tell(this, { code: r.code, game: r.host.game, version: r.host.pool || r.host.version, playing: !!r.playing, ...listed, ...stays, ...ev });   // (a pool's player counted as the pool's)
 	}
 	host_socket() { return this.ctx.getWebSockets ? this.ctx.getWebSockets('host').some((ws) => !this.quiet.has(ws)) : false; }
 	// (a host's socket with no ping for HOST_PING_GONE_MS: its game gone without a close (a cable pulled, a sleep): closed;
@@ -661,6 +666,7 @@ export class Room {
 			if (r && r.persist && rooms_on && b.old_key && b.old_key === r.key) {
 				r.host = b.host;
 				r.guest = null;
+				r.gsid = '';
 				r.playing = false;
 				r.token = random_hex(8);
 				r.seen = Date.now();
@@ -757,6 +763,7 @@ export class Room {
 			}
 			if (r.guest) return json({ error: 'full' }, 409);
 			r.guest = { ...g, as, them: g.version };   // (them: the other player's own version, for what the match says: whose Dural)
+			r.gsid = sid;   // (for the count: who's playing the host while the room says so)
 			if (r.persist) r.playing = true;
 			await this.save();
 			this.tell({ op: 'join', sids: [r.sid, clean(b.sid, 16)], countries: [h.country, g.country] });
@@ -790,6 +797,7 @@ export class Room {
 		}
 		if (op === '/reopen') {
 			r.guest = null;
+			r.gsid = '';
 			r.playing = false;   // (open again: listed waiting, not as a match on)
 			r.token = random_hex(8);   // (a new session: the last player's token no good for it)
 			await this.save();
@@ -973,7 +981,7 @@ export class Queue {
 		this.pairs.set(m.host.code, { t, players: [host, guest].map((x) => ({ from: x.from, name: x.me.name })) });
 		for (const [c, p] of this.pairs) if (t - p.t > RANDOM_PLAYING_MS) this.pairs.delete(c);
 		this.ctx.storage.put('pairs', [...this.pairs]);   // (not awaited, as matched's)
-		this.told.events.push({ op: 'match', code: m.host.code, sids: [host.sid, guest.sid], countries: [host.me.country, guest.me.country], t });
+		this.told.events.push({ op: 'match', code: m.host.code, version: host.me.pool || host.me.version, sids: [host.sid, guest.sid], countries: [host.me.country, guest.me.country], t });
 		host.partner = guest;
 		guest.partner = host;
 		host.room = guest.room = { code: m.host.code, key: m.host.key };
@@ -1234,7 +1242,11 @@ export class Stats {
 		const code = typeof b.code === 'string' ? b.code.slice(0, 8) : '';
 		const unmatch = (c, kind) => this.drop_matches((m) => m.code === c && m.kind === kind);
 		if (b.op === 'queue') {
-			const key = String(b.key).slice(0, 64), sids = [], countries = [];
+			// (its key: the queue's id, 64 hex digits on Cloudflare, then the version: kept whole, each version its own entry.
+			// Cut to 64 as it was, every version of a queue was one entry, the last told: a queue with an older build's player
+			// and new ones searching counted only one of the two lists)
+			const key = String(b.key).slice(0, 160), sids = [], countries = [];
+			if (key.length > 64) this.del('queues', key.slice(0, 64));   // (its entry as kept before this: gone at once, not counted beside it for its last minute)
 			for (const [sid, c] of pairs(b.sids, b.countries)) if (!sids.includes(sid) && sids.length < 2000) { sids.push(sid); countries.push(c); }
 			if (sids.length) this.set('queues', key, { ...at, sids, countries, until: now + ONLINE_QUEUE_MS });
 			else this.del('queues', key);
@@ -1243,7 +1255,9 @@ export class Stats {
 				if (e.op === 'match') {
 					unmatch(c, 'random');
 					const p = pairs(e.sids, e.countries).slice(0, 2);
-					this.add_match({ ...at, kind: 'random', code: c, sids: p.map((x) => x[0]), countries: p.map((x) => x[1]), t: Math.min(now, +e.t || now) });
+					// (its own version, what it plays as: told with the first list's, whatever version that is, before)
+					const v = typeof e.version === 'string' && e.version ? e.version.slice(0, 64) : at.version;
+					this.add_match({ ...at, version: v, kind: 'random', code: c, sids: p.map((x) => x[0]), countries: p.map((x) => x[1]), t: Math.min(now, +e.t || now) });
 				} else if (e.op === 'unmatch') unmatch(c, 'random');
 			}
 		} else if (b.op === 'watch' || b.op === 'unwatch') {
@@ -1269,7 +1283,7 @@ export class Stats {
 			for (const w of Object.values(s.watches)) watchers += w.watchers | 0;
 			const hours = s.month.ms / 3600e3;
 			return json({ matches: Object.keys(s.watches).length, watchers, month_hours: Math.round(hours * 10) / 10, over: hours >= month_ceiling(this.env) });   // (the load on watching, everywhere: the Watches shed it by this)
-		} else if (b.op === 'host' || b.op === 'reopen' || b.op === 'hold' || (b.op === 'join' && b.persist === true && b.listed === true)) {
+		} else if (b.op === 'host' || b.op === 'reopen' || b.op === 'hold' || (b.op === 'join' && b.persist === true)) {   // (a room that stays, listed or not: its host kept, in its match)
 			if (b.op === 'reopen') unmatch(code, 'room');
 			const [p] = pairs(b.sids, b.countries);
 			// (a public room's host by name and where, for the rooms list; anyone else's, only counted)
@@ -1283,8 +1297,12 @@ export class Stats {
 			}
 			// (playing: a room that stays, its match on; its host counted as in that match, not as hosting)
 			const playing = b.playing === true || b.op === 'join';
-			if (p && b.op !== 'join') this.set('hosts', code, { ...at, sid: p[0], country: p[1], seen: now, born: (s.hosts[code] && s.hosts[code].born) || now, in_match: playing, ...listed });
-			else if (s.hosts[code]) { Object.assign(s.hosts[code], { seen: now, in_match: playing }, listed); this.touch('hosts', code); }
+			// (a room that stays: its line's players, and its match's other player while the room says it's on; a room that
+			// says nothing of them (not one that stays) has none)
+			const line = pairs(b.qsids, b.qcountries).slice(0, QUEUE_MAX), [guest] = playing ? pairs([b.gsid], [b.gcountry]) : [];
+			const stays = { queued: line, guest: guest || null };
+			if (p && b.op !== 'join') this.set('hosts', code, { ...at, sid: p[0], country: p[1], seen: now, born: (s.hosts[code] && s.hosts[code].born) || now, in_match: playing, ...listed, ...stays });
+			else if (s.hosts[code]) { Object.assign(s.hosts[code], { seen: now, in_match: playing }, listed, stays); this.touch('hosts', code); }
 		} else if (b.op === 'join') {
 			this.del('hosts', code);
 			unmatch(code, 'room');
@@ -1346,9 +1364,15 @@ export class Stats {
 		for (const h of Object.values(s.hosts)) {   // (a room that stays, its match on: its host in a room's match, not hosting)
 			if (h.in_match) put(h.game, h.version, h.sid, 1, h.seen, 'room', h.country);
 			else put(h.game, h.version, h.sid, 2, h.seen, 'hosting', h.country);
+			if (h.in_match && Array.isArray(h.guest)) put(h.game, h.version, h.guest[0], 1, h.seen, 'room', h.guest[1]);   // (its other player)
+			for (const [sid, c] of Array.isArray(h.queued) ? h.queued : []) put(h.game, h.version, sid, 2, h.seen, 'queued', c);   // (in its line: waiting to play)
 		}
 		for (const m of s.matches) m.sids.forEach((sid, i) => put(m.game, m.version, sid, 1, m.t, m.kind === 'random' ? 'random' : 'room', c_at(m.countries, i)));
-		const zero = () => ({ total: 0, searching: 0, random: 0, hosting: 0, room: 0 });
+		const zero = () => ({ total: 0, searching: 0, random: 0, hosting: 0, queued: 0, room: 0 });
+		// (watching: those watching a match of the game now, as each match's Watch counts them; apart from total, which is
+		// the players: a watcher plays no one, and may be a player too, counted there as one)
+		const watching = {};
+		for (const w of Object.values(s.watches)) watching[w.game] = (watching[w.game] || 0) + (w.watchers | 0);
 		// (players by country, most first: a country's two letters, "" not known)
 		const by_country = (m) => Object.fromEntries([...m].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)));
 		const games = {}, all = new Map();
@@ -1362,6 +1386,7 @@ export class Stats {
 				if (p.variant === 'older') g.older++;
 			}
 			g.countries = by_country(lands);
+			g.watching = watching[game] || 0;
 			games[game] = g;
 		}
 		return { updated: Math.floor(now / 1000), games, countries: by_country(all), rooms: this.rooms() };

@@ -191,7 +191,7 @@ for (const [what, a, b, want] of cases) {
 	const d = await get();
 	const tb = d.games.vf3tb, tb0 = d0.games.vf3tb, g2 = d.games.vf2, g20 = d0.games.vf2;
 	check('online, the games counted', Object.keys(d.games || {}).sort().join(','), 'vf1,vf2,vf3,vf3tb');
-	check('online, the shape: total, searching, random, hosting, room, older, countries; no variants', Object.keys(tb).sort().join(','), 'countries,hosting,older,random,room,searching,total');
+	check('online, the shape: total, searching, random, hosting, queued, room, older, countries, watching; no variants', Object.keys(tb).sort().join(','), 'countries,hosting,older,queued,random,room,searching,total,watching');
 	check('online, Team Battle: a new and an old host, the old one older', (tb.hosting - tb0.hosting) + ' hosting, ' + (tb.older - tb0.older) + ' older', '2 hosting, 1 older');
 	check('online, VF2: a Random player is a current one', (g2.hosting - g20.hosting) + ' hosting, ' + (g2.older - g20.older) + ' older', '1 hosting, 0 older');
 	for (const [h, x] of [[h1, n], [h2, o], [h3, v]]) await post('/v1/close', { code: h.body.code, key: h.body.key }, x.from);

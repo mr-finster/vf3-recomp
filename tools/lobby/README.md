@@ -245,13 +245,18 @@ After changing anything here, `npx wrangler deploy` again.
 of them those on an older version:
 
 ```
-{"updated": 1793594882, "games": {"vf3tb": {"total": 3, "searching": 1, "random": 2, "hosting": 0, "room": 0,
-  "older": 1, "countries": {"JP": 2, "FR": 1}}, ...}, "countries": {"JP": 5, "US": 3, "FR": 1, "": 1}}
+{"updated": 1793594882, "games": {"vf3tb": {"total": 3, "searching": 1, "random": 2, "hosting": 0, "queued": 0,
+  "room": 0, "older": 1, "countries": {"JP": 2, "FR": 1}, "watching": 4}, ...}, "countries": {"JP": 5, "US": 3, "FR": 1, "": 1}}
 ```
 
 - `searching`: in the Random queue now; `random`: in a Random match made in the last 10 minutes (as the RANDOM
-  card's count); `hosting`: waiting with a room code; `room`: in a room code match joined in the last 10 minutes
-  (a host's reopen, the player who joined not getting going, takes it back). `total`: all of them.
+  card's count); `hosting`: waiting with a room code; `queued`: in the line of a room that stays (still asking);
+  `room`: in a room code match joined in the last 10 minutes (a host's reopen, the player who joined not getting
+  going, takes it back), or in the match on in a room that stays, both its players for as long as its host says it's
+  there. `total`: all of them (the parts add up to it). Play by address never reaches the lobby: not counted.
+- `watching`: those watching the game's matches now, as each match's Watch counts them. Not in `total`: a watcher
+  plays no one (and one who also plays is counted there, as a player). The sites' "Online now" and the Online page's
+  counts are `total`; the page shows `watching` beside it.
 - Each player once, in what they're doing now: searching, else hosting, else their latest match. A player is their
   address (an IPv6 one by its /64) and name, hashed (two searches, two rooms or a search again are one player; two
   players at one address with the same name count as one).

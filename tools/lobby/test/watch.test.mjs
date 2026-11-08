@@ -805,6 +805,6 @@ check('peek: no such room', (await call('POST', '/v1/peek', { code: 'ZZZ222' }))
 }
 
 // ---- an old game's pages: the counts as they were (the rooms a field more, which they don't read) ----
-check('online: the counts\' shape unchanged', Object.keys(d.games.vf3).sort(), ['countries', 'hosting', 'older', 'random', 'room', 'searching', 'total']);
+check('online: the counts\' shape unchanged', Object.keys(d.games.vf3).sort(), ['countries', 'hosting', 'older', 'queued', 'random', 'room', 'searching', 'total', 'watching']);
 console.log(fails ? fails + ' FAILED' : 'all passed');
 process.exit(fails ? 1 : 0);
