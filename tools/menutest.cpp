@@ -44,6 +44,7 @@ SDL_Texture *backdrop = nullptr;   // MENUTEST_BACKDROP: a picture of the game i
 std::vector<std::string> overflows;   // (each picture's text past its box: game_menu::overflow)
 std::vector<uint32_t> last_px;   // (the last picture written, its pixels)
 std::vector<std::string> misaligned;   // (a page's rows whose labels don't start where the others' do)
+std::vector<std::string> unfit;   // (a page of rows that doesn't fit whole: game_menu::page_fit)
 
 // a stand-in for the game's picture: a dark stage, two energy bars and a timer, so the notices are seen over something
 void draw_game(int w, int h)
@@ -74,6 +75,7 @@ void shot(const char *name, int w, int h)
 	menu->render(false);
 	if (!*name) return;   // (a frame only)
 	for (const std::string &o : menu->overflow()) overflows.push_back(std::string(name) + ": " + o);
+	if (const std::string f = menu->page_fit(); !f.empty()) unfit.push_back(std::string(name) + ": " + f);
 	SDL_Surface *s = SDL_RenderReadPixels(ren, nullptr);
 	SDL_Surface *c = s ? SDL_ConvertSurface(s, SDL_PIXELFORMAT_ABGR8888) : nullptr;
 	if (s) SDL_DestroySurface(s);
@@ -256,6 +258,9 @@ void pages(game_menu &gm, int w, int h)
 		{ D_GAMMA, D_GAMMA_HELP, F(NOT_WITH_RENDERER, { { "what", F(N_PERCENT, { { "n", "100" } }) } }) },
 		{ D_DRIVER, D_DRIVER_HELP, D_DRIVER_AUTO },
 		{ D_SHOW_FPS, D_SHOW_FPS_HELP, off },
+		{ D_HUD, D_HUD_HELP, on },
+		{ D_VSYNC, D_VSYNC_HELP, on },
+		{ D_FRAME_LIMIT, D_FRAME_LIMIT_HELP, F(D_FRAME_LIMIT_SCREEN, { { "n", "144" } }) },
 		{ D_WINDOW_SIZE, D_WINDOW_SIZE_HELP, F(D_WINDOW_N_IN_WINDOW, { { "n", "3" }, { "w", "1536" }, { "h", "1152" } }) },
 		{ D_FULLSCREEN, D_FULLSCREEN_HELP, on },
 		{ D_FS_MODE, D_FS_MODE_HELP, D_BORDERLESS } });
@@ -303,7 +308,8 @@ void pages(game_menu &gm, int w, int h)
 		{ P_PLAYER_1, CTL_P1_HELP, F(CTL_ANY_PAD, { { "pad", "Xbox Series X Controller" } }) }, { P_PLAYER_2, CTL_P2_HELP, CTL_ANY_PAD_NONE },
 		{ CTL_SWAP, CTL_SWAP_HELP, "" } });
 	page_shots(gm, w, h, "pages_player.png", P_PLAYER_1, {
-		{ CTL_PAD, CTL_PAD_HELP, CTL_CHOSEN_PAD_GONE }, { CTL_KEYBOARD, CTL_KEYBOARD_HELP, "" }, { CTL_PAD_BUTTONS, CTL_PAD_BUTTONS_HELP, "" },
+		{ CTL_PAD, CTL_PAD_HELP, CTL_CHOSEN_PAD_GONE }, { CTL_KEYBOARD, CTL_KEYBOARD_HELP, "" }, { CTL_KEYBOARD2, CTL_KEYBOARD2_HELP, "" }, { CTL_PAD_BUTTONS, CTL_PAD_BUTTONS_HELP, "" },
+		{ CTL_PAD_BUTTONS2, CTL_PAD_BUTTONS2_HELP, "" },
 		{ CTL_SETUP, CTL_SETUP_HELP, "" }, { CTL_RESET, CTL_RESET_HELP, "" } });
 	{
 		const tr::text names[] = { CTL_UP, CTL_DOWN, CTL_LEFT, CTL_RIGHT, CTL_GUARD, CTL_PUNCH, CTL_KICK, CTL_ESCAPE, CTL_GUARD_PUNCH, CTL_PUNCH_KICK, CTL_GUARD_KICK,
@@ -315,6 +321,8 @@ void pages(game_menu &gm, int w, int h)
 		}
 		page_shots(gm, w, h, "pages_keys.png", P_P2_KEYBOARD, keys);
 		page_shots(gm, w, h, "pages_pad.png", P_P2_PAD, pads);
+		page_shots(gm, w, h, "pages_keys2.png", P_P2_KEYBOARD2, keys);   // (the second keys' and buttons': the same rows)
+		page_shots(gm, w, h, "pages_pad2.png", P_P2_PAD2, pads);
 	}
 	// the prompts that take the help's place while a key, a button or a set-up step is waited for
 	{
@@ -1343,6 +1351,9 @@ int main(int argc, char **argv)
 	printf("%zu lines past their box\n", overflows.size());
 	for (const std::string &o : misaligned) check(false, ("a row out of line: " + o).c_str());
 	check(misaligned.empty(), "every page's rows start in line");
+	// every page of rows whole, none scrolling (a scroll can't be seen: the rows below the panel's foot looked missing)
+	for (const std::string &o : unfit) check(false, ("a page that doesn't fit: " + o).c_str());
+	check(unfit.empty(), "every page of rows fits whole: none scrolls");
 	if (fails) { fprintf(stderr, "menutest: %d failed\n", fails); return 1; }
 	printf("all passed\n");
 	return 0;

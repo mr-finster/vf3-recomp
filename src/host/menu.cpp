@@ -420,6 +420,21 @@ std::vector<std::string> game_menu::misaligned()
 	return out;
 }
 
+std::string game_menu::page_fit()
+{
+	if (!m->ctx || !m_open || on_screen()) return "";
+	m->ctx->Update();
+	Rml::Element *rows = m->doc->GetElementById("rows"), *foot = m->doc->GetElementById("ver");
+	if (!rows || !foot) return "";
+	const float dp = m->ctx->GetDensityIndependentPixelRatio();
+	auto n = [dp](float px) { return std::to_string(int(std::lround(px / dp))) + "dp"; };
+	if (rows->GetScrollHeight() > rows->GetClientHeight() + 1.5f)
+		return "the rows need " + n(rows->GetScrollHeight()) + ", " + n(rows->GetClientHeight()) + " shown: they scroll";
+	const float bottom = foot->GetAbsoluteOffset(Rml::BoxArea::Border).y + foot->GetBox().GetSize(Rml::BoxArea::Border).y;
+	if (bottom > float(m->ctx->GetDimensions().y) + 1.5f) return "the panel ends at " + n(bottom) + ", past the window's " + n(float(m->ctx->GetDimensions().y));
+	return "";
+}
+
 bool game_menu::init(SDL_Window *win, SDL_Renderer *ren, const std::string &assets)
 {
 	m->win = win;
@@ -587,13 +602,18 @@ void game_menu::build()
 	show_help();
 }
 
-// Long pages scroll inside #rows: keep the selected row in view.
+// Every page fits whole (menu.rcss: menutest fails one that doesn't); were one longer, it would scroll inside #rows,
+// keeping the selected row in view (said once in the log: a scroll can't be seen, its rows below look missing)
 void game_menu::scroll_to_selected()
 {
 	Rml::Element *rows = m->doc->GetElementById("rows"), *e = m->doc->GetElementById("r" + std::to_string(m_sel));
 	if (!rows || !e) return;
 	m->doc->UpdateDocument();                      // the rows' layout, for their positions
 	const float top = e->GetOffsetTop(), h = e->GetOffsetHeight(), view = rows->GetClientHeight();
+	if (static std::string said; rows->GetScrollHeight() > view + 1.5f && said != m_stack.back().name) {
+		said = m_stack.back().name;
+		SDL_Log("menu: the page \"%s\" doesn't fit: its rows scroll", said.c_str());
+	}
 	float st = rows->GetScrollTop();
 	if (top < st) st = top;
 	else if (top + h > st + view) st = top + h - view;
@@ -625,16 +645,17 @@ void game_menu::show_help()
 		const std::string &h = m_sel < int(p.items.size()) && !p.items[m_sel].help.empty() ? p.items[m_sel].help : p.note;
 		note->SetInnerRML(escape(h));
 	}
-	// (a translation longer than its four lines: a size smaller, then another, till it fits, 14dp at the least. Not
+	// (a translation longer than its four lines: a size smaller, then another, till it fits, 11.2dp at the least. Not
 	// the English: its layout as it was)
 	note->RemoveProperty("font-size");
 	note->RemoveProperty("line-height");
 	if (tr::current() == tr::lang::en) return;
 	const float dp = m->ctx->GetDensityIndependentPixelRatio();
 	m->doc->UpdateDocument();
-	for (int size = 17; size >= 14 && note->GetScrollHeight() > note->GetClientHeight() + 1; size--) {
-		note->SetProperty("font-size", std::to_string(float(size) * dp) + "px");
-		note->SetProperty("line-height", std::to_string(float(size) * 20.0f / 18.0f * dp) + "px");
+	for (int step = 17; step >= 14 && note->GetScrollHeight() > note->GetClientHeight() + 1; step--) {
+		const float size = 0.8f * float(step);   // (menu.rcss's sizes: 0.8 of the old ones, the note's 14.4dp; 13.6 to 11.2 here)
+		note->SetProperty("font-size", std::to_string(size * dp) + "px");
+		note->SetProperty("line-height", std::to_string(size * 20.0f / 18.0f * dp) + "px");
 		m->doc->UpdateDocument();
 	}
 }

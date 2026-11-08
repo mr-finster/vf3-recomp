@@ -1,17 +1,21 @@
-/* The in-game menu. Sizes are in dp: the host sets 1dp = 1/720 of the window's height.
+/* The in-game menu. Sizes are in dp: the host sets 1dp = 1/720 of the window's height (or 1/1280 of its width,
+   if that's less: the panel is laid out for 720dp of height or more).
    Gradients are the vertex-colour kind (horizontal-gradient): the SDL renderer has no shaders.
 
    One column with a fixed space for each part, so nothing overlaps whatever the page:
-     top 24 + title 53 + crumb 28 + rows 14 x 32 = 448 + note 8 + 80 (4 lines) + hint 8 + 22
-     + version 4 + 18 = 693dp of 720. The longest page (a player's keys: 13 and Back) fits
-     whole, so no page scrolls; a long value is cut, never drawn over its label. */
+     top 19.2 + title 42.4 + crumb 22.4 + rows 20 x 25.6 = 512 + note 6.4 + 64 (4 lines) + hint 6.4
+     + 17.6 + version 3.2 + 14.4 = 708dp of 720. Every page fits whole, so none scrolls (a scroll can't be
+     seen: the rows below looked missing); the longest, Display on Windows, has 19 and Back. menutest fails
+     a page that doesn't fit. A long value is cut, never drawn over its label.
+   (Each size 0.8 of what it was up to v0.1.18-alpha, when 14 rows fit: the same look, a size smaller, for
+   Display's 20.) */
 
 body {
 	width: 100%;
 	height: 100%;
 	font-family: "Barlow Condensed";
 	font-weight: 600;
-	font-size: 24dp;
+	font-size: 19.2dp;
 	color: #dfe7fb;
 }
 
@@ -26,26 +30,26 @@ div { display: block; }
 #panel {
 	position: absolute;
 	left: 9%;
-	top: 24dp;
-	width: 520dp;
+	top: 19.2dp;
+	width: 416dp;
 }
 
 #title {
-	font-size: 46dp;
+	font-size: 36.8dp;
 	font-weight: bold;
 	font-style: italic;
 	color: #ffd23f;
-	height: 48dp;
-	line-height: 48dp;
-	padding-bottom: 2dp;
-	border-bottom: 3dp #ffd23f;
+	height: 38.4dp;
+	line-height: 38.4dp;
+	padding-bottom: 1.6dp;
+	border-bottom: 2.4dp #ffd23f;
 }
 
 #crumb {
-	height: 24dp;
-	line-height: 24dp;
-	margin-bottom: 4dp;
-	font-size: 18dp;
+	height: 19.2dp;
+	line-height: 19.2dp;
+	margin-bottom: 3.2dp;
+	font-size: 14.4dp;
 	font-weight: 500;
 	color: #8fa3d6;
 	white-space: nowrap;
@@ -53,17 +57,17 @@ div { display: block; }
 }
 
 #rows {
-	max-height: 448dp;      /* 14 rows; a longer page would scroll, keeping the selected row in view */
+	max-height: 512dp;      /* 20 rows; a longer page would scroll, keeping the selected row in view */
 	overflow-y: hidden;
 }
 
 .row {
 	display: flex;
-	height: 29dp;
-	line-height: 29dp;
-	padding: 0 16dp;
-	margin-bottom: 3dp;
-	font-size: 23dp;
+	height: 23.2dp;
+	line-height: 23.2dp;
+	padding: 0 12.8dp;
+	margin-bottom: 2.4dp;
+	font-size: 18.4dp;
 	color: #c3cff0;
 	white-space: nowrap;
 	transition: padding-left 0.12s cubic-out;
@@ -71,7 +75,7 @@ div { display: block; }
 
 .row .label {
 	flex: 1 0 auto;
-	margin-right: 18dp;
+	margin-right: 14.4dp;
 }
 
 .row .value {
@@ -84,7 +88,7 @@ div { display: block; }
 .row.selected {
 	decorator: horizontal-gradient(#ffd23f #ff8f1f);
 	color: #0b1430;
-	padding-left: 28dp;
+	padding-left: 22.4dp;
 }
 
 .row.selected .value { color: #0b1430; }
@@ -93,9 +97,9 @@ div { display: block; }
 .row.selected .arrow { color: #0b1430; }
 
 .row.info {
-	height: 26dp;
-	line-height: 26dp;
-	font-size: 19dp;
+	height: 20.8dp;
+	line-height: 20.8dp;
+	font-size: 15.2dp;
 	font-weight: 500;
 	margin-bottom: 0;
 }
@@ -103,17 +107,17 @@ div { display: block; }
 .row.info .value { color: #dfe7fb; }
 
 /* a row belonging to the one above it */
-.row.sub { padding-left: 40dp; font-size: 21dp; }
+.row.sub { padding-left: 32dp; font-size: 16.8dp; }
 .row.sub .label { color: #9fb0dc; }
-.row.sub.selected { padding-left: 52dp; }
+.row.sub.selected { padding-left: 41.6dp; }
 .row.sub.selected .label { color: #0b1430; }
 
 /* a line under its row: a mistake to put right (red), or how it's going (green) */
 .row.error, .row.good {
 	height: auto;
-	line-height: 24dp;
-	padding-left: 52dp;
-	font-size: 18dp;
+	line-height: 19.2dp;
+	padding-left: 41.6dp;
+	font-size: 14.4dp;
 	color: #ff6b5a;
 	white-space: normal;   /* (a long one, a failed join's what to do, wraps) */
 }
@@ -122,42 +126,42 @@ div { display: block; }
 
 /* a section's title */
 .row.heading {
-	height: 24dp;
-	line-height: 24dp;
-	margin-top: 10dp;
-	margin-bottom: 4dp;
-	font-size: 16dp;
+	height: 19.2dp;
+	line-height: 19.2dp;
+	margin-top: 8dp;
+	margin-bottom: 3.2dp;
+	font-size: 12.8dp;
 	font-weight: 700;
 	color: #8fa3d6;
-	letter-spacing: 1dp;
+	letter-spacing: 0.8dp;
 }
 .row.heading:first-child { margin-top: 0; }
 
 /* a big value to read out (a host's address) */
 .row.big {
-	height: 44dp;
-	line-height: 44dp;
-	font-size: 34dp;
+	height: 35.2dp;
+	line-height: 35.2dp;
+	font-size: 27.2dp;
 	font-style: italic;
 	font-weight: 700;
 	color: #ffd23f;
 }
 
 #note {
-	margin-top: 8dp;
-	height: 80dp;           /* four lines; the help texts are written to fit */
-	line-height: 20dp;
+	margin-top: 6.4dp;
+	height: 64dp;           /* four lines; the help texts are written to fit */
+	line-height: 16dp;
 	overflow: hidden;
-	font-size: 18dp;
+	font-size: 14.4dp;
 	font-weight: 500;
 	color: #8fa3d6;
 }
 
 #hint {
-	margin-top: 8dp;
-	height: 22dp;
-	line-height: 22dp;
-	font-size: 17dp;
+	margin-top: 6.4dp;
+	height: 17.6dp;
+	line-height: 17.6dp;
+	font-size: 13.6dp;
 	font-weight: 500;
 	color: #8fa3d6;
 	white-space: nowrap;
@@ -167,10 +171,10 @@ div { display: block; }
 
 /* the version and date, small, under the hint */
 #ver {
-	margin-top: 4dp;
-	height: 18dp;
-	line-height: 18dp;
-	font-size: 15dp;
+	margin-top: 3.2dp;
+	height: 14.4dp;
+	line-height: 14.4dp;
+	font-size: 12dp;
 	font-weight: 500;
 	color: #5f6f9c;
 	white-space: nowrap;

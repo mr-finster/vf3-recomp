@@ -55,6 +55,9 @@ public:
 	// (tests: each line of text drawn past the box it's in, as laid out now: the menu's page or screen and the overlay)
 	std::vector<std::string> overflow();
 	std::vector<std::string> misaligned();   // (rows whose labels don't start where the others' do: for tests)
+	// (tests: the page of rows shown, if it doesn't fit whole: its rows past their space, where they'd scroll, or the
+	// panel past the window's bottom; empty if it fits, or a screen is shown)
+	std::string page_fit();
 	void set_title(const std::string &text);    // (PAUSED; a match goes on under the menu: ONLINE MATCH)
 	void select_row(int i) { select(i); }
 	void set_fps(const std::string &text);      // the small FPS at the top right; empty hides it
