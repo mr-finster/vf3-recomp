@@ -700,7 +700,7 @@ int Online::watchers() const
 void Online::drop_session()
 {
 	snapper.stop();   // (a copy reading the session's state stopped first: a megabyte's wait at most)
-	snap_up.reset();
+	for (SnapSlot &u : snap_slots) u = {};   // (a part on its way keeps its connection: the next on a new one, never two at once on one)
 	session.reset();
 }
 
@@ -750,6 +750,7 @@ void Online::feed_poll()
 		if (f.job && f.job->done) {   // (the lobby's answer: what it has, how many watch)
 			vfnet::json::Value v;
 			const vfnet::http::Reply &r = f.job->reply;
+			if (r.status == 200) snapper.heard(now - f.at, now);   // (the lobby's round trip, for the snapshot's pace)
 			const bool ok = r.status == 200 && vfnet::json::parse(r.body, v) && (f.up.start ? v["ok"].kind == vfnet::json::Value::boolean : v["has"].kind == vfnet::json::Value::number);
 			const double has = v["has"].n;
 			feed.done(f.up, ok, has < 0 ? vfnet::watch::NONE : uint32_t(std::clamp(has, 0.0, 1e9)), int(std::clamp(v["watchers"].n, 0.0, 1e7)), now);
@@ -767,18 +768,32 @@ void Online::feed_poll()
 			farewell(lobby_url("/v1/hold"), "{\"code\":" + vfnet::json::quote(code) + ",\"key\":" + vfnet::json::quote(key) + "}");
 		}
 	}
-	// (the snapshot's parts: one at a time on a connection of its own, the next after a pause as long as the last took)
-	if (snap_up && snap_up->done) {
-		const bool ok = snap_up->reply.status == 200;
-		snapper.done(snap_part, ok, now - snap_up_at, now);
-		if (!ok) log_line("watching: a part of the snapshot wasn't taken (" + std::to_string(snap_up->reply.status) + ")");
-		snap_up.reset();
+	// (the snapshot's parts, paced by the Snapper: each on a connection of its own kept open, two on their way at most)
+	for (SnapSlot &u : snap_slots)
+		if (u.job && u.job->done) {
+			const bool ok = u.job->reply.status == 200;
+			snapper.done(u.part, ok, now - u.at, now);
+			if (!ok) log_line("watching: a part of the snapshot wasn't taken (" + std::to_string(u.job->reply.status) + ")");
+			u.job.reset();
+		}
+	for (SnapSlot &u : snap_slots) {
+		if (u.job || !feed.on() || wid.empty() || !snapper.next(now, u.part)) continue;
+		u.at = now;
+		if (!u.client) u.client = std::make_shared<vfnet::http::Client>();
+		auto job = std::make_shared<Fetch>();
+		const std::string url = lobby_url("/v1/watch/snap?w=" + wid + "&k=" + wkey + "&m=" + hex64(u.part.match) + "&f=" + std::to_string(u.part.frame) +
+		                                  "&i=" + std::to_string(u.part.index) + "&n=" + std::to_string(u.part.count));
+		std::thread([job, client = u.client, url, body = std::string(u.part.body.begin(), u.part.body.end())] {
+			job->reply = client->request("POST", url, body, 20000, 4096);
+			job->done = true;
+		}).detach();
+		u.job = job;
 	}
-	if (!snap_up && feed.on() && !wid.empty() && snapper.next(now, snap_part)) {
-		snap_up_at = now;
-		snap_up = fetch("POST", lobby_url("/v1/watch/snap?w=" + wid + "&k=" + wkey + "&m=" + hex64(snap_part.match) + "&f=" + std::to_string(snap_part.frame) +
-		                                  "&i=" + std::to_string(snap_part.index) + "&n=" + std::to_string(snap_part.count)),
-		                std::string(snap_part.body.begin(), snap_part.body.end()), 20000, 4096);
+	if (snapper.failed != snap_failed_logged) {
+		const bool slow = snapper.aborted != snap_aborted_logged;
+		snap_failed_logged = snapper.failed;
+		snap_aborted_logged = snapper.aborted;
+		log_line(std::string("watching: the snapshot let go") + (slow ? ": at its pace it wouldn't be sent in time" : "") + " (a watcher come late catches up from the match's start)");
 	}
 	if (snapper.sent != snap_logged) {
 		snap_logged = snapper.sent;
@@ -802,6 +817,7 @@ void Online::feed_poll()
 				continue;
 			}
 			if (!feed_ws_waiting) continue;   // (nothing asked)
+			if (parsed) snapper.heard(now - feed_ws_sent, now);   // (the lobby's round trip, for the snapshot's pace)
 			const bool ok = parsed && (feed_ws_up.start ? v["ok"].kind == vfnet::json::Value::boolean : v["has"].kind == vfnet::json::Value::number);
 			const double has = v["has"].n;
 			feed.done(feed_ws_up, ok, has < 0 ? vfnet::watch::NONE : uint32_t(std::clamp(has, 0.0, 1e9)), int(std::clamp(v["watchers"].n, 0.0, 1e7)), now);
@@ -831,6 +847,7 @@ void Online::feed_poll()
 		const std::string url = lobby_url(std::string("/v1/watch/") + (f.up.start ? "start" : "push") + "?w=" + wid + "&k=" + wkey), body(f.up.body.begin(), f.up.body.end());
 		std::thread([job, client = f.client, url, body] { job->reply = client->request("POST", url, body, 3000, 4096); job->done = true; }).detach();
 		f.job = job;
+		f.at = now;
 		break;   // (one a pass)
 	}
 	// (the guest: how many watch, asked once a minute while the figures at the top are shown; only shown)
@@ -1160,7 +1177,7 @@ void Online::snap_poll()
 		const bool ahead = f >= 0 && uint32_t(f) > spec->frame() + 600;   // (ten seconds or more ahead of this one: worth it)
 		if (f >= 0 && !pending && ahead) get(f);
 		else if (pending && !watch_shown && now - snap_since < 90000) { snap_old = f; snap_step = 4; snap_ask_at = now + 1000; }   // (till it's caught up from the start meanwhile)
-		else if (snap_old >= 0 && uint32_t(snap_old) > spec->frame() + 600) get(snap_old);
+		else if (pending && snap_old >= 0 && uint32_t(snap_old) > spec->frame() + 600) get(snap_old);   // (still coming: the last one; none, as when switched off, means none)
 		else {
 			snap_step = 3;
 			log_line(std::string("watching: ") + (pending ? "caught up from the start before the snapshot came" : ok ? "no snapshot needed" : "no snapshot (the lobby has none)") + ": the match from its start");

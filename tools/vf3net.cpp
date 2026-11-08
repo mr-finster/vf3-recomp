@@ -393,6 +393,7 @@ int main(int argc, char **argv)
 	const auto t0 = Clock::now();
 	bool connected = false;
 	vf3net::Score score_a, score_b, score_c;   // (the detector on each side, as the game runs it: after each step, guesses and all)
+	std::map<uint32_t, vf3net::Score> score_a_at, score_b_at;   // (each side's after each frame it ran: compared at the frames confirmed, not past them)
 	while (sa.state() != vfnet::Session::State::ended && sb.state() != vfnet::Session::State::ended &&
 	       (long(sa.frame()) < frames || long(sb.frame()) < frames)) {
 		wire.now = t;
@@ -406,7 +407,7 @@ int main(int argc, char **argv)
 			const auto s0 = Clock::now();
 			const uint64_t rb0 = sa.stats().resim_frames;
 			snapper.before_step(sa);
-			if (sa.step(own_word(pick_a, A.m, 0, vf3net::pack(real[std::min(na, real.size() - 1)], 0)))) { na++; score_a.frame(A.m); }
+			if (sa.step(own_word(pick_a, A.m, 0, vf3net::pack(real[std::min(na, real.size() - 1)], 0)))) { na++; score_a.frame(A.m); score_a_at[sa.frame()] = score_a; }
 			if (!feed_on && sa.state() == vfnet::Session::State::running) {   // (the host's match to the lobby, as the game sends it)
 				vw::Start st;
 				st.match = 0x5eed;
@@ -431,7 +432,7 @@ int main(int argc, char **argv)
 		}
 		if (t >= next_b) {
 			const auto s0 = Clock::now();
-			if (sb.step(own_word(pick_b, B.m, 1, vf3net::pack(real[std::min(nb, real.size() - 1)], 1)))) { nb++; score_b.frame(B.m); }
+			if (sb.step(own_word(pick_b, B.m, 1, vf3net::pack(real[std::min(nb, real.size() - 1)], 1)))) { nb++; score_b.frame(B.m); score_b_at[sb.frame()] = score_b; }
 			if (connected) tb.add(std::chrono::duration<double, std::milli>(Clock::now() - s0).count());
 			next_b += fb / (1 - (soft ? std::clamp(sb.stats().lead * 0.02, 0.0, 0.04) : 0.0));
 		}
@@ -451,7 +452,7 @@ int main(int argc, char **argv)
 					}
 					has = uint32_t(lobby.in.size() / 2);
 				}
-				dues.push_back({ at + watch_ms, [&feed, up, has, done = at + watch_ms] { feed.done(up, true, has, int(0), done); } });
+				dues.push_back({ at + watch_ms, [&feed, &snapper, up, has, done = at + watch_ms] { feed.done(up, true, has, int(0), done); snapper.heard(2 * 60.0, done); } });   // (the lobby's round trip heard, as the game hears it)
 			} });
 		vw::Snapper::Part part;
 		if (snapper.next(t, part))
@@ -513,6 +514,12 @@ int main(int argc, char **argv)
 
 	// the same inputs straight through, on a third board, against both players' checkpoints
 	const uint32_t n = std::min(sa.confirmed(), sb.confirmed());
+	// (the players' scores as they were at frame n: a round ending in a frame past it, a guess run on the live board
+	// that the straight run never reaches, counted only when it's confirmed)
+	for (auto *h : { &score_a_at, &score_b_at }) {
+		const auto it = h->upper_bound(n);
+		(h == &score_a_at ? score_a : score_b) = it == h->begin() ? decltype(score_a){} : std::prev(it)->second;
+	}
 	uint32_t checked = 0;
 	if (!failed) {
 		auto pc = std::make_unique<Board>();

@@ -361,7 +361,9 @@ void Snapper::stop()
 {
 	let_go();
 	phase = Phase::idle;
-	in_flight = wanted = false;
+	in_flight = 0;
+	wanted = false;
+	again.clear();
 	std::vector<uint8_t>().swap(packed);
 }
 
@@ -387,8 +389,9 @@ void Snapper::step(const Session &s, Game &g, uint64_t m, double now)
 		job.reset();
 		if (packed.empty()) { failed++; phase = Phase::idle; return; }
 		phase = Phase::uploading;
-		part = tries = 0;
-		in_flight = false;
+		part = acked = tries = 0;
+		again.clear();
+		send_ms = -1;
 		next_at = upload_at = now;
 		last_packed = packed.size();
 		last_frame = frame;
@@ -396,7 +399,7 @@ void Snapper::step(const Session &s, Game &g, uint64_t m, double now)
 		return;
 	}
 	if (phase == Phase::uploading) {
-		if (now - started_at > give_up_ms) { failed++; phase = Phase::idle; std::vector<uint8_t>().swap(packed); }
+		if (now - started_at > give_up_ms) give_up(false);
 		return;
 	}
 	if (!wanted || now - made_at < min_gap_ms || !g.snap_format() || !m) return;
@@ -441,38 +444,71 @@ void Snapper::step(const Session &s, Game &g, uint64_t m, double now)
 
 bool Snapper::next(double now, Part &p)
 {
-	if (phase != Phase::uploading || in_flight || now < next_at) return false;
+	if (phase != Phase::uploading || in_flight >= std::max(1, send_ms < 0 ? 1 : max_in_flight) || now < next_at) return false;
+	if (now - started_at > give_up_ms) { give_up(false); return false; }
 	const uint32_t count = uint32_t((packed.size() + part_bytes - 1) / part_bytes);
-	if (part >= count) { phase = Phase::idle; std::vector<uint8_t>().swap(packed); return false; }
+	uint32_t i;
+	if (!again.empty()) { i = again.back(); again.pop_back(); }
+	else if (part < count) i = part++;
+	else return false;   // (all on their way)
 	p = {};
-	p.index = part;
+	p.index = i;
 	p.count = count;
 	p.frame = frame;
 	p.match = match;
-	const size_t a = size_t(part) * part_bytes, b = std::min(packed.size(), a + part_bytes);
+	const size_t a = size_t(i) * part_bytes, b = std::min(packed.size(), a + part_bytes);
 	p.body.assign(packed.begin() + ptrdiff_t(a), packed.begin() + ptrdiff_t(b));
-	in_flight = true;
+	in_flight++;
+	part_at = now;
+	// the next no sooner than max_rate allows, nor than twice this one's sending time (as the last ones went): this one
+	// sent before the next starts, the connection carrying it half the time at most
+	next_at = now + std::max({ gap_ms, max_rate > 0 ? 1000.0 * double(p.body.size()) / max_rate : 0.0, 2 * std::max(0.0, send_ms) });
 	return true;
+}
+
+void Snapper::heard(double ms, double now)
+{
+	if (!(ms >= 0)) return;
+	if (ms < rtt_ms || now - rtt_at > 10000) { rtt_ms = ms; rtt_at = now; }
+}
+
+void Snapper::give_up(bool slow)
+{
+	failed++;
+	if (slow) aborted++;
+	phase = Phase::idle;
+	again.clear();
+	std::vector<uint8_t>().swap(packed);
 }
 
 void Snapper::done(const Part &p, bool ok, double ms, double now)
 {
-	in_flight = false;
-	if (phase != Phase::uploading || p.frame != frame || p.match != match || p.index != part) return;
+	if (in_flight > 0) in_flight--;
+	if (phase != Phase::uploading || p.frame != frame || p.match != match) return;
 	if (!ok) {   // (again a little later; a fourth time, this one let go)
-		if (++tries >= 4) { failed++; phase = Phase::idle; std::vector<uint8_t>().swap(packed); return; }
-		next_at = now + 1000.0 * tries;
+		if (++tries >= 4) { give_up(false); return; }
+		again.push_back(p.index);
+		next_at = std::max(next_at, now + 1000.0 * tries);
 		return;
 	}
 	tries = 0;
-	part++;
-	next_at = now + std::max(gap_ms, ms);   // (half of what the connection carried at most, whatever it is)
-	if (size_t(part) * part_bytes >= packed.size()) {
+	acked++;
+	if (acked >= p.count) {
 		sent++;
 		last_upload_ms = now - upload_at;
 		phase = Phase::idle;
 		std::vector<uint8_t>().swap(packed);
+		return;
 	}
+	// its sending time (its time less the lobby's round trip; quick to rise, slow to fall): the pace from here
+	const double sending = ms - std::min(rtt_ms, ms);
+	send_ms = send_ms < 0 ? sending : std::max(sending, 0.75 * send_ms + 0.25 * sending);
+	next_at = std::max(next_at, part_at + 2 * send_ms);
+	// at this pace (a start every cycle, or as the round trips allow), the rest past give_up_ms from its asking: let go
+	// now, not later
+	const double cycle = std::max({ gap_ms, max_rate > 0 ? 1000.0 * double(p.body.size()) / max_rate : 0.0, 2 * send_ms, ms / std::max(1, max_in_flight) });
+	const double to_start = double(p.count) - acked - in_flight;
+	if (std::max(next_at, now) + std::max(0.0, to_start - 1) * cycle + ms - started_at > give_up_ms) give_up(true);
 }
 
 // ---- Spectator ----

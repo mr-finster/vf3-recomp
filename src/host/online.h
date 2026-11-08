@@ -317,7 +317,7 @@ private:
 	static std::shared_ptr<Fetch> fetch(const std::string &method, const std::string &url, std::string body, int timeout_ms, size_t most);
 	std::string wid, wkey;              // this match's watch code and the key the host sends it with (none: not watchable)
 	vfnet::watch::Feed feed;            // (the host's: the match to the lobby)
-	struct FeedSlot { std::shared_ptr<Fetch> job; vfnet::watch::Feed::Upload up; std::shared_ptr<vfnet::http::Client> client; };
+	struct FeedSlot { std::shared_ptr<Fetch> job; vfnet::watch::Feed::Upload up; std::shared_ptr<vfnet::http::Client> client; double at = 0; };
 	FeedSlot feed_slots[vfnet::watch::Feed::MOST_IN_FLIGHT];   // (the uploads on their way, each on a connection kept open)
 	// (the host's WebSocket to its match's Watch, the uploads on it one at a time; none, or it failed: the HTTPS slots)
 	std::shared_ptr<vfnet::http::Socket> feed_ws;
@@ -343,13 +343,12 @@ private:
 	bool room_ws_open() const;
 	void room_ws_drop();
 	bool room_ws_poll(vfnet::http::Reply &r);   // (a message on it, as a wait's answer: true, r it)
-	// (the host's snapshot for a watcher come late, made when the lobby asks: watch.h's Snapper; its parts sent one at a
-	// time, paced, on a connection of their own)
+	// (the host's snapshot for a watcher come late, made when the lobby asks: watch.h's Snapper; its parts sent paced,
+	// two on their way at most, each on a connection of its own kept open)
 	vfnet::watch::Snapper snapper;
-	std::shared_ptr<Fetch> snap_up;
-	vfnet::watch::Snapper::Part snap_part;
-	double snap_up_at = 0;
-	uint32_t snap_logged = 0;
+	struct SnapSlot { std::shared_ptr<Fetch> job; std::shared_ptr<vfnet::http::Client> client; vfnet::watch::Snapper::Part part; double at = 0; };
+	SnapSlot snap_slots[2];
+	uint32_t snap_logged = 0, snap_failed_logged = 0, snap_aborted_logged = 0;
 	void drop_session();                // (the session let go: none of it read for a snapshot any more first)
 	void feed_begin();
 	void feed_poll();

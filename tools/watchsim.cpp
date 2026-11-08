@@ -1019,6 +1019,97 @@ bool unit()
 			}
 		}
 		check("20,000 spoilt snapshots: read or refused, nothing past its limits", true);
+		// the snapshot's upload, gentle on the host's connection (the players' packets go on it too): each part's start
+		// twice its sending time after the last's at the least (half of what the link carries, each sent before the next
+		// starts), none sooner than max_rate allows, the lobby's round trip (heard) not counted as sending, two on their
+		// way at once so a long round trip doesn't hold it back; and let go at once, not run on, if at its pace it
+		// wouldn't be sent within give_up_ms. A link of link_bps bytes a second, rtt ms there and back, simulated (a part's
+		// bytes on the link one after another: its sending can't start before the last one's is done)
+		struct Paced { bool whole = false; uint32_t parts = 0, count = 0; int most_on_way = 0; double first_at = -1, last_start = 0, min_gap = 1e18, link_busy = 0, overlap = 0; size_t bytes = 0, last_bytes = 0; };
+		double tt = wire.now + 1;
+		auto paced = [&](vw::Snapper &p, double link_bps, double rtt) {
+			Paced o;
+			p.part_bytes = 4;
+			p.min_gap_ms = 0;
+			p.want(tt);
+			struct Way { vw::Snapper::Part pt; double at, due; };
+			std::vector<Way> on_way;
+			const double end = tt + 600000;
+			for (; tt < end; tt += 1) {
+				wire.now = tt;
+				a.poll(tt);
+				b.poll(tt);
+				if (std::fmod(tt, 17.0) < 1) {
+					p.before_step(a);
+					a.step(pa.next());
+					b.step(pb.next());
+					p.step(a, ga, s.match, tt);
+				}
+				if (std::fmod(tt, 200.0) < 1) p.heard(rtt, tt);   // (the host's small uploads, 5 a second)
+				for (size_t k = 0; k < on_way.size();)
+					if (tt >= on_way[k].due) {
+						const Way w = on_way[k];
+						on_way.erase(on_way.begin() + ptrdiff_t(k));
+						p.done(w.pt, true, tt - w.at, tt);
+						o.bytes += w.pt.body.size();
+						o.last_bytes = w.pt.body.size();
+						if (p.sent) o.whole = true;
+					} else k++;
+				if (o.whole) break;
+				vw::Snapper::Part pt;
+				while (p.next(tt, pt)) {
+					if (o.first_at < 0) o.first_at = tt;
+					if (o.parts) o.min_gap = std::min(o.min_gap, tt - o.last_start);
+					o.last_start = tt;
+					o.count = pt.count;
+					o.parts++;
+					const double send = double(pt.body.size()) * 1000.0 / link_bps, from = std::max(tt, o.link_busy);
+					o.overlap = std::max(o.overlap, from - tt);   // (waiting behind the last part's bytes: a burst)
+					o.link_busy = from + send;
+					on_way.push_back({ pt, tt, o.link_busy + rtt });
+					o.most_on_way = std::max(o.most_on_way, int(on_way.size()));
+				}
+				if (!p.busy() && o.parts && on_way.empty()) break;   // (let go)
+				if (p.busy()) std::this_thread::yield();
+			}
+			tt += 1000;
+			return o;
+		};
+		auto rate = [](const Paced &o) { return double(o.bytes - o.last_bytes) * 1000.0 / (o.last_start - o.first_at); };   // (start to start)
+		{   // a fast link: the cap's pace, 40 bytes a second here (4-byte parts 100 ms apart at the least)
+			vw::Snapper p;
+			p.max_rate = 40;
+			const Paced o = paced(p, 1e6, 5);
+			check("a snapshot's upload on a fast link: no faster than its cap, start to start", o.whole && o.parts > 5 && o.min_gap >= 100 && rate(o) <= 40 * 1.02 && p.sent == 1);
+			if (verbose) printf("  (fast: %u parts, %.1f bytes/s, start to start %.0f ms at the least)\n", o.parts, rate(o), o.min_gap);
+		}
+		{   // a slow link (10 bytes a second, under the cap): half of it at most, each part sent before the next starts
+			vw::Snapper p;
+			p.max_rate = 40;
+			const Paced o = paced(p, 10, 5);
+			check("... on a slow link: half of what it carries at most, no part waiting behind another's bytes", o.whole && rate(o) <= 10 / 2.0 * 1.02 && o.min_gap >= 799 && o.overlap == 0 && p.sent == 1);
+			if (verbose) printf("  (slow: %u parts, %.2f bytes/s on a link of 10, start to start %.0f ms at the least)\n", o.parts, rate(o), o.min_gap);
+		}
+		{   // the lobby's round trip (300 ms) not taken for sending, and not holding the pace back: two parts on their way
+			vw::Snapper p;
+			p.max_rate = 0;
+			const Paced o = paced(p, 10, 300);
+			check("... a long round trip to the lobby: not counted as sending (half the slow link's pace still)", o.whole && o.min_gap >= 799 && rate(o) >= 4.5 && rate(o) <= 5.1 && o.overlap == 0);
+			if (verbose) printf("  (300 ms round trip: %.2f bytes/s on a link of 10, start to start %.0f ms at the least)\n", rate(o), o.min_gap);
+			vw::Snapper q;
+			q.max_rate = 40;
+			const Paced o2 = paced(q, 1e6, 300);
+			check("... a fast link with a long round trip: two parts on their way, twice one a round trip's pace", o2.whole && o2.most_on_way == 2 && rate(o2) > 2 * 4 / 0.3 * 0.9 && rate(o2) <= 40 * 1.02);
+			if (verbose) printf("  (fast, 300 ms round trip: %.1f bytes/s)\n", rate(o2));
+		}
+		{   // too slow to be sent in time: let go after its first parts, not run on to give_up_ms
+			vw::Snapper p;
+			p.max_rate = 40;
+			p.give_up_ms = 3000;
+			const uint32_t was = p.failed;
+			const Paced o = paced(p, 2, 5);
+			check("... a link too slow to send it within give_up_ms: let go at once (aborted), not run on", !o.whole && p.aborted == 1 && p.failed == was + 1 && !p.busy() && o.parts <= 2 && o.count > 5 && o.last_start - o.first_at < 3000);
+		}
 		if (verbose) printf("  (the snapshot at frame %u in %u parts; %d spoilt ones still read)\n", got.frame, parts, read_ok);
 	}
 	// a late watcher: the match from its start, unseen and silent (on_catch_up says when), every one of the players'

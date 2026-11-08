@@ -53,7 +53,8 @@ constexpr uint32_t NONE = ~0u;
 constexpr size_t MAX_SNAP_STATE = 64u << 20;   // a snapshot's state at most (VF3's is 27 MB), its extra 1 MB
 constexpr size_t MAX_SNAP_EXTRA = 1u << 20;
 constexpr size_t MAX_SNAP = 16u << 20;         // and packed (the lobby keeps no bigger)
-constexpr size_t SNAP_PART = 128u << 10;       // its upload's parts (paced: Snapper)
+constexpr size_t SNAP_PART = 32u << 10;        // its upload's parts (paced: Snapper; the lobby takes 16 to 128 KB)
+constexpr double SNAP_RATE = 375000;           // its upload's most, bytes a second (3 Mbit/s: Snapper)
 
 // The match's own: who plays, and what game (as the start carries it, JSON)
 struct Meta
@@ -172,14 +173,23 @@ private:
 // Asked for by the lobby (want: a watcher come late, the last one too old or none), one at most every min_gap_ms. After
 // each step, the newest confirmed state the session keeps (Session::kept_state) is copied on a thread of its own while
 // the session leaves it be (before_step stops it first if the next step could save over it: a millisecond's wait at
-// most, then tried again), then hashed and deflated there. Its upload's parts (next/done) go one at a time, each after a
-// pause as long as the last one took (at least gap_ms), so a snapshot uses half of what the host's connection carries
-// at most, a part of SNAP_PART at a time, and the players' packets never queue long behind it. Nothing the players do
-// waits on any of it.
+// most, then tried again), then hashed and deflated there. Its upload is gentle on the host's connection, which carries
+// the players' packets too: parts of SNAP_PART (32 KB: a burst its modem holds 0.13 s at 2 Mbit/s, 26 ms at 10), each
+// on a connection kept open, a part's start twice its sending time after the last's at the least (its time less the
+// lobby's round trip, heard: from the host's small uploads), so each is sent before the next starts and half of what
+// the connection carries at most, and none sooner than max_rate allows (SNAP_RATE, 3 Mbit/s: a fast connection's share
+// kept small, VF3's 6.3 MB in 17 s or more, inside the 35 s a snapshot counts as fresh). Two parts may be on their way
+// at once (max_in_flight; one till the first's back and its sending time known), so a long round trip to the lobby
+// doesn't hold the pace back to a part each round trip. If, at the pace its parts
+// have gone, it wouldn't be sent within give_up_ms of being asked for, it's let go at once (aborted: a slow uplink's
+// watcher catches up from the match's start, as without snapshots) rather than run on. Nothing the players do waits
+// on any of it.
 class Snapper
 {
 public:
 	double min_gap_ms = 15000, gap_ms = 50, give_up_ms = 120000;
+	double max_rate = SNAP_RATE;           // bytes a second at most, on average (0: no cap)
+	int max_in_flight = 2;                 // parts on their way at once (each on its own connection)
 	size_t part_bytes = SNAP_PART;
 	~Snapper() { stop(); }
 	Snapper() = default;
@@ -191,11 +201,12 @@ public:
 	void before_step(const Session &s);    // (before each step)
 	void stop();                           // (the match over, its session to go: none copied or made from it any more)
 	struct Part { uint32_t index = 0, count = 0, frame = 0; uint64_t match = 0; std::vector<uint8_t> body; };
-	bool next(double now, Part &p);        // a part due now (none on its way)
+	bool next(double now, Part &p);        // a part due now (fewer than max_in_flight on their way); each given to done
 	void done(const Part &p, bool ok, double ms, double now);
+	void heard(double ms, double now);     // (a small request's round trip to the lobby: the least of the last 10 s kept)
 	bool busy() const { return phase != Phase::idle; }
 	// (the log's)
-	uint32_t made = 0, sent = 0, failed = 0;
+	uint32_t made = 0, sent = 0, failed = 0, aborted = 0;   // (aborted: too slow to be sent in time, counted in failed too)
 	uint32_t last_frame = 0;
 	size_t last_raw = 0, last_packed = 0;
 	double last_copy_ms = 0, last_pack_ms = 0, last_upload_ms = 0, stall_ms = 0;
@@ -212,12 +223,15 @@ private:
 	};
 	std::shared_ptr<Job> job;
 	Phase phase = Phase::idle;
-	bool wanted = false, in_flight = false;
-	double wanted_at = 0, made_at = -1e18, started_at = 0, next_at = 0, upload_at = 0;
-	uint32_t frame = 0, kept_for = 0, part = 0, tries = 0;
+	bool wanted = false;
+	int in_flight = 0;                     // (parts given by next, not yet to done: any upload's)
+	double wanted_at = 0, made_at = -1e18, started_at = 0, next_at = 0, upload_at = 0, part_at = 0, send_ms = -1, rtt_ms = 0, rtt_at = -1e18;
+	uint32_t frame = 0, kept_for = 0, part = 0, acked = 0, tries = 0;
+	std::vector<uint32_t> again;           // (parts to send again: not taken)
 	uint64_t match = 0;
 	std::vector<uint8_t> packed;
 	void let_go();
+	void give_up(bool slow);
 };
 
 // ---- a watcher ----
