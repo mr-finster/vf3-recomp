@@ -2800,7 +2800,7 @@ menu_page more_page(Online &o, OnlineSettings &s, game_menu &menu, std::function
 	return p;
 }
 
-// Enter code: a room's code, to join it, or watch the match on in it
+// Enter code: a room's code, to join it, or watch the match in it
 menu_page enter_code_page(Online &o, OnlineSettings &s, game_menu &menu, std::function<void()> changed)
 {
 	menu_page p = code_page(o, s, menu, changed);
