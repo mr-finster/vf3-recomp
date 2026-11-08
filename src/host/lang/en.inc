@@ -111,6 +111,8 @@ T(D_DRIVER_HELP, "Auto starts on Vulkan, and goes to Direct3D 12 by itself if Vu
 T(D_DRIVER_AUTO, "Auto (Vulkan first)")
 T(D_SHOW_FPS, "Show FPS")
 T(D_SHOW_FPS_HELP, "Shows the frame rate in the top right corner.")
+T(D_HUD, "HUD")                              // Display > HUD: the game's 2D over a fight (energy bars, timer, names) drawn or not
+T(D_HUD_HELP, "Off hides the game's display over a fight: the energy bars, the timer, the names, the rounds won and the round calls. The fighters and the stage are still drawn, and the game plays exactly the same.")
 T(D_WINDOW_SIZE, "Window size")
 T(D_WINDOW_SIZE_HELP, "Sizes the window to a whole multiple of the arcade's 384 lines (1x: 512 x 384 for the 4:3 picture, wider for a wider shape), each arcade line that many of your screen's: Render scale 1x with Window size 1x shows the arcade's 384 lines one to one, Window size 2x with Render scale 1x doubles each of them. Only the sizes your screen holds; for playing in a window (in fullscreen it waits for the window). Resizing the window by hand sets it back to Free. The window's size and place are remembered either way.")
 T(D_FREE, "Free")

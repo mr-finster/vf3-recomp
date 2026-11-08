@@ -106,6 +106,8 @@ T(D_DRIVER_HELP, "Auto startuje na Vulkanie i sam przechodzi na Direct3D 12, je�
 T(D_DRIVER_AUTO, "Auto (najpierw Vulkan)")
 T(D_SHOW_FPS, "Pokaż FPS")
 T(D_SHOW_FPS_HELP, "Pokazuje liczbę klatek w prawym górnym rogu.")
+T(D_HUD, "HUD")
+T(D_HUD_HELP, "Wył. ukrywa to, co gra pokazuje nad walką: paski energii, czas, imiona, wygrane rundy i zapowiedzi rund. Postacie i arena są rysowane jak zwykle, a gra przebiega dokładnie tak samo.")
 T(D_WINDOW_SIZE, "Rozmiar okna")
 T(D_WINDOW_SIZE_HELP, "Ustawia okno na całkowitą wielokrotność 384 linii automatu (1x: 512 x 384 dla 4:3, szerzej dla szerszych proporcji). Skala 1x z oknem 1x pokazuje 384 linie jeden do jednego, okno 2x ze skalą 1x podwaja każdą. Tylko rozmiary mieszczące się na ekranie, do gry w oknie (na pełnym ekranie czeka na okno). Ręczna zmiana rozmiaru wraca do Dowolnego. Rozmiar i miejsce okna są zapamiętywane zawsze.")
 T(D_FREE, "Dowolny")

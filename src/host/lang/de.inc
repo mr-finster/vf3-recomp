@@ -106,6 +106,8 @@ T(D_DRIVER_HELP, "Auto startet mit Vulkan und wechselt selbst zu Direct3D 12, we
 T(D_DRIVER_AUTO, "Auto (Vulkan zuerst)")
 T(D_SHOW_FPS, "FPS anzeigen")
 T(D_SHOW_FPS_HELP, "Zeigt die Bildrate oben rechts.")
+T(D_HUD, "HUD")
+T(D_HUD_HELP, "Aus blendet die Anzeigen des Spiels über dem Kampf aus: Energiebalken, Zeit, Namen, gewonnene Runden und Rundenansagen. Die Kämpfer und die Stage werden weiter gezeichnet, und das Spiel läuft genau gleich.")
 T(D_WINDOW_SIZE, "Fenstergröße")
 T(D_WINDOW_SIZE_HELP, "Bringt das Fenster auf ein ganzes Vielfaches der 384 Zeilen des Automaten (1x: 512 x 384 bei 4:3, breiter bei breiteren Formaten). Skalierung 1x und Fenster 1x zeigen die 384 Zeilen eins zu eins, Fenster 2x mit Skalierung 1x verdoppelt jede. Nur Größen, die auf deinen Bildschirm passen, fürs Spielen im Fenster (im Vollbild wartet es aufs Fenster). Größe von Hand ändern setzt auf Frei zurück. Größe und Position werden so oder so gemerkt.")
 T(D_FREE, "Frei")

@@ -106,6 +106,8 @@ T(D_DRIVER_HELP, "Auto inicia no Vulkan e passa sozinho para o Direct3D 12 se o 
 T(D_DRIVER_AUTO, "Auto (Vulkan primeiro)")
 T(D_SHOW_FPS, "Mostrar FPS")
 T(D_SHOW_FPS_HELP, "Mostra o FPS no canto superior direito.")
+T(D_HUD, "HUD")
+T(D_HUD_HELP, "Não esconde o que o jogo mostra sobre a luta: as barras de energia, o tempo, os nomes, os rounds vencidos e os avisos de round. Os lutadores e o cenário continuam sendo desenhados, e o jogo é exatamente o mesmo.")
 T(D_WINDOW_SIZE, "Tamanho da janela")
 T(D_WINDOW_SIZE_HELP, "Ajusta a janela a um múltiplo inteiro das 384 linhas do arcade (1x: 512 x 384 em 4:3, mais larga em formatos largos). Escala 1x com janela 1x mostra as 384 linhas uma para uma; janela 2x com escala 1x dobra cada uma. Só os tamanhos que cabem na tela, para jogar em janela (em tela cheia espera a janela). Mudar o tamanho na mão volta para Livre. O tamanho e a posição são lembrados de qualquer jeito.")
 T(D_FREE, "Livre")

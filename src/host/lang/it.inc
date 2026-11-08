@@ -106,6 +106,8 @@ T(D_DRIVER_HELP, "Auto parte con Vulkan e passa da solo a Direct3D 12 se Vulkan 
 T(D_DRIVER_AUTO, "Auto (prima Vulkan)")
 T(D_SHOW_FPS, "Mostra FPS")
 T(D_SHOW_FPS_HELP, "Mostra il frame rate in alto a destra.")
+T(D_HUD, "HUD")
+T(D_HUD_HELP, "No nasconde ciò che il gioco mostra sopra il combattimento: le barre di energia, il tempo, i nomi, i round vinti e gli annunci dei round. I lottatori e lo scenario restano disegnati, e il gioco si svolge esattamente allo stesso modo.")
 T(D_WINDOW_SIZE, "Dimensione finestra")
 T(D_WINDOW_SIZE_HELP, "Porta la finestra a un multiplo intero delle 384 righe dell'arcade (1x: 512 x 384 in 4:3, più larga per un formato largo). Scala 1x con finestra 1x mostra le 384 righe una a una; finestra 2x con scala 1x le raddoppia. Solo le dimensioni che stanno sul tuo schermo, per giocare in finestra (a schermo intero aspetta la finestra). Ridimensionare a mano torna a Libera. Dimensione e posizione vengono ricordate comunque.")
 T(D_FREE, "Libera")

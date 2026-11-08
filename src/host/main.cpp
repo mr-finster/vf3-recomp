@@ -101,6 +101,7 @@
 //   VF3_THREADS=N        threads drawing the 3D (default: the cores less 1, 12 at most)
 //   VF3_TEST_LOAD=ms:s   each picture ms longer (by the scale's square, from 1x) for the first s seconds after the
 //                        start's grace (the governor's tests)
+//   VF3_TEST_RAM_LOG=f   the game's RAM hashed every 30 game frames to f (a display setting changes no frame)
 #include "version.h"      // VF3_VERSION, VF3_DATE (made by the Makefile from git)
 #include "online.h"
 #include "links.h"
@@ -643,6 +644,7 @@ struct settings
 	static constexpr const char *BUILD = VF3_VERSION " " VF3_DATE " " VF3_COMMIT;   // (what gpu3d_failed was learnt by)
 	std::string gpu3d_failed;   // SDL_GPU's drivers whose 3D failed here ("direct3d12 vulkan"): the next start tries the next
 	bool fullscreen = false, arcade = false, show_fps = false, smooth = true;
+	bool hud = true;    // Display > HUD: the 2D over a fight (energy bars, timer, names...) drawn; off: the 3D and the backdrop only
 	// Fullscreen as a borderless window a line taller than the screen, never the driver's own (issue #7: AMD's Vulkan
 	// on Windows froze in its exclusive fullscreen): the way on Windows unless fullscreen_exclusive = 1 (Display >
 	// Fullscreen mode); elsewhere the system's own (a Mac's Spaces, the Deck's gamescope) unless fullscreen_window = 1
@@ -729,6 +731,7 @@ struct settings
 		flag("arcade_mode", arcade);
 		flag("frame_timings", timings);
 		flag("show_fps", show_fps);
+		flag("hud", hud);
 		flag("smooth_motion", smooth);
 		flag("smooth_backgrounds", smooth_bg);
 		flag("background_filter", smooth_bg);   // (VF1's and VF2's name)
@@ -822,6 +825,7 @@ struct settings
 		if (!gpu3d_failed.empty()) fprintf(f, "gpu_3d_failed = %s\ngpu_3d_failed_build = %s\n", gpu3d_failed.c_str(), BUILD);
 		fprintf(f, "crt_colours = %d\nbrightness = %d\ngamma = %d\nsharp_textures = %d\n", crt_colours, brightness, gamma, int(sharp_textures));
 		fprintf(f, "quad_rendering = %d\n", int(quads));
+		fprintf(f, "hud = %d\n", int(hud));
 		if (graphics) fprintf(f, "graphics = %d\n", graphics);
 		fprintf(f, "window_scale = %d\n", window_scale);
 		if (window_w > 0) fprintf(f, "window_w = %d\nwindow_h = %d\nwindow_x = %d\nwindow_y = %d\nwindow_maximised = %d\n", window_w, window_h, window_x, window_y, int(window_max));
@@ -1133,6 +1137,7 @@ struct Game
 	std::vector<uint32_t> below_wide = std::vector<uint32_t>(video::WW * video::H);   // (widescreen's: tilegen.h)
 	bool full_3d = false;
 	bool no_stage_screen = false;   // (the newest frame's: the character select's or the ranking's, never a stage)
+	bool fight_screen = false;      // (the newest frame's: a fight, mode 7: Display > HUD Off hides the 2D over it)
 	video::TileGen::Scroll prev_scroll;   // the frame before's (for bg_dx, bg_dy)
 	std::vector<uint32_t> prev_below;
 	bool bg_moved = false;                // the layer below the 3D scrolled this frame by bg_dx, bg_dy
@@ -1413,6 +1418,7 @@ struct Game
 		// as a stage's letterbox for 20 frames)
 		const int mode = board.profile->mode ? board.ram[board.profile->mode ^ 3] : -1;
 		no_stage_screen = mode == 4 || mode == 5 || mode == 16 || mode == 17;
+		fight_screen = mode == 7;
 	}
 	const video::Scene &cur() const { return scene[newest]; }
 	const video::Scene &prev() const { return scene[newest ^ 1]; }
@@ -1424,7 +1430,7 @@ struct Game
 	struct View {
 		video::Scene scene[2];
 		int newest = 0;
-		bool have_prev = false, full_3d = false, bg_moved = false, no_stage_screen = false;
+		bool have_prev = false, full_3d = false, bg_moved = false, no_stage_screen = false, fight_screen = false;
 		float bg_dx = 0, bg_dy = 0;
 		std::vector<uint32_t> below = std::vector<uint32_t>(video::W * video::H), above = std::vector<uint32_t>(video::W * video::H);
 		std::vector<uint32_t> below_wide = std::vector<uint32_t>(video::WW * video::H);
@@ -1443,6 +1449,7 @@ struct Game
 		view.have_prev = have_prev;
 		view.full_3d = full_3d;
 		view.no_stage_screen = no_stage_screen;
+		view.fight_screen = fight_screen;
 		view.bg_moved = bg_moved;
 		view.bg_dx = bg_dx;
 		view.bg_dy = bg_dy;
@@ -2782,9 +2789,13 @@ int main(int argc, char **argv)
 				                        : SDL_FRect{ all.x, y0, mid.x - all.x, y1 - y0 };
 				if (bar.w > 0) SDL_RenderFillRect(ren, &bar);
 			}
-		SDL_RenderTexture(ren, tex_above, nullptr, &mid);
+		// (Display > HUD Off: in a fight the 2D over the 3D isn't drawn, the energy bars, the timer, the names, the
+		// rounds won, the round calls' text, and the flags beside the names; the 3D and the backdrop under it are, and
+		// the game runs as ever: only this picture leaves it out)
+		const bool hud = cfg.hud || !game.view.fight_screen;
+		if (hud) SDL_RenderTexture(ren, tex_above, nullptr, &mid);
 		draw_dural_wide(all, mid);
-		draw_hud_flags(mid);
+		if (hud) draw_hud_flags(mid);
 		if (crt) {
 			SDL_SetRenderTarget(ren, nullptr);
 			crt_paint.draw(ren, crt, nullptr, cfg.crt_colours, cfg.brightness, cfg.gamma);
@@ -3183,6 +3194,9 @@ int main(int argc, char **argv)
 		p.items.push_back({ tr::D_SHOW_FPS, tr::D_SHOW_FPS_HELP,
 			[&] { return on_off(cfg.show_fps); },
 			[&](int) { cfg.show_fps = !cfg.show_fps; cfg_dirty = true; if (!cfg.show_fps) menu.set_fps(""); } });
+		p.items.push_back({ tr::D_HUD, tr::D_HUD_HELP,
+			[&] { return on_off(cfg.hud); },
+			[&](int) { cfg.hud = !cfg.hud; cfg_dirty = true; } });
 		p.items.push_back({ tr::D_WINDOW_SIZE, tr::D_WINDOW_SIZE_HELP,
 			[&] {
 				if (cfg.window_scale <= 0) return std::string(tr::D_FREE);
@@ -4706,6 +4720,12 @@ int main(int argc, char **argv)
 			if (game_frame == BOOT_FRAMES && scripted) if (const char *vc = getenv("VF3_VERSUS_COUNT")) vf3net::set_versus_count(board, uint32_t(atoi(vc)));   // (tests: that stage)
 			if (game_frame == BOOT_FRAMES && !scripted && !skip_boot()) vf3net::set_random_seed(board, std::random_device{}());   // (as after an unseen boot)
 			if (game_frame == BOOT_FRAMES && scripted) if (const char *rs = getenv("VF3_SEED")) vf3net::set_random_seed(board, uint32_t(strtoul(rs, nullptr, 0)));
+			// (tests: the game's RAM hashed every 30 frames, VF3_TEST_RAM_LOG=file: the game the same whatever the display's
+			// settings, Display > HUD's, V-Sync's, the frame limit's)
+			if (static FILE *rl = getenv("VF3_TEST_RAM_LOG") ? fopen(getenv("VF3_TEST_RAM_LOG"), "w") : nullptr; rl && game_frame % 30 == 0) {
+				fprintf(rl, "%llu %016llx\n", (unsigned long long)game_frame, (unsigned long long)fnv(board.ram.data(), board.ram.size()));
+				fflush(rl);
+			}
 			// Arcade settings > CPU opponents' order: Random (issue #30; offline, Revision D). A Start that begins a game
 			// seeds the game's random numbers from its frame clock (0x1ECC0: a word of the program at the clock's
 			// 0x100000 low half), which stands still on the title screen, then marks the order to be shuffled (0x288E8:

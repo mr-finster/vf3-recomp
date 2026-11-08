@@ -106,6 +106,8 @@ T(D_DRIVER_HELP, "Auto démarre sur Vulkan et passe tout seul à Direct3D 12 si 
 T(D_DRIVER_AUTO, "Auto (Vulkan d'abord)")
 T(D_SHOW_FPS, "Afficher les FPS")
 T(D_SHOW_FPS_HELP, "Affiche les FPS en haut à droite.")
+T(D_HUD, "HUD")
+T(D_HUD_HELP, "Non masque l'affichage du jeu par-dessus le combat\xC2\xA0: les barres d'énergie, le chrono, les noms, les rounds gagnés et les annonces de round. Les combattants et le décor restent affichés, et le jeu se déroule exactement pareil.")
 T(D_WINDOW_SIZE, "Taille de la fenêtre")
 T(D_WINDOW_SIZE_HELP, "Règle la fenêtre sur un multiple entier des 384 lignes de l'arcade (1x\xC2\xA0: 512 x 384 en 4:3, plus large pour un format large). Échelle 1x et fenêtre 1x montrent les 384 lignes une pour une\xC2\xA0; fenêtre 2x et échelle 1x doublent chacune. Seulement les tailles que ton écran contient, pour jouer en fenêtre (en plein écran, elle attend la fenêtre). Redimensionner à la main revient à Libre. La taille et la position sont gardées dans tous les cas.")
 T(D_FREE, "Libre")
