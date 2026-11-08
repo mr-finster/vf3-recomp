@@ -4,7 +4,7 @@
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 const lobby = process.argv[2] || 'src/index.js';
-const files = ['pairing.test.mjs', 'watch.test.mjs', 'ws-over.test.mjs', 'switches.test.mjs', 'pairing-switched.mjs', 'review.test.mjs', 'counts.test.mjs'];
+const files = ['pairing.test.mjs', 'watch.test.mjs', 'ws-over.test.mjs', 'switches.test.mjs', 'pairing-switched.mjs', 'review.test.mjs', 'counts.test.mjs', 'score.test.mjs'];
 const quiet = process.argv.includes('--quiet');   // (only the failures and the summary)
 const failed = [];
 for (const f of files) {

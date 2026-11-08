@@ -118,7 +118,10 @@ the code then left out), waiting or playing (a room that stays through its match
 may be watched, Quick match games among them (`random: true`: both players, the score, a watch code and no code to
 join; listed only once the host's game sends the match, and only when both players' games said `qm_listed: true`, Show
 my Quick Match games in Rooms On: so never with an older build's player, which never says; watchable by its watch code
-either way). A Quick match's watch code is one of its own, never its room's code: that is the code its Play again opens
+either way). A listed room's score is the matches won between its host and the player it has now, all their matches in
+it together: the same two again (Play again, or back from its line) go on from where they were, someone else starts
+from 0-0; from its Watch's tellings (the match's id, the two players, the score), and kept as last known when the
+Watch is told no more while the room is still held (its host's uploads stopped). A Quick match's watch code is one of its own, never its room's code: that is the code its Play again opens
 again for the other player, and a stranger who had it from the list could take that room (and the host's addresses)
 first; and `you`, the asker's continent
 (the browser's "near me"). A match takes 400 watchers at most (`WATCH_MAX`): one more is answered `full` (429), which

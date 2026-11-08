@@ -1302,13 +1302,12 @@ export class Stats {
 			const was = s.watches[wid];
 			if (was) s.month.ms += Math.min(Math.max(now - was.seen, 0), 60000) * (was.watchers > 0 ? 1 : UNWATCHED_WEIGHT);
 			this.dirty.set('month', s.month);
+			const p = (Array.isArray(b.p) ? b.p : []).slice(0, 2).map((x) => ({ name: Array.isArray(x) ? clean(x[0], 10) : '', country: Array.isArray(x) ? country_ok(x[1]) : '' }));
+			const nums = (l) => (Array.isArray(l) ? l : []).slice(0, 2).map((x) => Math.min(Math.max(x | 0, 0), 255));
+			this.tally(wid, p, nums(b.wins), hex16(b.mid));
 			if (b.op === 'unwatch') this.del('watches', wid);
-			else {
-				const p = (Array.isArray(b.p) ? b.p : []).slice(0, 2).map((x) => ({ name: Array.isArray(x) ? clean(x[0], 10) : '', country: Array.isArray(x) ? country_ok(x[1]) : '' }));
-				const nums = (l) => (Array.isArray(l) ? l : []).slice(0, 2).map((x) => Math.min(Math.max(x | 0, 0), 255));
-				this.set('watches', wid, { ...at, listed: !!b.listed, random: !!b.random && !b.listed, region: String(b.region || '').slice(0, 2), aid: hex16(b.aid), p, wins: nums(b.wins), rounds: nums(b.rounds),
-					watchers: Math.min(Math.max(b.watchers | 0, 0), 1e6), seen: now, born: Math.min(now, +b.born || now) });
-			}
+			else this.set('watches', wid, { ...at, listed: !!b.listed, random: !!b.random && !b.listed, region: String(b.region || '').slice(0, 2), aid: hex16(b.aid), p, wins: nums(b.wins), rounds: nums(b.rounds),
+				watchers: Math.min(Math.max(b.watchers | 0, 0), 1e6), seen: now, born: Math.min(now, +b.born || now) });
 			await this.flush();
 			let watchers = 0;
 			for (const w of Object.values(s.watches)) watchers += w.watchers | 0;
@@ -1332,7 +1331,8 @@ export class Stats {
 			// says nothing of them (not one that stays) has none)
 			const line = pairs(b.qsids, b.qcountries).slice(0, QUEUE_MAX), [guest] = playing ? pairs([b.gsid], [b.gcountry]) : [];
 			const stays = { queued: line, guest: guest || null };
-			if (p && b.op !== 'join') this.set('hosts', code, { ...at, sid: p[0], country: p[1], seen: now, born: (s.hosts[code] && s.hosts[code].born) || now, in_match: playing, ...listed, ...stays });
+			const was = s.hosts[code], tally = was && was.sid === (p && p[0]) && was.tally ? { tally: was.tally } : {};   // (a room that stays, open again: the score between its two kept)
+			if (p && b.op !== 'join') this.set('hosts', code, { ...at, sid: p[0], country: p[1], seen: now, born: (was && was.born) || now, in_match: playing, ...listed, ...stays, ...tally });
 			else if (s.hosts[code]) { Object.assign(s.hosts[code], { seen: now, in_match: playing }, listed, stays); this.touch('hosts', code); }
 		} else if (b.op === 'join') {
 			this.del('hosts', code);
@@ -1343,6 +1343,23 @@ export class Stats {
 		else return json({ error: 'bad' }, 400);
 		await this.flush();
 		return new Response(null, { status: 204 });
+	}
+	// A listed room's score: the matches won between its host and the player it has now, all its matches together (a room
+	// that stays: each match a new one, its Watch's score from 0; the same two again, Play again or back from its line,
+	// go on from where they were), and kept when its Watch is told no more while it plays (its host's uploads stopped:
+	// the lobby not reached for a minute, the month's watching used up; its line said 0-0 till the room closed). From
+	// its Watch's tellings: the match's id (a new one: the last one's score put by), the two players, the score now
+	tally(wid, p, wins, mid) {
+		const h = this.s.hosts[wid];
+		if (!h || h.wid !== wid || p.length !== 2 || wins.length !== 2) return;
+		const pair = p.map((x) => same_name(x.name)).join('|');
+		let t = h.tally;
+		if (!t || t.pair !== pair) t = { pair, done: [0, 0], cur: [0, 0], mid };
+		else if (mid && t.mid && t.mid !== mid) t = { pair, done: [0, 1].map((i) => Math.min(t.done[i] + t.cur[i], 9999)), cur: [0, 0], mid };
+		else if (mid) t.mid = mid;
+		t.cur = [0, 1].map((i) => Math.max(t.cur[i], wins[i]));   // (a match's score only goes up: a start sent again, 0-0 for a moment, isn't taken)
+		h.tally = t;
+		this.touch('hosts', wid);
 	}
 	// The rooms list: public rooms waiting for an opponent (to join), and the matches anyone may watch, newest first,
 	// ROOMS_MAX a game at most. A player's name only where they chose to be listed (Create room: Listed), or played a
@@ -1368,7 +1385,10 @@ export class Stats {
 				const p2 = h.p2 && h.p2.name ? h.p2 : w && w.p[1] && w.p[1].name ? w.p[1] : null;
 				if (!p2) continue;
 				// (a locked room's match: no watch code, which is the room's own code, the one its lock keeps from the list)
-				room({ ...base, state: 'playing', p2, ...(w ? { ...(h.locked ? {} : { watch: h.wid }), score: w.wins, round: (w.rounds[0] | 0) + (w.rounds[1] | 0) + 1 } : { score: [0, 0], round: 0 }) });
+				// (the score: the room's tally between these two, its match's now with it; no Watch, its last known)
+				const t = h.tally && h.tally.pair === [h.name, p2.name].map(same_name).join('|') ? h.tally : null;
+				const score = t ? [0, 1].map((i) => t.done[i] + (w ? Math.max(t.cur[i], w.wins[i] | 0) : t.cur[i])) : w ? w.wins : [0, 0];
+				room({ ...base, state: 'playing', p2, score, ...(w ? { ...(h.locked ? {} : { watch: h.wid }), round: (w.rounds[0] | 0) + (w.rounds[1] | 0) + 1 } : { round: 0 }) });
 			} else if (!h.playing) room({ ...base, state: 'waiting' });
 		}
 		// a listed room's match whose room isn't kept (no line after it): from its Watch (an unlisted room's never: by its code
@@ -1504,6 +1524,7 @@ function w_head(b, kind) {
 	return m === '0000000000000000' ? null : { v, m, at: 14 };
 }
 const hex16 = (s) => (typeof s === 'string' && /^[0-9a-f]{16}$/.test(s) ? s : '');   // (a match's id; an address's hash, aid)
+const same_name = (x) => String(x || '').toUpperCase().replace(/[^A-Z0-9]/g, '');   // (a player's name as the room has it and as its Watch does, the same)
 
 // (a watcher's seen, a guest's count: a code new to the asker counts against the limit for new codes, a join's, whatever
 // the code is, so watching can't be used to find room codes faster than joining can; asked again, not)
@@ -1762,10 +1783,12 @@ export class Watch {
 		const now = Date.now(), over = this.over();
 		const sig = [over, m.info.join(','), this.count()].join('|');
 		const gap = this.env.TURN_STATIC ? 0 : 5000;   // (a test's own lobby: every change at once)
-		if (!force && (now - this.told.at < gap || (sig === this.told.sig && now - this.told.at < 20000))) return;
-		this.told = { at: now, sig };
+		// (the match over: told at once, its last score with it; within the gap of the last telling it was never told,
+		// the host sending no more)
+		if (!force && over === !!this.told.over) if (now - this.told.at < gap || (sig === this.told.sig && now - this.told.at < 20000)) return;
+		this.told = { at: now, sig, over };
 		const ev = { op: over ? 'unwatch' : 'watch', wid: a.wid, game: a.game, version: a.version, listed: a.listed, random: !!a.random, region: a.region, aid: a.aid || '',
-			p: [[m.meta.p1, m.meta.c1], [m.meta.p2, m.meta.c2]], wins: [m.info[0], m.info[1]], rounds: [m.info[2], m.info[3]], watchers: this.count(), born: m.born };
+			p: [[m.meta.p1, m.meta.c1], [m.meta.p2, m.meta.c2]], wins: [m.info[0], m.info[1]], rounds: [m.info[2], m.info[3]], watchers: this.count(), born: m.born, mid: m.id };
 		const p = this.env.STATS.get(this.env.STATS.idFromName('all')).fetch('https://stats/tell', { method: 'POST', body: JSON.stringify(ev) })
 			.then((r) => (r.ok ? r.json() : null))
 			.then((l) => { if (l && Number.isFinite(l.watchers)) this.load = { matches: l.matches | 0, watchers: l.watchers | 0, over: l.over === true }; })
