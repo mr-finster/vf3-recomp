@@ -106,6 +106,21 @@ $(BIN)/delaytest: $(call objs,$(NET) tools/delaytest.cpp)
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDLIBS)
 
+# snapfuzz: a watcher's snapshot loading against a hostile host's (spoilt real snapshots: vf3net --watch-snap --snap-out
+# DIR), with AddressSanitizer and UBSan, its own objects (make snapfuzz: build/asan/bin/snapfuzz)
+ASAN_FLAGS = -std=c++20 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wno-unused-function
+snapfuzz:
+	CXXFLAGS="$(ASAN_FLAGS)" $(MAKE) OBJ=build/asan/obj BIN=build/asan/bin build/asan/bin/snapfuzz
+.PHONY: snapfuzz
+# (the sound board's 68000, MAME's generated code, unchanged: without the sanitizers there, a gigabyte less and the same
+# checks everywhere else)
+ifeq ($(OBJ),build/asan/obj)
+$(OBJ)/third_party/mame/m68000/%.o: CXXFLAGS = -std=c++20 -O1 -g0 -Isrc/core/shim_include -DSLJIT_CONFIG_AUTO=1
+endif
+$(BIN)/snapfuzz: $(call objs,$(CORE) $(NET) src/host/vf3_netplay.cpp tools/snapfuzz.cpp) $(SLJIT_OBJ)
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDLIBS) -lpthread
+
 $(BIN)/vf3net: $(call objs,$(CORE) $(NET) src/host/vf3_netplay.cpp tools/vf3net.cpp) $(SLJIT_OBJ)
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDLIBS)
