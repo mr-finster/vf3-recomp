@@ -43,7 +43,7 @@ html.cjk { font-synthesis: none; }
 html.cjk .lede, html.cjk .note, html.cjk .how { line-height: 1.5; }
 /* the language, in the corner */
 main { position: relative; }
-.lang { position: absolute; top: 32px; right: 16px; height: var(--h); padding: 2px 8px 0; font: 500 15px/1 var(--font); color: var(--row); background: var(--panel); border: 1px solid var(--line-2); border-radius: var(--r-s); cursor: pointer; }
+.lang { position: absolute; top: 32px; right: 16px; height: var(--h); padding: 0 8px 0.1em; font: 500 15px/1 var(--font); color: var(--row); background: var(--panel); border: 1px solid var(--line-2); border-radius: var(--r-s); cursor: pointer; }
 .lang:hover { border-color: var(--muted); }
 h1 { padding-right: 180px; }
 * { box-sizing: border-box; }
@@ -100,21 +100,28 @@ button, a, input { -webkit-tap-highlight-color: transparent; }
 .tab .all-icon i { display: block; border-radius: 2px; background: currentColor; }
 .tab .name { padding-top: 1px; }
 .tab .short { display: none; }
-.tab .count { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; height: 20px; padding: 1px 7px 0; border-radius: 10px;
+.tab .count { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; height: 20px; padding: 0 7px 0.1em; border-radius: 10px;
 	font: normal 600 13px/1 var(--font); font-variant-numeric: tabular-nums; color: var(--ink); background: var(--line); }
 .tab[aria-selected="true"] .count { color: var(--on-gold); background: var(--gold); }
 .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; min-height: 56px; padding: 12px; background: var(--panel); border: 1px solid var(--line); border-bottom: 0; }
 .bar .lbl, .bar .ago, .chip, .search { height: var(--h); line-height: 1; }
 .bar .lbl { display: inline-flex; align-items: center; padding-top: 2px; margin-right: 4px; font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
 .chips { display: flex; align-items: center; gap: 8px; }
-.chip { display: inline-flex; align-items: center; padding: 2px 14px 0; font: 600 17px/1 var(--font); color: var(--row); background: transparent; border: 1px solid var(--line-2); border-radius: 16px; cursor: pointer; white-space: nowrap; }
+.chip { display: inline-flex; align-items: center; padding: 0 14px 0.1em; font: 600 17px/1 var(--font); color: var(--row); background: transparent; border: 1px solid var(--line-2); border-radius: 16px; cursor: pointer; white-space: nowrap; }
 .chip:hover { color: var(--ink); border-color: var(--muted); }
 .chip:active { background: var(--panel-2); }
 .chip[aria-pressed="true"] { color: var(--on-gold); background: var(--ink); border-color: var(--ink); }
-.search { width: 220px; padding: 2px 12px 0; font: 500 17px/1 var(--font); color: var(--ink); background: var(--well); border: 1px solid var(--line-2); border-radius: var(--r-s); }
+.search { width: 220px; padding: 0 12px 0.1em; font: 500 17px/1 var(--font); color: var(--ink); background: var(--well); border: 1px solid var(--line-2); border-radius: var(--r-s); }
 .search:hover { border-color: var(--muted); }
 .search:focus-visible { border-color: var(--gold); box-shadow: none; }
 .search::placeholder { color: var(--muted); }
+/* (Barlow's caps and figures sit 0.05 em under the middle of a line 1 high (ascent 1, descent 0.2, caps 0.7): a pill, a
+   tab's count, the search box and the language menu lift them by as much, 0.1 em more padding under than over. Where a
+   browser trims a line to its caps (text-box), the pills and counts are trimmed instead: centred whatever its rounding of
+   the font) */
+@supports (text-box: trim-both cap alphabetic) {
+	.chip, .tab .count { display: inline-block; align-content: center; text-align: center; padding-bottom: 0; text-box: trim-both cap alphabetic; }
+}
 .bar .ago { display: inline-flex; align-items: center; gap: 6px; padding-top: 2px; margin-left: auto; font-size: 15px; font-weight: 500; color: var(--muted); }
 .ago.down { color: var(--gold); }
 
@@ -209,7 +216,7 @@ table.rooms.last { border-radius: 0 0 var(--r-m) var(--r-m); }
 	.tab .short { display: inline; }
 	.bar { padding: 8px; gap: 8px; }
 	.bar .lbl { display: none; }
-	.chip { padding: 2px 12px 0; font-size: 16px; }
+	.chip { padding-left: 12px; padding-right: 12px; font-size: 16px; }
 	.search { flex: 1 1 120px; width: auto; min-width: 120px; font-size: 16px; }
 	.bar .ago { flex-basis: 100%; height: auto; margin-left: 0; font-size: 13px; }
 	table.rooms, .rooms tbody { display: block; width: 100%; }
