@@ -21,7 +21,7 @@ globalThis.fetch = (url, init) => {
 };
 const now_s = () => Math.floor(Date.now() / 1000);
 const room = (state, extra) => ({ game: "vf3", state, name: "KOREA FINALS", code: "ABCDEF", p1: { name: "HOST", country: "KR" }, ...(state === "playing" ? { watch: "GHJKMN", p2: { name: "GUEST", country: "JP" }, score: [1, 0] } : {}), ...extra });
-const answer = (extra) => () => ({ updated: now_s(), games: { vf3: { total: 3 } }, countries: { KR: 2 }, rooms: [room("waiting"), room("playing", { code: "PQRSTU" })], features: { rooms: true, watch: true }, ...extra });
+const answer = (extra) => () => ({ updated: now_s(), games: { vf3: { total: 3, queued: 1, watching: 5 } }, countries: { KR: 2 }, rooms: [room("waiting"), room("playing", { code: "PQRSTU" })], features: { rooms: true, watch: true }, ...extra });
 
 let bad = 0, n = 0;
 const check = (ok, what, got) => { n++; if (!ok) bad++; console.log((ok ? "ok   " : "FAIL ") + what + (got !== undefined ? ": " + JSON.stringify(got) : "")); };
@@ -46,6 +46,7 @@ const alive = setInterval(() => {}, 1000);   // (AbortSignal.timeout's timer kee
 await reset("ok");
 let r = await run("EU");
 check(r.status === 200 && r.json.rooms.length === 2, "rooms and a match passed on", r.json && r.json.rooms.length);
+check(r.json.games.vf3.total === 3 && r.json.games.vf3.queued === 1 && r.json.games.vf3.watching === 5 && r.json.games.vf1.total === 0 && r.json.games.vf1.watching === 0, "the counts passed on: players (a room's line among them), watchers apart", r.json.games.vf3);
 check(r.json.you === "EU" && /^private/.test(r.cc), "the viewer's own answer (with you) kept private", r.cc);
 check(!/workers\.dev/.test(r.text), "nothing of the lobby's address");
 r = await run("");

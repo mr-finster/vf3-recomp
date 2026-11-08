@@ -1252,6 +1252,9 @@ function render_strip() {
 		t.appendChild(el("b", "", n(d.total)));
 		if (after) t.appendChild(document.createTextNode(after));
 		if (n(d.searching)) t.appendChild(el("span", "qmc", fill(T.in_quick, { n: n(d.searching) })));
+		// (those watching its matches: apart from the players online, a watcher plays no one; the rooms table's words,
+		// "{n} watching · ", without its dot after and with one before, as Quick match's)
+		if (n(d.watching)) t.appendChild(el("span", "qmc", " · " + fill(T.n_watching, { n: n(d.watching) }).replace(/\s*·\s*$/, "")));
 		const older = Math.min(n(d.older), n(d.total));
 		if (older) t.title = fill(T.older, { n: older });
 	}

@@ -7,7 +7,7 @@
 // asked again for FAIL_S. (Only plain data is kept between requests, never a promise: on Workers one request can't
 // safely wait on another's fetch, so each request that misses asks for itself.)
 const GAMES = ['vf1', 'vf2', 'vf3', 'vf3tb'];
-const STATES = ['total', 'searching', 'random', 'hosting', 'room'];
+const STATES = ['total', 'searching', 'random', 'hosting', 'queued', 'room'];   // (total: the players, each once; queued: in a room's line)
 const FRESH_S = 15, MAX_AGE = 10, STALE_S = 120, FAIL_S = 5, TIMEOUT_MS = 4000;
 let kept = null;   // ({t, body}: this copy's last answer, t when the counts were made)
 let failed_at = 0;   // (when the lobby last couldn't be reached: not asked again for FAIL_S)
@@ -60,7 +60,9 @@ function clean(d) {
 	const games = {};
 	for (const g of GAMES) {
 		const src = (d && d.games && d.games[g]) || {};
-		games[g] = { ...counts(src), older: count(src.older), countries: lands(src.countries) };   // (one count a game: who one can meet; older: of them, on an older version)
+		// (one count a game: who one can meet; older: of them, on an older version; watching: those watching its matches,
+		// apart from total, 0 from a lobby that doesn't say)
+		games[g] = { ...counts(src), older: count(src.older), countries: lands(src.countries), watching: count(src.watching) };
 	}
 	const t = d && d.updated;
 	// (what the lobby has on, its switches': each on only when it says so; no features, as from an older lobby, is
