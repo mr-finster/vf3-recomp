@@ -855,7 +855,11 @@ export class Room {
 			r.playing = true;
 			await this.save();
 			if (Date.now() - this.told > 60000) { this.tell({ op: 'hold', sids: [r.sid], countries: [r.host.country] }); this.told = Date.now(); }
-			return json({ ok: true, queue: (r.queue || []).length });
+			// (its line as it is: those still asking, not one who stopped and wasn't let go yet, no /v1/join since. A game
+			// whose guest makes way for the next in line after each match (vf3-recomp issue #42) goes by this: a line
+			// left would have moved its guest on for nobody)
+			const now = Date.now();
+			return json({ ok: true, queue: (r.queue || []).filter((q) => now - q.seen < QUEUE_GONE_MS).length });
 		}
 		return json({ error: 'bad' }, 400);
 	}

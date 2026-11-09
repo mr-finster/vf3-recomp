@@ -347,6 +347,17 @@ async function quick_pair(a, b) {   // (a Quick match: the first in waits, the s
 	env.ANY_LIMIT = saved;
 }
 
+// ---- /v1/hold: a room's line as it is, not one who left it (a game moves its guest on for the line, issue #42) ----
+{
+	const h = await call('POST', '/v1/host', me('LINEHOST', { listed: true, persist: true }), '198.51.100.140');
+	await call('POST', '/v1/join', me('PLAYING', { code: h.body.code }), '198.51.100.141');
+	const q = await call('POST', '/v1/join', me('INLINE', { code: h.body.code, queue: true }), '198.51.100.142');
+	const held = async () => (await call('POST', '/v1/hold', { code: h.body.code, key: h.body.key }, '198.51.100.140')).body.queue;
+	const asking = await held();
+	advance(16000);   // (no ask from the one in line since: gone from it)
+	check('/v1/hold: one in line while they ask, none once they stopped asking', [q.body.queued, asking, await held()], [1, 1, 0]);
+}
+
 Date.now = real_now;
 console.log(fails ? fails + ' FAILED' : 'all passed');
 process.exit(fails ? 1 : 0);
