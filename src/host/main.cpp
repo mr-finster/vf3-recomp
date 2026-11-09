@@ -4291,8 +4291,10 @@ int main(int argc, char **argv)
 			fprintf(stderr, "the notice: %s\n", cpu_notice().en().c_str());   // (in the log too: what the player was told)
 		}
 		const bool press = wait == 1 || wait == 3;
-		menu.set_banner(press ? std::string(tr::BANNER_PRESS) : wait ? tr::fill(tr::BANNER_WAITING_FOR, { { "name", online.opponent() } }) : "",
-		                wait == 2 ? std::string(tr::BANNER_TO_PRESS_START) : wait == 3 ? std::string(tr::BANNER_FOR_REMATCH) : wait == 4 ? std::string(tr::BANNER_TO_PRESS_REMATCH) : "", press ? start_button() : "");
+		// (a room's host, someone in its line: the guest about to make way for them, said for the moment before)
+		if (online.making_way()) menu.set_banner(tr::BANNER_NEXT_IN_LINE, tr::fill(tr::BANNER_MAKES_WAY, { { "name", online.opponent() } }));
+		else menu.set_banner(press ? std::string(tr::BANNER_PRESS) : wait ? tr::fill(tr::BANNER_WAITING_FOR, { { "name", online.opponent() } }) : "",
+		                     wait == 2 ? std::string(tr::BANNER_TO_PRESS_START) : wait == 3 ? std::string(tr::BANNER_FOR_REMATCH) : wait == 4 ? std::string(tr::BANNER_TO_PRESS_REMATCH) : "", press ? start_button() : "");
 		if (interrupted)
 			menu.set_notice(tr::fill(tr::BANNER_WAITING_FOR, { { "name", online.opponent() } }), tr::fill(tr::NOTICE_DROPPED, { { "n", std::to_string(online.hold_left()) } }),
 			                tr::NOTICE_CARRIES_ON);

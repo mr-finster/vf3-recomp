@@ -159,6 +159,9 @@ public:
 	// Who's to press Start: on the match's title screen 1 this player hasn't yet, 2 the other hasn't; after a match
 	// (the loser out of the game, as its RAM has it) 3 this player's out (Start for a rematch), 4 the other is; 0 none
 	int start_wait() const;
+	// A room that stays, someone in its line, the match decided: the guest about to make way for the next in line (the
+	// host's screen says so for a moment before the match ends)
+	bool making_way() const { return make_way_at > 0 && session && ph == Phase::playing && !session->interrupted(); }
 	// who's in the game, as the score holds it (bit 0 player 1, bit 1 player 2): a side the CPU has (a player out, or
 	// one who never pressed Start) shows the game's own name on the HUD, not the player's
 	// (in at once, as the RAM has them this frame; out once that holds)
@@ -330,6 +333,11 @@ private:
 	bool watch_ws_failed = false;
 	double watch_ws_frames_at = 0;      // (the last frames on it)
 	std::shared_ptr<Fetch> count_job;
+	// (a room that stays: its line asked about once a match is decided, and the guest making way if anyone's in it)
+	std::shared_ptr<Fetch> line_job;
+	double line_at = 0, decided_at = 0, make_way_at = 0, line_for = 0;   // (line_for: the decided_at its ask was for)
+	int line_said = -2;   // (the line's count last logged this match: said once, not every ask)
+	void line_poll();
 	double count_at = 0;
 	int guest_watchers = -1;
 	mutable double cells_at = -1e18;    // (when the figures at the top were last asked for: the guest's count asked only while they're shown)

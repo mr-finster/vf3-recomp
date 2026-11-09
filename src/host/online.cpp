@@ -751,6 +751,62 @@ bool Online::lobby_off(const vfnet::json::Value &v)
 	return true;
 }
 
+// Why a room's host ended the match, said with the quit (Session::quit's reason): someone's in the room's line, the
+// guest made way for them. src/net's QUIT_ reasons are 1 (QUIT_TOO_FAR) so far; a build that doesn't know this one
+// reads a plain quit ("left the match"), as ever: the packet's the same, only the byte it already has for a reason.
+constexpr uint8_t QUIT_NEXT_IN_LINE = 2;
+static_assert(QUIT_NEXT_IN_LINE != vfnet::QUIT_TOO_FAR);
+constexpr double LINE_ASK_MS = 10000;      // (the line asked about again this often while the match stays decided)
+constexpr double MAKE_WAY_AFTER_MS = 3000; // (from the match decided to the guest making way: how it ended seen first)
+constexpr double MAKE_WAY_SAID_MS = 2000;  // (the banner said at least this long first, however late the lobby's answer)
+
+// A room that stays, with someone in its line (GitHub issue #42): after each match, whoever won, the guest makes way
+// and the next in line plays the host, who stays. (The arcade's continue, the loser's Start, kept the line waiting
+// till the guest left of their own accord.) Once the match is decided, one of the two out of the game as its RAM has
+// it, the lobby's asked how many are in the line (/v1/hold's answer, the room's host's own, by its key), again every
+// LINE_ASK_MS while it stays decided; someone there: a moment for both to see how it ended (the host's banner says
+// what's coming), then the session quit with QUIT_NEXT_IN_LINE (the guest's game says it made way, not that the host
+// left) and the room open again for the next in line as after any match (its watchers follow, as with a Play again).
+// Nobody in the line, or a lobby that doesn't say: as before, the loser's Start plays on.
+void Online::line_poll()
+{
+	if (!persist || !is_host || random || !rooms || key.empty() || ph != Phase::playing || !session || session->state() != vfnet::Session::State::running) return;
+	if (make_way_at > 0) {
+		if (now < make_way_at || session->interrupted()) return;   // (not while the guest's cut off: its game told why, not "stopped")
+		make_way_at = 0;
+		const std::string who = opponent();
+		log_line("someone in the room's line: " + who + " makes way for them");
+		ended(tr::line(tr::MADE_WAY_HOST, { { "name", who } }));
+		session->quit(QUIT_NEXT_IN_LINE);   // (its ended event, next: the room open again, as after any match)
+		return;
+	}
+	const bool decided = both_in && score.players() != 3;
+	if (!decided) decided_at = 0;
+	else if (decided_at <= 0) {
+		decided_at = now;
+		line_at = now;
+		line_said = -2;
+	}
+	if (line_job && line_job->done) {
+		vfnet::json::Value v;
+		const bool ok = line_job->reply.status == 200 && vfnet::json::parse(line_job->reply.body, v) && v["queue"].kind == vfnet::json::Value::number;
+		const int n = ok ? int(std::clamp(v["queue"].n, 0.0, 99.0)) : -1;
+		line_job.reset();
+		const double asked_for = line_for;   // (the decided match it was asked for: its answer holds though the loser's Start came first)
+		line_for = 0;
+		if (asked_for > 0 && n != line_said) log_line("the match decided: " + (n < 0 ? std::string("the room's line not known (the lobby didn't say): the loser's Start plays on") :
+		                             n == 0 ? std::string("nobody in the room's line: the loser's Start plays on") : std::to_string(n) + " in the room's line: the guest makes way"));
+		if (asked_for > 0) line_said = n;
+		if (n > 0 && asked_for > 0) make_way_at = std::max(now + MAKE_WAY_SAID_MS, asked_for + MAKE_WAY_AFTER_MS);
+		return;
+	}
+	if (decided_at > 0 && !line_job && now >= line_at) {
+		line_at = now + LINE_ASK_MS;
+		line_for = decided_at;
+		line_job = fetch("POST", lobby_url("/v1/hold"), "{\"code\":" + vfnet::json::quote(code) + ",\"key\":" + vfnet::json::quote(key) + "}", 5000, 4096);
+	}
+}
+
 void Online::feed_poll()
 {
 	for (FeedSlot &f : feed_slots)
@@ -1946,6 +2002,8 @@ void Online::stop()
 	room_ws_at = 0;
 	peek_job.reset();
 	count_job.reset();
+	line_job.reset();
+	decided_at = make_way_at = line_for = 0;
 	wid.clear();
 	wkey.clear();
 	guest_watchers = -1;
@@ -2000,6 +2058,8 @@ void Online::begin_match(const std::string &who)
 	ticket.clear();   // (out of the queue: the lobby's done with it)
 	guest_watchers = -1;
 	count_at = now + 3000;
+	line_job.reset();
+	decided_at = make_way_at = line_at = line_for = 0;
 	if (is_host && !wkey.empty()) feed_begin();   // (its matches may be watched: sent to the lobby as it's played)
 }
 
@@ -2012,6 +2072,7 @@ void Online::poll(double t)
 	if (!session) return;
 	feed_poll();
 	session->poll(t);
+	line_poll();
 	vfnet::Session::Event e;
 	while (session && session->next_event(e)) {
 		switch (e.kind) {
@@ -2053,7 +2114,11 @@ void Online::poll(double t)
 			}
 			if (was_playing && why != vfnet::Session::End::quit) {
 				const std::string who = opponent();
-				ended(why == vfnet::Session::End::opponent_quit ? tr::line(tr::OPPONENT_LEFT, { { "name", who } })
+				// (a room's host whose line has someone in it: this guest made way for them, said as that, not as the host gone)
+				const bool made_way = why == vfnet::Session::End::opponent_quit && rooms && !is_host && session->opponent_quit_reason() == QUIT_NEXT_IN_LINE;
+				if (made_way) log_line(who + "'s room has someone in its line: this player made way for them");
+				ended(made_way ? tr::line(tr::MADE_WAY_GUEST, { { "name", who } })
+				      : why == vfnet::Session::End::opponent_quit ? tr::line(tr::OPPONENT_LEFT, { { "name", who } })
 				      : why == vfnet::Session::End::disconnected ? tr::line(tr::OPPONENT_STOPPED, { { "name", who } })
 				      : why == vfnet::Session::End::desync ? tr::line(tr::MATCH_OUT_OF_STEP) : tr::line(e.text),
 				      why == vfnet::Session::End::disconnected);
