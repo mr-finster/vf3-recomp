@@ -149,9 +149,16 @@ public:
 	std::function<void(const std::vector<uint8_t> &)> midi_out;   // bytes for the sound board
 	std::function<void()> on_begin;            // a match's start, before the board is set up for it (keep the player's NVRAM)
 	std::function<void()> booting;             // now and then in the match's boot (seconds of frames: the window's events)
-	// (a watcher catching up from the match's start, unseen: the frames' sound bytes dropped, not played in a burst;
-	// only what's heard, never the game)
+	// (a watcher catching up from the match's start, unseen: the frames' sound bytes not played as they run, a burst,
+	// but given to midi_unheard, a frame's at a time (none too), for the sound board to run through unheard, in time,
+	// as a from-the-start watcher's ran them: dropped, as before, a watcher heard no music till the next round's song.
+	// Only what's heard, never the game)
 	bool mute = false;
+	std::function<void(const std::vector<uint8_t> &)> midi_unheard;   // (none: they're dropped)
+	// (and how many of them the sound board has still to run: a watcher catching up waits for it past UNHEARD_AHEAD
+	// (Online::step), so its board is a from-the-start watcher's when the picture's up; 0 none waiting)
+	std::function<size_t()> midi_unheard_waiting;
+	static constexpr size_t UNHEARD_AHEAD = 120;
 
 	bool begin(const std::vector<uint8_t> &blob) override;
 	void save(std::vector<uint8_t> &state) override;

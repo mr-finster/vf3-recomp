@@ -154,6 +154,7 @@ __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
 #include <filesystem>
 #include <map>
 #include <atomic>
+#include <deque>
 #include <memory>
 #include <optional>
 #include <random>
@@ -1211,6 +1212,27 @@ struct Game
 	// frames make them and played as it reaches them, the music and the voices in their own time and pitch.
 	SDL_AudioStream *free_stream = nullptr;
 	std::vector<uint8_t> free_midi;   // (a frame's bytes, taken)
+	// A watcher's frames caught up unseen (Adapter::midi_unheard): each frame's bytes, for the thread to run through
+	// the sound board unheard, a frame each, as fast as it can, before anything heard; and, while it catches up
+	// (Online::watch_hushed), nothing to the real clock: so at the live point the board is a from-the-start watcher's,
+	// the stage's music playing (dropped, it had none till the next round's song). The catch-up waits for it
+	// (unheard_waiting, Online::step); none kept with no stream (no sound playing)
+	std::deque<std::vector<uint8_t>> unheard;
+	std::atomic<bool> sound_held{ false };
+	void put_unheard(const std::vector<uint8_t> &b)
+	{
+		{
+			std::lock_guard<std::mutex> lk(sound_m);
+			if (!free_stream) return;
+			unheard.push_back(b);
+		}
+		sound_cv.notify_all();
+	}
+	size_t unheard_waiting()
+	{
+		std::lock_guard<std::mutex> lk(sound_m);
+		return unheard.size();
+	}
 	int free_target = 0;
 	std::atomic<int> sound_dry{ 0 };   // (the queue found empty: a drop heard; the log's pace line)
 	void sound_wait()
@@ -1238,6 +1260,7 @@ struct Game
 				SDL_PutAudioStreamData(stream, sound_out.data(), int(sound_out.size() * sizeof(int16_t)));
 			if (stream) sound_out.clear();
 			sound_midi.clear();
+			unheard.clear();
 			free_stream = stream;
 			free_target = target_bytes;
 		}
@@ -1255,8 +1278,22 @@ struct Game
 				if (!free_stream) fed = false;
 				if (free_stream) {
 					// (a look every 4 ms: a frame's sound, 17 ms, made whenever the queue's under its mark)
-					sound_cv.wait_for(lk, std::chrono::milliseconds(4));
+					if (unheard.empty()) sound_cv.wait_for(lk, std::chrono::milliseconds(4));
 					if (sound_quit) return;
+					for (int n = 0; free_stream && n < 16 && !unheard.empty(); n++) {   // (a watcher's frames caught up: unheard)
+						midi.swap(unheard.front());
+						unheard.pop_front();
+						sound_busy = true;
+						lk.unlock();
+						for (uint8_t b : midi) sound.midi_in(b);
+						midi.clear();
+						out.clear();
+						sound.run(1.0 / FRAME_HZ, out);
+						lk.lock();
+						sound_busy = false;
+						sound_cv.notify_all();
+					}
+					if (!unheard.empty() || sound_held) continue;   // (catching up: none to the real clock, none sped up)
 					if (free_stream && fed && SDL_GetAudioStreamQueued(free_stream) == 0) sound_dry++;   // (not before its first)
 					for (int n = 0; free_stream && n < 4 && SDL_GetAudioStreamQueued(free_stream) < free_target; n++) {
 						SDL_AudioStream *to = free_stream;
@@ -1318,6 +1355,7 @@ struct Game
 			sound_cv.wait(lk, [this] { return !sound_busy; });
 			sound_out.clear();
 			sound_midi.clear();
+			unheard.clear();
 			sound.reset();
 		}
 		builder.clear_cache();
@@ -4110,6 +4148,8 @@ int main(int argc, char **argv)
 	};
 	std::vector<uint8_t> late_midi;   // (a frame run again that has sounds its first run hadn't: they go with the next frame's)
 	online.adapter.midi_out = [&](const std::vector<uint8_t> &b) { late_midi.insert(late_midi.end(), b.begin(), b.end()); };
+	online.adapter.midi_unheard = [&](const std::vector<uint8_t> &b) { game.put_unheard(b); };   // (a watcher's frames caught up: Game::unheard)
+	online.adapter.midi_unheard_waiting = [&] { return game.unheard_waiting(); };
 	bool match_on = false;
 	Online::Phase online_was = Online::Phase::off;
 	std::string online_code_was;   // (the room code: its page made again when the lobby gives it)
@@ -4183,6 +4223,7 @@ int main(int argc, char **argv)
 	};
 	auto online_pass = [&] {
 		online.poll(double(SDL_GetTicksNS()) / 1e6);
+		game.sound_held = online.watch_hushed();   // (a watcher catching up: its frames' sound unheard, none to the real clock)
 		Online::Notice n;
 		while (online.next_notice(n)) {
 			if (n.kind == Online::Notice::joined || n.kind == Online::Notice::watching) {

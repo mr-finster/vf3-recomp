@@ -2181,6 +2181,15 @@ bool Online::step(uint16_t input)
 		// (catching up, unseen: as fast as it can, 40 ms a step (the passes' pictures just the line saying how far it is);
 		// watching, a frame's time at most)
 		const bool catching = !watch_shown || spec->state() == vfnet::watch::Spectator::State::catching_up;
+		// (catching up: not past the sound board's running through those frames by more than UNHEARD_AHEAD (near the
+		// live point, any), waited for a little here, else on the next pass: its sound at the live point a
+		// from-the-start watcher's, the stage's music playing where the players' is)
+		if (catching && adapter.midi_unheard_waiting) {
+			const size_t ahead = spec->total() > spec->frame() + 600 ? vf3net::Adapter::UNHEARD_AHEAD : 0;
+			const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(30);
+			while (adapter.midi_unheard_waiting() > ahead && std::chrono::steady_clock::now() < until) std::this_thread::sleep_for(std::chrono::microseconds(500));
+			if (adapter.midi_unheard_waiting() > ahead) return false;
+		}
 		const int ran = spec->tick(&shown, catching ? 40.0 : 10.0);
 		if (ran) score.frame(board);
 		if (shown && !watch_shown) {   // (caught up: its first picture, the sound from now on)

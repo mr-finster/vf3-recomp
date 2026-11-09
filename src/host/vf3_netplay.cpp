@@ -277,7 +277,10 @@ void Adapter::advance(const uint16_t input[2], bool resim)
 	if (!midi_taken) {
 		std::vector<uint8_t> out;
 		take_midi(out);
-		if (!out.empty() && midi_out && !mute) midi_out(out);
+		if (mute) {   // (a watcher catching up: unheard, in time)
+			if (midi_unheard) midi_unheard(out);
+		} else if (!out.empty() && midi_out)
+			midi_out(out);
 	}
 	frame++;
 	if (checkpoint_every && frame % checkpoint_every == 0) {
