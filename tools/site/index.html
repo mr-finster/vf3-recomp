@@ -401,6 +401,12 @@ dialog .x:hover{background:rgba(255,255,255,.2)}
       <div class="pop" role="dialog" aria-label="Changelog">
         <p><b>%VERSION%</b> &middot; %DATE%</p>
         <ul>
+          <li><b>A room&rsquo;s line moves after every match</b> (vf3-recomp #42): when someone is waiting in a room&rsquo;s line, the guest makes way after each match, whoever won, and the next in line plays the host. With nobody waiting, the loser can press Start and play on as before.</li>
+          <li><b>Watching is smoother</b>: a watcher stays at least 1.5 s behind the players (it was about 0.2 s), so on a steady connection it no longer skips or repeats a frame now and then.</li>
+          <li><b>Cheats &rarr; Dural&rsquo;s stage online</b> (vf3-recomp #36): a quick cursor move and Guard no longer gets &ldquo;no Dural version&rdquo; for the stage next to it (Lau&rsquo;s and Taka&rsquo;s). In Team Battle the Cave gets its Dural look (the original VF3 cave), online too. Aoi&rsquo;s stage still can&rsquo;t: the arcade never gives its Dural version.</li>
+          <li>No update is forced: plays v0.1.19-alpha and every build it played online as before.</li>
+        </ul>
+        <details><summary>v0.1.19-alpha</summary><ul>
           <li><b>Display &rarr; HUD: Off</b> hides a fight&rsquo;s energy bars, timer, names and round calls, for a clean picture of the 3D (the select, the VS screen and the menus keep theirs). Only the picture: the game plays exactly the same.</li>
           <li><b>The match found chime is the cabinet&rsquo;s own coin sound</b> (as in Virtua Fighter 1 Recomp), made from your ROMs when the game starts. Online &rarr; Settings &rarr; Match found chime still turns it on and off.</li>
           <li><b>A second key and a second pad button for every control</b>: Controls &rarr; Player &rarr; Second keys and Second pad buttons. Either one works (Guard on a face button and a trigger, for example).</li>
@@ -410,7 +416,7 @@ dialog .x:hover{background:rgba(255,255,255,.2)}
           <li><b>Watching a match you join late is quicker</b>: the game catches up with it about twice as fast, and silently, showing only how far along it is until it reaches the live match (no sped-up sound any more). Only for watchers: the players&rsquo; match is untouched.</li>
           <li><b>Dural&rsquo;s spot on the select screen fades in with the rest of the grid</b>, frame for frame (it showed a frame early, and brighter).</li>
           <li>No update is forced: plays v0.1.18-alpha and every build it played online as before.</li>
-        </ul>
+        </ul></details>
         <details><summary>v0.1.18-alpha</summary><ul>
           <li><b>Online is a room browser.</b> Menu &rarr; Online lists the open rooms and the matches being played, with the players, the score and how many are watching. CREATE ROOM (unlisted, code only, unless you list it; a name if you like), ENTER CODE and QUICK MATCH.</li>
           <li><b>Watch any match.</b> WATCH on a match in the list, or its code: a watcher never slows the players down, however many watch (up to 400) and whatever their ping. The players see how many are watching. Join late and it catches up from the start, unseen.</li>
