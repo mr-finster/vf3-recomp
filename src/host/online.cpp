@@ -654,6 +654,13 @@ void Online::close_room()
 
 // ---- watching (src/net/watch.h): this match's watchers, and watching another ----
 
+// A watcher's least buffer: the frames held ahead of the one shown, 1.5 s at least. The Spectator's own least (50 ms)
+// kept a watcher on a steady link about 0.2 s behind, where the odd late reply had it hold a frame (a little slower,
+// the buffer nearly gone) or run one unseen (a quarter faster, too much held): about 140 frames unseen in 2.5 minutes,
+// a stutter (a VF3 watcher's log, 9 Nov). Watching isn't playing: 1.5 s behind is nothing, and covers it (watchsim, 50 watchers: at 0.75 s still a held frame every 11 s on a good link, at 1.5 s none). (A
+// watcher from a snapshot, or catching up from the match's start, buffers this much before its first picture.)
+constexpr double WATCH_BUFFER_MIN_MS = 1500;
+
 struct Online::Fetch
 {
 	std::atomic<bool> done{ false };
@@ -1042,6 +1049,7 @@ void Online::watch_poll()
 		if (spec) log_line("watching " + watch_code() + ": their next match" + (watch_ended() ? "" : watch_gone ? " (the lobby has no more of the last)" : " (no more frames of the last)"));
 		watch_match = watch_next;
 		Spectator::Config c;
+		c.buffer_min_ms = WATCH_BUFFER_MIN_MS;
 		stream_stop();
 		spec = std::make_unique<Spectator>(adapter, c);
 		spec->on_catch_up = [this](bool on) { adapter.mute = on || !watch_shown; };   // (catching up, unseen: no sound, then none late)
