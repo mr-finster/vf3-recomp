@@ -156,3 +156,8 @@ clean:
 
 .PHONY: all clean FORCE
 -include $(shell find $(OBJ) -name '*.d' 2>/dev/null)
+
+# vf3watchsound: a late watcher's match sound after its catch-up against a from-the-start watcher's (join points swept)
+$(BIN)/vf3watchsound: $(call objs,$(CORE) $(NET) src/host/vf3_netplay.cpp tools/vf3watchsound.cpp) $(SLJIT_OBJ)
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDLIBS)
