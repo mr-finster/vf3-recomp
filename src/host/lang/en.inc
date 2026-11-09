@@ -111,6 +111,12 @@ T(D_SHOW_FPS, "Show FPS")
 T(D_SHOW_FPS_HELP, "Shows the frame rate in the top right corner.")
 T(D_HUD, "HUD")                              // Display > HUD: the game's 2D over a fight (energy bars, timer, names) drawn or not
 T(D_HUD_HELP, "Off hides the game's display over a fight: the energy bars, the timer, the names, the rounds won and the round calls. The fighters and the stage are still drawn, and the game plays exactly the same.")
+T(D_FREECAM, "Free camera")   // Display > Free camera: On / Off (not saved)
+T(D_FREECAM_HELP, "Fly a camera around the fight: WASD + mouse (E/Space up, Q/Ctrl down, Shift faster, R back to the game's camera), or the sticks (LT/RT down/up, Y back). F4, or Back + R3 on a pad. Only the picture changes: the game plays exactly the same. Off at each start.")
+T(D_FREECAM_NOT_NOW, "Not while playing online")   // (Free camera's value in a match of the player's own)
+T(FREECAM_ON_KEYS, "Free camera: WASD + mouse, or the sticks. F4 to leave")   // a toast as it turns on from the keyboard (key names as printed)
+T(FREECAM_ON_PAD, "Free camera: sticks, LT/RT down/up. Back + R3 to leave")   // ...from a pad
+T(FREECAM_NOT_ONLINE, "Free camera: not while playing online")   // a toast: F4 or View + R3 in a match of the player's own
 T(D_VSYNC, "V-Sync")                         // Display > V-Sync (ja/ko/zh: the usual words for it)
 T(D_VSYNC_HELP, "On: each picture waits for your screen's next refresh, so none tears. Off: each is shown as soon as it's ready, a little sooner, but a line can tear across it. The game's speed is the same either way.")
 T(D_FRAME_LIMIT, "Frame limit")              // Display > Frame limit: Off, 30, 60, 120, 144 or the screen's refresh rate

@@ -123,6 +123,9 @@ public:
 	// Widescreen: how much wider than 4:3 the full-screen viewports are drawn (the picture's width over its 4:3
 	// width); their culling's side planes are widened as much, or what's past the 4:3 sides would pop in and out
 	float widen = 1;
+	// The free camera on (src/host/free_cam.h): nothing culled against the game's camera's planes (the free camera
+	// sees what it can't); the detail levels stay the game camera's
+	bool cull_off = false;
 
 private:
 	const uint32_t *cull_lo = nullptr, *cull_hi = nullptr, *poly = nullptr, *vrom = nullptr;

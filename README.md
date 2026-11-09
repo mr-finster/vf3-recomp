@@ -144,6 +144,7 @@ Change them in the menu (<kbd>Esc</kbd>, or View / Select on a pad).
 | <kbd>F12</kbd> | A screenshot of the picture (in the Screenshots folder) |
 | <kbd>Tab</kbd> (held) | As fast as it goes |
 | <kbd>F2</kbd> / <kbd>9</kbd> | The arcade's test and service buttons (in its test menu, Down and Start do too) |
+| <kbd>F4</kbd> | Free camera (see below) |
 
 Gamepads: d-pad or left stick, X guard, A punch, B kick, Y escape, LT guard + punch, RB punch + kick, LB guard + kick,
 RT all three, Start. The menu: View (tapped), L3 + R3, or the touchpad's click (View + Start too). View + LB: render
@@ -153,11 +154,27 @@ Arcade sticks the game doesn't know (DirectInput sticks such as HORI's Virtua St
 Mini) get a fighting stick's layout; Controls > Player 1 (or 2) > Set up buttons sets theirs by pressing each in turn. A
 `gamecontrollerdb.txt` (SDL's mappings) in the data folder or beside the program is read too.
 
+### Free camera
+
+Fly a camera around the fight: <kbd>F4</kbd>, on a pad View (Back / Select) + R3, or Display > Free camera. It starts
+at the game's camera; the game goes on (or stays paused with <kbd>P</kbd> while you fly), only the picture changes, and
+the HUD is hidden. Not while playing online yourself (watching a match, yes). Off at each start.
+
+| Keyboard and mouse | Pad | Does |
+| --- | --- | --- |
+| Mouse, or the arrows | Right stick | Look |
+| <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> | Left stick | Move, strafe |
+| <kbd>E</kbd> / <kbd>Space</kbd>, <kbd>Q</kbd> / <kbd>Ctrl</kbd> | RT, LT | Up, down |
+| <kbd>Shift</kbd> (x4), <kbd>Alt</kbd> (x0.25) | L3 held (x4) | Faster, slower while held |
+| Mouse wheel | LB, RB | Base speed down, up |
+| <kbd>R</kbd> | Y | Back to the game's camera |
+| <kbd>F4</kbd> | View + R3 | Leave |
+
 ## Menu
 
 - **Resume** and **Quit**.
 - **Display:** render scale (up to 6x), antialiasing (2x, 3x), the 3D renderer, picture shape (fit the window, 4:3,
-  16:10, 16:9, 21:9), background filter, distant textures (sharp, or as the arcade's), smooth motion, screen filter (scanlines, CRT), CRT colours (an arcade monitor's, as Supermodel's presets), Show FPS, window size, fullscreen and (on Windows) fullscreen mode.
+  16:10, 16:9, 21:9), background filter, distant textures (sharp, or as the arcade's), smooth motion, screen filter (scanlines, CRT), CRT colours (an arcade monitor's, as Supermodel's presets), Show FPS, free camera, window size, fullscreen and (on Windows) fullscreen mode.
   **Window size** makes the window a whole multiple of the arcade's 384 lines (1x 512 x 384 for the 4:3 picture,
   2x 1024 x 768, up to 4x: as many as your screen holds; a wider picture shape makes it as wide as the shape), each
   arcade line that many of your screen's: Render scale 1x with Window size 1x shows the arcade's 384 lines one to one,

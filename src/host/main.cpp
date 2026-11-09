@@ -49,11 +49,14 @@
 //        player 2: I J K L, B guard, N punch, M kick, comma escape, 2 start (both remapped in Controls)
 //        5 / 6 coins, F2 test, 9 service, Esc the menu, P pause, F3 reset, F5 render scale, F6 picture shape,
 //        F9 the timings in the title bar, F11 (or F, Alt+Enter) fullscreen, F12 a screenshot (the picture, into Screenshots in the
-//        data folder), Tab held: as fast as it goes. In the arcade's test menu Down moves and Start selects.
+//        data folder), Tab held: as fast as it goes, F4 the free camera (free_cam.h: WASD and the mouse, E or Space up,
+//        Q or Ctrl down, Shift x4, Alt x0.25, the wheel its speed, the arrows look, R back to the game's camera). In the
+//        arcade's test menu Down moves and Start selects.
 // Pads:  d-pad or left stick, X guard, A punch, B kick, Y escape, LT guard+punch, RB punch+kick, LB guard+kick,
 //        RT all three, Start; Menu (View tapped by default), L3 + R3 or the touchpad click: the menu (View
 //        + Start too; View tapped is a coin only when it's set as Coin); View + LB: render scale; View + RB:
-//        picture shape.
+//        picture shape; View + R3: the free camera (the left stick moves, the right looks, LT / RT down / up, L3 held
+//        x4, LB / RB its speed, Y back to the game's camera).
 // Sticks: a joystick SDL doesn't know as a pad (a DirectInput arcade stick) is given a fighting stick's layout
 //        (give_stick_layout); Controls > Player > Set up buttons makes one from its own presses (settings.ini's
 //        pad_mapping); a gamecontrollerdb.txt in the data folder or beside the program is read too.
@@ -105,6 +108,10 @@
 //                        start's grace (the governor's tests)
 //   VF3_TEST_RAM_LOG=f   the game's RAM hashed every 30 game frames to f (a display setting changes no frame)
 //   VF3_TEST_CHIME_WAV=f the match found chime's sound (the game's coin, made at the start) to f, a .wav
+//   VF3_TEST_FREECAM=... the free camera at these times: on@F, off@F, yaw@F=deg, pitch@F=deg, move@F=x,y,z (right,
+//                        world up, forward as it looks, in view units), reset@F, pause@F (P), shot@F=name (the window
+//                        to build/host_freecam_name.png), log@F (the game camera and the models' place), quit@F; F a game frame, counted on by the passes while the
+//                        game is stopped (paused), so a paused game's camera can be flown and shot
 #include "version.h"      // VF3_VERSION, VF3_DATE (made by the Makefile from git)
 #include "online.h"
 #include "links.h"
@@ -127,6 +134,7 @@
 #include "png.h"
 #include "input_script.h"
 #include "dural_stage.h"
+#include "free_cam.h"
 #include "menu.h"
 #include "crt_colours.h"
 #include "controls.h"
@@ -377,6 +385,7 @@ hotkey read_inputs(m3::Controls &c, SDL_Gamepad *pads[2], pad_state ps[2], const
 				static bool lb_was[2], rb_was[2];
 				if (lb && !lb_was[p]) { hk = hotkey::scale; st.back_combo = true; }
 				if (rb && !rb_was[p]) { hk = hotkey::aspect; st.back_combo = true; }
+				if (btn(SDL_GAMEPAD_BUTTON_RIGHT_STICK)) st.back_combo = true;   // (View + R3: the free camera's, read each pass)
 				lb_was[p] = lb; rb_was[p] = rb;
 			} else {
 				for (int a = C_GUARD; a < C_START; a++)
@@ -1483,6 +1492,13 @@ struct Game
 	}
 	const video::Scene &cur() const { return scene[newest]; }
 	const video::Scene &prev() const { return scene[newest ^ 1]; }
+	// The newest frame's scene built again from the board as it stands, as the builder is set now (the free camera
+	// turned on while paused: nothing culled against the game's camera); only between frames, none running
+	void rebuild_view()
+	{
+		builder.build(board, scene[newest]);
+		view.scene[view.newest] = scene[newest];
+	}
 	void forget_prev() { have_prev = false; view.have_prev = false; }
 
 	// What the pictures are drawn from: the last two frames' scenes, their 2D layers, the sky's lead and a copy of the
@@ -2304,6 +2320,10 @@ int main(int argc, char **argv)
 	};
 
 	static video::Scene between;
+	// The free camera (free_cam.h; Display > Free camera, F4, a pad's View + R3)
+	freecam::Cam fc;
+	bool fc_drawn = false;                  // (the picture on show is the free camera's)
+	uint32_t fc_sky_colour = 0xFF000000u;   // the stage's sky's colour (the layer's top line, averaged): past what the layer holds
 	SDL_Texture *tex3d = nullptr, *tex_below = nullptr, *tex_above = nullptr;
 	bool g3_shown = false;   // the picture on show is the GPU's
 	uint32_t side_colour[2] = { 0xFF000000u, 0xFF000000u };   // widescreen's bars beside the 2D (left, right)
@@ -2483,13 +2503,27 @@ int main(int argc, char **argv)
 			}
 			else cut_n++;
 		}
+		// The free camera: the scene (after the in-between) seen from it, the sky moved by its turn from the game's
+		// camera (as the sky's lead is: sky_lead.h)
+		fc_drawn = false;
+		if (fc.on) {
+			static video::Scene seen;
+			seen = *s;
+			float kx = 0, ky = 0;
+			if (fc.apply(seen, s == &between ? &game.view.prev() : nullptr, float(t), kx, ky)) {
+				s = &seen;
+				fc_drawn = true;
+				bg_shift_x -= kx;
+				bg_shift_y -= ky;
+			}
+		}
 		// The 2D opaque over all of the picture (the grade's and the ranking's boards after a game, their name entry):
 		// the 3D under it is never seen, not drawn. On Wolf's desert it was the stage's camera close to a dune, the
 		// sand's big layered polygons filling the screen several times over (a picture 4 times a fight's on the CPU,
 		// slow on an RX 570's Vulkan too: issue #7). Off the 4:3 the picture then has bars (not a stage, below), and
 		// the GPU's texture memory is sent whole when it draws again.
 		const bool hidden_3d = [&] {
-			if (game.view.above.empty()) return false;
+			if (game.view.above.empty() || fc_drawn) return false;   // (the free camera's: the 2D over it hidden)
 			for (const uint32_t px : game.view.above) if ((px >> 24) != 0xFF) return false;
 			return true;
 		}();
@@ -2605,7 +2639,15 @@ int main(int argc, char **argv)
 			// layer: its middle is the screen moved 2 pixels as the 3D is, so the 4:3's last 2 columns were the right
 			// side's first, what the sides make of a screen that isn't a stage (Team Battle's select: a black notch
 			// and a pink bar at the sea panel's right edge)
-			if (stage) send_2d(tex_below, game.view.below_wide, video::WW, video::HT);
+			if (stage) {
+				send_2d(tex_below, game.view.below_wide, video::WW, video::HT);
+				// (the sky's colour, the free camera's past the layer: the screen's top line's opaque pixels, averaged)
+				const uint32_t *row = &game.view.below_wide[size_t(video::EY) * video::WW];
+				uint64_t sum[3] = {}, n = 0;
+				for (int x = 0; x < video::WW; x++)
+					if (row[x] >> 24) { for (int c = 0; c < 3; c++) sum[c] += (row[x] >> (8 * c)) & 255; n++; }
+				if (n) fc_sky_colour = 0xFF000000u | uint32_t(sum[0] / n) | uint32_t(sum[1] / n) << 8 | uint32_t(sum[2] / n) << 16;
+			}
 			else {
 				static std::vector<uint32_t> narrow;
 				narrow.assign(size_t(video::WW) * video::HT, 0);
@@ -2657,6 +2699,21 @@ int main(int argc, char **argv)
 		// vertical streaks across the top of the sky and smears at the sides.)
 		const float sx = std::clamp(bg_shift_x, -float(video::WW) + 1, float(video::WW) - 1);
 		const float sy = std::clamp(bg_shift_y, -float(video::H) + 1, float(video::H) - 1);
+		// The free camera turned further than the layer reaches (on a stage): the sky faded to its colour, over half a
+		// screen's turn past the layer's edge (mirrored there, it would be sky that isn't the stage's)
+		float fade = 1;
+		if (fc_drawn && sky_wide) {
+			const float over_x = std::max({ 0.0f, -(video::EXT + l - bg_shift_x), video::EXT + r - bg_shift_x - float(video::WW) });
+			const float over_y = std::max({ 0.0f, -(video::EY - bg_shift_y), float(video::EY + video::H) - bg_shift_y - float(video::HT) });
+			fade = std::clamp(1.0f - std::max(over_x / (0.5f * video::W), over_y / (0.5f * video::H)), 0.0f, 1.0f);
+			if (fade < 1) {
+				SDL_SetRenderDrawColor(ren, uint8_t(fc_sky_colour), uint8_t(fc_sky_colour >> 8), uint8_t(fc_sky_colour >> 16), 255);
+				SDL_RenderFillRect(ren, &all);
+			}
+			if (fade <= 0) return;
+		}
+		struct AlphaBack { SDL_Texture *t; bool on; ~AlphaBack() { if (on) SDL_SetTextureAlphaMod(t, 255); } } alpha_back{ tex_below, fade < 1 };
+		if (fade < 1) SDL_SetTextureAlphaMod(tex_below, uint8_t(std::lround(fade * 255)));
 		const float ua = video::EXT + l - sx, ub = video::EXT + r - sx, va = video::EY - sy, vb = float(video::EY + video::H) - sy;
 		// one piece: [p0, p1) of the layer (within it) drawn to the picture's [d0, d1), flipped where mirrored
 		auto piece = [&](float p0, float p1, float q0, float q1, float d0, float d1, float e0, float e1, bool fx, bool fy) {
@@ -2863,7 +2920,7 @@ int main(int argc, char **argv)
 		draw_below(all, mid);
 		SDL_RenderTexture(ren, g3_shown && g3.tex ? g3.tex : tex3d, nullptr, &all);
 		const float ky = mid.h / video::H;
-		for (int s = 0; s < 2; s++)
+		for (int s = 0; s < 2 && !fc_drawn; s++)   // (the free camera's: the 2D over the 3D hidden, the HUD and all)
 			for (const SideRun &r : side_cover[s]) {
 				SDL_SetRenderDrawColor(ren, uint8_t(r.c), uint8_t(r.c >> 8), uint8_t(r.c >> 16), 255);
 				const float y0 = mid.y + r.y0 * ky, y1 = mid.y + r.y1 * ky;
@@ -2874,9 +2931,9 @@ int main(int argc, char **argv)
 		// (Display > HUD Off: in a fight the 2D over the 3D isn't drawn, the energy bars, the timer, the names, the
 		// rounds won, the round calls' text, and the flags beside the names; the 3D and the backdrop under it are, and
 		// the game runs as ever: only this picture leaves it out)
-		const bool hud = cfg.hud || !game.view.fight_screen;
+		const bool hud = (cfg.hud || !game.view.fight_screen) && !fc_drawn;
 		if (hud) SDL_RenderTexture(ren, tex_above, nullptr, &mid);
-		draw_dural_wide(all, mid);
+		if (!fc_drawn) draw_dural_wide(all, mid);
 		if (hud) draw_hud_flags(mid);
 		if (crt) {
 			SDL_SetRenderTarget(ren, nullptr);
@@ -2973,6 +3030,9 @@ int main(int argc, char **argv)
 		fprintf(stderr, "no menu: its files (assets/ui) weren't found\n");
 	menu.set_footer(std::string("Virtua Fighter 3 Recomp ") + VF3_VERSION + (*VF3_DATE ? std::string(" \u00b7 ") + VF3_DATE : std::string()));
 	bool running = true, paused = false;
+	// P pressed with a frame's first half run (smooth motion: half, below): the pause taken once that frame is done, so a
+	// paused game is always between two frames (the free camera builds the frame on show again from the board then)
+	bool pause_pending = false;
 	bool restart = false;   // (Game > Version: started again as it quits, the other program)
 	// Game > Add Team Battle's file picker (it answers on its own thread: what it wrote is read once done is set)
 	struct zip_pick { std::atomic<bool> done{ false }; bool failed = false; std::vector<std::string> files; };
@@ -3164,7 +3224,7 @@ int main(int argc, char **argv)
 		if (nvram_away) { fprintf(stderr, "(no restart: an online match's board)\n"); return; }
 		half = false;
 		menu.close();   // (back to the game, as VF1's and VF2's)
-		paused = false;
+		paused = pause_pending = false;
 		SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
 		SDL_RenderClear(ren);
 		SDL_RenderPresent(ren);
@@ -3174,6 +3234,11 @@ int main(int argc, char **argv)
 		test_pending = in_test = false;
 		fprintf(stderr, "the game restarted\n");
 		clock_reset = true;
+	};
+	auto toggle_pause = [&] {
+		if (paused) paused = false;
+		else if (half) pause_pending = !pause_pending;
+		else paused = true;
 	};
 	auto on_off = [](bool b) { return std::string(b ? tr::ON : tr::OFF); };
 	auto wrap = [](int v, int n) { return (v % n + n) % n; };
@@ -3188,6 +3253,30 @@ int main(int argc, char **argv)
 		fprintf(stderr, "Game > Language: %s (the menus in %s)\n", cfg.language.c_str(), tr::code(tr::current()));
 		menu.set_language();
 		if (menus_relabelled) menus_relabelled();
+	};
+	// The free camera on or off (free_cam.h): never in a match of this player's own (watching one, yes), said once;
+	// on, it starts at the game's camera, the 2D over the 3D hidden and the players' inputs held back from the game
+	int fc_menu = -1;          // (Display > Free camera's choice, taken when the menu closes; -1: none)
+	bool fc_grabbed = false;   // (the pointer captured for it)
+	float fc_mouse[2] = {}, fc_wheel = 0;   // (the mouse's moves and the wheel's notches since the last pass)
+	auto own_match = [&] { return online.playing() && !online.watching(); };
+	auto set_freecam = [&](bool on, bool from_pad) {
+		if (on == fc.on) return;
+		if (on && own_match()) { menu.toast(tr::FREECAM_NOT_ONLINE); return; }
+		fc.on = on;
+		fc.anchored = false;
+		game.builder.cull_off = on;
+		fprintf(stderr, "the free camera: %s\n", on ? (from_pad ? "on (a pad)" : "on") : "off");
+		if (on) {
+			menu.toast(from_pad ? tr::FREECAM_ON_PAD : tr::FREECAM_ON_KEYS);
+			// (paused: the frame on show built again without the game's camera's culling, so all of the stage is there
+			// to see; not while a frame's first half has run, the board then part way into the next)
+			if (paused && !half && !online.playing()) {
+				if (game.emu_thread.joinable()) game.job_wait();
+				game.rebuild_view();
+				fprintf(stderr, "the free camera: the paused frame built again, nothing culled\n");
+			} else if (paused) fprintf(stderr, "the free camera: paused part way into a frame: the frame on show as culled for the game's camera\n");
+		}
 	};
 	auto display_page = [&] {
 		menu_page p{ tr::P_DISPLAY, "", {} };
@@ -3276,6 +3365,9 @@ int main(int argc, char **argv)
 		p.items.push_back({ tr::D_HUD, tr::D_HUD_HELP,
 			[&] { return on_off(cfg.hud); },
 			[&](int) { cfg.hud = !cfg.hud; cfg_dirty = true; } });
+		p.items.push_back({ tr::D_FREECAM, tr::D_FREECAM_HELP,
+			[&] { return own_match() ? std::string(tr::D_FREECAM_NOT_NOW) : on_off(fc_menu >= 0 ? fc_menu == 1 : fc.on); },
+			[&](int) { if (!own_match()) fc_menu = (fc_menu >= 0 ? fc_menu == 1 : fc.on) ? 0 : 1; } });
 		p.items.push_back({ tr::D_VSYNC, tr::D_VSYNC_HELP,
 			[&] { return on_off(cfg.vsync); },
 			[&](int) {
@@ -3526,7 +3618,7 @@ int main(int argc, char **argv)
 					reset_game();
 				} });
 		p.items.push_back({ tr::A_SERVICE, tr::A_SERVICE_HELP,
-			{}, {}, [&] { menu.close(); paused = false; test_pending = true; } });
+			{}, {}, [&] { menu.close(); paused = pause_pending = false; test_pending = true; } });
 		p.items.push_back(back_item());
 		return p;
 	};
@@ -3589,7 +3681,7 @@ int main(int argc, char **argv)
 						[&, p, slot, a](const SDL_Event &e) {
 							if (e.type != SDL_EVENT_KEY_DOWN) return false;
 							const SDL_Scancode k = e.key.scancode == SDL_SCANCODE_BACKSPACE || e.key.scancode == SDL_SCANCODE_DELETE ? SDL_SCANCODE_UNKNOWN : e.key.scancode;
-							static const SDL_Scancode RESERVED[] = { SDL_SCANCODE_P, SDL_SCANCODE_TAB, SDL_SCANCODE_F3,
+							static const SDL_Scancode RESERVED[] = { SDL_SCANCODE_P, SDL_SCANCODE_TAB, SDL_SCANCODE_F3, SDL_SCANCODE_F4,
 								SDL_SCANCODE_F5, SDL_SCANCODE_F9, SDL_SCANCODE_F6, SDL_SCANCODE_F11, SDL_SCANCODE_F12 };
 							for (SDL_Scancode r : RESERVED) if (k == r) return false;
 							for (const auto &sk : SYS_KEYS) if (k == sk.key) return false;
@@ -4158,7 +4250,7 @@ int main(int argc, char **argv)
 			nvram_away = true;
 		}
 		half = false;
-		paused = false;
+		paused = pause_pending = false;
 		game.reset_host();
 		game.tiles_on = false;   // (the match's boot runs unseen)
 		test_frames = service_frames = test_mode_frames = 0;
@@ -4557,6 +4649,8 @@ int main(int argc, char **argv)
 				if (!hidden && SDL_GetKeyboardFocus() != win) SDL_RaiseWindow(win);   // (the move to a new Space can lose it)
 			}
 			if (menu.handle_event(e)) continue;
+			if (fc.on && e.type == SDL_EVENT_MOUSE_MOTION && fc_grabbed) { fc_mouse[0] += e.motion.xrel; fc_mouse[1] += e.motion.yrel; }
+			if (fc.on && e.type == SDL_EVENT_MOUSE_WHEEL) fc_wheel += e.wheel.y;
 			// Fullscreen also with F and Alt+Enter, as VF1's and VF2's (after the menu's own events: typing in its
 			// fields never does it; F not while a player has it as a control, nor with Ctrl, Alt or the command key)
 			auto fullscreen_key = [&](const SDL_KeyboardEvent &k) {
@@ -4572,8 +4666,10 @@ int main(int argc, char **argv)
 			if (e.type == SDL_EVENT_KEY_DOWN && !e.key.repeat) {
 				switch (e.key.scancode) {
 				case SDL_SCANCODE_ESCAPE: open_menu(); break;
-				case SDL_SCANCODE_P: if (!online.playing() && !nvram_away) paused = !paused; break;   // (a match can't pause)
+				case SDL_SCANCODE_P: if (!online.playing() && !nvram_away) toggle_pause(); break;   // (a match can't pause)
 				case SDL_SCANCODE_F3: if (!online.playing() && !nvram_away) reset_game(); break;
+				case SDL_SCANCODE_F4: set_freecam(!fc.on, false); break;
+				case SDL_SCANCODE_R: if (fc.on) fc.anchored = false; break;   // (the free camera back to the game's)
 				case SDL_SCANCODE_F9:   // the timings in the title (and the log) every 2 s
 					cfg.timings = !cfg.timings; cfg_dirty = true; title_now.clear();
 					t9 = {}; t9.t0 = SDL_GetTicksNS();
@@ -4606,6 +4702,7 @@ int main(int argc, char **argv)
 		if ((menu_was_open && !menu.is_open()) || std::exchange(menu_closed_elsewhere, false)) {
 			// (not a match just left from the menu: Leave closes it before end_match has shown MATCH OVER, which it then didn't)
 			if (online.phase() == Online::Phase::off && !match_on) { online.set_last_match({}); online.forget_failure(); }   // (MATCH OVER, COULDN'T CONNECT: just after, not for ever)
+			if (fc_menu >= 0) { set_freecam(fc_menu == 1, false); fc_menu = -1; }   // (Display > Free camera)
 			if (cfg_dirty && quit_after < 0 && cfg.save(settings_path)) cfg_dirty = false;
 			if (!arcade_before.empty()) {
 				const bool changed = arcade_before != arcade_bytes();
@@ -4624,6 +4721,77 @@ int main(int argc, char **argv)
 		g_where = "online";
 		online_pass();
 		g_where = "the frames";
+		// The free camera: off once a match of this player's own starts; on and off with a pad's View + R3; moved by
+		// the real clock, the game running or not (keys, the mouse, any pad's sticks)
+		{
+			static uint64_t fc_t = 0;
+			const uint64_t now = SDL_GetTicksNS();
+			const float dt = fc_t ? float(std::min(0.1, double(now - fc_t) / 1e9)) : 0.0f;
+			fc_t = now;
+			if (fc.on && own_match()) set_freecam(false, false);
+			static bool combo_was[2], lb_was[2], rb_was[2], y_was[2];
+			for (int p = 0; p < 2; p++) {
+				const bool c = pads[p] && SDL_GetGamepadButton(pads[p], SDL_GAMEPAD_BUTTON_BACK) && SDL_GetGamepadButton(pads[p], SDL_GAMEPAD_BUTTON_RIGHT_STICK);
+				if (c && !combo_was[p] && !menu.is_open()) set_freecam(!fc.on, true);
+				combo_was[p] = c;
+			}
+			// (the pointer captured while it's on, the menu closed and the window in front)
+			const bool grab = fc.on && !menu.is_open() && !hidden && (SDL_GetWindowFlags(win) & SDL_WINDOW_INPUT_FOCUS);
+			if (grab != fc_grabbed) { SDL_SetWindowRelativeMouseMode(win, grab); fc_grabbed = grab; }
+			if (fc.on && !menu.is_open()) {
+				freecam::Step st;
+				const bool *ks = SDL_GetKeyboardState(nullptr);
+				st.move[2] += float(ks[SDL_SCANCODE_W]) - float(ks[SDL_SCANCODE_S]);
+				st.move[0] += float(ks[SDL_SCANCODE_D]) - float(ks[SDL_SCANCODE_A]);
+				st.move[1] += float(ks[SDL_SCANCODE_E] || ks[SDL_SCANCODE_SPACE]) - float(ks[SDL_SCANCODE_Q] || ks[SDL_SCANCODE_LCTRL] || ks[SDL_SCANCODE_RCTRL]);
+				if (ks[SDL_SCANCODE_LSHIFT] || ks[SDL_SCANCODE_RSHIFT]) st.speed *= 4;
+				if (ks[SDL_SCANCODE_LALT] || ks[SDL_SCANCODE_RALT]) st.speed *= 0.25f;
+				constexpr float TURN = 120;   // (degrees a second: the arrows, a stick all the way)
+				st.yaw += TURN * dt * (float(ks[SDL_SCANCODE_RIGHT]) - float(ks[SDL_SCANCODE_LEFT]));
+				st.pitch += TURN * dt * (float(ks[SDL_SCANCODE_UP]) - float(ks[SDL_SCANCODE_DOWN]));
+				constexpr float SENS = 0.12f;   // (degrees a pixel)
+				st.yaw += SENS * fc_mouse[0];
+				st.pitch -= SENS * fc_mouse[1];
+				bool boost = false;
+				for (int p = 0; p < 2; p++) {
+					SDL_Gamepad *gp = pads[p];
+					if (!gp) continue;
+					// (a stick's deadzone 0.15 round the middle, the rest squared)
+					auto stick = [&](SDL_GamepadAxis ax, SDL_GamepadAxis ay, float &x, float &y) {
+						x = SDL_GetGamepadAxis(gp, ax) / 32767.0f;
+						y = SDL_GetGamepadAxis(gp, ay) / 32767.0f;
+						const float m = std::min(1.0f, std::sqrt(x * x + y * y));
+						if (m < 0.15f) { x = y = 0; return; }
+						const float k = (m - 0.15f) / 0.85f;
+						x = x / m * k * k;
+						y = y / m * k * k;
+					};
+					auto trigger = [&](SDL_GamepadAxis a) { const float v = SDL_GetGamepadAxis(gp, a) / 32767.0f; return v < 0.15f ? 0.0f : std::pow((v - 0.15f) / 0.85f, 2.0f); };
+					float lx, ly, rx, ry;
+					stick(SDL_GAMEPAD_AXIS_LEFTX, SDL_GAMEPAD_AXIS_LEFTY, lx, ly);
+					stick(SDL_GAMEPAD_AXIS_RIGHTX, SDL_GAMEPAD_AXIS_RIGHTY, rx, ry);
+					st.move[0] += lx;
+					st.move[2] -= ly;
+					st.move[1] += trigger(SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) - trigger(SDL_GAMEPAD_AXIS_LEFT_TRIGGER);
+					st.yaw += TURN * dt * rx;
+					st.pitch -= TURN * dt * ry;
+					boost |= SDL_GetGamepadButton(gp, SDL_GAMEPAD_BUTTON_LEFT_STICK);
+					const bool lb = SDL_GetGamepadButton(gp, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER), rb = SDL_GetGamepadButton(gp, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER);
+					const bool back = SDL_GetGamepadButton(gp, SDL_GAMEPAD_BUTTON_BACK);   // (View + LB, RB: the scale's and shape's)
+					const bool y = SDL_GetGamepadButton(gp, SDL_GAMEPAD_BUTTON_NORTH);
+					if (lb && !lb_was[p] && !back) fc.faster(-1);
+					if (rb && !rb_was[p] && !back) fc.faster(1);
+					if (y && !y_was[p]) fc.anchored = false;
+					lb_was[p] = lb; rb_was[p] = rb; y_was[p] = y;
+				}
+				if (boost) st.speed *= 4;
+				for (float &m : st.move) m = std::clamp(m, -1.0f, 1.0f);
+				fc.step(st, dt);
+				if (fc_wheel != 0) fc.faster(int(std::lround(fc_wheel)));
+			}
+			fc_mouse[0] = fc_mouse[1] = 0;
+			fc_wheel = 0;
+		}
 		const bool stopped = !online.playing() && (paused || menu.is_open() || online.starting());
 		const bool ff = !stopped && !online.playing() && SDL_GetKeyboardState(nullptr)[SDL_SCANCODE_TAB];
 		int due = 0;
@@ -4724,6 +4892,7 @@ int main(int argc, char **argv)
 				// the inputs the game reads during the next frame: the script's, then the player's
 				m3::Controls live;
 				hk = read_inputs(live, pads, pstate, cfg.ctl);
+				if (fc.on) live = m3::Controls();   // (the free camera: the keys and pads fly it, none reach the game)
 				act = InputScript::Actions();
 				if (scripted) act = script.step(script_ctl, game_frame);
 				m3::Controls &c = board.controls;
@@ -4764,6 +4933,7 @@ int main(int argc, char **argv)
 				if (test_pending && game_frame >= BOOT_FRAMES) { test_pending = false; test_frames = 10; }
 				if (test_frames > 0) { c.test[0] = true; test_frames--; }
 				game.builder.widen = std::max(1.0f, float(picture_aspect()) * 0.75f) * 1.05f;   // (a little more: smooth motion)
+				game.builder.cull_off = fc.on;
 		};
 		if (online.playing()) {
 			// A match: each frame through the session, with this player's input (whichever player's controls they
@@ -4777,7 +4947,7 @@ int main(int argc, char **argv)
 					const uint16_t sb = vf3net::pack(script_ctl, 0);
 					vf3net::unpack(uint16_t(vf3net::pack(live, 0) | sb), 0, live);
 				}
-				uint16_t bits = menu.is_open() ? 0 : uint16_t(vf3net::pack(live, 0) | vf3net::pack(live, 1) | step_carry);
+				uint16_t bits = menu.is_open() || fc.on ? 0 : uint16_t(vf3net::pack(live, 0) | vf3net::pack(live, 1) | step_carry);
 				if (!online.watching()) {   // (Cheats > Dural's stage: this player's own input word, from the board as both sides have it; inputs only)
 					stage_pick.trigger = cfg.dural_stage;
 					dural_stage::Picker::Said said;
@@ -4786,6 +4956,7 @@ int main(int argc, char **argv)
 					stage_pick_say(said, wait_s);
 				}
 				game.builder.widen = std::max(1.0f, float(picture_aspect()) * 0.75f) * 1.05f;
+				game.builder.cull_off = fc.on;
 				const uint64_t te = SDL_GetTicksNS();
 				online.poll(double(te) / 1e6);
 				if (hk == hotkey::menu) open_menu();
@@ -4825,7 +4996,7 @@ int main(int argc, char **argv)
 			// (with pictures over a frame's time (pass_burst over 2), the frames due run here but the last, as online's:
 			// handed on from the second, the rest of the pass's were dropped, and a slow machine offline kept to a frame
 			// or two a picture whatever the burst allowed)
-			if (emu_threaded && i > 0 && !half && !ff && cfg.smooth && (pass_burst <= 2 || i + 1 == due)) {
+			if (emu_threaded && i > 0 && !half && !pause_pending && !ff && cfg.smooth && (pass_burst <= 2 || i + 1 == due)) {
 				frames_run -= uint64_t(due - i);
 				frame_clock = std::min(frame_clock, double(frames_run) + 1.0);
 				const uint64_t th = SDL_GetTicksNS();
@@ -4896,12 +5067,12 @@ int main(int argc, char **argv)
 			case hotkey::none: break;
 			}
 			if (left_test && g_pc_mode) { reset_game(); break; }
-			if (menu.is_open()) break;
+			if (menu.is_open() || pause_pending) break;
 		}
 		// The next frame's first half, when it's due within half a frame: smooth motion's pictures then each hold half
 		// a frame's work at most (the pictures go between the last two frames finished: this one isn't yet)
 		static const bool no_halves = getenv("VF3_NO_HALVES") != nullptr;   // (tests: whole frames, as before)
-		if (!half && !no_halves && rec.dir.empty() && running && !stopped && !ff && cfg.smooth && (due == 0 || emu_threaded) && !menu.is_open() && first_shown &&
+		if (!half && !pause_pending && !no_halves && rec.dir.empty() && running && !stopped && !ff && cfg.smooth && (due == 0 || emu_threaded) && !menu.is_open() && first_shown &&
 			online.phase() == Online::Phase::off && !match_on && !nvram_away &&   // (online: whole frames, each through the session; none as one ends)
 			frame_clock - double(frames_run) >= 0.5) {
 			const uint64_t th = SDL_GetTicksNS();
@@ -4912,6 +5083,7 @@ int main(int argc, char **argv)
 			pass_kind = std::max(pass_kind, 1);
 			half_ns = SDL_GetTicksNS() - th;
 		}
+		if (pause_pending && !half) { pause_pending = false; paused = true; }   // (P: the frame it came in done)
 		// The picture: smooth motion's, between the last two frames, at every pass; else the newest frame's
 		// (in a match, each frame as it is: a picture between two frames the rollback may yet change showed the
 		// change as a ghost; and the in-between's time is better spent on the frames)
@@ -4945,7 +5117,7 @@ int main(int argc, char **argv)
 		// and then)
 		static const bool no_pictures = getenv("VF3_TEST_NO_PICTURES") != nullptr;
 		const bool draw = no_pictures ? first_shown ? (pass % 120 == 0) : true
-		                              : rec.on || !first_shown ||
+		                              : rec.on || !first_shown || (fc.on && (every_refresh || smooth_budget >= 1)) ||   // (the free camera: moving, paused too)
 		                                (smooth && !stopped && !unseen ? smooth_budget >= 1 || every_refresh   // (a new frame's in the in-between pictures: the limit holds)
 		                                                               : new_frame && (!capped_low || smooth_budget >= 1 || stopped));
 		if (draw) {
@@ -5048,6 +5220,90 @@ int main(int argc, char **argv)
 			if (*it <= game_frame) { read_window("build/host_window_" + std::to_string(*it - 3) + ".png"); it = window_shots.erase(it); }
 			else ++it;
 		for (uint64_t s : shot_at) if (s == pass) read_window("build/host_window_at_" + std::to_string(pass) + ".png");
+		if (static const char *ft = getenv("VF3_TEST_FREECAM"); ft) {   // (tests: the free camera at these frames)
+			struct Ev { std::string what, arg; uint64_t at; bool done; };
+			static std::vector<Ev> evs = [&] {
+				std::vector<Ev> v;
+				const std::string all = ft;
+				size_t i = 0;
+				while (i < all.size()) {
+					// (what@F or what@F=arg, the arg itself may hold commas: move@F=x,y,z)
+					const size_t at = all.find('@', i);
+					if (at == std::string::npos) break;
+					Ev e{ all.substr(i, at - i), "", strtoull(all.c_str() + at + 1, nullptr, 10), false };
+					size_t j = at + 1;
+					while (j < all.size() && isdigit((unsigned char)all[j])) j++;
+					if (j < all.size() && all[j] == '=') {
+						size_t k = j + 1;
+						for (;;) {   // (up to the next comma followed by a name and an @)
+							const size_t c = all.find(',', k);
+							if (c == std::string::npos) { k = all.size(); break; }
+							const size_t a = all.find('@', c);
+							if (a != std::string::npos && all.find_first_of("=,", c + 1) > a) { k = c; break; }
+							k = c + 1;
+						}
+						e.arg = all.substr(j + 1, k - j - 1);
+						j = k;
+					}
+					v.push_back(e);
+					i = j < all.size() ? j + 1 : j;
+				}
+				return v;
+			}();
+			static uint64_t stopped_passes = 0;
+			if (stopped) stopped_passes++;
+			const uint64_t clock = game_frame + stopped_passes;
+			for (Ev &e : evs) {
+				if (e.done || clock < e.at) continue;
+				e.done = true;
+				fprintf(stderr, "(test) the free camera: %s%s%s at %llu (frame %llu)\n", e.what.c_str(), e.arg.empty() ? "" : "=", e.arg.c_str(), (unsigned long long)clock, (unsigned long long)game_frame);
+				// (anchored first if it isn't: the game's camera now)
+				auto anchor = [&] {
+					if (fc.anchored) return;
+					const video::Scene &sc = game.view.cur();
+					const int k = freecam::Cam::main_viewport(sc);
+					fc.anchor(k >= 0 ? sc.viewports[size_t(k)].root : video::Mat4::identity());
+				};
+				// (log: the game's camera and its viewports; for the speed, where the models are in its view)
+				auto info = [&] {
+					const video::Scene &sc = game.view.cur();
+					const int k = freecam::Cam::main_viewport(sc);
+					if (k < 0) { fprintf(stderr, "(test) the free camera: no game camera in this scene\n"); return; }
+					const video::Viewport &vp = sc.viewports[size_t(k)];
+					std::vector<float> d;
+					float lo[3] = { 1e30f, 1e30f, 1e30f }, hi[3] = { -1e30f, -1e30f, -1e30f };
+					for (const video::Model &m : vp.models) {
+						d.push_back(std::sqrt(m.matrix.m[12] * m.matrix.m[12] + m.matrix.m[13] * m.matrix.m[13] + m.matrix.m[14] * m.matrix.m[14]));
+						for (int c = 0; c < 3; c++) { lo[c] = std::min(lo[c], m.matrix.m[12 + c]); hi[c] = std::max(hi[c], m.matrix.m[12 + c]); }
+					}
+					std::sort(d.begin(), d.end());
+					fprintf(stderr, "(test) the free camera: up (%.3f %.3f %.3f), pitch %.1f, %zu viewports, %zu models (distance: 10%% %.0f, median %.0f, 90%% %.0f; x %.0f to %.0f, y %.0f to %.0f, z %.0f to %.0f)\n",
+					        fc.u[0], fc.u[1], fc.u[2], fc.pitch / freecam::DEG, sc.viewports.size(), vp.models.size(),
+					        d.empty() ? 0.0f : d[d.size() / 10], d.empty() ? 0.0f : d[d.size() / 2], d.empty() ? 0.0f : d[d.size() * 9 / 10], lo[0], hi[0], lo[1], hi[1], lo[2], hi[2]);
+					for (size_t v = 0; v < sc.viewports.size(); v++)
+						fprintf(stderr, "(test)   viewport %zu: full %d, root matrix %d, %zu models, priority %d\n", v, int(sc.viewports[v].full_screen), sc.viewports[v].root_matrix, sc.viewports[v].models.size(), sc.viewports[v].priority);
+				};
+				if (e.what == "on") set_freecam(true, false);
+				else if (e.what == "off") set_freecam(false, false);
+				else if (e.what == "pause") toggle_pause();
+				else if (e.what == "reset") fc.anchored = false;
+				else if (e.what == "log") info();
+				else if (e.what == "quit") running = false;
+				else if (e.what == "shot") { if (stopped) draw_picture(1.0, false); compose(); menu.render(false); read_window("build/host_freecam_" + (e.arg.empty() ? std::to_string(e.at) : e.arg) + ".png"); }
+				else if (e.what == "yaw" || e.what == "pitch") {
+					anchor();
+					freecam::Step st;
+					(e.what == "yaw" ? st.yaw : st.pitch) = float(atof(e.arg.c_str()));
+					fc.step(st, 0);
+				}
+				else if (e.what == "move") {
+					anchor();
+					float x = 0, y = 0, z = 0;
+					sscanf(e.arg.c_str(), "%f,%f,%f", &x, &y, &z);
+					fc.move_by(x, y, z);
+				}
+			}
+		}
 		if (static const char *rs = getenv("VF3_TEST_RESIZE"); rs) {   // (tests: the window resized as by hand, "WxH@pass")
 			int rw = 0, rh = 0, rx = 0, ry = 0;
 			unsigned long long at = 0;

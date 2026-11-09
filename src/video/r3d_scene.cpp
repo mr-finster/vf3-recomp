@@ -342,8 +342,8 @@ void SceneBuilder::node_one(uint32_t addr)
 	const float x = cur.m[12], y = cur.m[13], z = cur.m[14];
 	const float cull_r = float16(w7 & 0xFFFF) * attr.scale;
 	const float blend_r = float16(w7 >> 16) * attr.scale;
-	const bool outside = (z * planes.lu - x * planes.lv) > cull_r || (z * planes.tu + y * planes.tw) > cull_r ||
-		(z * planes.ru - x * planes.rv) > cull_r || (z * planes.bu + y * planes.bw) > cull_r;
+	const bool outside = !cull_off && ((z * planes.lu - x * planes.lv) > cull_r || (z * planes.tu + y * planes.tw) > cull_r ||
+		(z * planes.ru - x * planes.rv) > cull_r || (z * planes.bu + y * planes.bw) > cull_r);
 	float lod_scale = attr.no_cull ? std::numeric_limits<float>::max() : blend_r / std::sqrt(x * x + y * y + z * z);
 	if (!(lod_scale >= 0)) lod_scale = 0;   // NaN too
 	const int lod_entry = (w1 >> 12) & 0x7F;
