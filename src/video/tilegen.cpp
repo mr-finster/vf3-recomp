@@ -1404,6 +1404,106 @@ void TileGen::line(const m3::Model3 &board, unsigned y, const uint32_t *line_reg
 	}
 }
 
+// The sky past the screen's top and bottom, for the sky drawn ahead of the game's backdrop (sky_lead.h): moved down
+// as the camera tilts up fast, the picture reaches above the layer's top. The layer's map holds no more than the
+// screen shows (its other rows are stale), but the game's own map of the stage's backdrop has the rest of the sky:
+// the rows the game writes there once the camera gets there (checked in the attract's fights, Revision D and Team
+// Battle: the lines drawn so match what the screen shows a few frames later for 99% of their pixels; the screen's
+// lines mirrored, 13%). A row past the map's top is the game's filler, its first entry, as the game writes it. Made
+// only where the screen's edge line is the backdrop's own (a stage's sky, not the letterbox, a cut's other layer);
+// a tile whose pattern has a see-through texel isn't the backdrop's (a bank the game hasn't loaded: a cut's first
+// frames): the screen's lines mirrored there instead, as past the layer's edge before.
+void TileGen::sky_past(const m3::Model3 &board, int top, int bottom, std::vector<uint32_t> &out)
+{
+	static const bool no_past = getenv("VF3_NO_SKY_PAST") != nullptr;   // (tests: the screen mirrored there, as before)
+	if (no_past || !backdrop.ok || cover2 || backdrop.w <= 0 || out.size() != size_t(WW) * HT) return;
+	const int S = 2;   // (aligned()'s shift)
+	std::vector<uint32_t> line_buf(WW);
+	const uint32_t *vram = reinterpret_cast<const uint32_t *>(board.tile_ram.data());
+	const uint32_t *pal = vram + 0x40000;
+	for (int side = 0; side < 2; side++) {
+		const int ey = side ? H - 1 : 0;   // (the screen's edge line, whose registers are used)
+		const LineRegs &L = drawn_regs[ey];
+		if (!L.drawn || !(L.layer[3] & 0x80000000u) || (L.order >> (8 + 3)) & 1) continue;
+		const bool four = (L.order >> (12 + 3)) & 1;
+		const int sy = int((L.layer[3] >> 16) & 0x1FF), sx = scroll.sx[3][ey] & 511;
+		const Offset off = offset_of(L.offset_b);
+		uint8_t lut[3][32];
+		const int offs[3] = { off.r, off.g, off.b };
+		for (int c = 0; c < 3; c++)
+			for (int i = 0; i < 32; i++) lut[c][i] = uint8_t(std::clamp(i * 255 / 31 + offs[c], 0, 255));
+		auto raw = [&](uint32_t e, int fy, int fx) {
+			if (four) {
+				const uint32_t pat = (((e & 0x3FFF) << 1) | (e >> 15)) * 8;
+				return pal[((e & 0x7FF0) | ((vram[(pat + fy) & 0x3FFFF] >> ((7 - fx) * 4)) & 0xF)) & 0x7FFF];
+			}
+			const uint32_t pat = (e & 0x3FFF) * 16;
+			return pal[((e & 0x7F00) | ((vram[(pat + fy * 2 + (fx >> 2)) & 0x3FFFF] >> ((3 - (fx & 3)) * 8)) & 0xFF)) & 0x7FFF];
+		};
+		auto colour = [&](uint32_t v) {
+			return 0xFF000000u | uint32_t(lut[2][(v >> 10) & 31]) << 16 | uint32_t(lut[1][(v >> 5) & 31]) << 8 | lut[0][v & 31];
+		};
+		// a line's map row (the screen's line ey's row in the layer, as find_backdrop places the map, and on from it)
+		const int r0 = ((ey + sy) >> 3) & 63, f0 = (ey + sy) & 7;
+		auto entry = [&](int line, int x) {
+			const int d = f0 + (line - ey);
+			return backdrop_entry(board, backdrop.x0 + ((x + sx) >> 3), backdrop.y0 + r0 + (d >> 3));
+		};
+		auto line_px = [&](int line, int x) {   // (0 where see-through)
+			const int d = f0 + (line - ey);
+			const uint32_t v = raw(entry(line, x), d & 7, (x + sx) & 7);
+			return (v & 0x8000) ? 0u : colour(v);
+		};
+		// the edge line as the map has it against the screen's: the backdrop's own all across
+		const uint32_t *scr = below.data() + size_t(ey) * W;
+		int same = 0, n = 0;
+		for (int x = 0; x < W; x += 2) { n++; same += scr[x] != 0 && line_px(ey, x) == scr[x]; }
+		if (same * 20 < n * 19) continue;
+		// a tile's pattern solid (no see-through texel): solid_memo's (this frame's, by entry and depth)
+		auto is_solid = [&](uint32_t e) {
+			uint8_t &m = solid_memo[size_t(e & 0xFFFF) << 1 | size_t(four)];
+			if (!m) {
+				m = 1;
+				for (int fy = 0; fy < 8 && m == 1; fy++)
+					for (int fx = 0; fx < 8; fx++) if (raw(e, fy, fx) & 0x8000) { m = 2; break; }
+			}
+			return m == 1;
+		};
+		// the aligned lines a: above, -1 to -top (aligned's -1 and -2 the screen's lines 1 and 0, which aligned_tall
+		// left mirrored, then the drawn lines -1 on); below, H - 2 to H + bottom - 1 (the drawn H on)
+		const int a0 = side ? H - S : -std::clamp(top, 0, EY), a1 = side ? H + std::clamp(bottom, 0, EY) : 0;
+		for (int a = a0; a < a1; a++) {
+			const int line = a + S;
+			uint32_t *dst = line_buf.data() + EXT;
+			if (line >= 0 && line < H)
+				std::copy(below_wide.begin() + std::ptrdiff_t(line) * WW, below_wide.begin() + std::ptrdiff_t(line + 1) * WW, line_buf.begin());
+			else {
+				const int mirror = side ? std::max(2 * H - 1 - line, 0) : std::min(-1 - line, H - 1);   // (the screen's line mirrored)
+				const uint32_t *mir = below_wide.data() + size_t(mirror) * WW + EXT;
+				const int fy = (f0 + (line - ey)) & 7;
+				for (int x = -EXT; x < W + EXT;) {
+					const uint32_t e = entry(line, x);
+					const int fx0 = (x + sx) & 7, m = std::min(8 - fx0, W + EXT - x);
+					if (!is_solid(e)) std::copy(mir + x, mir + x + m, dst + x);
+					else if (four) {
+						const uint32_t w = vram[((((e & 0x3FFF) << 1) | (e >> 15)) * 8 + fy) & 0x3FFFF], base = e & 0x7FF0;
+						for (int j = 0; j < m; j++) dst[x + j] = colour(pal[(base | ((w >> ((7 - (fx0 + j)) * 4)) & 0xF)) & 0x7FFF]);
+					} else {
+						const uint32_t pat = (e & 0x3FFF) * 16, base = e & 0x7F00;
+						const uint32_t w2[2] = { vram[(pat + fy * 2) & 0x3FFFF], vram[(pat + fy * 2 + 1) & 0x3FFFF] };
+						for (int j = 0; j < m; j++) { const int fx = fx0 + j; dst[x + j] = colour(pal[(base | ((w2[fx >> 2] >> ((3 - (fx & 3)) * 8)) & 0xFF)) & 0x7FFF]); }
+					}
+					x += m;
+				}
+			}
+			// (as aligned(): S on, its last S columns the one before's)
+			uint32_t *o = out.data() + size_t(a + EY) * WW;
+			std::copy(line_buf.begin() + S, line_buf.end(), o);
+			for (int x = WW - S; x < WW; x++) o[x] = o[WW - S - 1];
+		}
+	}
+}
+
 void TileGen::aligned(std::vector<uint32_t> &b, std::vector<uint32_t> &a) const
 {
 	const int S = 2;
@@ -1435,6 +1535,26 @@ void TileGen::aligned_wide(std::vector<uint32_t> &b) const
 		for (int x = WW - S; x < WW; x++) b[size_t(y) * WW + x] = b[size_t(y) * WW + WW - S - 1];
 	}
 	for (int y = H - S; y < H; y++) memcpy(&b[size_t(y) * WW], &b[size_t(H - S - 1) * WW], size_t(WW) * 4);
+}
+
+void TileGen::aligned_tall(std::vector<uint32_t> &b) const
+{
+	const int S = 2;
+	b.assign(size_t(WW) * HT, 0);
+	auto put = [&](int a, const uint32_t *src) {   // (aligned line a, from the drawn line src: S on)
+		uint32_t *o = &b[size_t(a + EY) * WW];
+		memcpy(o, src + S, size_t(WW - S) * 4);
+		for (int x = WW - S; x < WW; x++) o[x] = o[WW - S - 1];
+	};
+	auto copy = [&](int a, int from) { memcpy(&b[size_t(a + EY) * WW], &b[size_t(from + EY) * WW], size_t(WW) * 4); };
+	for (int a = -EY; a < H + EY; a++) {
+		const int d = a + S;   // (the drawn line)
+		if (d >= 0 && d < H) put(a, &below_wide[size_t(d) * WW]);
+	}
+	// the last S lines as aligned()'s, and the screen mirrored at its edges
+	for (int a = H - S; a < H; a++) copy(a, H - S - 1);
+	for (int a = -EY; a < 0; a++) copy(a, -1 - a);
+	for (int a = H; a < H + EY; a++) copy(a, 2 * H - 1 - a);
 }
 
 void TileGen::compose(const uint32_t *pic3d, uint32_t *out) const

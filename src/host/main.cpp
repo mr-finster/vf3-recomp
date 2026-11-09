@@ -92,6 +92,8 @@
 //   VF3_GPU_CHECK_DIR=d  the GPU's start-up check's pictures (gpu.png, cpu.png) into d
 //   VF3_WIDE_SKY=0       the stages' 2D sky kept to the middle 4:3 (tests)
 //   VF3_SKY_LAG=1        the stages' sky as the game scrolls it (3 frames behind the camera: sky_lead.h)
+//   VF3_NO_SKY_PAST=1    the stages' sky past the screen's top and bottom the screen mirrored, not the game's map
+//                        of the backdrop (TileGen::sky_past; tests)
 //   VF3_RECORD=dir       a recording (a trailer's footage): from game frame VF3_RECORD_FROM (default 0; before it as
 //                        fast as it goes) to VF3_RECORD_TO, 60 pictures a second by the game's clock, not the
 //                        real one (smooth motion's in-betweens), the window's whole picture to dir/video.mp4 (by
@@ -1143,7 +1145,7 @@ struct Game
 	int newest = 0;
 	bool have_prev = false;
 	std::vector<uint32_t> below = std::vector<uint32_t>(video::W * video::H), above = std::vector<uint32_t>(video::W * video::H);
-	std::vector<uint32_t> below_wide = std::vector<uint32_t>(video::WW * video::H);   // (widescreen's: tilegen.h)
+	std::vector<uint32_t> below_wide = std::vector<uint32_t>(video::WW * video::HT);   // (widescreen's, and the sky past the screen's top and bottom: tilegen.h)
 	bool full_3d = false;
 	bool no_stage_screen = false;   // (the newest frame's: the character select's or the ranking's, never a stage)
 	bool fight_screen = false;      // (the newest frame's: a fight, mode 7: Display > HUD Off hides the 2D over it)
@@ -1443,7 +1445,7 @@ struct Game
 				for (auto &a : hud_flag_at) a[0] = a[1] = -1;
 			dural_wide.on = false;
 			if (dural_players.load(std::memory_order_relaxed)) video::dural_cell(board, tiles, above, dural_pic, &dural_wide);   // (her spot's picture)
-			tiles.aligned_wide(below_wide);
+			tiles.aligned_tall(below_wide);
 		});
 		t = SDL_GetTicksNS();
 		builder.build(board, scene[newest]);
@@ -1459,6 +1461,14 @@ struct Game
 		static const bool sky_lag = getenv("VF3_SKY_LAG") != nullptr;   // (tests: the game's own backdrop, 3 frames behind)
 		if (have_prev && !sky_lag) sky.frame(prev(), cur(), bg_moved, bg_dx, bg_dy);
 		else sky.reset();
+		{
+			// the stage's sky past the screen's top and bottom, as far as this frame's pictures reach (draw_below's
+			// bg_shift: the sky's lead, and smooth motion's in-between back towards the frame before: the most at
+			// either end), and a line or two for the smooth backgrounds' filter
+			const float s0 = (bg_moved ? bg_dy : 0.0f) - sky.at_y(0), s1 = -sky.at_y(1);
+			auto lines = [](float v) { return v > 0.01f ? std::min(video::EY, int(std::ceil(v)) + 2) : 0; };
+			tiles.sky_past(board, lines(std::max(s0, s1)), lines(-std::min(s0, s1)), below_wide);
+		}
 		part_ms[4] += ms_since(t);
 		bool full = false;   // (the 3D drawn full width: a stage; a close-up's or a title's 3D isn't)
 		for (auto &v : scene[newest].viewports) full |= v.full_screen && !v.models.empty();
@@ -1484,7 +1494,7 @@ struct Game
 		bool have_prev = false, full_3d = false, bg_moved = false, no_stage_screen = false, fight_screen = false;
 		float bg_dx = 0, bg_dy = 0;
 		std::vector<uint32_t> below = std::vector<uint32_t>(video::W * video::H), above = std::vector<uint32_t>(video::W * video::H);
-		std::vector<uint32_t> below_wide = std::vector<uint32_t>(video::WW * video::H);
+		std::vector<uint32_t> below_wide = std::vector<uint32_t>(video::WW * video::HT);
 		int hud_flag_at[2][2] = { { -1, -1 }, { -1, -1 } };
 		video::DuralWide dural_wide;
 		video::SkyLead sky;
@@ -2310,12 +2320,12 @@ int main(int argc, char **argv)
 	struct { uint64_t t0 = 0; int pictures = 0, frames = 0; double draw_ms = 0, emu_ms = 0, upload_ms = 0, gpu_ms = 0, stopped_s = 0; int slow[4] = {}; double slow_work_ms = 0, prep_ms = 0, g3_wall_ms = 0, interp_ms = 0; } pace;   // (slow: passes over 1.5 refreshes, by what they ran: nothing but a picture, a frame's first half, its second, a whole frame)
 	uint64_t between_n = 0, cut_n = 0;   // smooth motion's pictures between frames, and those shown as the frame (a cut)
 	int tex_w = 0, tex_h = 0;
-	auto make_2d = [&](SDL_Texture *&t, int w) {
-		t = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING, w, video::H);
+	auto make_2d = [&](SDL_Texture *&t, int w, int h = video::H) {
+		t = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING, w, h);
 		SDL_SetTextureBlendMode(t, SDL_BLENDMODE_BLEND);
 		SDL_SetTextureScaleMode(t, SDL_SCALEMODE_NEAREST);
 	};
-	make_2d(tex_below, video::WW);
+	make_2d(tex_below, video::WW, video::HT);
 	SDL_SetTextureScaleMode(tex_below, cfg.smooth_bg ? SDL_SCALEMODE_LINEAR : SDL_SCALEMODE_NEAREST);
 	video::Raster::arcade_lod = !cfg.sharp_textures;
 	make_2d(tex_above, video::W);
@@ -2327,9 +2337,9 @@ int main(int argc, char **argv)
 		if (d3d11_map(t, &p, &pitch)) { write(static_cast<uint8_t *>(p), size_t(pitch)); d3d11_unmap(t); }
 		else if (SDL_LockTexture(t, nullptr, &p, &pitch)) { write(static_cast<uint8_t *>(p), size_t(pitch)); SDL_UnlockTexture(t); }
 	};
-	auto send_2d = [&](SDL_Texture *t, const std::vector<uint32_t> &src, int w) {
+	auto send_2d = [&](SDL_Texture *t, const std::vector<uint32_t> &src, int w, int h = video::H) {
 		send(t, [&](uint8_t *p, size_t pitch) {
-			for (int y = 0; y < video::H; y++) memcpy(p + size_t(y) * pitch, src.data() + size_t(y) * w, size_t(w) * 4);
+			for (int y = 0; y < h; y++) memcpy(p + size_t(y) * pitch, src.data() + size_t(y) * w, size_t(w) * 4);
 		});
 	};
 	// the 3D's size: 384 lines a scale, as wide as the picture's shape
@@ -2595,17 +2605,23 @@ int main(int argc, char **argv)
 			// layer: its middle is the screen moved 2 pixels as the 3D is, so the 4:3's last 2 columns were the right
 			// side's first, what the sides make of a screen that isn't a stage (Team Battle's select: a black notch
 			// and a pink bar at the sea panel's right edge)
-			if (stage) send_2d(tex_below, game.view.below_wide, video::WW);
+			if (stage) send_2d(tex_below, game.view.below_wide, video::WW, video::HT);
 			else {
 				static std::vector<uint32_t> narrow;
-				narrow.assign(size_t(video::WW) * video::H, 0);
+				narrow.assign(size_t(video::WW) * video::HT, 0);
 				for (int y = 0; y < video::H; y++) {
 					const uint32_t *src = &game.view.below[size_t(y) * video::W];
-					uint32_t *dst = &narrow[size_t(y) * video::WW];
+					uint32_t *dst = &narrow[size_t(y + video::EY) * video::WW];
 					std::copy(src, src + video::W, dst + video::EXT);
 					for (int x = 1; x <= 8; x++) { dst[video::EXT - x] = src[0]; dst[video::EXT + video::W - 1 + x] = src[video::W - 1]; }
 				}
-				send_2d(tex_below, narrow, video::WW);
+				// (above and below it, the screen mirrored at its edges)
+				for (int i = 0; i < video::EY; i++) {
+					auto row = [&](int y) { return narrow.begin() + std::ptrdiff_t(y + video::EY) * video::WW; };
+					std::copy(row(i), row(i) + video::WW, row(-1 - i));
+					std::copy(row(video::H - 1 - i), row(video::H - 1 - i) + video::WW, row(video::H + i));
+				}
+				send_2d(tex_below, narrow, video::WW, video::HT);
 			}
 			send_2d(tex_above, game.view.above, video::W);
 			pace.upload_ms += double(SDL_GetTicksNS() - tu) / 1e6;
@@ -2631,15 +2647,17 @@ int main(int argc, char **argv)
 		const float k = mid.w / video::W;
 		// the picture's sides, in the layer's pixels from the 4:3 screen's left
 		const float l = sky_wide ? (all.x - mid.x) / k : 0.0f, r = sky_wide ? (all.x + all.w - mid.x) / k : float(video::W);
-		// The layer's place (u, v: in its pixels) for each of the picture's, 1:1: moved by bg_shift (the sky's lead on
-		// the game's backdrop, sky_lead.h, smooth motion's in-between), it reaches past the layer's edges: past the top
-		// (or bottom) when the camera tilts up fast (a round's start, a throw, a jump), past the sides on the widest
-		// screens. The arcade never shows those parts (its backdrop lags the camera, its screen is 4:3): they are the
-		// layer mirrored at its edge, carrying the sky on smoothly. (Issue #35: they were its edge row and column
-		// stretched, vertical streaks across the top of the sky and smears at the sides.)
+		// The layer's place (u, v: in its pixels; v from the EY lines above the screen's) for each of the picture's,
+		// 1:1: moved by bg_shift (the sky's lead on the game's backdrop, sky_lead.h, smooth motion's in-between), it
+		// reaches past the screen's top (or bottom) when the camera tilts up fast (a round's start, a throw, a jump),
+		// past the sides on the widest screens. Above and below, on a stage, the layer has the sky the game would draw
+		// there, from its own map of the backdrop (TileGen::sky_past: issue #43, the mirrored sky seen as a
+		// distortion at the top), else the screen mirrored at its edge. Further out than the layer reaches, the layer
+		// mirrored at its edge, carrying the sky on smoothly. (Issue #35: they were its edge row and column stretched,
+		// vertical streaks across the top of the sky and smears at the sides.)
 		const float sx = std::clamp(bg_shift_x, -float(video::WW) + 1, float(video::WW) - 1);
 		const float sy = std::clamp(bg_shift_y, -float(video::H) + 1, float(video::H) - 1);
-		const float ua = video::EXT + l - sx, ub = video::EXT + r - sx, va = -sy, vb = float(video::H) - sy;
+		const float ua = video::EXT + l - sx, ub = video::EXT + r - sx, va = video::EY - sy, vb = float(video::EY + video::H) - sy;
 		// one piece: [p0, p1) of the layer (within it) drawn to the picture's [d0, d1), flipped where mirrored
 		auto piece = [&](float p0, float p1, float q0, float q1, float d0, float d1, float e0, float e1, bool fx, bool fy) {
 			if (p1 - p0 < 0.01f || q1 - q0 < 0.01f) return;
@@ -2660,7 +2678,7 @@ int main(int argc, char **argv)
 			return m;
 		};
 		Span hx[3], vy[3];
-		const int nh = spans(ua, ub, float(video::WW), l - ua, hx), nv = spans(va, vb, float(video::H), -va, vy);
+		const int nh = spans(ua, ub, float(video::WW), l - ua, hx), nv = spans(va, vb, float(video::HT), -va, vy);
 		for (int i = 0; i < nh; i++)
 			for (int j = 0; j < nv; j++) {
 				// (a mirrored piece's source shorter than its place, past twice the layer: its edge stretched, as before)
@@ -4076,7 +4094,7 @@ int main(int argc, char **argv)
 		SDL_DestroyTexture(tex_below);
 		SDL_DestroyTexture(tex_above);
 		if (dural_tex) { SDL_DestroyTexture(dural_tex); dural_tex = nullptr; }   // (made again when next drawn)
-		make_2d(tex_below, video::WW);
+		make_2d(tex_below, video::WW, video::HT);
 		SDL_SetTextureScaleMode(tex_below, cfg.smooth_bg ? SDL_SCALEMODE_LINEAR : SDL_SCALEMODE_NEAREST);
 		make_2d(tex_above, video::W);
 		if (glass) { SDL_DestroyTexture(glass); glass = nullptr; glass_w = glass_h = 0; }

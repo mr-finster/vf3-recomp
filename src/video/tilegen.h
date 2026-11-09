@@ -16,6 +16,8 @@ namespace video {
 const int W = 496, H = 384;
 // the layer below the 3D widened for widescreen: EXT more pixels each side
 const int EXT = 256, WW = W + 2 * EXT;
+// and taller for the stages' sky drawn ahead of the game's backdrop (sky_lead.h): EY more lines above and below
+const int EY = 64, HT = H + 2 * EY;
 
 class TileGen
 {
@@ -54,6 +56,14 @@ public:
 	// places them, its 3D drawn as ours is)
 	void aligned(std::vector<uint32_t> &below_out, std::vector<uint32_t> &above_out) const;
 	void aligned_wide(std::vector<uint32_t> &out) const;   // below_wide, as aligned() (WW wide)
+	// below_wide with EY lines above and below it (WW x HT, the screen's lines from EY), as aligned(): the screen's
+	// lines mirrored at its edges there (sky_past puts a stage's sky over them)
+	void aligned_tall(std::vector<uint32_t> &out) const;
+	// After the frame (its lines drawn, before the next's): a stage's sky past the screen's top and bottom into
+	// aligned_tall's out, as the game would draw it there, the lines a picture reaches (top, bottom: how many past the
+	// screen, up to EY; the screen's last 2 lines, which aligned()'s shift leaves as copies, always). Where the screen's
+	// edge isn't the stage's backdrop, the mirrored lines are kept.
+	void sky_past(const m3::Model3 &board, int top, int bottom, std::vector<uint32_t> &out);
 	// the 3D (RGBA, alpha ignored) between the layers, into out (RGBA); out may be the 3D's own buffer
 	void compose(const uint32_t *pic3d, uint32_t *out) const;
 
