@@ -230,8 +230,9 @@ T(C_DURAL_HELP, "Dural, the boss, in a 13th spot past Kage on the select, for ei
 T(C_DURAL_STAGE, "Dural's stage")
 T(C_DURAL_STAGE_HELP, "On the stage screen (Stage select: Challenger), confirm a stage with this button for its Dural version: Start is held for you and the pick made at the second the game allows (up to about 12 s). Online too (your inputs only), though some picks can't be Dural's there. Start stays the game's own: hold it and pick with Punch or Kick for Team Battle's VF3 version of a stage.")
 T(DURAL_STAGE_WAIT, "Dural's stage: Start held for you, picked in {n} s (the second the game allows it).")
-T(DURAL_STAGE_NONE, "Dural's stage: this stage has no Dural version.")
+T(DURAL_STAGE_NONE, "Dural's stage: the arcade's stage screen never gives this stage's Dural version.")
 T(DURAL_STAGE_NOT_NOW, "Dural's stage: not this time online (the game allows it only at certain seconds, and none is left for this pick).")
+T(DURAL_STAGE_TB_CAVE, "Dural's stage: Team Battle's VF3 version of the cave, which looks like its Dural version (Start held for you).")
 
 // ---- Controls ----
 T(CTL_UP, "Up")                            // (the game's controls: rows in Controls, and the steps of Set up buttons)

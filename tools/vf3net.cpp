@@ -344,7 +344,7 @@ int main(int argc, char **argv)
 		int wait_s;
 		const uint16_t out = pick.filter(m, player, bits, delay, false, said, wait_s);
 		if (said) printf("  Dural's stage, the %s's pick: %s (%d s)\n", player ? "guest" : "host",
-		                 said == dural_stage::Picker::waiting ? "waiting" : said == dural_stage::Picker::no_version ? "no Dural version" : "not this time", wait_s);
+		                 said == dural_stage::Picker::waiting ? "waiting" : said == dural_stage::Picker::no_version ? "no Dural version" : said == dural_stage::Picker::vf3_version ? "VF3 version (the cave)" : "not this time", wait_s);
 		return out;
 	};
 	// watching: the host's feed (the same whether anyone watches), a stand-in lobby, the watchers' boards

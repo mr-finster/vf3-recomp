@@ -225,8 +225,9 @@ T(C_DURAL_HELP, "Dural, le boss, dans une 13e case après Kage à la sélection,
 T(C_DURAL_STAGE, "Stage de Dural")
 T(C_DURAL_STAGE_HELP, "Sur l'écran des stages (Choix du stage\xC2\xA0: Challenger), valide un stage avec ce bouton pour sa version Dural\xC2\xA0: Start est maintenu pour toi et le choix fait à la seconde que le jeu permet (jusqu'à 12\xC2\xA0s environ). En ligne aussi (tes commandes seulement), mais certains choix ne peuvent pas y être ceux de Dural. Start reste celui du jeu\xC2\xA0: maintiens-le et choisis avec Poing ou Pied pour la version VF3 de Team Battle.")
 T(DURAL_STAGE_WAIT, "Stage de Dural\xC2\xA0: Start maintenu pour toi, choix dans {n}\xC2\xA0s (la seconde que le jeu permet).")
-T(DURAL_STAGE_NONE, "Stage de Dural\xC2\xA0: ce stage n'a pas de version Dural.")
+T(DURAL_STAGE_NONE, "Stage de Dural\xC2\xA0: l'écran des stages de la borne ne donne jamais la version Dural de ce stage.")
 T(DURAL_STAGE_NOT_NOW, "Stage de Dural\xC2\xA0: pas cette fois en ligne (le jeu ne le permet qu'à certaines secondes, et il n'en reste aucune pour ce choix).")
+T(DURAL_STAGE_TB_CAVE, "Stage de Dural\xC2\xA0: la version VF3 de la grotte de Team Battle, qui ressemble à sa version Dural (Start maintenu pour toi).")
 
 // ---- Controls ----
 T(CTL_UP, "Haut")

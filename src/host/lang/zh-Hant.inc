@@ -225,8 +225,9 @@ T(C_DURAL_HELP, "首領 Dural 出現在選人畫面 Kage 之後的第 13 格，�
 T(C_DURAL_STAGE, "Dural 的場地")
 T(C_DURAL_STAGE_HELP, "在場地畫面（場地選擇：亂入方）用此按鈕確認場地即為 Dural 版本：自動替你按住開始鍵，在遊戲允許的那一秒選定（最多約 12 秒）。連線也可用（僅你的輸入），但有時無法成為 Dural 版本。開始鍵保持遊戲原樣：按住它再用拳或腳選擇，是 Team Battle 的 VF3 版場地。")
 T(DURAL_STAGE_WAIT, "Dural 的場地：已替你按住開始鍵，{n} 秒後選定（遊戲允許的那一秒）。")
-T(DURAL_STAGE_NONE, "Dural 的場地：這個場地沒有 Dural 版本。")
+T(DURAL_STAGE_NONE, "Dural 的場地：街機的場地畫面從不給出這個場地的 Dural 版本。")
 T(DURAL_STAGE_NOT_NOW, "Dural 的場地：這次連線不行（遊戲只在特定的秒允許，這次選擇已經沒有了）。")
+T(DURAL_STAGE_TB_CAVE, "Dural 的場地：Team Battle 中這個場地為 VF3 版本（畫面與 Dural 版本相同），已替你按住開始鍵。")
 
 // ---- Controls ----
 T(CTL_UP, "上")

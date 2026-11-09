@@ -225,8 +225,9 @@ T(C_DURAL_HELP, "Dural, la jefa, en un 13.º hueco tras Kage en la selección, p
 T(C_DURAL_STAGE, "Escenario de Dural")
 T(C_DURAL_STAGE_HELP, "En la pantalla de escenarios (Selección: Retador), confirma con este botón para su versión Dural: se mantiene Start por ti y se elige en el segundo que el juego permite (hasta unos 12 s). También online (solo tus controles), aunque allí algunas elecciones no pueden ser de Dural. Start sigue siendo el del juego: mantenlo y elige con Puñetazo o Patada para la versión VF3 de Team Battle.")
 T(DURAL_STAGE_WAIT, "Escenario de Dural: Start mantenido por ti, se elige en {n} s (el segundo que el juego lo permite).")
-T(DURAL_STAGE_NONE, "Escenario de Dural: este escenario no tiene versión Dural.")
+T(DURAL_STAGE_NONE, "Escenario de Dural: la pantalla de escenarios de la recreativa nunca da la versión Dural de este escenario.")
 T(DURAL_STAGE_NOT_NOW, "Escenario de Dural: esta vez no online (el juego solo lo permite en ciertos segundos y no queda ninguno para esta elección).")
+T(DURAL_STAGE_TB_CAVE, "Escenario de Dural: la versión VF3 de la cueva de Team Battle, que se ve como su versión Dural (Start mantenido por ti).")
 
 // ---- Controls ----
 T(CTL_UP, "Arriba")

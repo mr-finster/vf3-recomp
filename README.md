@@ -222,7 +222,9 @@ Start at the right second of the screen's timer (a count kept since power-on dec
 timer runs out yourself, the arcade's own trick, works only about 1 time in 17 after the first match. The cheat holds
 Start for you and makes the pick at that second, at once or up to about 12 s later. Offline it always works. Online
 it's only your inputs, so your opponent needs nothing and sees the same stage, but about a third of the picks have no
-second left for it: the stage is then the plain one (a notice says so). Two stages have no Dural version.
+second left for it: the stage is then the plain one (a notice says so). The arcade's stage screen never gives the
+Dural version of two stages, the cave and Aoi's river, and the cheat leaves those plain too (issue #36), but for Team
+Battle's cave: its VF3 version, which the cheat picks there, looks the same as its Dural version.
 
 ## Online play (experimental)
 

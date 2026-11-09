@@ -226,8 +226,9 @@ T(C_DURAL_HELP, "Boss Dural, seçim ekranında Kage'nin ötesinde 13. yerde, iki
 T(C_DURAL_STAGE, "Dural'ın sahnesi")
 T(C_DURAL_STAGE_HELP, "Sahne ekranında (Sahne seçimi: Challenger) bir sahneyi Dural sürümü için bu düğmeyle onayla: Start senin için basılı tutulur ve seçim oyunun izin verdiği saniyede yapılır (en fazla 12 sn kadar). Çevrimiçide de (yalnızca senin girişlerin), ama orada bazı seçimler Dural'ın olamaz. Start oyunun kendi düğmesi olarak kalır: Team Battle'da bir sahnenin VF3 sürümü için onu basılı tutup Punch ya da Kick ile seç.")
 T(DURAL_STAGE_WAIT, "Dural'ın sahnesi: Start senin için basılı, {n} sn içinde seçiliyor (oyunun izin verdiği saniye).")
-T(DURAL_STAGE_NONE, "Dural'ın sahnesi: bu sahnenin Dural sürümü yok.")
+T(DURAL_STAGE_NONE, "Dural'ın sahnesi: salon makinesinin sahne ekranı bu sahnenin Dural sürümünü hiç vermez.")
 T(DURAL_STAGE_NOT_NOW, "Dural'ın sahnesi: çevrimiçide bu sefer olmaz (oyun buna yalnızca belli saniyelerde izin verir ve bu seçim için hiç kalmadı).")
+T(DURAL_STAGE_TB_CAVE, "Dural'ın sahnesi: mağaranın Team Battle'daki VF3 sürümü, Dural sürümü gibi görünür (Start senin için basılı).")
 
 // ---- Controls ----
 T(CTL_UP, "Yukarı")

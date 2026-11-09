@@ -225,8 +225,9 @@ T(C_DURAL_HELP, "Dural, der Boss, auf einem 13. Platz nach Kage in der Auswahl, 
 T(C_DURAL_STAGE, "Durals Stage")
 T(C_DURAL_STAGE_HELP, "Auf dem Stage-Bildschirm (Stage-Wahl: Challenger) eine Stage mit diesem Knopf bestätigen gibt ihre Dural-Version: Start wird für dich gehalten und gewählt, sobald das Spiel es erlaubt (bis etwa 12\xC2\xA0s). Auch online (nur deine Eingaben), dort kann aber nicht jede Wahl Durals sein. Start bleibt das des Spiels: halte es und wähle mit Schlag oder Tritt für Team Battles VF3-Version.")
 T(DURAL_STAGE_WAIT, "Durals Stage: Start für dich gehalten, Wahl in {n}\xC2\xA0s (sobald das Spiel es erlaubt).")
-T(DURAL_STAGE_NONE, "Durals Stage: diese Stage hat keine Dural-Version.")
+T(DURAL_STAGE_NONE, "Durals Stage: der Stage-Bildschirm des Automaten gibt nie die Dural-Version dieser Stage.")
 T(DURAL_STAGE_NOT_NOW, "Durals Stage: online diesmal nicht (das Spiel erlaubt es nur zu bestimmten Sekunden, und für diese Wahl ist keine übrig).")
+T(DURAL_STAGE_TB_CAVE, "Durals Stage: die VF3-Version der Höhle aus Team Battle, die wie ihre Dural-Version aussieht (Start für dich gehalten).")
 
 // ---- Controls ----
 T(CTL_UP, "Oben")

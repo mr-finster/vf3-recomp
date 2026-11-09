@@ -4692,10 +4692,12 @@ int main(int argc, char **argv)
 		// Cheats > Dural's stage: what the pick does, said
 		auto stage_pick_say = [&](dural_stage::Picker::Said said, int wait_s) {
 			if (said) fprintf(stderr, "Dural's stage: %s\n", said == dural_stage::Picker::waiting ? ("the pick in " + std::to_string(wait_s) + " s").c_str() :
-			                  said == dural_stage::Picker::no_version ? "no Dural version of this stage" : "not this time (online: no second left for it)");
+			                  said == dural_stage::Picker::no_version ? "the stage screen never gives this stage's Dural version" :
+			                  said == dural_stage::Picker::vf3_version ? "the cave's VF3 version (Team Battle's: its Dural look)" : "not this time (online: no second left for it)");
 			if (said == dural_stage::Picker::waiting && wait_s > 0)
 				menu.toast(tr::fill(tr::DURAL_STAGE_WAIT, { { "n", std::to_string(wait_s) } }));
-			else if (said == dural_stage::Picker::no_version) menu.toast(tr::DURAL_STAGE_NONE);
+			else if (said == dural_stage::Picker::no_version) menu.toast(tr::DURAL_STAGE_NONE, 6);
+			else if (said == dural_stage::Picker::vf3_version) menu.toast(tr::DURAL_STAGE_TB_CAVE, 6);
 			else if (said == dural_stage::Picker::not_this_time)
 				menu.toast(tr::DURAL_STAGE_NOT_NOW, 6);
 		};

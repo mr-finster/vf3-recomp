@@ -214,7 +214,7 @@ int main(int argc, char **argv)
 				const uint16_t in = dural_stage::word(board.controls, p), out = picker.filter(board, p, in, lead, !no_write, said, wait_s);
 				if (out != in) dural_stage::set(board.controls, p, out);
 				if (said) fprintf(stderr, "frame %llu: Dural's stage, player %d: %s (%d s)\n", (unsigned long long)f, p + 1,
-				                  said == dural_stage::Picker::waiting ? "waiting" : said == dural_stage::Picker::no_version ? "no Dural version" : "not this time", wait_s);
+				                  said == dural_stage::Picker::waiting ? "waiting" : said == dural_stage::Picker::no_version ? "no Dural version" : said == dural_stage::Picker::vf3_version ? "VF3 version (the cave)" : "not this time", wait_s);
 			}
 		}
 		for (auto &m : act.marks)

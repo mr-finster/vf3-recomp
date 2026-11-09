@@ -225,8 +225,9 @@ T(C_DURAL_HELP, "Bossowa Dural na 13. polu za Kage w wyborze, dla obu graczy. Zm
 T(C_DURAL_STAGE, "Arena Dural")
 T(C_DURAL_STAGE_HELP, "Na ekranie aren (Wybór areny: Challenger) zatwierdź arenę tym przyciskiem, by dostać jej wersję Dural: Start jest trzymany za ciebie, a wybór pada w sekundzie, na którą gra pozwala (do ok. 12 s). Online też (tylko twoje wejścia), choć tam nie każdy wybór może być Dural. Start zostaje startem gry: trzymaj go i wybierz Ciosem lub Kopnięciem, by mieć wersję VF3 z Team Battle.")
 T(DURAL_STAGE_WAIT, "Arena Dural: Start trzymany za ciebie, wybór za {n} s (w sekundzie, na którą gra pozwala).")
-T(DURAL_STAGE_NONE, "Arena Dural: ta arena nie ma wersji Dural.")
+T(DURAL_STAGE_NONE, "Arena Dural: ekran aren automatu nigdy nie daje wersji Dural tej areny.")
 T(DURAL_STAGE_NOT_NOW, "Arena Dural: tym razem nie online (gra pozwala tylko w określonych sekundach, a na ten wybór żadna nie została).")
+T(DURAL_STAGE_TB_CAVE, "Arena Dural: wersja VF3 jaskini z Team Battle, wygląda jak jej wersja Dural (Start trzymany za ciebie).")
 
 // ---- Controls ----
 T(CTL_UP, "Góra")
