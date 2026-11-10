@@ -665,7 +665,8 @@ struct settings
 	bool fullscreen = false, arcade = false, show_fps = false, smooth = true;
 	bool hud = true;    // Display > HUD: the 2D over a fight (energy bars, timer, names...) drawn; off: the 3D and the backdrop only
 	bool vsync = true;  // Display > V-Sync: each picture presented at a refresh (off: at once, maybe torn)
-	int frame_limit = 120;   // Display > Frame limit: the pictures a second at most, 30 60 120 (as before) 144; 0 none, -1 the screen's refresh rate
+	int frame_limit = -1;    // Display > Frame limit: the pictures a second at most, 30 60 120 144; 0 none, -1 the screen's refresh rate (a first start's;
+	                         // a settings.ini from before it was kept there, or from when 120 was the default and unsaved, stays at 120: load)
 	// Fullscreen as a borderless window a line taller than the screen, never the driver's own (issue #7: AMD's Vulkan
 	// on Windows froze in its exclusive fullscreen): the way on Windows unless fullscreen_exclusive = 1 (Display >
 	// Fullscreen mode); elsewhere the system's own (a Mac's Spaces, the Deck's gamescope) unless fullscreen_window = 1
@@ -753,6 +754,7 @@ struct settings
 		flag("show_fps", show_fps);
 		flag("hud", hud);
 		flag("vsync", vsync);
+		if (!kv.count("frame_limit")) frame_limit = 120;   // (settings kept by a version whose limit was 120: no one's changes under them)
 		num("frame_limit", frame_limit, -1, 1000);
 		if (frame_limit != -1 && frame_limit != 0 && frame_limit != 30 && frame_limit != 60 && frame_limit != 144) frame_limit = 120;
 		flag("smooth_motion", smooth);
@@ -3569,8 +3571,11 @@ int main(int argc, char **argv)
 				return listed({ std::string(names[cfg.filter]), cfg.crt_colours ? std::string(tr::D_CRT_COLOURS) : std::string() });
 			}, {}, [&] { menu.push(screen_page()); } });
 		p.items.push_back({ tr::D_FREECAM, tr::D_FREECAM_HELP,
-			[&] { return own_match() ? std::string(tr::D_FREECAM_NOT_NOW) : on_off(fc_menu >= 0 ? fc_menu == 1 : fc.on); },
-			[&](int) { if (!own_match()) fc_menu = (fc_menu >= 0 ? fc_menu == 1 : fc.on) ? 0 : 1; } });
+			[&] { return own_match() ? std::string(tr::D_FREECAM_NOT_ONLINE) : on_off(fc_menu >= 0 ? fc_menu == 1 : fc.on); },
+			[&](int) {
+				if (own_match()) { menu.toast(tr::FREECAM_NOT_ONLINE); return; }   // (said, as F4 there)
+				fc_menu = (fc_menu >= 0 ? fc_menu == 1 : fc.on) ? 0 : 1;
+			} });
 		p.items.push_back(back_item());
 		return p;
 	};
@@ -4208,9 +4213,9 @@ int main(int argc, char **argv)
 			p.items.push_back({ tr::P_ONLINE, tr::M_ONLINE_HELP, {}, {}, [&] { menu.push(online_page()); } });
 		else
 			p.items.push_back({ tr::P_ONLINE, tr::fill(tr::M_ONLINE_NOT_READY, { { "game", board.profile->name } }), {}, {}, {} });
-		if (board.profile->dural)   // (issue #12; after Online: online_row's place kept)
-			p.items.push_back({ tr::P_CHEATS, cfg.dural ? tr::M_CHEATS_ON_HELP : tr::M_CHEATS_HELP, {}, {}, [&] { menu.push(cheats_page()); } });
 		p.items.push_back({ tr::P_CONTROLS, tr::M_CONTROLS_HELP, {}, {}, [&] { menu.push(controls_page()); } });
+		if (board.profile->dural)   // (issue #12; after Online and Controls, as VF1's and VF2's main page: online_row's place kept)
+			p.items.push_back({ tr::P_CHEATS, cfg.dural ? tr::M_CHEATS_ON_HELP : tr::M_CHEATS_HELP, {}, {}, [&] { menu.push(cheats_page()); } });
 		p.items.push_back({ tr::M_QUIT, tr::M_QUIT_HELP, {}, {}, [&] { running = false; } });
 		return p;
 	};
@@ -4840,7 +4845,7 @@ int main(int argc, char **argv)
 					cfg.timings = !cfg.timings; cfg_dirty = true; title_now.clear();
 					t9 = {}; t9.t0 = SDL_GetTicksNS();
 					break;
-				case SDL_SCANCODE_F5: set_scale(scale % MAX_SCALE + 1); break;
+				case SDL_SCANCODE_F5: set_scale(chosen_scale() % MAX_SCALE + 1); break;   // (the player's scale's next, not the governor's lowered one's: as the menu's row)
 				case SDL_SCANCODE_F6: set_shape((aspect_i + 1) % N_ASPECTS); break;
 				case SDL_SCANCODE_F11: set_fullscreen(!is_fullscreen()); break;
 				case SDL_SCANCODE_F12: {
@@ -5228,7 +5233,7 @@ int main(int argc, char **argv)
 			if (quit_after >= 0 && int64_t(game_frame) >= quit_after) running = false;
 			switch (hk) {
 			case hotkey::menu: open_menu(); break;
-			case hotkey::scale: set_scale(scale % MAX_SCALE + 1); break;
+			case hotkey::scale: set_scale(chosen_scale() % MAX_SCALE + 1); break;
 			case hotkey::aspect: set_shape((aspect_i + 1) % N_ASPECTS); break;
 			case hotkey::none: break;
 			}

@@ -245,7 +245,7 @@ void pages(game_menu &gm, int w, int h)
 	page_shots(gm, w, h, "pages_main.png", M_RESUME, {   // (the main page: its rows' helps)
 		{ M_RESUME, M_RESUME_HELP, "" }, { P_DISPLAY, M_DISPLAY_HELP, "" }, { P_SOUND, M_SOUND_HELP, "" }, { P_GAME, M_GAME_HELP, "" },
 		{ M_ARCADE, M_ARCADE_HELP, "" }, { P_ONLINE, F(M_ONLINE_NOT_READY, { { "game", "Virtua Fighter 3 Team Battle" } }), "" },
-		{ P_CHEATS, M_CHEATS_ON_HELP, "" }, { P_CONTROLS, M_CONTROLS_MATCH_HELP, "" }, { M_QUIT, M_QUIT_HELP, "" } });
+		{ P_CONTROLS, M_CONTROLS_MATCH_HELP, "" }, { P_CHEATS, M_CHEATS_ON_HELP, "" }, { M_QUIT, M_QUIT_HELP, "" } });
 	// Display: its three pages' rows, each with what it's set to, and the free camera's; then each page (as main.cpp's
 	// display_page, picture_page, quality_page and screen_page)
 	auto listed = [&](std::initializer_list<std::string> parts) {
@@ -258,7 +258,7 @@ void pages(game_menu &gm, int w, int h)
 		{ D_QUALITY, listed({ D_SCALE, D_AA, D_RENDERER, D_DRIVER, D_BG_FILTER, D_TEXTURES, D_SMOOTH_MOTION, D_VSYNC, D_FRAME_LIMIT }),
 		  listed({ F(N_X, { { "n", "6" } }), F(D_SUM_AA, { { "n", F(N_X, { { "n", "3" } }) } }), R3D_GPU }) },
 		{ D_SCREEN, listed({ D_SCREEN_FILTER, D_CRT_COLOURS, D_BRIGHTNESS, D_GAMMA }), listed({ D_SCANLINES, D_CRT_COLOURS }) },
-		{ D_FREECAM, D_FREECAM_HELP, D_FREECAM_NOT_NOW } });
+		{ D_FREECAM, D_FREECAM_HELP, D_FREECAM_NOT_ONLINE } });
 	page_shots(gm, w, h, "pages_display_more.png", P_DISPLAY, {   // (the other values of its rows)
 		{ D_PICTURE, "", listed({ "21:9", D_FULLSCREEN }) }, { D_PICTURE, "", listed({ "4:3", D_SUM_WINDOW }) },
 		{ D_QUALITY, "", listed({ F(N_X, { { "n", "1" } }), R3D_CPU }) }, { D_SCREEN, "", OFF }, { D_SCREEN, "", listed({ D_CRT, D_CRT_COLOURS }) },
