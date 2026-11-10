@@ -227,6 +227,8 @@ void page_shots(game_menu &gm, int w, int h, const char *file, tr::text title, c
 		gm.select_row(int(i));
 		shot("", w, h);
 		for (const std::string &o : gm.overflow()) overflows.push_back(std::string(file) + " row " + std::to_string(i) + ": " + o);
+		// (every row's help within the panel, not only the pictured one's)
+		if (const std::string f = gm.page_fit(); !f.empty()) unfit.push_back(std::string(file) + " row " + std::to_string(i) + ": " + f);
 	}
 	gm.select_row(int(longest));
 	for (int i = 0; i < 8; i++) { shot("", w, h); SDL_Delay(40); }   // (the rows' slide, 0.12 s, over before the picture)

@@ -430,6 +430,21 @@ std::string game_menu::page_fit()
 	auto n = [dp](float px) { return std::to_string(int(std::lround(px / dp))) + "dp"; };
 	if (rows->GetScrollHeight() > rows->GetClientHeight() + 1.5f)
 		return "the rows need " + n(rows->GetScrollHeight()) + ", " + n(rows->GetClientHeight()) + " shown: they scroll";
+	// (the help under the rows: a line of it wider than the panel, or more lines than its space: a language without
+	// spaces whose text didn't break)
+	if (Rml::Element *note = m->doc->GetElementById("note")) {
+		if (note->GetScrollWidth() > note->GetClientWidth() + 1.5f)
+			return "the help is " + n(note->GetScrollWidth()) + " wide, the panel " + n(note->GetClientWidth());
+		std::function<float(Rml::Element *)> widest = [&](Rml::Element *e) {
+			float w = 0;
+			if (auto *t = dynamic_cast<Rml::ElementText *>(e))
+				for (const auto &ln : t->GetLines()) w = std::max(w, ln.position.x + float(ln.width));
+			for (int i = 0; i < e->GetNumChildren(); i++) w = std::max(w, widest(e->GetChild(i)));
+			return w;
+		};
+		if (const float w = widest(note); w > note->GetClientWidth() + 1.5f)
+			return "the help's longest line is " + n(w) + " wide, the panel " + n(note->GetClientWidth());
+	}
 	const float bottom = foot->GetAbsoluteOffset(Rml::BoxArea::Border).y + foot->GetBox().GetSize(Rml::BoxArea::Border).y;
 	if (bottom > float(m->ctx->GetDimensions().y) + 1.5f) return "the panel ends at " + n(bottom) + ", past the window's " + n(float(m->ctx->GetDimensions().y));
 	return "";
