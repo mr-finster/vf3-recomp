@@ -14,6 +14,7 @@
 #include "../video/r3d_scene.h"
 #include <algorithm>
 #include <cmath>
+#include <functional>
 
 namespace freecam {
 
@@ -55,6 +56,9 @@ struct Cam
 	// The last picture's (apply): how far the free camera looks right and up of the game's camera, about the world's
 	// up (radians: the sky, a panorama round it, moves by these), and the view's pixels a radian (496 x 384)
 	float turn_yaw = 0, turn_pitch = 0, fx = 496, fy = 384;
+	// (tests: flown by a path, free_cam_path.h: called for each picture with the scene (its models in the game camera's
+	// view) and that view into E0, to set the place and the look)
+	std::function<void(Cam &, const Scene &, const Mat4 &)> pilot;
 
 	static float dot(const float *a, const float *b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
 	static void cross(const float *a, const float *b, float *o) { o[0] = a[1] * b[2] - a[2] * b[1]; o[1] = a[2] * b[0] - a[0] * b[2]; o[2] = a[0] * b[1] - a[1] * b[0]; }
@@ -182,6 +186,7 @@ struct Cam
 		if (!anchored) anchor(r);
 		Mat4 inv;
 		if (!inverse(r, inv)) return false;
+		if (pilot) pilot(*this, s, r0 * inv);
 		const Mat4 f = view() * (r0 * inv);
 		for (Viewport &v : s.viewports) {
 			if (!v.full_screen) continue;

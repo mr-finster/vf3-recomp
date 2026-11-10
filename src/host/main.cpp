@@ -109,6 +109,11 @@
 //                        start's grace (the governor's tests)
 //   VF3_TEST_RAM_LOG=f   the game's RAM hashed every 30 game frames to f (a display setting changes no frame)
 //   VF3_TEST_CHIME_WAV=f the match found chime's sound (the game's coin, made at the start) to f, a .wav
+//   VF3_TEST_FREECAM_PATH=f the free camera flown along the path in f (free_cam_path.h: keys, orbits round the fighters,
+//                        pause and unpause, on the same clock as VF3_TEST_FREECAM's), for footage with VF3_RECORD
+//                        (a recording goes on through a pause: a picture each pass, the sound silent meanwhile).
+//                        VF3_TEST_FREECAM_PATH_LOG=1: every 30 ticks where the game's camera is round the fighters, as a
+//                        path's "rel" key has it (for writing one)
 //   VF3_TEST_BANKS=1     log@F lists the backdrop map's banks too (where the table and the screen have each) and its rows'
 //   VF3_TEST_FREECAM=... the free camera at these times: on@F, off@F, yaw@F=deg, pitch@F=deg (from the game's camera as it
 //                        was when the free camera started, not added up), move@F=x,y,z (right,
@@ -138,6 +143,7 @@
 #include "input_script.h"
 #include "dural_stage.h"
 #include "free_cam.h"
+#include "free_cam_path.h"
 #include "menu.h"
 #include "crt_colours.h"
 #include "controls.h"
@@ -2352,6 +2358,18 @@ int main(int argc, char **argv)
 	uint64_t pano_version = 0;
 	bool pano_shown = false;
 	float fc_base_x = 0, fc_base_y = 0;
+	// (tests: the hooks' clock, game frames and then a tick a pass while the game is stopped; the path flown,
+	// VF3_TEST_FREECAM_PATH, at the clock of the picture being drawn)
+	uint64_t fc_stopped_passes = 0;
+	double fc_path_clock = 0;
+	freecam::Path fc_path;
+	if (const char *pf = getenv("VF3_TEST_FREECAM_PATH")) {
+		if (!fc_path.load(pf)) fprintf(stderr, "(test) the free camera's path: %s\n", fc_path.error.c_str());
+		else {
+			fprintf(stderr, "(test) the free camera's path: %zu keys, %zu orbits, %zu events\n", fc_path.keys.size(), fc_path.orbits.size(), fc_path.events.size());
+			fc.pilot = [&](freecam::Cam &c, const video::Scene &sc, const video::Mat4 &g) { fc_path.fly(c, sc, g, fc_path_clock); };
+		}
+	}
 	SDL_Texture *tex3d = nullptr, *tex_below = nullptr, *tex_above = nullptr;
 	bool g3_shown = false;   // the picture on show is the GPU's
 	uint32_t side_colour[2] = { 0xFF000000u, 0xFF000000u };   // widescreen's bars beside the 2D (left, right)
@@ -3373,7 +3391,7 @@ int main(int argc, char **argv)
 		game.builder.cull_off = on;
 		fprintf(stderr, "the free camera: %s\n", on ? (from_pad ? "on (a pad)" : "on") : "off");
 		if (on) {
-			menu.toast(from_pad ? tr::FREECAM_ON_PAD : tr::FREECAM_ON_KEYS);
+			if (!fc_path.no_toast) menu.toast(from_pad ? tr::FREECAM_ON_PAD : tr::FREECAM_ON_KEYS);
 			// (paused: the frame on show built again without the game's camera's culling, so all of the stage is there
 			// to see; not while a frame's first half has run, the board then part way into the next)
 			if (paused && !half && !online.playing()) {
@@ -4288,6 +4306,7 @@ int main(int argc, char **argv)
 	// VF3_RECORD: the recording (see the top)
 	struct {
 		std::string dir;
+		uint64_t stopped_n = 0;   // (of n: recorded while the game was stopped, a pause with the free camera flying: the game's clock stood still)
 		uint64_t from = 0, to = UINT64_MAX, n = 0, base = 0;   // game frames; n: the pictures recorded; base: frames_run then
 		bool on = false;
 		FILE *video = nullptr, *wav = nullptr;
@@ -4989,7 +5008,7 @@ int main(int argc, char **argv)
 			}
 			if (!rec.on) { due = 8; frame_clock = double(frames_run + due); }
 			else {
-				frame_clock = double(rec.base) + double(rec.n + 1) * FRAME_HZ / double(rec.hz);
+				frame_clock = double(rec.base) + double(rec.n - rec.stopped_n + 1) * FRAME_HZ / double(rec.hz);
 				due = std::max(0, int(int64_t(std::floor(frame_clock)) - int64_t(frames_run)));
 			}
 			frames_run += due;
@@ -5296,10 +5315,29 @@ int main(int argc, char **argv)
 		// (tests: VF3_TEST_NO_PICTURES, two games at once on a small machine, the frames' cost alone: a picture only now
 		// and then)
 		static const bool no_pictures = getenv("VF3_TEST_NO_PICTURES") != nullptr;
-		const bool draw = no_pictures ? first_shown ? (pass % 120 == 0) : true
+		// (a recording not yet started: the frames before it as fast as they go, a picture only now and then)
+		const bool rec_wait = !rec.dir.empty() && !rec.on && first_shown;
+		const bool draw = no_pictures || rec_wait ? first_shown ? (pass % 120 == 0) : true
 		                              : rec.on || !first_shown || (fc.on && (every_refresh || smooth_budget >= 1)) ||   // (the free camera: moving, paused too)
 		                                (smooth && !stopped && !unseen ? smooth_budget >= 1 || every_refresh   // (a new frame's in the in-between pictures: the limit holds)
 		                                                               : new_frame && (!capped_low || smooth_budget >= 1 || stopped));
+		// (tests: the free camera hooks' clock, and the path's events and this picture's time on it: between two frames
+		// as far as the picture is)
+		if (stopped) fc_stopped_passes++;
+		if (fc_path.loaded) {
+			const double tt = smooth && !stopped ? std::clamp(frame_clock - double(frames_run), 0.0, 1.0) : 1.0;
+			fc_path_clock = double(game_frame + fc_stopped_passes) + (stopped ? 0.0 : tt - 1.0);
+			for (freecam::Path::Event &e : fc_path.events) {
+				if (e.done || double(game_frame + fc_stopped_passes) < e.t) continue;
+				e.done = true;
+				fprintf(stderr, "(test) the free camera's path: %s at %llu (frame %llu)\n", e.what.c_str(), (unsigned long long)(game_frame + fc_stopped_passes), (unsigned long long)game_frame);
+				if (e.what == "on") set_freecam(true, false);
+				else if (e.what == "off") set_freecam(false, false);
+				else if (e.what == "pause") { if (!paused && !pause_pending) toggle_pause(); }
+				else if (e.what == "unpause") { if (paused) toggle_pause(); else pause_pending = false; }
+				else if (e.what == "quit") running = false;
+			}
+		}
 		if (draw) {
 			smooth_budget = std::max(0.0, smooth_budget - 1);
 			t9.pictures++;
@@ -5445,9 +5483,7 @@ int main(int argc, char **argv)
 					        496.0f / (sc.viewports[size_t(k)].right - sc.viewports[size_t(k)].left));
 				}
 			}
-			static uint64_t stopped_passes = 0;
-			if (stopped) stopped_passes++;
-			const uint64_t clock = game_frame + stopped_passes;
+			const uint64_t clock = game_frame + fc_stopped_passes;
 			for (Ev &e : evs) {
 				if (e.done || clock < e.at) continue;
 				e.done = true;
@@ -5539,6 +5575,17 @@ int main(int argc, char **argv)
 				SDL_DestroySurface(s);
 			}
 			rec.n++;
+			if (stopped) {   // (a paused picture: the game's clock stands still, the sound silent for its time, in step)
+				rec.stopped_n++;
+				if (rec.wav) {
+					static uint64_t silent = 0;   // (samples written for them, to the whole sample over the pause)
+					const uint64_t want = rec.stopped_n * uint64_t(SOUND_RATE) / uint64_t(rec.hz);
+					const std::vector<int16_t> zero(size_t(want - silent) * 2, 0);
+					fwrite(zero.data(), sizeof(int16_t), zero.size(), rec.wav);
+					rec.wav_bytes += uint32_t(zero.size() * sizeof(int16_t));
+					silent = want;
+				}
+			}
 			if (rec.n % (uint64_t(rec.hz) * 10) == 0) fprintf(stderr, "record: %.0f s\n", rec.n / double(rec.hz));
 			if (game_frame >= rec.to) running = false;
 		}
