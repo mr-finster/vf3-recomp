@@ -95,6 +95,7 @@
 //   VF3_GPU_CHECK_DIR=d  the GPU's start-up check's pictures (gpu.png, cpu.png) into d
 //   VF3_WIDE_SKY=0       the stages' 2D sky kept to the middle 4:3 (tests)
 //   VF3_SKY_LAG=1        the stages' sky as the game scrolls it (3 frames behind the camera: sky_lead.h)
+//   VF3_NO_SKY_ROM=1     the free camera's sky from the tiles in the pattern RAM only, none decoded from the ROM (tests)
 //   VF3_NO_SKY_PAST=1    the stages' sky past the screen's top and bottom the screen mirrored, not the game's map
 //                        of the backdrop (TileGen::sky_past; tests)
 //   VF3_RECORD=dir       a recording (a trailer's footage): from game frame VF3_RECORD_FROM (default 0; before it as
@@ -5462,6 +5463,9 @@ int main(int argc, char **argv)
 						fprintf(stderr, "(test) the free camera's sky: the map %s, %d x %d pixels, the screen at %d, %d; a turn %d pixels (%.3f of the map), the view's %.1f x %.1f pixels a radian; above %08x below %08x; turned %.1f, %.1f degrees\n%s",
 						        pn.ok ? "found" : "not found", pn.w, pn.h, pn.x, pn.y, freecam::SKY_TURN, pn.w ? float(freecam::SKY_TURN) / pn.w : 0.0f, fc.fx, fc.fy, pn.above, pn.below,
 						        fc.turn_yaw / freecam::DEG, fc.turn_pitch / freecam::DEG, game.tiles.backdrop_list(board).c_str());
+						const video::TileGen::Panorama &gp = game.pano;
+						fprintf(stderr, "(test) the free camera's sky's tiles: %d from the pattern RAM (%d of them in the ROM's picture too, %d the same pixels), %d from the ROM (the CROM's bank %d), %d neither\n",
+						        gp.vram_tiles, gp.rom_compared, gp.rom_same, gp.rom_tiles, gp.rom_bank, gp.filled_tiles);
 					}
 					if (k < 0) { fprintf(stderr, "(test) the free camera: no game camera in this scene\n"); return; }
 					const video::Viewport &vp = sc.viewports[size_t(k)];

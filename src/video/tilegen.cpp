@@ -15,6 +15,7 @@
 // A name table entry, 4-bit: pattern ((e & 0x3FFF) << 1 | e >> 15) * 32 bytes, colour (e & 0x7FF0) | texel;
 // 8-bit: pattern (e & 0x3FFF) * 64 bytes, colour (e & 0x7F00) | texel. The leftmost texel is the top bits.
 #include "tilegen.h"
+#include "dural_cell.h"
 #include "../machine/model3.h"
 #include <algorithm>
 #include <cmath>
@@ -438,6 +439,7 @@ void TileGen::find_backdrop(const m3::Model3 &board, bool full)
 		for (size_t i = 0; i < b.map.size(); i++) b.map[i] = board.peek16(desc + 8 + 2 * uint32_t(i));
 	}
 	b.desc = desc; b.w = w; b.h = h;
+	b.stage = stage;
 	b.known = true;
 	for (int i = 0; i < 128; i++) b.bank[i] = int16_t(board.peek16(board.profile->backdrops.banks + 2 * uint32_t(i)));
 	// where the layer's map is in it: some of the rows on screen compared
@@ -1510,6 +1512,8 @@ void TileGen::sky_past(const m3::Model3 &board, int top, int bottom, std::vector
 // show it (the bank where the screen has it, else where the game's table says; the palette, the depth and the colour
 // offset of the screen line it's placed by), made again only when one of those changes. Placed by the first of a few
 // screen lines that is the backdrop's own (as sky_past's edge line: the map's line there the screen's).
+struct TileGen::RomPicture { uint32_t desc = 0; int bank = -1; bool ok = false; int stage = -1; TilePictureData data; };
+
 void TileGen::panorama(const m3::Model3 &board, Panorama &out)
 {
 	out.ok = false;
@@ -1560,6 +1564,25 @@ void TileGen::panorama(const m3::Model3 &board, Panorama &out)
 		mix(backdrop.desc); mix(uint64_t(four)); mix(L.offset_b); mix(uint64_t(w) << 32 | uint32_t(h));
 		for (int i = 0; i < 128; i++) mix(uint64_t(uint16_t(backdrop.bank[i])) << 32 | uint32_t(backdrop.seen[i]));
 		for (int i = 0; i < 128; i++) mix(uint32_t(backdrop.trust[i]));
+		// the stage's picture from the ROM, once: the bank of the CROM its data is in the one that decodes whole (Dural's
+		// picture's first: the game's pictures are all in it)
+		static const bool no_rom = getenv("VF3_NO_SKY_ROM") != nullptr;   // (tests: the pattern RAM's tiles only)
+		if (!rom_picture) rom_picture = std::make_shared<RomPicture>();
+		RomPicture &rp = *rom_picture;
+		if (rp.desc != backdrop.desc) {
+			rp = RomPicture();
+			rp.desc = backdrop.desc;
+			rp.stage = backdrop.stage;
+			const int first = board.profile->dural ? int(board.profile->dural->data_bank) : 7;
+			const uint32_t data_table = board.profile->dural ? board.profile->dural->data : 0xFF300000u;
+			for (int k = 0; k < 17 && !rp.ok && backdrop.stage >= 0; k++) {
+				const int bank = k == 0 ? first : k - 1;
+				if (k > 0 && bank == first) continue;
+				if (tile_picture_data(board, bank, board.profile->backdrops.descriptors, data_table, backdrop.stage, rp.data) &&
+				    rp.data.desc == backdrop.desc && rp.data.tw == backdrop.w && rp.data.th == backdrop.h) { rp.ok = true; rp.bank = bank; }
+			}
+		}
+		mix(uint64_t(rp.ok && !no_rom));
 		for (int i = 0; i < 0x8000; i++) mix(pal[i]);
 		for (int i = 0; i < 0x40000; i += 7) mix(vram[i]);
 		if (key == out.key && out.px.size() == size_t(w) * h && out.w == w && out.h == h) return;
@@ -1600,13 +1623,48 @@ void TileGen::panorama(const m3::Model3 &board, Panorama &out)
 		auto raw_at = [&](int tx, int ty) { return backdrop.map[size_t(ty) * backdrop.w + tx]; };
 		uint32_t t[64];
 		const int tw = backdrop.w, th = backdrop.h;
+		// a tile from the ROM's picture (false: not in it, or a see-through pixel); the loader's two special pictures'
+		// colours as it stores them (0x32CA4)
+		auto rom_tile = [&](uint16_t e, uint32_t q[64]) {
+			const size_t c = (e >> 7) & 0x7F, i = e & 0x7F;
+			if (!rp.ok || c >= rp.data.pat.size() || (i + 1) * 64 > rp.data.pat[c].size()) return false;
+			const uint8_t *src = &rp.data.pat[c][i * 64];
+			const std::vector<uint16_t> &pl = rp.data.pal[c];
+			for (int k = 0; k < 64; k++) {
+				if (src[k] >= pl.size()) return false;
+				uint32_t v = pl[src[k]];
+				if (rp.stage == 0xA2 && v == 0x739C) v = 0x7FFF;
+				if (rp.stage == 0xD && v) v |= 0x7C00;
+				if (v & 0x8000) return false;
+				q[k] = colour(v);
+			}
+			return true;
+		};
 		std::vector<uint8_t> have(size_t(tw) * th, 0);
+		out.vram_tiles = out.rom_compared = out.rom_same = out.rom_tiles = out.filled_tiles = 0;
+		out.rom_bank = rp.ok ? rp.bank : -1;
+		uint32_t q[64];
 		for (int ty = 0; ty < th; ty++)
 			for (int tx = 0; tx < tw; tx++) {
-				if (!there((raw_at(tx, ty) >> 7) & 0x7F) || !tile(backdrop_entry(board, tx, ty), t)) continue;
+				const uint16_t e = raw_at(tx, ty);
+				if (!there((e >> 7) & 0x7F) || !tile(backdrop_entry(board, tx, ty), t)) continue;
 				have[size_t(ty) * tw + tx] = 1;
+				out.vram_tiles++;
+				if (rom_tile(e, q)) { out.rom_compared++; out.rom_same += memcmp(q, t, sizeof q) == 0; }
 				for (int fy = 0; fy < 8; fy++) memcpy(&out.px[size_t(ty * 8 + fy) * w + size_t(tx) * 8], t + fy * 8, 32);
 			}
+		// the chunks not loaded, from the ROM: only once it's seen to give the loaded ones' pixels (49 in 50 of at
+		// least 64 tiles: a palette the game is fading differs for a frame or two)
+		const bool rom_good = rp.ok && !no_rom && out.rom_compared >= 64 && out.rom_same * 50 >= out.rom_compared * 49;
+		if (rom_good)
+			for (int ty = 0; ty < th; ty++)
+				for (int tx = 0; tx < tw; tx++) {
+					if (have[size_t(ty) * tw + tx] || !rom_tile(raw_at(tx, ty), q)) continue;
+					have[size_t(ty) * tw + tx] = 1;
+					out.rom_tiles++;
+					for (int fy = 0; fy < 8; fy++) memcpy(&out.px[size_t(ty * 8 + fy) * w + size_t(tx) * 8], q + fy * 8, 32);
+				}
+		for (uint8_t hv : have) out.filled_tiles += !hv;
 		// The tiles of banks not there (the sky's top, mostly: the game loads those rows when its camera looks up): each
 		// the colour of the row next to it's edge (from below first: a sky's colour goes on up from its clouds; then from
 		// above), never the patterns the bank's place holds
@@ -1645,7 +1703,8 @@ void TileGen::panorama(const m3::Model3 &board, Panorama &out)
 		auto filler = [&](int row) -> uint32_t {
 			const int ty = row < 0 ? 0 : th - 1;
 			uint64_t sum[3] = {}, cnt = 0;
-			if (there((raw_at(0, ty) >> 7) & 0x7F) && tile(backdrop_entry(board, 0, row), t)) {
+			const bool loaded = there((raw_at(0, ty) >> 7) & 0x7F) && tile(backdrop_entry(board, 0, row), t);
+			if (loaded || (rom_good && rom_tile(raw_at(0, ty), t))) {
 				for (uint32_t v : t) { for (int c = 0; c < 3; c++) sum[c] += (v >> (8 * c)) & 255; cnt++; }
 			} else {
 				const uint32_t *q = &out.px[size_t(row < 0 ? 0 : h - 1) * w];
@@ -1655,6 +1714,23 @@ void TileGen::panorama(const m3::Model3 &board, Panorama &out)
 		};
 		out.above = filler(-1);
 		out.below = filler(backdrop.h);
+		// the map's top lines into the filler's colour above it, its bottom lines into the one below: eased (slow at
+		// both ends), so no line shows where the map ends and the plain colour starts
+		for (int side = 0; side < 2; side++) {
+			const uint32_t to = side ? out.below : out.above;
+			if (!to) continue;
+			for (int i = 0; i < SKY_BLEND && i < h / 3; i++) {
+				const float u = 1.0f - (float(i) + 0.5f) / float(SKY_BLEND), k = u * u * (3 - 2 * u);
+				const int a256 = int(std::lround(k * 256));
+				uint32_t *row = &out.px[size_t(side ? h - 1 - i : i) * w];
+				for (int x = 0; x < w; x++) {
+					const uint32_t v = row[x] ? row[x] : to;
+					uint32_t o = 0xFF000000u;
+					for (int c = 0; c < 24; c += 8) o |= ((((v >> c) & 255) * uint32_t(256 - a256) + ((to >> c) & 255) * uint32_t(a256)) >> 8) << c;
+					row[x] = o;
+				}
+			}
+		}
 		return;
 	}
 }

@@ -95,34 +95,32 @@ uint32_t rgba(uint16_t c) { return (c & 0x8000) ? 0 : 0xFF000000u | uint32_t(((c
 
 } // namespace
 
-bool dural_picture(const m3::Model3 &board, DuralPicture &pic)
+bool tile_picture_data(const m3::Model3 &board, int bank, uint32_t descriptors, uint32_t data, int picture, TilePictureData &out)
 {
-	if (pic.w) return pic.w > 0;
-	pic.w = -1;
-	const m3::DuralPatch *d = board.profile->dural;
-	if (!d) return false;
-	const Rom r{ board, int(d->data_bank) };
-	// the descriptor: 1, chunks, width, height (in tiles), then the map; the data: each chunk's palette (a count,
-	// then that many colours) and patterns (a count, bit 15 packed: then its size, a halfword, and the packed bytes)
-	const uint32_t at = d->descriptors + 4 * d->picture, data_at = d->data + 4 * d->picture;
+	out = TilePictureData();
+	const Rom r{ board, bank };
+	const uint32_t at = descriptors + 4 * uint32_t(picture), data_at = data + 4 * uint32_t(picture);
 	if (!r.ok(at, 4) || !r.ok(data_at, 4)) return false;
 	const uint32_t desc = r.u32(at);
 	uint32_t p = r.u32(data_at);
 	if (!r.ok(desc, 8)) return false;
 	const int chunks = r.u16(desc + 2), tw = r.u16(desc + 4), th = r.u16(desc + 6);
-	if (chunks < 1 || chunks > 64 || tw < 1 || tw > 64 || th < 1 || th > 64 || !r.ok(desc + 8, size_t(tw * th) * 2)) return false;
-	std::vector<std::vector<uint16_t>> pal(chunks);
-	std::vector<std::vector<uint8_t>> pat(chunks);
+	if (chunks < 1 || chunks > 128 || tw < 1 || tw > 2048 || th < 1 || th > 256 || !r.ok(desc + 8, size_t(tw * th) * 2)) return false;
+	std::vector<std::vector<uint16_t>> pal(static_cast<size_t>(chunks));
+	std::vector<std::vector<uint8_t>> pat(static_cast<size_t>(chunks));
 	for (int c = 0; c < chunks; c++) {
 		if (!r.ok(p, 2)) return false;
 		int n = int16_t(r.u16(p));
 		if (n < 0 || n > 256) return false;
 		n += n & 1;
+		if (!r.ok(p + 2, size_t(n) * 2 + 2)) return false;
 		for (int i = 0; i < n; i++) pal[c].push_back(r.u16(p + 2 + 2 * i));
 		p += 2 + 2 * n;
 		const uint16_t k = r.u16(p);
 		const size_t count = k & 0x7FFF;
+		if (count > 128) return false;   // (a slot's tiles at most)
 		if (k & 0x8000) {
+			if (!r.ok(p + 2, 4)) return false;
 			const uint16_t size = r.u16(p + 2);
 			if (!unpack(r, p + 6, count * 64, pat[c])) return false;
 			p += 6 + size;
@@ -132,6 +130,26 @@ bool dural_picture(const m3::Model3 &board, DuralPicture &pic)
 			p += 2 + uint32_t(count) * 64;
 		}
 	}
+	out.chunks = chunks; out.tw = tw; out.th = th; out.desc = desc;
+	out.pal = std::move(pal);
+	out.pat = std::move(pat);
+	return true;
+}
+
+bool dural_picture(const m3::Model3 &board, DuralPicture &pic)
+{
+	if (pic.w) return pic.w > 0;
+	pic.w = -1;
+	const m3::DuralPatch *d = board.profile->dural;
+	if (!d) return false;
+	const Rom r{ board, int(d->data_bank) };
+	TilePictureData t;
+	if (!tile_picture_data(board, int(d->data_bank), d->descriptors, d->data, int(d->picture), t)) return false;
+	const int chunks = t.chunks, tw = t.tw, th = t.th;
+	if (chunks > 64 || tw > 64 || th > 64) return false;
+	const uint32_t desc = t.desc;
+	const std::vector<std::vector<uint16_t>> &pal = t.pal;
+	const std::vector<std::vector<uint8_t>> &pat = t.pat;
 	// the map's entries: the chunk (bits 7-13) and its pattern (0-6); 8-bit patterns, their chunk's colours
 	pic.px.assign(size_t(tw * 8) * (th * 8), 0);
 	for (int ty = 0; ty < th; ty++)
