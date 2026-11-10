@@ -3380,8 +3380,46 @@ int main(int argc, char **argv)
 			} else if (paused) fprintf(stderr, "the free camera: paused part way into a frame: the frame on show as culled for the game's camera\n");
 		}
 	};
-	auto display_page = [&] {
-		menu_page p{ tr::P_DISPLAY, "", {} };
+	// Display's rows in three pages of their own, each a row of Display with what it's set to in a few words (a page
+	// is 14 rows at most: menu.rcss): Picture, Quality, Screen filter and colours. Each row as it was.
+	auto picture_page = [&] {
+		menu_page p{ tr::D_PICTURE, "", {} };
+		p.items.push_back({ tr::D_SHAPE, tr::D_SHAPE_HELP,
+			[&] { return std::string(aspect_i ? ASPECT_NAMES[aspect_i] : tr::D_SHAPE_FIT.c_str()); },
+			[&](int d) { set_shape(wrap(aspect_i + d, N_ASPECTS)); } });
+		p.items.push_back({ tr::D_WINDOW_SIZE, tr::D_WINDOW_SIZE_HELP,
+			[&] {
+				if (cfg.window_scale <= 0) return std::string(tr::D_FREE);
+				int w, h;
+				window_target(cfg.window_scale, w, h);
+				return tr::fill(is_fullscreen() ? tr::D_WINDOW_N_IN_WINDOW : tr::D_WINDOW_N, { { "n", std::to_string(cfg.window_scale) }, { "w", std::to_string(w) }, { "h", std::to_string(h) } });
+			},
+			[&](int d) { set_window_scale(wrap(cfg.window_scale + d, window_scale_most() + 1)); } });
+		p.items.push_back({ tr::D_FULLSCREEN, tr::D_FULLSCREEN_HELP,
+			[&] { return on_off(is_fullscreen()); },
+			[&](int) { set_fullscreen(!is_fullscreen()); } });
+#ifdef _WIN32
+		p.items.push_back({ tr::D_FS_MODE, tr::D_FS_MODE_HELP,
+			[&] { return std::string(fs_borderless() ? tr::D_BORDERLESS : tr::D_STANDARD); },
+			[&](int) {
+				const bool was = is_fullscreen();
+				if (was) set_fullscreen(false);
+				cfg.fs_exclusive = fs_borderless(); cfg_dirty = true;
+				if (was) set_fullscreen(true);
+				menu.refresh();
+			} });
+#endif
+		p.items.push_back({ tr::D_HUD, tr::D_HUD_HELP,
+			[&] { return on_off(cfg.hud); },
+			[&](int) { cfg.hud = !cfg.hud; cfg_dirty = true; } });
+		p.items.push_back({ tr::D_SHOW_FPS, tr::D_SHOW_FPS_HELP,
+			[&] { return on_off(cfg.show_fps); },
+			[&](int) { cfg.show_fps = !cfg.show_fps; cfg_dirty = true; if (!cfg.show_fps) menu.set_fps(""); } });
+		p.items.push_back(back_item());
+		return p;
+	};
+	auto quality_page = [&] {
+		menu_page p{ tr::D_QUALITY, "", {} };
 		p.items.push_back({ tr::D_SCALE, tr::D_SCALE_HELP,
 			[&] { return gov.scale_cut ? tr::fill(tr::D_SCALE_LOWERED, { { "n", std::to_string(chosen_scale()) }, { "now", std::to_string(scale) } }) : tr::fill(tr::N_X, { { "n", std::to_string(chosen_scale()) } }); },
 			[&](int d) { set_scale(chosen_scale() + d); } });
@@ -3420,35 +3458,6 @@ int main(int argc, char **argv)
 				SDL_RemovePath((data + "/gpu-start.crashed").c_str());
 				menu.toast("");   // (its advice followed: the notice taken down)
 			} });
-		p.items.push_back({ tr::D_SHAPE, tr::D_SHAPE_HELP,
-			[&] { return std::string(aspect_i ? ASPECT_NAMES[aspect_i] : tr::D_SHAPE_FIT.c_str()); },
-			[&](int d) { set_shape(wrap(aspect_i + d, N_ASPECTS)); } });
-		p.items.push_back({ tr::D_BG_FILTER, tr::D_BG_FILTER_HELP,
-			[&] { return std::string(cfg.smooth_bg ? tr::D_SMOOTH : tr::OFF); },
-			[&](int) { cfg.smooth_bg = !cfg.smooth_bg; cfg_dirty = true; SDL_SetTextureScaleMode(tex_below, cfg.smooth_bg ? SDL_SCALEMODE_LINEAR : SDL_SCALEMODE_NEAREST); } });
-		p.items.push_back({ tr::D_TEXTURES, tr::D_TEXTURES_HELP,
-			[&] { return std::string(cfg.sharp_textures ? tr::D_SHARP : tr::D_ARCADE); },
-			[&](int) { cfg.sharp_textures = !cfg.sharp_textures; video::Raster::arcade_lod = !cfg.sharp_textures; cfg_dirty = true; } });
-		p.items.push_back({ tr::D_SMOOTH_MOTION, tr::D_SMOOTH_MOTION_HELP,
-			[&] { return cfg.smooth && gov.smooth_off ? std::string(tr::D_SMOOTH_BUSY) : on_off(cfg.smooth); },
-			[&](int) { cfg.smooth = !cfg.smooth; cfg_dirty = true; gov_fresh(); } });
-		p.items.push_back({ tr::D_SCREEN_FILTER, tr::D_SCREEN_FILTER_HELP,
-			[&] { const tr::text names[] = { tr::OFF, tr::D_SCANLINES, tr::D_CRT }; return std::string(names[cfg.filter]); },
-			[&](int d) { cfg.filter = wrap(cfg.filter + d, 3); cfg_dirty = true; } });
-		p.items.push_back({ tr::D_CRT_COLOURS, tr::D_CRT_COLOURS_HELP,
-			[&] {
-				const tr::text names[] = { tr::OFF, tr::CRT_SEGA, tr::CRT_SONY, tr::CRT_NTSC_JP, tr::CRT_NTSC_US, tr::CRT_PAL };
-				static_assert(sizeof names / sizeof names[0] == crt::N_PRESETS, "a name for each of crt::PRESETS");
-				const std::string n = names[cfg.crt_colours];
-				return crt_on() && crt_paint.failed() ? tr::fill(tr::NOT_WITH_RENDERER, { { "what", n } }) : n;
-			},
-			[&](int d) { cfg.crt_colours = wrap(cfg.crt_colours + d, crt::N_PRESETS); cfg_dirty = true; } });
-		p.items.push_back({ tr::D_BRIGHTNESS, tr::D_BRIGHTNESS_HELP,
-			[&] { const std::string n = tr::fill(tr::N_PERCENT, { { "n", std::to_string(cfg.brightness) } }); return crt_on() && crt_paint.failed() ? tr::fill(tr::NOT_WITH_RENDERER, { { "what", n } }) : n; },
-			[&](int d) { cfg.brightness = std::clamp(cfg.brightness + 5 * d, crt::BRIGHT_MIN, crt::BRIGHT_MAX); cfg_dirty = true; } });
-		p.items.push_back({ tr::D_GAMMA, tr::D_GAMMA_HELP,
-			[&] { const std::string n = tr::fill(tr::N_PERCENT, { { "n", std::to_string(cfg.gamma) } }); return crt_on() && crt_paint.failed() ? tr::fill(tr::NOT_WITH_RENDERER, { { "what", n } }) : n; },
-			[&](int d) { cfg.gamma = std::clamp(cfg.gamma + 5 * d, crt::GAMMA_MIN, crt::GAMMA_MAX); cfg_dirty = true; } });
 #ifdef _WIN32
 		p.items.push_back({ tr::D_DRIVER, tr::D_DRIVER_HELP,
 			[&] { return std::string(cfg.graphics ? "Direct3D 12" : tr::D_DRIVER_AUTO.c_str()); },
@@ -3461,15 +3470,15 @@ int main(int argc, char **argv)
 				menu.toast("");
 			} });
 #endif
-		p.items.push_back({ tr::D_SHOW_FPS, tr::D_SHOW_FPS_HELP,
-			[&] { return on_off(cfg.show_fps); },
-			[&](int) { cfg.show_fps = !cfg.show_fps; cfg_dirty = true; if (!cfg.show_fps) menu.set_fps(""); } });
-		p.items.push_back({ tr::D_HUD, tr::D_HUD_HELP,
-			[&] { return on_off(cfg.hud); },
-			[&](int) { cfg.hud = !cfg.hud; cfg_dirty = true; } });
-		p.items.push_back({ tr::D_FREECAM, tr::D_FREECAM_HELP,
-			[&] { return own_match() ? std::string(tr::D_FREECAM_NOT_NOW) : on_off(fc_menu >= 0 ? fc_menu == 1 : fc.on); },
-			[&](int) { if (!own_match()) fc_menu = (fc_menu >= 0 ? fc_menu == 1 : fc.on) ? 0 : 1; } });
+		p.items.push_back({ tr::D_BG_FILTER, tr::D_BG_FILTER_HELP,
+			[&] { return std::string(cfg.smooth_bg ? tr::D_SMOOTH : tr::OFF); },
+			[&](int) { cfg.smooth_bg = !cfg.smooth_bg; cfg_dirty = true; SDL_SetTextureScaleMode(tex_below, cfg.smooth_bg ? SDL_SCALEMODE_LINEAR : SDL_SCALEMODE_NEAREST); } });
+		p.items.push_back({ tr::D_TEXTURES, tr::D_TEXTURES_HELP,
+			[&] { return std::string(cfg.sharp_textures ? tr::D_SHARP : tr::D_ARCADE); },
+			[&](int) { cfg.sharp_textures = !cfg.sharp_textures; video::Raster::arcade_lod = !cfg.sharp_textures; cfg_dirty = true; } });
+		p.items.push_back({ tr::D_SMOOTH_MOTION, tr::D_SMOOTH_MOTION_HELP,
+			[&] { return cfg.smooth && gov.smooth_off ? std::string(tr::D_SMOOTH_BUSY) : on_off(cfg.smooth); },
+			[&](int) { cfg.smooth = !cfg.smooth; cfg_dirty = true; gov_fresh(); } });
 		p.items.push_back({ tr::D_VSYNC, tr::D_VSYNC_HELP,
 			[&] { return on_off(cfg.vsync); },
 			[&](int) {
@@ -3494,28 +3503,73 @@ int main(int argc, char **argv)
 				cfg_dirty = true;
 				fprintf(stderr, "Display > Frame limit: %d (0 none, -1 the screen's)\n", cfg.frame_limit);
 			} });
-		p.items.push_back({ tr::D_WINDOW_SIZE, tr::D_WINDOW_SIZE_HELP,
+		p.items.push_back(back_item());
+		return p;
+	};
+	auto screen_page = [&] {
+		menu_page p{ tr::D_SCREEN, "", {} };
+		p.items.push_back({ tr::D_SCREEN_FILTER, tr::D_SCREEN_FILTER_HELP,
+			[&] { const tr::text names[] = { tr::OFF, tr::D_SCANLINES, tr::D_CRT }; return std::string(names[cfg.filter]); },
+			[&](int d) { cfg.filter = wrap(cfg.filter + d, 3); cfg_dirty = true; } });
+		p.items.push_back({ tr::D_CRT_COLOURS, tr::D_CRT_COLOURS_HELP,
 			[&] {
-				if (cfg.window_scale <= 0) return std::string(tr::D_FREE);
-				int w, h;
-				window_target(cfg.window_scale, w, h);
-				return tr::fill(is_fullscreen() ? tr::D_WINDOW_N_IN_WINDOW : tr::D_WINDOW_N, { { "n", std::to_string(cfg.window_scale) }, { "w", std::to_string(w) }, { "h", std::to_string(h) } });
+				const tr::text names[] = { tr::OFF, tr::CRT_SEGA, tr::CRT_SONY, tr::CRT_NTSC_JP, tr::CRT_NTSC_US, tr::CRT_PAL };
+				static_assert(sizeof names / sizeof names[0] == crt::N_PRESETS, "a name for each of crt::PRESETS");
+				const std::string n = names[cfg.crt_colours];
+				return crt_on() && crt_paint.failed() ? tr::fill(tr::NOT_WITH_RENDERER, { { "what", n } }) : n;
 			},
-			[&](int d) { set_window_scale(wrap(cfg.window_scale + d, window_scale_most() + 1)); } });
-		p.items.push_back({ tr::D_FULLSCREEN, tr::D_FULLSCREEN_HELP,
-			[&] { return on_off(is_fullscreen()); },
-			[&](int) { set_fullscreen(!is_fullscreen()); } });
+			[&](int d) { cfg.crt_colours = wrap(cfg.crt_colours + d, crt::N_PRESETS); cfg_dirty = true; } });
+		p.items.push_back({ tr::D_BRIGHTNESS, tr::D_BRIGHTNESS_HELP,
+			[&] { const std::string n = tr::fill(tr::N_PERCENT, { { "n", std::to_string(cfg.brightness) } }); return crt_on() && crt_paint.failed() ? tr::fill(tr::NOT_WITH_RENDERER, { { "what", n } }) : n; },
+			[&](int d) { cfg.brightness = std::clamp(cfg.brightness + 5 * d, crt::BRIGHT_MIN, crt::BRIGHT_MAX); cfg_dirty = true; } });
+		p.items.push_back({ tr::D_GAMMA, tr::D_GAMMA_HELP,
+			[&] { const std::string n = tr::fill(tr::N_PERCENT, { { "n", std::to_string(cfg.gamma) } }); return crt_on() && crt_paint.failed() ? tr::fill(tr::NOT_WITH_RENDERER, { { "what", n } }) : n; },
+			[&](int d) { cfg.gamma = std::clamp(cfg.gamma + 5 * d, crt::GAMMA_MIN, crt::GAMMA_MAX); cfg_dirty = true; } });
+		p.items.push_back(back_item());
+		return p;
+	};
+	// (a list as a sentence has it, in the language: the pages' helps name their rows, the summaries their parts)
+	auto listed = [](std::initializer_list<std::string> parts) {
+		std::string out;
+		for (const std::string &x : parts) if (!x.empty()) out = out.empty() ? x : tr::fill(tr::LIST_PAIR, { { "a", out }, { "b", x } });
+		return out;
+	};
+	auto display_page = [&] {
+		menu_page p{ tr::P_DISPLAY, "", {} };
+		// Picture: its shape, and fullscreen or the window's size ("16:9, Fullscreen", "4:3, Window 2x")
+		p.items.push_back({ tr::D_PICTURE,
 #ifdef _WIN32
-		p.items.push_back({ tr::D_FS_MODE, tr::D_FS_MODE_HELP,
-			[&] { return std::string(fs_borderless() ? tr::D_BORDERLESS : tr::D_STANDARD); },
-			[&](int) {
-				const bool was = is_fullscreen();
-				if (was) set_fullscreen(false);
-				cfg.fs_exclusive = fs_borderless(); cfg_dirty = true;
-				if (was) set_fullscreen(true);
-				menu.refresh();
-			} });
+			listed({ tr::D_SHAPE, tr::D_WINDOW_SIZE, tr::D_FULLSCREEN, tr::D_FS_MODE, tr::D_HUD, tr::D_SHOW_FPS }),
+#else
+			listed({ tr::D_SHAPE, tr::D_WINDOW_SIZE, tr::D_FULLSCREEN, tr::D_HUD, tr::D_SHOW_FPS }),
 #endif
+			[&] {
+				return listed({ std::string(aspect_i ? ASPECT_NAMES[aspect_i] : tr::D_SUM_FIT.c_str()),
+				                is_fullscreen() ? std::string(tr::D_FULLSCREEN)
+				                : cfg.window_scale > 0 ? tr::fill(tr::D_SUM_WINDOW_N, { { "n", std::to_string(cfg.window_scale) } }) : std::string(tr::D_SUM_WINDOW) });
+			}, {}, [&] { menu.push(picture_page()); } });
+		// Quality: the render scale, the antialiasing in use if any, and the 3D renderer drawing ("3x, AA 2x, GPU")
+		p.items.push_back({ tr::D_QUALITY,
+#ifdef _WIN32
+			listed({ tr::D_SCALE, tr::D_AA, tr::D_RENDERER, tr::D_DRIVER, tr::D_BG_FILTER, tr::D_TEXTURES, tr::D_SMOOTH_MOTION, tr::D_VSYNC, tr::D_FRAME_LIMIT }),
+#else
+			listed({ tr::D_SCALE, tr::D_AA, tr::D_RENDERER, tr::D_BG_FILTER, tr::D_TEXTURES, tr::D_SMOOTH_MOTION, tr::D_VSYNC, tr::D_FRAME_LIMIT }),
+#endif
+			[&] {
+				const int k = aa_now();
+				return listed({ tr::fill(tr::N_X, { { "n", std::to_string(scale) } }),
+				                k > 1 ? tr::fill(tr::D_SUM_AA, { { "n", tr::fill(tr::N_X, { { "n", std::to_string(k) } }) } }) : std::string(),
+				                std::string(g3.on ? tr::R3D_GPU : tr::R3D_CPU) });
+			}, {}, [&] { menu.push(quality_page()); } });
+		// Screen filter and colours: the filter, and the CRT colours if on ("Scanlines", "Off, CRT colours")
+		p.items.push_back({ tr::D_SCREEN, listed({ tr::D_SCREEN_FILTER, tr::D_CRT_COLOURS, tr::D_BRIGHTNESS, tr::D_GAMMA }),
+			[&] {
+				const tr::text names[] = { tr::OFF, tr::D_SCANLINES, tr::D_CRT };
+				return listed({ std::string(names[cfg.filter]), cfg.crt_colours ? std::string(tr::D_CRT_COLOURS) : std::string() });
+			}, {}, [&] { menu.push(screen_page()); } });
+		p.items.push_back({ tr::D_FREECAM, tr::D_FREECAM_HELP,
+			[&] { return own_match() ? std::string(tr::D_FREECAM_NOT_NOW) : on_off(fc_menu >= 0 ? fc_menu == 1 : fc.on); },
+			[&](int) { if (!own_match()) fc_menu = (fc_menu >= 0 ? fc_menu == 1 : fc.on) ? 0 : 1; } });
 		p.items.push_back(back_item());
 		return p;
 	};
@@ -3773,9 +3827,16 @@ int main(int argc, char **argv)
 	// (slot 0 a control's key or button, 1 its second: Controls > Second keys, Second pad buttons)
 	auto key_of = [&](int p, int slot, int a) -> SDL_Scancode & { return slot ? cfg.ctl[p].key2[a] : cfg.ctl[p].key[a]; };
 	auto pad_of = [&](int p, int slot, int a) -> int & { return slot ? cfg.ctl[p].pad2[a] : cfg.ctl[p].pad[a]; };
-	auto keys_page = [&](int p, int slot) {
-		menu_page pg{ slot ? (p ? tr::P_P2_KEYBOARD2 : tr::P_P1_KEYBOARD2) : (p ? tr::P_P2_KEYBOARD : tr::P_P1_KEYBOARD), "", {} };
-		for (int a = 0; a < C_COUNT; a++)
+	// A player's keys: the directions, the buttons, Start, Coin and Menu; the four combinations (Guard + Punch and
+	// the rest) on a page of their own from it, Button combinations (15 rows and Back were more than a page's 14)
+	std::function<menu_page(int, int, bool)> keys_page = [&](int p, int slot, bool combos) {
+		menu_page pg{ combos ? tr::CTL_COMBOS : slot ? (p ? tr::P_P2_KEYBOARD2 : tr::P_P1_KEYBOARD2) : (p ? tr::P_P2_KEYBOARD : tr::P_P1_KEYBOARD), "", {} };
+		for (int a = 0; a < C_COUNT; a++) {
+			const bool combo = a >= C_GUARD_PUNCH && a <= C_ALL_THREE;
+			if (!combos && a == C_GUARD_PUNCH)
+				pg.items.push_back({ tr::CTL_COMBOS, tr::fill(tr::CTL_COMBOS_HELP, { { "list", listed({ control_name(C_GUARD_PUNCH), control_name(C_PUNCH_KICK), control_name(C_GUARD_KICK), control_name(C_ALL_THREE) }) } }),
+					{}, {}, [&, p, slot] { menu.push(keys_page(p, slot, true)); } });
+			if (combo != combos) continue;
 			pg.items.push_back({ control_name(a), a == C_COIN ? tr::CTL_KEY_HELP_COIN : a == C_MENU ? tr::CTL_KEY_HELP_MENU : tr::CTL_KEY_HELP,
 				[&, p, slot, a] { return key_name(key_of(p, slot, a)); }, {},
 				[&, p, slot, a] {
@@ -3794,6 +3855,7 @@ int main(int argc, char **argv)
 							return true;
 						});
 				}, false, [&, p, slot, a] { key_of(p, slot, a) = SDL_SCANCODE_UNKNOWN; cfg_dirty = true; } });
+		}
 		pg.items.push_back(back_item());
 		return pg;
 	};
@@ -4045,8 +4107,8 @@ int main(int argc, char **argv)
 		menu_page pg{ p ? tr::P_PLAYER_2 : tr::P_PLAYER_1, "", {} };
 		pg.items.push_back({ tr::CTL_PAD, tr::CTL_PAD_HELP,
 							 [&, p] { return pad_name(p); }, [&, p](int d) { cycle_pad(p, d); } });
-		pg.items.push_back({ tr::CTL_KEYBOARD, tr::CTL_KEYBOARD_HELP, {}, {}, [&, p] { menu.push(keys_page(p, 0)); } });
-		pg.items.push_back({ tr::CTL_KEYBOARD2, tr::CTL_KEYBOARD2_HELP, {}, {}, [&, p] { menu.push(keys_page(p, 1)); } });
+		pg.items.push_back({ tr::CTL_KEYBOARD, tr::CTL_KEYBOARD_HELP, {}, {}, [&, p] { menu.push(keys_page(p, 0, false)); } });
+		pg.items.push_back({ tr::CTL_KEYBOARD2, tr::CTL_KEYBOARD2_HELP, {}, {}, [&, p] { menu.push(keys_page(p, 1, false)); } });
 		pg.items.push_back({ tr::CTL_PAD_BUTTONS, tr::CTL_PAD_BUTTONS_HELP,
 							 {}, {}, [&, p] { menu.push(pad_buttons_page(p, 0)); } });
 		pg.items.push_back({ tr::CTL_PAD_BUTTONS2, tr::CTL_PAD_BUTTONS2_HELP,

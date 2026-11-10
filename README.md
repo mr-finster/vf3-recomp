@@ -175,8 +175,15 @@ game's own camera), with the game's plain colour above and below it.
 ## Menu
 
 - **Resume** and **Quit**.
-- **Display:** render scale (up to 6x), antialiasing (2x, 3x), the 3D renderer, picture shape (fit the window, 4:3,
-  16:10, 16:9, 21:9), background filter, distant textures (sharp, or as the arcade's), smooth motion, screen filter (scanlines, CRT), CRT colours (an arcade monitor's, as Supermodel's presets), Show FPS, free camera, window size, fullscreen and (on Windows) fullscreen mode.
+- **Display:** three pages, each shown on its row with what it's set to, and the free camera's On / Off:
+  - **Picture:** picture shape (fit the window, 4:3, 16:10, 16:9, 21:9), window size, fullscreen and (on Windows)
+    fullscreen mode, the HUD, Show FPS.
+  - **Quality:** render scale (up to 6x), antialiasing (2x, 3x), the 3D renderer and (on Windows) the graphics
+    driver, background filter, distant textures (sharp, or as the arcade's), smooth motion, V-Sync, frame limit.
+  - **Screen filter and colours:** screen filter (scanlines, CRT), CRT colours (an arcade monitor's, as
+    Supermodel's presets), brightness, gamma.
+  - **Free camera** (see [Free camera](#free-camera)).
+
   **Window size** makes the window a whole multiple of the arcade's 384 lines (1x 512 x 384 for the 4:3 picture,
   2x 1024 x 768, up to 4x: as many as your screen holds; a wider picture shape makes it as wide as the shape), each
   arcade line that many of your screen's: Render scale 1x with Window size 1x shows the arcade's 384 lines one to one,
@@ -198,7 +205,7 @@ game's own camera), with the game's plain colour above and below it.
   starting from a random one) or **Challenger** (the challenger picks the stage, so on every rematch
   the loser picks, as Japanese arcades had it; the stage's Dural version is easiest with Menu > Cheats > Dural's stage). Team Battle also lists **Variable** and **Full**, the arcade's own, not yet known (no stage screen seen between two players).
   **Debug mode** (issue #37, offline only): the arcade's hidden debug mode without its code: the CPU load, polygons, hits and damage on the screen; in a fight, P2 Guard held and P2 Start pause the game, P1 Start then runs a frame at a time, P1 Start with P2 Start held goes on.
-- **Controls:** each player's pad, keys and buttons.
+- **Controls:** each player's pad, keys and buttons (a key for two or three buttons at once: Button combinations, on the keys' page).
 - **Online:** a random opponent, host a match, join one, play by address, your name, input delay, the connection display (see below).
 - **Cheats:** **Dural on the select** and **Dural's stage** (see [Dural](#dural)).
 

@@ -645,7 +645,7 @@ void game_menu::show_help()
 		const std::string &h = m_sel < int(p.items.size()) && !p.items[m_sel].help.empty() ? p.items[m_sel].help : p.note;
 		note->SetInnerRML(escape(h));
 	}
-	// (a translation longer than its four lines: a size smaller, then another, till it fits, 11.2dp at the least. Not
+	// (a translation longer than its four lines: a size smaller, then another, till it fits, 14dp at the least. Not
 	// the English: its layout as it was)
 	note->RemoveProperty("font-size");
 	note->RemoveProperty("line-height");
@@ -653,7 +653,7 @@ void game_menu::show_help()
 	const float dp = m->ctx->GetDensityIndependentPixelRatio();
 	m->doc->UpdateDocument();
 	for (int step = 17; step >= 14 && note->GetScrollHeight() > note->GetClientHeight() + 1; step--) {
-		const float size = 0.8f * float(step);   // (menu.rcss's sizes: 0.8 of the old ones, the note's 14.4dp; 13.6 to 11.2 here)
+		const float size = float(step);   // (menu.rcss's note is 18dp: 17 to 14 here)
 		note->SetProperty("font-size", std::to_string(size * dp) + "px");
 		note->SetProperty("line-height", std::to_string(size * 20.0f / 18.0f * dp) + "px");
 		m->doc->UpdateDocument();

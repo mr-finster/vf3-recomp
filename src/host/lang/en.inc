@@ -117,6 +117,16 @@ T(D_FREECAM_NOT_NOW, "Not while playing online")   // (Free camera's value in a 
 T(FREECAM_ON_KEYS, "Free camera: WASD + mouse, or the sticks. F4 to leave")   // a toast as it turns on from the keyboard (key names as printed)
 T(FREECAM_ON_PAD, "Free camera: sticks, LT/RT down/up. Back + R3 to leave")   // ...from a pad
 T(FREECAM_NOT_ONLINE, "Free camera: not while playing online")   // a toast: F4 or View + R3 in a match of the player's own
+T(D_PICTURE, "Picture")   // Display > Picture: a page of its own (picture shape, window size, fullscreen, HUD, Show FPS); its value a summary: "16:9, Fullscreen"
+T(D_QUALITY, "Quality")   // Display > Quality: render scale, antialiasing, the 3D renderer...; its value "3x, AA 2x, GPU"
+T(D_SCREEN, "Screen filter and colours")   // Display > Screen filter and colours: screen filter, CRT colours, brightness, gamma; its value the filter's name
+T(LIST_PAIR, "{a}, {b}")   // two items of a list made by the code, {a} what came before (a summary's parts, a page's rows named in its help)
+T(D_SUM_FIT, "Fit")   // (Picture's summary: Picture shape's Fit the window, in a word)
+T(D_SUM_WINDOW_N, "Window {n}x")   // (Picture's summary: a window at Window size's {n} times)
+T(D_SUM_WINDOW, "Window")   // (...a window of any size)
+T(D_SUM_AA, "AA {n}")   // (Quality's summary: antialiasing, {n} its value: "AA 2x")
+T(CTL_COMBOS, "Button combinations")   // a player's keys > Button combinations: a page of its own (Guard + Punch, Punch + Kick, Guard + Kick, All three)
+T(CTL_COMBOS_HELP, "A key for two or three buttons at once: {list}.")   // ({list}: those four controls' names)
 T(D_VSYNC, "V-Sync")                         // Display > V-Sync (ja/ko/zh: the usual words for it)
 T(D_VSYNC_HELP, "On: each picture waits for your screen's next refresh, so none tears. Off: each is shown as soon as it's ready, a little sooner, but a line can tear across it. The game's speed is the same either way.")
 T(D_FRAME_LIMIT, "Frame limit")              // Display > Frame limit: Off, 30, 60, 120, 144 or the screen's refresh rate
