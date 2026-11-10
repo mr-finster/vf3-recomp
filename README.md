@@ -158,7 +158,9 @@ Mini) get a fighting stick's layout; Controls > Player 1 (or 2) > Set up buttons
 
 Fly a camera around the fight: <kbd>F4</kbd>, on a pad View (Back / Select) + R3, or Display > Free camera. It starts
 at the game's camera; the game goes on (or stays paused with <kbd>P</kbd> while you fly), only the picture changes, and
-the HUD is hidden. Not while playing online yourself (watching a match, yes). Off at each start.
+the HUD is hidden. Not while playing online yourself (watching a match, yes). Off at each start. The sky is the stage's own
+backdrop wherever you look (the game's map of it: on most stages it comes round four times a turn, as it does for the
+game's own camera), with the game's plain colour above and below it.
 
 | Keyboard and mouse | Pad | Does |
 | --- | --- | --- |

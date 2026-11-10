@@ -23,6 +23,12 @@ using video::Viewport;
 
 constexpr float PI = 3.14159265358979f;
 constexpr float DEG = PI / 180.0f;
+// The game's sky (the stage's 2D backdrop) as its camera turns: 3968 pixels a whole turn, across and up and down (the
+// backdrop's place the game keeps against its camera's yaw, frame by frame over the attract's fights: 631.3 pixels a
+// radian across, R2 0.98, whatever the view's angle; 3968 / 2 pi is 631.5. A stage's map is 992 pixels wide, a
+// quarter of it, or 3968). The backdrop on screen is that place's 3 frames late: sky_lead.h.
+constexpr int SKY_TURN = 3968;
+constexpr float SKY_PX = SKY_TURN / (2 * PI);
 
 // What moves it this step: move (right, up, forward: -1 to 1, the stick's or a key's), look in degrees (already
 // this step's), speed the multiplier (Shift, Alt, L3)
@@ -45,6 +51,10 @@ struct Cam
 	float u[3] = { 0, 1, 0 }, h0[3] = { 0, 0, -1 }, s0[3] = { 1, 0, 0 };   // E0's world up, and the level forward and right at yaw 0
 	float p[3] = {};   // the place (in E0)
 	float yaw = 0, pitch = 0;
+	float pitch0 = 0;   // (the game's camera's when anchored)
+	// The last picture's (apply): how far the free camera looks right and up of the game's camera, about the world's
+	// up (radians: the sky, a panorama round it, moves by these), and the view's pixels a radian (496 x 384)
+	float turn_yaw = 0, turn_pitch = 0, fx = 496, fy = 384;
 
 	static float dot(const float *a, const float *b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
 	static void cross(const float *a, const float *b, float *o) { o[0] = a[1] * b[2] - a[2] * b[1]; o[1] = a[2] * b[0] - a[0] * b[2]; o[2] = a[0] * b[1] - a[1] * b[0]; }
@@ -104,6 +114,7 @@ struct Cam
 		yaw = 0;
 		pitch = std::asin(std::clamp(fu, -1.0f, 1.0f));
 		pitch = std::clamp(pitch, -89 * DEG, 89 * DEG);
+		pitch0 = pitch;
 		anchored = true;
 	}
 
@@ -152,9 +163,9 @@ struct Cam
 
 	// The scene s seen from the free camera: its full-screen viewports' models through F (the game's camera R the
 	// main viewport's root; with prev, the frame before's scene smooth motion blended s from, t of the way, R
-	// blended the same). Anchors at the game's camera first if it isn't yet. sky_x, sky_y: F's turn, in the backdrop's
-	// pixels as SkyLead gives a turn (the sky layer moved that much the other way follows it). False: nothing to do
-	// (no game camera in it: the game's view).
+	// blended the same). Anchors at the game's camera first if it isn't yet. sky_x, sky_y: its turn from the game's
+	// camera (turn_yaw, turn_pitch) in the backdrop's pixels as SkyLead gives a turn (the sky layer moved that much the
+	// other way follows it). False: nothing to do (no game camera in it: the game's view).
 	bool apply(Scene &s, const Scene *prev, float t, float &sky_x, float &sky_y)
 	{
 		sky_x = sky_y = 0;
@@ -181,14 +192,22 @@ struct Cam
 			const float l0 = std::sqrt(dot(v.sun, v.sun)), l1 = std::sqrt(dot(sun, sun));
 			if (l1 > 1e-12f) for (int i = 0; i < 3; i++) v.sun[i] = sun[i] * (l0 / l1);
 		}
-		// (F's rotation, its scale taken out)
-		float c0[3] = { f.m[0], f.m[1], f.m[2] }, c2[3] = { f.m[8], f.m[9], f.m[10] };
-		normalise(c0);
-		normalise(c2);
-		const float fx = 496.0f / (mv.right - mv.left), fy = 384.0f / (mv.top - mv.bottom);
-		sky_x = 1.11f * fx * std::atan2(c2[0], c0[0]);
-		sky_y = 1.08f * fy * std::atan2(-c2[1], c2[2]);
-		if (!std::isfinite(sky_x) || !std::isfinite(sky_y)) sky_x = sky_y = 0;
+		// where the game's camera looks now, in E0 (its forward through R0 R^-1), as a yaw and a pitch about the
+		// world's up: the free camera's from it
+		const Mat4 g = r0 * inv;
+		float gf[3] = { -g.m[8], -g.m[9], -g.m[10] };
+		turn_yaw = turn_pitch = 0;
+		if (normalise(gf)) {
+			const float gp = std::asin(std::clamp(dot(gf, u), -1.0f, 1.0f));
+			const float gy = std::fabs(dot(gf, u)) < 0.9999f ? std::atan2(dot(gf, s0), dot(gf, h0)) : yaw;
+			turn_yaw = std::remainder(yaw - gy, 2 * PI);
+			turn_pitch = pitch - gp;
+		}
+		fx = 496.0f / (mv.right - mv.left);
+		fy = 384.0f / (mv.top - mv.bottom);
+		sky_x = SKY_PX * turn_yaw;
+		sky_y = -SKY_PX * turn_pitch;
+		if (!std::isfinite(sky_x) || !std::isfinite(sky_y)) sky_x = sky_y = turn_yaw = turn_pitch = 0;
 		return true;
 	}
 };

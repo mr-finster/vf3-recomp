@@ -108,9 +108,11 @@
 //                        start's grace (the governor's tests)
 //   VF3_TEST_RAM_LOG=f   the game's RAM hashed every 30 game frames to f (a display setting changes no frame)
 //   VF3_TEST_CHIME_WAV=f the match found chime's sound (the game's coin, made at the start) to f, a .wav
-//   VF3_TEST_FREECAM=... the free camera at these times: on@F, off@F, yaw@F=deg, pitch@F=deg, move@F=x,y,z (right,
+//   VF3_TEST_BANKS=1     log@F lists the backdrop map's banks too (where the table and the screen have each) and its rows'
+//   VF3_TEST_FREECAM=... the free camera at these times: on@F, off@F, yaw@F=deg, pitch@F=deg (from the game's camera as it
+//                        was when the free camera started, not added up), move@F=x,y,z (right,
 //                        world up, forward as it looks, in view units), reset@F, pause@F (P), shot@F=name (the window
-//                        to build/host_freecam_name.png), log@F (the game camera and the models' place), quit@F; F a game frame, counted on by the passes while the
+//                        to build/host_freecam_name.png), log@F (the game camera, the models' place, the sky's map), trace@F (each frame's camera and backdrop place), quit@F; F a game frame, counted on by the passes while the
 //                        game is stopped (paused), so a paused game's camera can be flown and shot
 #include "version.h"      // VF3_VERSION, VF3_DATE (made by the Makefile from git)
 #include "online.h"
@@ -1477,6 +1479,9 @@ struct Game
 			const float s0 = (bg_moved ? bg_dy : 0.0f) - sky.at_y(0), s1 = -sky.at_y(1);
 			auto lines = [](float v) { return v > 0.01f ? std::min(video::EY, int(std::ceil(v)) + 2) : 0; };
 			tiles.sky_past(board, lines(std::max(s0, s1)), lines(-std::min(s0, s1)), below_wide);
+			// (the free camera on: the stage's whole backdrop from the game's map, its sky wherever it looks)
+			if (builder.cull_off) tiles.panorama(board, pano);
+			else pano.ok = false;
 		}
 		part_ms[4] += ms_since(t);
 		bool full = false;   // (the 3D drawn full width: a stage; a close-up's or a title's 3D isn't)
@@ -1498,6 +1503,17 @@ struct Game
 	{
 		builder.build(board, scene[newest]);
 		view.scene[view.newest] = scene[newest];
+		tiles.panorama(board, pano);
+		publish_pano();
+	}
+	video::TileGen::Panorama pano;   // (the stage's whole backdrop, made while the free camera is on: TileGen::panorama)
+	void publish_pano()
+	{
+		video::TileGen::Panorama &v = view.pano;
+		const bool fresh = pano.ok && (v.version != pano.version || v.px.size() != pano.px.size());
+		if (fresh) v.px = pano.px;   // (the picture only when it was made again)
+		v.ok = pano.ok; v.w = pano.w; v.h = pano.h; v.x = pano.x; v.y = pano.y; v.above = pano.above; v.below = pano.below;
+		if (pano.ok) v.version = pano.version;
 	}
 	void forget_prev() { have_prev = false; view.have_prev = false; }
 
@@ -1514,6 +1530,7 @@ struct Game
 		int hud_flag_at[2][2] = { { -1, -1 }, { -1, -1 } };
 		video::DuralWide dural_wide;
 		video::SkyLead sky;
+		video::TileGen::Panorama pano;
 		std::vector<uint16_t> tex;
 		std::vector<m3::Model3::TexUpload> uploads;   // (the areas changed since a renderer last took them)
 		const video::Scene &cur() const { return scene[newest]; }
@@ -1532,6 +1549,7 @@ struct Game
 		view.bg_dy = bg_dy;
 		view.below = below;
 		view.above = above;
+		publish_pano();
 		memcpy(view.hud_flag_at, hud_flag_at, sizeof hud_flag_at);
 		view.dural_wide = dural_wide;
 		view.below_wide = below_wide;
@@ -2324,6 +2342,13 @@ int main(int argc, char **argv)
 	freecam::Cam fc;
 	bool fc_drawn = false;                  // (the picture on show is the free camera's)
 	uint32_t fc_sky_colour = 0xFF000000u;   // the stage's sky's colour (the layer's top line, averaged): past what the layer holds
+	// Its sky: the stage's whole backdrop from the game's map (TileGen::panorama), a texture made again when the
+	// picture is; fc_base: the sky's move without the free camera's turn (the lead, smooth motion's in-between)
+	SDL_Texture *tex_pano = nullptr;
+	int pano_w = 0, pano_h = 0;
+	uint64_t pano_version = 0;
+	bool pano_shown = false;
+	float fc_base_x = 0, fc_base_y = 0;
 	SDL_Texture *tex3d = nullptr, *tex_below = nullptr, *tex_above = nullptr;
 	bool g3_shown = false;   // the picture on show is the GPU's
 	uint32_t side_colour[2] = { 0xFF000000u, 0xFF000000u };   // widescreen's bars beside the 2D (left, right)
@@ -2513,8 +2538,25 @@ int main(int argc, char **argv)
 			if (fc.apply(seen, s == &between ? &game.view.prev() : nullptr, float(t), kx, ky)) {
 				s = &seen;
 				fc_drawn = true;
+				fc_base_x = bg_shift_x;
+				fc_base_y = bg_shift_y;
 				bg_shift_x -= kx;
 				bg_shift_y -= ky;
+			}
+		}
+		pano_shown = false;
+		if (const video::TileGen::Panorama &pn = game.view.pano; fc_drawn && pn.ok && pn.w > 0 && pn.w <= 8192 && pn.h > 0 && pn.px.size() == size_t(pn.w) * pn.h) {
+			if (!tex_pano || pano_w != pn.w || pano_h != pn.h) {
+				if (tex_pano) SDL_DestroyTexture(tex_pano);
+				tex_pano = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING, pn.w, pn.h);
+				if (tex_pano) SDL_SetTextureBlendMode(tex_pano, SDL_BLENDMODE_BLEND);
+				pano_w = pn.w; pano_h = pn.h;
+				pano_version = 0;
+			}
+			if (tex_pano) {
+				SDL_SetTextureScaleMode(tex_pano, cfg.smooth_bg ? SDL_SCALEMODE_LINEAR : SDL_SCALEMODE_NEAREST);
+				if (pano_version != pn.version) { send_2d(tex_pano, pn.px, pn.w, pn.h); pano_version = pn.version; }
+				pano_shown = true;
 			}
 		}
 		// The 2D opaque over all of the picture (the grade's and the ranking's boards after a game, their name entry):
@@ -2697,6 +2739,66 @@ int main(int argc, char **argv)
 		// distortion at the top), else the screen mirrored at its edge. Further out than the layer reaches, the layer
 		// mirrored at its edge, carrying the sky on smoothly. (Issue #35: they were its edge row and column stretched,
 		// vertical streaks across the top of the sky and smears at the sides.)
+		// The free camera's sky: the stage's whole backdrop (the game's map of it, TileGen::panorama) where the camera
+		// looks: the screen's place in it, moved by the camera's turn from the game's as the game moves it with its own
+		// (freecam::SKY_TURN: 3968 pixels a turn of the camera, across and up, whatever the view's angle). Across,
+		// the game wraps its map: a stage's is 124 tiles, 992 pixels, a quarter of a turn (the game's own sky comes
+		// round four times a turn), or 496 tiles, a whole one. So a map that goes a whole number of times into a turn
+		// wraps here as the game's does; one that doesn't goes as far as it has and fades into the sky's colour over a
+		// wide band. Above the map the game's own filler (its colour), below it the same; a tile whose bank isn't
+		// loaded, the sky's colour.
+		if (fc_drawn && pano_shown && tex_pano) {
+			const video::TileGen::Panorama &pn = game.view.pano;
+			const bool wraps = freecam::SKY_TURN % pn.w == 0;
+			const float ppr = freecam::SKY_PX;
+			const float x0 = float(pn.x) - fc_base_x + fc.turn_yaw * ppr + l, y0 = float(pn.y) - fc_base_y - fc.turn_pitch * ppr;
+			const float n = r - l;   // (the picture's width in the layer's pixels; x0, y0: its top left's place in the map)
+			auto set = [&](uint32_t c) { SDL_SetRenderDrawColor(ren, uint8_t(c), uint8_t(c >> 8), uint8_t(c >> 16), 255); };
+			const uint32_t sky = pn.above ? pn.above : fc_sky_colour, ground = pn.below ? pn.below : sky;
+			auto rect = [&](float u0, float v0, float u1, float v1) { return SDL_FRect{ mid.x + (l + u0) * k, mid.y + v0 * k, (u1 - u0) * k, (v1 - v0) * k }; };
+			// the rows: above the map, the map's, below it (v: the picture's lines)
+			const float va = std::clamp(-y0, 0.0f, float(video::H)), vb = std::clamp(float(pn.h) - y0, 0.0f, float(video::H));
+			set(sky);
+			const SDL_FRect top = rect(0, 0, n, vb);   // (under the map's rows too: a tile not loaded shows it)
+			if (vb > 0) SDL_RenderFillRect(ren, &top);
+			set(ground);
+			const SDL_FRect bottom = rect(0, vb, n, float(video::H));
+			if (vb < video::H) SDL_RenderFillRect(ren, &bottom);
+			if (vb - va > 0.01f) {
+				const float q0 = y0 + va, q1 = y0 + vb;
+				if (wraps) {
+					for (float u = 0; u < n;) {
+						float p = std::fmod(x0 + u, float(pn.w));
+						if (p < 0) p += float(pn.w);
+						const float m = std::min(n - u, float(pn.w) - p);
+						if (m < 0.01f) { u += 0.01f; continue; }
+						const SDL_FRect src{ p, q0, m, q1 - q0 }, dst = rect(u, va, u + m, vb);
+						SDL_RenderTexture(ren, tex_pano, &src, &dst);
+						u += m;
+					}
+				} else {
+					// (not a full turn: its part in view, its ends fading out over BAND pixels)
+					constexpr float BAND = 192;
+					const float a = std::max(x0, 0.0f), b = std::min(x0 + n, float(pn.w));
+					if (b > a) {
+						const float cuts[4] = { a, std::clamp(BAND, a, b), std::clamp(float(pn.w) - BAND, a, b), b };
+						auto alpha = [&](float p) { return std::clamp(std::min(p, float(pn.w) - p) / BAND, 0.0f, 1.0f); };
+						for (int i = 0; i < 3; i++) {
+							const float p0 = cuts[i], p1 = cuts[i + 1];
+							if (p1 - p0 < 0.01f) continue;
+							const SDL_FRect d = rect(p0 - x0, va, p1 - x0, vb);
+							const SDL_FColor c0{ 1, 1, 1, alpha(p0) }, c1{ 1, 1, 1, alpha(p1) };
+							const SDL_Vertex vx[4] = {
+								{ { d.x, d.y }, c0, { p0 / pn.w, q0 / pn.h } }, { { d.x + d.w, d.y }, c1, { p1 / pn.w, q0 / pn.h } },
+								{ { d.x + d.w, d.y + d.h }, c1, { p1 / pn.w, q1 / pn.h } }, { { d.x, d.y + d.h }, c0, { p0 / pn.w, q1 / pn.h } } };
+							static const int idx[6] = { 0, 1, 2, 0, 2, 3 };
+							SDL_RenderGeometry(ren, tex_pano, vx, 4, idx, 6);
+						}
+					}
+				}
+			}
+			return;
+		}
 		const float sx = std::clamp(bg_shift_x, -float(video::WW) + 1, float(video::WW) - 1);
 		const float sy = std::clamp(bg_shift_y, -float(video::H) + 1, float(video::H) - 1);
 		// The free camera turned further than the layer reaches (on a stage): the sky faded to its colour, over half a
@@ -4186,6 +4288,7 @@ int main(int argc, char **argv)
 		SDL_DestroyTexture(tex_below);
 		SDL_DestroyTexture(tex_above);
 		if (dural_tex) { SDL_DestroyTexture(dural_tex); dural_tex = nullptr; }   // (made again when next drawn)
+		if (tex_pano) { SDL_DestroyTexture(tex_pano); tex_pano = nullptr; pano_w = pano_h = 0; }   // (the free camera's sky: made again when next drawn)
 		make_2d(tex_below, video::WW, video::HT);
 		SDL_SetTextureScaleMode(tex_below, cfg.smooth_bg ? SDL_SCALEMODE_LINEAR : SDL_SCALEMODE_NEAREST);
 		make_2d(tex_above, video::W);
@@ -5083,7 +5186,16 @@ int main(int argc, char **argv)
 			pass_kind = std::max(pass_kind, 1);
 			half_ns = SDL_GetTicksNS() - th;
 		}
-		if (pause_pending && !half) { pause_pending = false; paused = true; }   // (P: the frame it came in done)
+		if (pause_pending && !half) {   // (P: the frame it came in done)
+			pause_pending = false;
+			paused = true;
+			// (the free camera turned on since that frame was started: built again as it sees it, nothing culled, its sky)
+			if (fc.on && !online.playing()) {
+				if (game.emu_thread.joinable()) game.job_wait();
+				game.builder.cull_off = true;
+				game.rebuild_view();
+			}
+		}
 		// The picture: smooth motion's, between the last two frames, at every pass; else the newest frame's
 		// (in a match, each frame as it is: a picture between two frames the rollback may yet change showed the
 		// change as a ghost; and the in-between's time is better spent on the frames)
@@ -5250,6 +5362,21 @@ int main(int argc, char **argv)
 				}
 				return v;
 			}();
+			// (trace@F: from then each frame's camera (its forward in the world, from the root matrix) and the game's own
+			// place of the backdrop, in pixels: how the game turns its sky with its camera)
+			static bool trace = false;
+			static uint64_t traced = 0;
+			if (trace && game_frame != traced) {
+				traced = game_frame;
+				const video::Scene &sc = game.view.cur();
+				const int k = freecam::Cam::main_viewport(sc);
+				if (k >= 0 && board.profile->backdrops.place) {
+					const video::Mat4 &r = sc.viewports[size_t(k)].root;
+					fprintf(stderr, "(trace) %llu fwd %.5f %.5f %.5f place %d %d fx %.2f\n", (unsigned long long)game_frame, -r.m[2], -r.m[6], -r.m[10],
+					        int(int32_t(board.peek32(board.profile->backdrops.place + 4))), int(int32_t(board.peek32(board.profile->backdrops.place + 8))),
+					        496.0f / (sc.viewports[size_t(k)].right - sc.viewports[size_t(k)].left));
+				}
+			}
 			static uint64_t stopped_passes = 0;
 			if (stopped) stopped_passes++;
 			const uint64_t clock = game_frame + stopped_passes;
@@ -5268,6 +5395,12 @@ int main(int argc, char **argv)
 				auto info = [&] {
 					const video::Scene &sc = game.view.cur();
 					const int k = freecam::Cam::main_viewport(sc);
+					{
+						const video::TileGen::Panorama &pn = game.view.pano;
+						fprintf(stderr, "(test) the free camera's sky: the map %s, %d x %d pixels, the screen at %d, %d; a turn %d pixels (%.3f of the map), the view's %.1f x %.1f pixels a radian; above %08x below %08x; turned %.1f, %.1f degrees\n%s",
+						        pn.ok ? "found" : "not found", pn.w, pn.h, pn.x, pn.y, freecam::SKY_TURN, pn.w ? float(freecam::SKY_TURN) / pn.w : 0.0f, fc.fx, fc.fy, pn.above, pn.below,
+						        fc.turn_yaw / freecam::DEG, fc.turn_pitch / freecam::DEG, game.tiles.backdrop_list(board).c_str());
+					}
 					if (k < 0) { fprintf(stderr, "(test) the free camera: no game camera in this scene\n"); return; }
 					const video::Viewport &vp = sc.viewports[size_t(k)];
 					std::vector<float> d;
@@ -5288,13 +5421,15 @@ int main(int argc, char **argv)
 				else if (e.what == "pause") toggle_pause();
 				else if (e.what == "reset") fc.anchored = false;
 				else if (e.what == "log") info();
+				else if (e.what == "trace") trace = !trace;
 				else if (e.what == "quit") running = false;
 				else if (e.what == "shot") { if (stopped) draw_picture(1.0, false); compose(); menu.render(false); read_window("build/host_freecam_" + (e.arg.empty() ? std::to_string(e.at) : e.arg) + ".png"); }
 				else if (e.what == "yaw" || e.what == "pitch") {
 					anchor();
-					freecam::Step st;
-					(e.what == "yaw" ? st.yaw : st.pitch) = float(atof(e.arg.c_str()));
-					fc.step(st, 0);
+					// (from the game's camera as it was when anchored: yaw@F=180 looks behind it, whatever came before)
+					const float v = float(atof(e.arg.c_str())) * freecam::DEG;
+					if (e.what == "yaw") fc.yaw = v;
+					else fc.pitch = std::clamp(fc.pitch0 + v, -89 * freecam::DEG, 89 * freecam::DEG);
 				}
 				else if (e.what == "move") {
 					anchor();
@@ -5480,6 +5615,7 @@ int main(int argc, char **argv)
 	if (glass) SDL_DestroyTexture(glass);
 	if (crt_tex) SDL_DestroyTexture(crt_tex);
 	crt_paint.release();
+	if (tex_pano) SDL_DestroyTexture(tex_pano);
 	SDL_DestroyTexture(tex_below);
 	SDL_DestroyTexture(tex_above);
 	if (dural_tex) SDL_DestroyTexture(dural_tex);
