@@ -204,6 +204,8 @@ game's own camera), with the game's plain colour above and below it.
   **Stage select** has the arcade's own options by name: **Off** (each two-player match on the game's next stage,
   starting from a random one) or **Challenger** (the challenger picks the stage, so on every rematch
   the loser picks, as Japanese arcades had it; the stage's Dural version is easiest with Menu > Cheats > Dural's stage). Team Battle also lists **Variable** and **Full**, the arcade's own, not yet known (no stage screen seen between two players).
+  **Stage select**'s Variable and Full were never seen to show a stage screen between two players. **CPU opponents'
+  order** is offline only: online never plays the computer.
   **Debug mode** (issue #37, offline only): the arcade's hidden debug mode without its code: the CPU load, polygons, hits and damage on the screen; in a fight, P2 Guard held and P2 Start pause the game, P1 Start then runs a frame at a time, P1 Start with P2 Start held goes on.
 - **Controls:** each player's pad, keys and buttons (a key for two or three buttons at once: Button combinations, on the keys' page).
 - **Online:** a random opponent, host a match, join one, play by address, your name, input delay, the connection display (see below).
@@ -225,6 +227,9 @@ Virtua Fighter 3 Team Battle (MAME's `vf3tb`, 1997), three fighters a side, play
   on its own.
 - **Press Start in a fight** to change the camera: the normal view, close behind your opponent, high behind you, and
   from above (Team Battle's own feature).
+- **1 vs 1 or 3 vs 3:** Menu > Game > **Team Battle mode** is what Start begins (hold Up as you press Start for
+  3 vs 3 instead, or Down for 1 vs 1). A player joining plays the mode already on, and the intro follows it as the
+  arcade's does (its sunset in 3 vs 3).
 - **Online:** Team Battle plays only Team Battle (and Virtua Fighter 3 only Virtua Fighter 3).
 - **The CPU's teams** are new each time you play: the game's random numbers start somewhere new at each launch,
   as on a cabinet that's been on all day.

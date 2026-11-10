@@ -114,6 +114,7 @@
 //                        (a recording goes on through a pause: a picture each pass, the sound silent meanwhile).
 //                        VF3_TEST_FREECAM_PATH_LOG=1: every 30 ticks where the game's camera is round the fighters, as a
 //                        path's "rel" key has it (for writing one)
+//   VF3_TEST_CRT_FAILED=1 Screen filter and colours' rows as with a renderer that can't do the CRT colours (the line under them)
 //   VF3_TEST_BANKS=1     log@F lists the backdrop map's banks too (where the table and the screen have each) and its rows'
 //   VF3_TEST_FREECAM=... the free camera at these times: on@F, off@F, yaw@F=deg, pitch@F=deg (from the game's camera as it
 //                        was when the free camera started, not added up), move@F=x,y,z (right,
@@ -3536,16 +3537,23 @@ int main(int argc, char **argv)
 			[&] {
 				const tr::text names[] = { tr::OFF, tr::CRT_SEGA, tr::CRT_SONY, tr::CRT_NTSC_JP, tr::CRT_NTSC_US, tr::CRT_PAL };
 				static_assert(sizeof names / sizeof names[0] == crt::N_PRESETS, "a name for each of crt::PRESETS");
-				const std::string n = names[cfg.crt_colours];
-				return crt_on() && crt_paint.failed() ? tr::fill(tr::NOT_WITH_RENDERER, { { "what", n } }) : n;
+				return std::string(names[cfg.crt_colours]);
 			},
 			[&](int d) { cfg.crt_colours = wrap(cfg.crt_colours + d, crt::N_PRESETS); cfg_dirty = true; } });
+		// (a renderer that can't do the CRT colours' pass: said in a line under each of its three rows, their values as set)
+		auto not_with_renderer = [&] {
+			static const bool test = getenv("VF3_TEST_CRT_FAILED") != nullptr;   // (tests: as a renderer that can't)
+			return crt_on() && (crt_paint.failed() || test) ? std::string(tr::D_NOT_WITH_RENDERER) : std::string();
+		};
+		p.items.back().below = not_with_renderer;
 		p.items.push_back({ tr::D_BRIGHTNESS, tr::D_BRIGHTNESS_HELP,
-			[&] { const std::string n = tr::fill(tr::N_PERCENT, { { "n", std::to_string(cfg.brightness) } }); return crt_on() && crt_paint.failed() ? tr::fill(tr::NOT_WITH_RENDERER, { { "what", n } }) : n; },
+			[&] { return tr::fill(tr::N_PERCENT, { { "n", std::to_string(cfg.brightness) } }); },
 			[&](int d) { cfg.brightness = std::clamp(cfg.brightness + 5 * d, crt::BRIGHT_MIN, crt::BRIGHT_MAX); cfg_dirty = true; } });
+		p.items.back().below = not_with_renderer;
 		p.items.push_back({ tr::D_GAMMA, tr::D_GAMMA_HELP,
-			[&] { const std::string n = tr::fill(tr::N_PERCENT, { { "n", std::to_string(cfg.gamma) } }); return crt_on() && crt_paint.failed() ? tr::fill(tr::NOT_WITH_RENDERER, { { "what", n } }) : n; },
+			[&] { return tr::fill(tr::N_PERCENT, { { "n", std::to_string(cfg.gamma) } }); },
 			[&](int d) { cfg.gamma = std::clamp(cfg.gamma + 5 * d, crt::GAMMA_MIN, crt::GAMMA_MAX); cfg_dirty = true; } });
+		p.items.back().below = not_with_renderer;
 		p.items.push_back(back_item());
 		return p;
 	};

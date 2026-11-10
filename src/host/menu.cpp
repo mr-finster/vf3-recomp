@@ -165,14 +165,14 @@ void game_menu::set_net(const net_cells &c)
 	std::string rml = "<div class=\"row\"><div class=\"c name\" style=\"width: 118dp;\"><span class=\"v\">" + escape(name) + "</span><span class=\"dot\">" + (m->mono ? "\xE2\x97\x8F" : "\xE2\x80\xA2") + "</span></div>";   // (a circle of the font: drawn round at any size; Barlow has only the bullet)
 	const std::string watchers = c.watchers > 0 ? cell(tr::CELL_WATCHING.c_str(), std::to_string(std::min(c.watchers, 99999)), 112, "eye") : "";   // (how many watch, if any: drawn only)
 	if (c.watching) {   // (a watched match: one cell, watching and how many, and the score)
-		rml = "<div class=\"row\"><div class=\"c name\" style=\"width: 150dp;\"><span class=\"v\">" + escape(c.watchers > 0 ? tr::fill(tr::CELL_WATCHING_N, { { "n", std::to_string(std::min(c.watchers, 99999)) } }) : std::string(tr::CELL_WATCHING)) +
-		      "</span><span class=\"dot\">" + (m->mono ? "\xE2\x97\x8F" : "\xE2\x80\xA2") + "</span></div>" + cell("", c.score, 236, "mid") + "</div>";
+		rml = "<div class=\"row\"><div class=\"c name\" style=\"width: 166dp;\"><span class=\"v\">" + escape(c.watchers > 0 ? tr::fill(tr::CELL_WATCHING_N, { { "n", std::to_string(std::min(c.watchers, 99999)) } }) : std::string(tr::CELL_WATCHING)) +
+		      "</span><span class=\"dot\">" + (m->mono ? "\xE2\x97\x8F" : "\xE2\x80\xA2") + "</span></div>" + cell("", c.score, 220, "mid") + "</div>";
 		show_net(rml, c.level <= 0 ? "cells good" : "cells fair");
 		return;
 	}
 	if (c.interrupted) rml += cell("", tr::CELL_INTERRUPTED, 222, "lost");
 	else rml += cell(tr::CELL_PING.c_str(), std::to_string(std::min(c.ping, 9999)), 86) + cell(tr::CELL_DELAY.c_str(), std::to_string(c.delay), 76) + cell(tr::CELL_RB.c_str(), std::to_string(c.rollback), 50);
-	rml += cell("", c.relay ? tr::CELL_RELAY : tr::CELL_DIRECT, 66, c.relay ? "via relay" : "via direct") + watchers + "</div>";
+	rml += cell("", c.relay ? tr::CELL_RELAY : tr::CELL_DIRECT, 78, c.relay ? "via relay" : "via direct") + watchers + "</div>";
 	if (c.detailed && !c.interrupted)   // (above it: the first row stays where it is either way)
 		rml = "<div class=\"row two\">" + cell(tr::CELL_JITTER.c_str(), num("%.0f", c.jitter), 92) + cell(tr::CELL_RB_AVG.c_str(), num("%.1f", c.rb_avg), 92) +
 		      cell(tr::CELL_AHEAD.c_str(), num("%+.1f", c.ahead), 86) + cell(tr::CELL_FRAME.c_str(), num("%.1f", c.frame_ms), 92) + "</div>" + rml;
@@ -444,6 +444,9 @@ std::string game_menu::page_fit()
 		};
 		if (const float w = widest(note); w > note->GetClientWidth() + 1.5f)
 			return "the help's longest line is " + n(w) + " wide, the panel " + n(note->GetClientWidth());
+		// (or more lines than its four, at the smallest size a long translation gets: cut, its last line at the hint's)
+		if (note->GetScrollHeight() > note->GetClientHeight() + 1.5f)
+			return "the help needs " + n(note->GetScrollHeight()) + ", " + n(note->GetClientHeight()) + " shown: it's cut";
 	}
 	const float bottom = foot->GetAbsoluteOffset(Rml::BoxArea::Border).y + foot->GetBox().GetSize(Rml::BoxArea::Border).y;
 	if (bottom > float(m->ctx->GetDimensions().y) + 1.5f) return "the panel ends at " + n(bottom) + ", past the window's " + n(float(m->ctx->GetDimensions().y));

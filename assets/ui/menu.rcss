@@ -3,8 +3,8 @@
    Gradients are the vertex-colour kind (horizontal-gradient): the SDL renderer has no shaders.
 
    One column with a fixed space for each part, so nothing overlaps whatever the page:
-     top 24 + title 53 + crumb 28 + rows 14 x 32 = 448 + note 8 + 80 (4 lines) + hint 8 + 22
-     + version 4 + 18 = 693dp of 720. Every page fits whole, so none scrolls (a scroll can't be seen: the
+     top 24 + title 53 + crumb 28 + rows 14 x 32 = 448 + note 8 + 80 (4 lines) + hint 10 + 22
+     + version 4 + 18 = 695dp of 720. Every page fits whole, so none scrolls (a scroll can't be seen: the
      rows below looked missing): a page is 14 rows at most, and one that would be longer is split into pages
      of its own (Display's Picture, Quality and Screen filter and colours; a player's keys and buttons).
      menutest fails a page that doesn't fit. A long value is cut, never drawn over its label.
@@ -159,7 +159,7 @@ div { display: block; }
 }
 
 #hint {
-	margin-top: 8dp;
+	margin-top: 10dp;         /* (a help of four full lines clear of it) */
 	height: 22dp;
 	line-height: 22dp;
 	font-size: 17dp;
