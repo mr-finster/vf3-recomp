@@ -423,6 +423,15 @@ void Online::room2_react()
 	RoomMember &m = *r2;
 	// at the table with an opponent: their session, if it's not the one on (a new pair; seated again cold)
 	if (m.pos == 0 && m.seated && m.seat.token != m.played_token && m.seat.token != m.failed_token) { room2_seat(); return; }
+	// (the session lost, the lobby's word since: the same two play on, its token kept (a lost match given to the holder,
+	// nobody next): a fresh session with it, both sides alike)
+	if (m.pos == 0 && m.seated && !m.in_seat && !m.retry_token.empty() && m.seat.token == m.retry_token && m.phase == "PLAYING" && m.n != m.reported_n) {
+		log("Rooms 2: the same two play on (match " + std::to_string(m.n) + "): their session started again");
+		m.retry_token.clear();
+		m.played_token.clear();
+		room2_seat();
+		return;
+	}
 	// at the table alone (the other left, or lost and gone): a session still on with them ended
 	if (m.pos == 0 && !m.seated && m.in_seat) {
 		log("Rooms 2: the other player's no longer at the table: the session ended");
@@ -533,6 +542,7 @@ void Online::room2_session_ended(const vfnet::Session::Event &e)
 			room2_send("result", ",\"winner\":\"" + std::string(res) + "\",\"n\":" + std::to_string(m.n));
 		}
 		log("Rooms 2: the session with " + who + " ended: " + e.text + (res ? std::string(": result ") + res : moved ? ": the room's line moved on" : ""));
+		if (res) m.retry_token = m.played_token;
 		ended(moved ? tr::line(tr::OPPONENT_LEFT, { { "name", who } })
 		      : why == vfnet::Session::End::opponent_quit ? tr::line(tr::OPPONENT_LEFT, { { "name", who } })
 		      : why == vfnet::Session::End::disconnected ? tr::line(tr::OPPONENT_STOPPED, { { "name", who } })

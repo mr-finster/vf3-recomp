@@ -263,6 +263,7 @@ private:
 	vfnet::Link &lagged(vfnet::Link &l);
 	std::unique_ptr<vfnet::RoomLink> room;
 	std::unique_ptr<vfnet::LagLink> lag;   // (tests' worse network: VF3_NET_LAG)
+	std::unique_ptr<vfnet::Link> drop;     // (tests, VF3_TEST_NET_DROP: the connection gone a while, both games still up)
 	std::unique_ptr<vfnet::Session> session;
 	Phase ph = Phase::off;
 	Step st = Step::none;

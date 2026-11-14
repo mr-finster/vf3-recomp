@@ -91,6 +91,8 @@ struct RoomMember
 	bool in_seat = false;
 	bool test = false;              // (menutest's made-up state: shown, nothing done about it)           // (a seat's session on (connecting or playing): the link is Online's room meanwhile)
 	std::string played_token;       // (the seat's token whose session was started: one session a seat)
+	std::string retry_token;        // (a seat's session lost (cut off, out of step): the lobby playing on with the same pair and token
+	                                // (the holder kept, nobody next) has it started again, fresh)
 	std::string failed_token;       // (a seat whose session ended before it began: not tried again; the lobby moves on)
 	bool started_said = false;      // (started sent for played_token)
 	int reported_n = -1;            // (the match number a result was sent for)

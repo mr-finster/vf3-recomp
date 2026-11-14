@@ -166,7 +166,10 @@ public:
 	void advance(const uint16_t input[2], bool resim) override;
 	// (the state's hash without its header: that's this board's own bookkeeping, not the game's)
 	uint64_t hash(const std::vector<uint8_t> &state);
-	size_t hash_skip() const override { return m3::Model3::STATE_HEADER; }
+	// (tests, VF3_TEST_DESYNC_AT=F: in this process's first match, from its frame F the hash skips a byte more, so the
+	// two sides' desync check disagrees, as a real desync's would; the game itself the same)
+	size_t hash_skip() const override { return m3::Model3::STATE_HEADER + (test_desync_from && frame >= test_desync_from ? 1 : 0); }
+	uint32_t test_desync_from = 0;
 	// (a watched match's snapshot: this build's states, as its online version and the state's own version and layout
 	// make them; another number for any other)
 	uint32_t snap_format() const override;

@@ -88,6 +88,10 @@
 //   VF3_ROOM2_LEAVE_AT=N leaves the room (Leave room) at pass N
 //   VF3_ROOM2_SHOT=1     the window to build/host_room2_ready.png 1 s into the ready check (its banner)
 //   VF3_TEST_VS_ROUNDS=n online matches first to n rounds (the host's, which both play), not 3: shorter matches
+//   VF3_TEST_NET_DROP=S,D[,N] every packet of a room's session dropped from S s after it's made for D s, each way, the
+//                        first N sessions (1): the connection lost with both games still up
+//   VF3_TEST_DESYNC_AT=F this process's first room session out of step from its frame F (its desync check's hash, not
+//                        the game, differs)
 //   VF3_MENU_KEYS=k,...  presses these keys (esc, up, down, left, right, enter, or SDL key names) 6 passes of the
 //                        loop apart from pass 30; "shot" among them: the window then, to build/host_window_menu_N.png
 //                        (N its place in the list, from 1). VF3_MENU_KEYS_FROM=F: from 30 passes after game frame F

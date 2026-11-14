@@ -575,18 +575,57 @@ std::string Online::me_json(const std::string &extra) const
 	       (random ? std::string(",\"qm_listed\":") + (started_with.quick_listed ? "true" : "false") : std::string()) + extra + "}";
 }
 
+// Tests: VF3_TEST_NET_DROP=S,D[,N]: every packet each way dropped from S seconds after a session's made for D seconds, the
+// first N sessions (default 1): a connection lost with both games still up (a router's hiccup), as a real one is
+class DropLink : public vfnet::Link
+{
+public:
+	DropLink(vfnet::Link &in, double from_s, double for_s) : inner(in), from(now() + from_s * 1000), to(from + for_s * 1000) {}
+	void send(const uint8_t *p, size_t n) override { if (!dropping()) inner.send(p, n); }
+	bool recv(std::vector<uint8_t> &out) override
+	{
+		while (inner.recv(out)) if (!dropping()) return true;
+		return false;
+	}
+	void lock() override { inner.lock(); }
+private:
+	vfnet::Link &inner;
+	double from, to;
+	static double now() { return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
+	bool dropping() const { const double t = now(); return t >= from && t < to; }
+};
+
 vfnet::Link &Online::lagged(vfnet::Link &l)
 {
 	drop_session();   // (the session before, on the old lag link, gone first)
+	drop.reset();
 	lag = vfnet::LagLink::from_env(l);   // (tests: VF3_NET_LAG)
-	if (!lag) return l;
-	log_line(lag->describe());
-	return *lag;
+	vfnet::Link &base = lag ? static_cast<vfnet::Link &>(*lag) : l;
+	if (lag) log_line(lag->describe());
+	static int drops_left = -1;
+	if (const char *e = getenv("VF3_TEST_NET_DROP"); e && *e) {
+		double s = 0, d = 0, n = 1;
+		sscanf(e, "%lf,%lf,%lf", &s, &d, &n);
+		if (drops_left < 0) drops_left = int(n);
+		if (drops_left > 0 && d > 0) {
+			drops_left--;
+			drop = std::make_unique<DropLink>(base, s, d);
+			log_line("(test) this session's packets dropped from " + std::to_string(int(s)) + " s for " + std::to_string(int(d)) + " s, each way");
+			return *drop;
+		}
+	}
+	return base;
 }
 
 void Online::room_session(bool host)
 {
 	if (adapter.settle) adapter.settle();
+	{   // (tests, VF3_TEST_DESYNC_AT=F: this process's first room session out of step from its frame F, the hash's way)
+		static int desync_sessions = 0;
+		const char *e = getenv("VF3_TEST_DESYNC_AT");
+		adapter.test_desync_from = e && *e && desync_sessions++ == 0 ? uint32_t(std::max(1, atoi(e))) : 0;
+		if (adapter.test_desync_from) log_line("(test) this session's desync check out of step from frame " + std::to_string(adapter.test_desync_from));
+	}
 	vfnet::Config c = config(started_with);
 	c.token = room_token;
 	snapper.stop();
