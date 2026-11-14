@@ -1,33 +1,45 @@
-// VF3_WIDE_SELECT's option 2 (wide_select.h): the sides as a content-aware fill of the screen's own background.
-// Each side is the background's colour at the edge, line by line (the edge's own columns averaged: its gradient, and
-// the lines and bands that reach the edge, carried straight on), plus its texture: the background's detail (each
-// pixel less its line's local mean, 17 pixels across), quilted from the plate's background anywhere on the screen
-// (8 x 8 blocks of solid tiles whose colour is near the edge's: the photo under the letters and the 3D, not the
-// portraits or the stage's stills). Quilting (Efros and Freeman's): 32 x 32 patches overlapping by 8, out from the
-// edge's own 12 columns mirrored (no seam at the 4:3 edge), each patch the source window whose detail best matches
-// what's made where they overlap, near its own lines (the bands line up), joined along the overlap's least-error path
-// (a cut, not a blend). Made once a screen, on a thread of its own, once the screen has settled (its fade in); then
-// each picture is the edge's colours of that picture plus the detail made (scaled with the screen's brightness: its
-// fades), so the cost each picture is a few adds a pixel.
+// VF3_WIDE_SELECT's option 2 (wide_select.h): the sides as a content-aware fill of the screen's own background, made
+// so the 4:3 picture's edge can't be told.
+// - Quilted (Efros and Freeman's) from the background's own pixels, whole (their full detail): 40 x 24 patches (20 x
+//   12 where the background is in small pieces, as the stage screen's panels), overlapping by 10 across and 8 down,
+//   from the plate's background anywhere on the screen (8 x 8 blocks of solid tiles, colour near the edge's, no line
+//   down them: the photo under the letters and the 3D, not the portraits, stills or frames). Each patch is the source
+//   window that best matches what's there where they overlap (each one's mean taken off: the shape, not the shade),
+//   near its own lines, and as strong a texture as the edge's own (its steps across and down: matching alone favours
+//   the faintest); joined along the overlap's least-error path. No block with a speck far brighter than its texture.
+// - The first patches overlap the 4:3 picture's own last 16 columns: the streaks there carry on into the side, and the
+//   cut can go up to 8 columns into the picture where those are background (the 2D's own pixels the plate's: never
+//   letters, frames, portraits or the 3D), so the edge isn't a straight line.
+// - Each pixel made is the edge's colour on its line, carried out with the picture's own large-scale slope there
+//   (eased out over 96 pixels), plus its source pixel's detail (it less its line's mean over 25 columns round it, in
+//   the plate): the texture whole and as sharp as the photo's, the shade the edge's, so no seam in colour where
+//   patches meet or at the 4:3 edge. (A gradient-domain solve, Poisson's, the side's steps the patches' own with the
+//   picture's pixels fixed, was tried: told apart from the photo more easily, 66% against 59%, its streaks shorter.)
+// Made once a screen, on a thread of its own, once the screen has settled (its fade in); each picture then is that,
+// moved by how much the edge's colour has moved since (a fade: the game's colour offsets, added).
 // On the stage screen (both programs: the same layout) the preview of the stage, lines ARENA_Y0 to ARENA_Y1, isn't
-// carried on: beside it the panels' metal goes on down as a frame round it (option 2), or the sides are dark there
-// (option 6).
+// carried on: beside it the panels' metal goes on down as a frame round it (option 2: the panels' own texture, their
+// colour between those above and below), or the sides are dark there (option 6).
 #pragma once
-#include <chrono>
 #include <atomic>
+#include <chrono>
 #include <memory>
 #include <thread>
 
 namespace wide_select {
 
-constexpr int PMAX = 32, OMAX = 8, MIRROR = 12, HB = 8;
+constexpr float DETMAX = 40, LINEK = 3, LINEC = 48, SDK = 12, SPECK = 150;
+constexpr int OVS = 3, CXS = 3;
+constexpr int KR = 16, KIN = 8;               // (the picture's own columns the first patches overlap; of those, how many may be replaced)
 constexpr int ARENA_Y0 = 68, ARENA_Y1 = 262;   // (the stage screen's preview, aligned lines: both programs)
 
 struct FillResult
 {
 	int reach = 0;
-	std::vector<int16_t> det[2];      // (reach x H x 3: each side's detail, d out from its edge)
-	std::vector<uint8_t> zone[2];     // (each line's columns averaged for its colour at the edge, 1-16)
+	std::vector<int16_t> px[2];       // ((KIN + reach) x H x 3: each side's colours, from d = -KIN (inside the picture) out)
+	std::vector<uint8_t> mine[2];     // ((KIN + reach) x H: made here (inside the picture: replaced))
+	std::vector<uint8_t> zone[2];     // (each line's columns averaged for its colour at the edge)
+	std::vector<int16_t> edge[2];     // (H x 3: that colour when made)
 	std::vector<uint8_t> arena;       // (H: the stage screen's preview lines)
 	double lum = 0, ms = 0;
 	int patches = 0, candidates = 0;
@@ -41,15 +53,28 @@ inline double plate_lum(const std::vector<uint32_t> &p)
 	return n ? s / n : 0;
 }
 
-// the edge's colour on line y of side s (side view f): its first z columns' mean
-inline void edge_colour(const Filled &f, int y, int z, int out[3])
+// the 2D as shown (the layers above over those below; 0 where neither draws)
+inline std::vector<uint32_t> visible_2d(const std::vector<uint32_t> &above, const std::vector<uint32_t> &below)
 {
-	int m[3] = {};
-	for (int i = 0; i < z; i++) for (int c = 0; c < 3; c++) m[c] += ch(f.at(y, i), c);
-	for (int c = 0; c < 3; c++) out[c] = m[c] / z;
+	std::vector<uint32_t> v(size_t(W) * H, 0);
+	if (above.size() != v.size() || below.size() != v.size()) return v;
+	for (size_t i = 0; i < v.size(); i++) v[i] = (above[i] >> 24) ? above[i] : below[i];
+	return v;
 }
 
-inline FillResult synth(std::vector<uint32_t> plate, int kind, int reach)
+// the edge's colour on line y of a side: the mean of the plate's background pixels in its first z columns
+inline bool edge_mean(const std::vector<uint32_t> &plate, int s, int y, int z, int out[3])
+{
+	long m[3] = {}; int n = 0;
+	for (int i = 0; i < z; i++) {
+		const uint32_t v = plate[size_t(y) * W + (s ? W - 1 - RCUT - i : i)];
+		if (v >> 24) { for (int c = 0; c < 3; c++) m[c] += ch(v, c); n++; }
+	}
+	if (n) for (int c = 0; c < 3; c++) out[c] = int(m[c] / n);
+	return n > 0;
+}
+
+inline FillResult synth(std::vector<uint32_t> plate, std::vector<uint32_t> vis, int kind, int reach)
 {
 	const auto t0 = std::chrono::steady_clock::now();
 	FillResult r;
@@ -57,213 +82,377 @@ inline FillResult synth(std::vector<uint32_t> plate, int kind, int reach)
 	r.lum = plate_lum(plate);
 	r.arena.assign(H, 0);
 	if (kind == 19 || kind == 20) std::fill(r.arena.begin() + ARENA_Y0, r.arena.begin() + ARENA_Y1, 1);
-	Filled f[2];
+	Filled F;   // (side 0's view: the plate as it is, its holes filled)
+	F.make(plate.data(), 0);
+	std::vector<float> FP(size_t(FZ) * H * 3);
+	for (int y = 0; y < H; y++) for (int x = 0; x < FZ; x++) for (int c = 0; c < 3; c++) FP[(size_t(y) * FZ + x) * 3 + c] = float(ch(F.at(y, x), c));
+	auto fp = [&](int x, int y, int c) { return FP[(size_t(std::clamp(y, 0, H - 1)) * FZ + size_t(std::clamp(x, 0, FZ - 1))) * 3 + c]; };
+	// (each plate pixel's line's mean over 25 columns round it: a source pixel's detail is it less this, so a patch
+	// brings its texture but not its shade)
+	std::vector<float> FM(FP.size());
+	for (int y = 0; y < H; y++)
+		for (int c = 0; c < 3; c++) {
+			float sum = 0;
+			for (int x = -12; x <= 12; x++) sum += fp(x, y, c);
+			for (int x = 0; x < FZ; x++) {
+				FM[(size_t(y) * FZ + x) * 3 + c] = sum / 25;
+				sum += fp(x + 13, y, c) - fp(x - 12, y, c);
+			}
+		}
+	auto fm = [&](int x, int y, int c) { return FM[(size_t(std::clamp(y, 0, H - 1)) * FZ + size_t(std::clamp(x, 0, FZ - 1))) * 3 + c]; };
+	// each side's zones (how far in the background goes), its colour at the edge line by line, its slope across
 	std::vector<int> bands[2];
-	std::vector<int> E[2];   // (H x 3)
+	std::vector<float> E[2], slope[2];
 	for (int s = 0; s < 2; s++) {
-		f[s].make(plate.data(), s);
-		clean_zones(f[s], plate.data(), s, bands[s]);
-		r.zone[s].assign(H, 8);
+		Filled fs;
+		fs.make(plate.data(), s);
+		clean_zones(fs, plate.data(), s, bands[s]);
+		r.zone[s].assign(H, 1);
 		E[s].assign(size_t(H) * 3, 0);
+		r.edge[s].assign(size_t(H) * 3, 0);
+		std::vector<float> sl(size_t(H) * 3, 0);
+		std::vector<uint8_t> has(H, 0);
 		for (int y = 0; y < H; y++) {
-			const int z = std::clamp(bands[s][size_t(y / 8)], 1, 16);
+			const int zb = std::max(bands[s][size_t(y / 8)], 1);
+			const int z = std::clamp(zb, 1, 16);
 			r.zone[s][size_t(y)] = uint8_t(z);
-			edge_colour(f[s], y, z, &E[s][size_t(y) * 3]);
+			int e[3];
+			if (!edge_mean(plate, s, y, z, e)) for (int c = 0; c < 3; c++) e[c] = ch(fs.at(y, 0), c);
+			for (int c = 0; c < 3; c++) { E[s][size_t(y) * 3 + c] = float(e[c]); r.edge[s][size_t(y) * 3 + c] = int16_t(e[c]); }
+			// (the slope across, outwards: the zone's inner half against its outer half, where it's 8 or more)
+			if (zb >= 8 && !r.arena[size_t(y)]) {
+				const int zz = std::min(zb, 48), h = zz / 2;
+				for (int c = 0; c < 3; c++) {
+					float a = 0, b = 0;
+					for (int i = 0; i < h; i++) { a += ch(fs.at(y, i), c); b += ch(fs.at(y, h + i), c); }
+					sl[size_t(y) * 3 + c] = (a - b) / float(h * h);
+				}
+				has[y] = 1;
+			}
 		}
+		// (smoothed over 25 lines, clamped: a large-scale slope, not a line's)
+		slope[s].assign(size_t(H) * 3, 0);
+		for (int y = 0; y < H; y++)
+			for (int c = 0; c < 3; c++) {
+				float t = 0; int n = 0;
+				for (int k = -12; k <= 12; k++) { const int yy = y + k; if (yy >= 0 && yy < H && has[yy]) { t += sl[size_t(yy) * 3 + c]; n++; } }
+				slope[s][size_t(y) * 3 + c] = n && !r.arena[size_t(y)] ? std::clamp(t / float(n), -0.4f, 0.4f) : 0.0f;
+			}
 	}
-	// the detail, in the plate's own places (side 0's view is the plate as it is): each pixel less its line's mean
-	// over 2 HB + 1 columns
-	const Filled &F = f[0];
-	std::vector<int16_t> D(size_t(W) * H * 3);
-	for (int y = 0; y < H; y++) {
-		int sum[3] = {};
-		auto px = [&](int x) { return F.at(y, std::clamp(x, 0, FZ - 1)); };
-		for (int x = -HB; x <= HB; x++) for (int c = 0; c < 3; c++) sum[c] += ch(px(x), c);
-		for (int x = 0; x < W; x++) {
-			for (int c = 0; c < 3; c++) D[(size_t(y) * W + x) * 3 + c] = int16_t(ch(px(x), c) - sum[c] / (2 * HB + 1));
-			for (int c = 0; c < 3; c++) sum[c] += ch(px(x + HB + 1), c) - ch(px(x - HB), c);
-		}
-	}
-	// the background: 8 x 8 blocks all solid, not the preview, their colour near the edge's on their lines (either side)
-	// and their detail no more than a photo's
+	// the background to take patches from: 8 x 8 blocks all solid, not the preview, their colour near the edge's on
+	// their lines (either side), no more detail than a photo's, no line down them
 	const int BW = W / 8, BH = H / 8;
 	std::vector<uint8_t> ok(size_t(W) * H, 0);
+	std::vector<float> blk_det(size_t(BW) * BH, -1);
 	for (int by = 0; by < BH; by++)
 		for (int bx = 0; bx < BW; bx++) {
 			bool all = true, prev = false;
-			long m[3] = {}, e[2][3] = {}, det = 0;
+			float m[3] = {}, det = 0;
+			float e[2][3] = {};
 			for (int y = by * 8; y < by * 8 + 8; y++) {
 				prev |= r.arena[size_t(y)] != 0;
 				for (int x = bx * 8; x < bx * 8 + 8; x++) {
 					const uint32_t v = plate[size_t(y) * W + x];
-					all &= (v >> 24) != 0;
-					for (int c = 0; c < 3; c++) { m[c] += ch(v, c); det += std::abs(D[(size_t(y) * W + x) * 3 + c]); }
+					all &= (v >> 24) != 0 && x < FZ;
+					for (int c = 0; c < 3; c++) { m[c] += ch(v, c); det += std::fabs(ch(v, c) - fp(x + 1, y, c)); }
 				}
 				for (int s = 0; s < 2; s++) for (int c = 0; c < 3; c++) e[s][c] += E[s][size_t(y) * 3 + c];
 			}
 			if (!all || prev) continue;
-			long dist = 1 << 30;
+			float dist = 1e9f;
 			for (int s = 0; s < 2; s++) {
-				long d = 0;
-				for (int c = 0; c < 3; c++) d += std::abs(m[c] / 64 - e[s][c] / 8);
+				float d = 0;
+				for (int c = 0; c < 3; c++) d += std::fabs(m[c] / 64.0f - e[s][c] / 8);
 				dist = std::min(dist, d);
 			}
-			if (dist > 70 || det / 192 > 40) continue;
-			// (and no line down it: a frame's or a still's edge, which copied out would be a line down the side) the
-			// block's columns' steps to the next, the largest against the middle one
-			{
-				int st[8];
-				for (int i = 0; i < 8; i++) {
-					const int x = std::min(bx * 8 + i, FZ - 2);
-					int sum = 0;
-					for (int y = by * 8; y < by * 8 + 8; y++) for (int c = 0; c < 3; c++) sum += std::abs(ch(F.at(y, x + 1), c) - ch(F.at(y, x), c));
-					st[i] = sum;
-				}
-				int so[8];
-				std::copy(st, st + 8, so);
-				std::sort(so, so + 8);
-				if (so[7] > 3 * so[3] + 48) continue;
+			if (dist > 70 || det / 192 > DETMAX) continue;
+			{   // (no speck far brighter than the rest, for its texture: a highlight copied out shows as a mark)
+				float lum[64];
+				int k = 0;
+				for (int y = by * 8; y < by * 8 + 8; y++) for (int x = bx * 8; x < bx * 8 + 8; x++) { const uint32_t v = plate[size_t(y) * W + x]; lum[k++] = float(ch(v, 0) + ch(v, 1) + ch(v, 2)); }
+				float sorted[64];
+				std::copy(lum, lum + 64, sorted);
+				std::nth_element(sorted, sorted + 32, sorted + 64);
+				const float med = sorted[32];
+				float dev = 0;
+				for (float l : lum) dev += std::fabs(l - med);
+				dev /= 64;
+				if (*std::max_element(lum, lum + 64) > med + std::max(SPECK, 6 * dev)) continue;
 			}
+			blk_det[size_t(by) * BW + bx] = det / 192;
+			float so[8];
+			for (int i = 0; i < 8; i++) {
+				const int x = bx * 8 + i;
+				float sum = 0;
+				for (int y = by * 8; y < by * 8 + 8; y++) for (int c = 0; c < 3; c++) sum += std::fabs(fp(x + 1, y, c) - fp(x, y, c));
+				so[i] = sum;
+			}
+			std::sort(so, so + 8);
+			if (so[7] > LINEK * so[3] + LINEC) continue;
 			for (int y = by * 8; y < by * 8 + 8; y++) std::fill_n(&ok[size_t(y) * W + bx * 8], 8, 1);
 		}
-	// the source windows (pw x ph, every 2 pixels) all background
+	// (and no stronger than the background at the edges (their 3 blocks in), by more than 1.8 times: a panel's
+	// letters drawn into its picture, not its brushing)
+	{
+		std::vector<float> ed;
+		for (int by = 0; by < BH; by++) for (int bx : { 0, 1, 2, BW - 3, BW - 2, BW - 1 }) if (blk_det[size_t(by) * BW + bx] >= 0) ed.push_back(blk_det[size_t(by) * BW + bx]);
+		if (ed.size() >= 4) {
+			std::nth_element(ed.begin(), ed.begin() + ed.size() / 2, ed.end());
+			const float lim = ed[ed.size() / 2] * 1.8f + 4;
+			for (int by = 0; by < BH; by++)
+				for (int bx = 0; bx < BW; bx++)
+					if (blk_det[size_t(by) * BW + bx] > lim)
+						for (int y = by * 8; y < by * 8 + 8; y++) std::fill_n(&ok[size_t(y) * W + bx * 8], 8, 0);
+		}
+	}
 	std::vector<int> I(size_t(W + 1) * (H + 1), 0);
 	for (int y = 0; y < H; y++)
 		for (int x = 0; x < W; x++)
 			I[size_t(y + 1) * (W + 1) + x + 1] = ok[size_t(y) * W + x] + I[size_t(y) * (W + 1) + x + 1] + I[size_t(y + 1) * (W + 1) + x] - I[size_t(y) * (W + 1) + x];
 	auto area = [&](int x0, int y0, int x1, int y1) { return I[size_t(y1) * (W + 1) + x1] - I[size_t(y0) * (W + 1) + x1] - I[size_t(y1) * (W + 1) + x0] + I[size_t(y0) * (W + 1) + x0]; };
-	struct Cand { int16_t x, y; };
+	struct Cand { int16_t x, y; float sd; };
 	std::vector<Cand> cands;
-	// (32 x 32 patches overlapping by 8; where the background is in small pieces (the stage screen's panels, between
-	// their stills and letters) 16 x 16 by 4)
-	int pw = PMAX, ph = PMAX, ov = OMAX;
+	int pw = 40, ph = 24, ox = 10, oy = 8;
 	for (int pass = 0; pass < 2; pass++) {
 		cands.clear();
-		for (int y = 0; y + ph <= H; y += 3)
-			for (int x = 0; x + pw <= FZ; x += 3)
-				if (area(x, y, x + pw, y + ph) == pw * ph) cands.push_back({ int16_t(x), int16_t(y) });
-		if (cands.size() >= 2000 || pass) break;
-		pw = ph = PMAX / 2; ov = OMAX / 2;
+		for (int y = 0; y + ph <= H; y += 2)
+			for (int x = 0; x + pw <= FZ; x += CXS)
+				if (area(x, y, x + pw, y + ph) == pw * ph) cands.push_back({ int16_t(x), int16_t(y), 0 });
+		if (cands.size() >= 1000 || pass) break;
+		pw = 20; ph = 12; ox = 6; oy = 4;
+	}
+	// (each window's texture strength: the mean step across, over its pixels)
+	for (Cand &c : cands) {
+		float t = 0;
+		for (int v = 0; v + 1 < ph; v += 2) for (int u = 0; u + 1 < pw; u += 2) for (int q = 0; q < 3; q++) t += std::fabs(fp(c.x + u + 1, c.y + v, q) - fp(c.x + u, c.y + v, q)) + std::fabs(fp(c.x + u, c.y + v + 1, q) - fp(c.x + u, c.y + v, q));
+		c.sd = t / float(((ph - 1) / 2 + 1) * ((pw - 1) / 2 + 1));
 	}
 	r.candidates = int(cands.size());
 	if (cands.empty()) return r;
 	uint32_t seed = 0x9E3779B9u;
 	for (int s = 0; s < 2; s++) {
-		const int RC = reach + pw;
-		std::vector<int16_t> C(size_t(RC) * H * 3, 0);
-		std::vector<uint8_t> have(size_t(RC) * H, 0);
-		// the edge's own columns mirrored first (lines beside the preview: none)
+		const int D0 = -KR, RC = reach + pw;   // (the canvas: d from D0 to RC)
+		const int CW = RC - D0;
+		auto at = [&](int d, int y) { return size_t(y) * CW + size_t(d - D0); };
+		std::vector<float> Q(size_t(CW) * H * 3, 0);
+		std::vector<int16_t> sx(size_t(CW) * H, -1), sy(size_t(CW) * H, -1);
+		std::vector<uint8_t> have(size_t(CW) * H, 0), real(size_t(CW) * H, 0), free_(size_t(CW) * H, 0);
+		auto plate_x = [&](int d) { return s ? W - RCUT + d : -1 - d; };   // (d < 0: the picture's own)
+		// the picture's own last KR columns: placed; those that are background as shown (the plate's pixel shows),
+		// and no further in than KIN, may be replaced
 		for (int y = 0; y < H; y++) {
-			if (r.arena[size_t(y)] || !f[s].row_ok[y]) continue;
-			const int z = std::max(bands[s][size_t(y / 8)], 1);
-			for (int d = 0; d < std::min(MIRROR, z); d++) {   // (only the edge's background: a band's whose is short, that far)
-				const int m = d % (2 * z), i = m < z ? m : 2 * z - 1 - m;
-				const uint32_t v = f[s].at(y, i);
-				for (int c = 0; c < 3; c++) C[(size_t(y) * RC + d) * 3 + c] = int16_t(ch(v, c) - E[s][size_t(y) * 3 + c]);
-				have[size_t(y) * RC + d] = 1;
+			if (r.arena[size_t(y)]) continue;
+			for (int d = D0; d < 0; d++) {
+				const int x = plate_x(d);
+				const uint32_t v = vis[size_t(y) * W + x], p = plate[size_t(y) * W + x];
+				if (!(v >> 24)) continue;
+				for (int c = 0; c < 3; c++) Q[at(d, y) * 3 + c] = float(ch(v, c));
+				have[at(d, y)] = real[at(d, y)] = 1;
+				sx[at(d, y)] = int16_t(x); sy[at(d, y)] = int16_t(y);
+				free_[at(d, y)] = d >= -KIN && (p >> 24) && (v & 0xFFFFFF) == (p & 0xFFFFFF);
 			}
 		}
-		std::vector<Cand> placed;   // (each patch's source, by column then line)
-		const int rows = (H - ov + (ph - ov) - 1) / (ph - ov);
-		for (int k = 0, x0 = MIRROR - ov; x0 < reach; k++, x0 += pw - ov)
+		// (the texture strength to match, at the patch's lines: the picture's own edge's, background there)
+		auto target_sd = [&](int y0, int h) {
+			float t = 0; int n = 0;
+			for (int y = y0; y < y0 + h; y += 2)
+				for (int d = D0; d < -1; d++) {
+					const size_t i = at(d, y), k = at(d + 1, y), j = at(d, std::min(y + 1, H - 1));
+					if (!free_[i] && !(real[i] && d < -KIN)) continue;
+					if (!have[i] || !have[k] || !have[j]) continue;
+					for (int q = 0; q < 3; q++) t += std::fabs(Q[k * 3 + q] - Q[i * 3 + q]) + std::fabs(Q[j * 3 + q] - Q[i * 3 + q]);
+					n++;
+				}
+			return n > 16 ? t / float(n) : -1.0f;
+		};
+		auto src = [&](const Cand &c, int u, int v, int q) { return fp(s ? c.x + u : c.x + pw - 1 - u, c.y + v, q); };   // (the left side reads its source mirrored: as the picture runs outwards)
+		const int rows = (H - oy + (ph - oy) - 1) / (ph - oy);
+		static thread_local float err[48][48], accv[48][16], acch[48][16];
+		static thread_local int fromv[48][16], fromh[48][16];
+		for (int x0 = -KIN - 2; x0 < reach; x0 += pw - ox)
 			for (int j = 0; j < rows; j++) {
-				const int y0 = std::min(j * (ph - ov), H - ph);
+				const int y0 = std::min(j * (ph - oy), H - ph);
 				const bool beside = r.arena[size_t(std::min(y0 + ph / 2, H - 1))] != 0;
-				long best = -1;
+				const float tsd = beside ? -1.0f : target_sd(y0, ph);
+				// the overlap's pixels (every other one), each channel's mean there taken off both sides
+				std::vector<std::pair<int16_t, int16_t>> ov;
+				float cm[3] = {};
+				for (int v = 0; v < ph; v += OVS)
+					for (int u = (v / OVS) % 2; u < pw; u += OVS)
+						if (have[at(x0 + u, y0 + v)]) { ov.push_back({ int16_t(v), int16_t(u) }); for (int q = 0; q < 3; q++) cm[q] += Q[at(x0 + u, y0 + v) * 3 + q]; }
+				const float n = std::max(1.0f, float(ov.size()));
+				for (float &q : cm) q /= n;
+				float best = -1;
 				Cand bc = cands[0];
-				// the overlap's pixels (every other one each way), and each candidate's error there (stopped once past the best)
-				std::vector<std::pair<int16_t, int16_t>> at;
-				for (int v = 0; v < ph; v += 2)
-					for (int u = 0; u < pw; u += 2) if (have[size_t(y0 + v) * RC + x0 + u]) at.push_back({ int16_t(v), int16_t(u) });
-				const long n = std::max<long>(1, long(at.size()));
+				for (int win : { 48, 128, H }) {   // (near its own lines; further if there's nothing near)
+				if (best >= 0) break;
 				for (const Cand &c : cands) {
-					long pen = 0;
-					if (!beside) { const long dy = c.y - y0; pen = dy * dy / 2; }   // (near its own lines)
+					if (!beside && std::abs(c.y - y0) > win) continue;
+					if (!beside && win > 48 && std::abs(c.y - y0) <= 48) continue;
+					float pen = 0, mul = 1;
+					if (!beside) { const float dy = float(c.y - y0); pen += dy * dy * 0.6f; }
+					if (tsd > 0) { const float k = (c.sd - tsd) / std::max(tsd, 4.0f); mul += SDK * k * k; }   // (a texture as strong as the edge's: matching alone favours the faintest)
 					seed = seed * 1664525u + 1013904223u;
-					pen += long(seed >> 28);
+					pen += float(seed >> 28);
 					if (best >= 0 && pen >= best) continue;
-					long e = 0;
-					for (const auto &[v, u] : at) {
-						const int16_t *a = &C[(size_t(y0 + v) * RC + x0 + u) * 3], *b = &D[(size_t(c.y + v) * W + c.x + u) * 3];
-						for (int q = 0; q < 3; q++) { const int d = a[q] - b[q]; e += d * d; }
-						if (best >= 0 && e * 16 / n + pen >= best) break;
+					float sm[3] = {};
+					for (const auto &[v, u] : ov) for (int q = 0; q < 3; q++) sm[q] += src(c, u, v, q);
+					for (float &q : sm) q /= n;
+					float e = 0;
+					bool stop = false;
+					for (const auto &[v, u] : ov) {
+						for (int q = 0; q < 3; q++) { const float d = (Q[at(x0 + u, y0 + v) * 3 + q] - cm[q]) - (src(c, u, v, q) - sm[q]); e += d * d; }
+						if (best >= 0 && e * 16 / n * mul + pen >= best) { stop = true; break; }
 					}
-					e = e * 16 / n + pen;
+					if (stop) continue;
+					e = e * 16 / n * mul + pen;
 					if (best < 0 || e < best) { best = e; bc = c; }
 				}
-				placed.push_back(bc);
+				}
 				r.patches++;
-				// the cuts: down the left overlap (a column a line), across the top one (a line a column), the least error
-				long err[PMAX][PMAX];
+				// the cuts, on the overlap's error with each side's mean off (as matched): down the left, across the top
+				float pm[3] = {};
+				for (const auto &[v, u] : ov) for (int q = 0; q < 3; q++) pm[q] += src(bc, u, v, q);
+				for (float &q : pm) q /= n;
 				for (int v = 0; v < ph; v++)
 					for (int u = 0; u < pw; u++) {
-						long e = 0;
-						if (have[size_t(y0 + v) * RC + x0 + u]) {
-							const int16_t *a = &C[(size_t(y0 + v) * RC + x0 + u) * 3], *b = &D[(size_t(bc.y + v) * W + bc.x + u) * 3];
-							for (int q = 0; q < 3; q++) { const int d = a[q] - b[q]; e += d * d; }
-						}
+						float e = 0;
+						const size_t i = at(x0 + u, y0 + v);
+						if (have[i]) for (int q = 0; q < 3; q++) { const float d = (Q[i * 3 + q] - cm[q]) - (src(bc, u, v, q) - pm[q]); e += d * d; }
+						if (real[i] && !free_[i]) e = 1e12f;   // (a picture's pixel that isn't background stays)
 						err[v][u] = e;
 					}
-				int cut_v[PMAX], cut_h[PMAX];   // (the left cut's column on each line; the top cut's line in each column)
-				{
-					long acc[PMAX][OMAX]; int from[PMAX][OMAX];
-					for (int v = 0; v < ph; v++)
-						for (int u = 0; u < ov; u++) {
-							long b = 0; int bu = u;
-							if (v > 0) {
-								b = acc[v - 1][u];
-								for (int du = -1; du <= 1; du += 2) if (u + du >= 0 && u + du < ov && acc[v - 1][u + du] < b) { b = acc[v - 1][u + du]; bu = u + du; }
-							}
-							acc[v][u] = err[v][u] + b; from[v][u] = bu;
+				int cut_v[48], cut_h[48];
+				// down the left overlap: each line's cut column (the line's pixels left of it stay; never left of the
+				// last that must stay)
+				for (int v = 0; v < ph; v++) {
+					int lim = -1;
+					for (int u = 0; u < ox; u++) if (err[v][u] >= 1e11f) lim = u;
+					for (int u = 0; u < ox; u++) {
+						float b = 0; int bu = u;
+						if (v > 0) {
+							b = accv[v - 1][u];
+							for (int du = -1; du <= 1; du += 2) if (u + du >= 0 && u + du < ox && accv[v - 1][u + du] < b) { b = accv[v - 1][u + du]; bu = u + du; }
 						}
-					int u = 0;
-					for (int q = 1; q < ov; q++) if (acc[ph - 1][q] < acc[ph - 1][u]) u = q;
-					for (int v = ph - 1; v >= 0; v--) { cut_v[v] = u; u = from[v][u]; }
+						accv[v][u] = (u < lim ? 1e12f : std::min(err[v][u], 1e10f)) + b; fromv[v][u] = bu;
+					}
 				}
 				{
-					long acc[PMAX][OMAX]; int from[PMAX][OMAX];
-					for (int u = 0; u < pw; u++)
-						for (int v = 0; v < ov; v++) {
-							long b = 0; int bv = v;
-							if (u > 0) {
-								b = acc[u - 1][v];
-								for (int dv = -1; dv <= 1; dv += 2) if (v + dv >= 0 && v + dv < ov && acc[u - 1][v + dv] < b) { b = acc[u - 1][v + dv]; bv = v + dv; }
-							}
-							acc[u][v] = err[v][u] + b; from[u][v] = bv;
+					int u = 0;
+					for (int q = 1; q < ox; q++) if (accv[ph - 1][q] < accv[ph - 1][u]) u = q;
+					for (int v = ph - 1; v >= 0; v--) { cut_v[v] = u; u = fromv[v][u]; }
+				}
+				for (int u = 0; u < pw; u++)
+					for (int v = 0; v < oy; v++) {
+						float b = 0; int bv = v;
+						if (u > 0) {
+							b = acch[u - 1][v];
+							for (int dv = -1; dv <= 1; dv += 2) if (v + dv >= 0 && v + dv < oy && acch[u - 1][v + dv] < b) { b = acch[u - 1][v + dv]; bv = v + dv; }
 						}
+						acch[u][v] = std::min(err[v][u], 1e10f) + b; fromh[u][v] = bv;
+					}
+				{
 					int v = 0;
-					for (int q = 1; q < ov; q++) if (acc[pw - 1][q] < acc[pw - 1][v]) v = q;
-					for (int u = pw - 1; u >= 0; u--) { cut_h[u] = v; v = from[u][v]; }
+					for (int q = 1; q < oy; q++) if (acch[pw - 1][q] < acch[pw - 1][v]) v = q;
+					for (int u = pw - 1; u >= 0; u--) { cut_h[u] = v; v = fromh[u][v]; }
 				}
 				for (int v = 0; v < ph; v++)
 					for (int u = 0; u < pw; u++) {
-						uint8_t &hv = have[size_t(y0 + v) * RC + x0 + u];
-						const bool left_ok = u >= ov || u > cut_v[v], top_ok = v >= ov || v > cut_h[u] || j == 0;
-						if (hv && !(left_ok && top_ok)) continue;
-						const int16_t *b = &D[(size_t(bc.y + v) * W + bc.x + u) * 3];
-						std::copy(b, b + 3, &C[(size_t(y0 + v) * RC + x0 + u) * 3]);
-						hv = 1;
+						const size_t i = at(x0 + u, y0 + v);
+						if (real[i] && !free_[i]) continue;
+						const bool left_ok = u >= ox || u > cut_v[v], top_ok = v >= oy || v > cut_h[u] || j == 0;
+						if (have[i] && !(left_ok && top_ok)) continue;
+						for (int q = 0; q < 3; q++) Q[i * 3 + q] = src(bc, u, v, q);
+						sx[i] = int16_t(s ? bc.x + u : bc.x + pw - 1 - u); sy[i] = int16_t(bc.y + v);
+						have[i] = 1; real[i] = 0;
 					}
 			}
-		// the texture's strength matched to the edge's, band by band (8 lines): the detail's spread in the edge's own
-		// columns (its first 24) against the made one's past the mirrored columns
-		for (int b = 0; b < H / 8; b++) {
-			double st = 0, sc = 0; long nt = 0, nc = 0;
-			for (int y = b * 8; y < b * 8 + 8; y++) {
-				if (r.arena[size_t(y)]) continue;
-				for (int i = 0; i < 24; i++) {
-					const int x = s ? FZ - 1 - i : i;
-					for (int c = 0; c < 3; c++) { const double v = D[(size_t(y) * W + x) * 3 + c]; st += v * v; nt++; }
-				}
-				for (int d = MIRROR; d < reach; d++) for (int c = 0; c < 3; c++) { const double v = C[(size_t(y) * RC + d) * 3 + c]; sc += v * v; nc++; }
+		// Each pixel made: the edge's colour on its line, carried out with the picture's slope there (eased over L),
+		// plus its source's detail (the source pixel less its line's mean over 25 columns round it, in the plate: the
+		// patch's texture whole, not its shade, so no seam in colour where patches meet or at the edge). Beside the
+		// preview: the panels' colour above and below it (lines 8 to 24 off it), between them
+		std::vector<float> T(size_t(CW) * H * 3, 0);
+		std::vector<float> Eb;
+		auto L96 = [](int d) { const float L = 96; return d > 0 ? L * (1 - std::exp(-float(d) / L)) : float(d); };
+		{
+			std::vector<float> Ey(E[s]);
+			for (int y = 0; y < H; y++) {
+				if (!r.arena[size_t(y)]) continue;
+				int b = y;
+				while (b < H && r.arena[size_t(b)]) b++;
+				float ea[3] = {}, eb[3] = {}; int na = 0, nb = 0;
+				for (int yy = std::max(y - 24, 0); yy < y - 8; yy++) { for (int c = 0; c < 3; c++) ea[c] += E[s][size_t(yy) * 3 + c]; na++; }
+				for (int yy = b + 8; yy < std::min(b + 24, H); yy++) { for (int c = 0; c < 3; c++) eb[c] += E[s][size_t(yy) * 3 + c]; nb++; }
+				for (int yy = y; yy < b; yy++)
+					for (int c = 0; c < 3; c++) {
+						const float a = na ? ea[c] / float(na) : eb[c] / float(std::max(nb, 1)), bb = nb ? eb[c] / float(nb) : a;
+						Ey[size_t(yy) * 3 + c] = a + (bb - a) * float(yy - y + 1) / float(b - y + 1);
+					}
+				y = b - 1;
 			}
-			if (!nt || !nc || sc <= 0) continue;
-			const double g = std::clamp(std::sqrt((st / nt) / (sc / nc)), 0.5, 2.0);
-			for (int y = b * 8; y < b * 8 + 8; y++)
-				for (int d = MIRROR; d < RC; d++) for (int c = 0; c < 3; c++) { int16_t &v = C[(size_t(y) * RC + d) * 3 + c]; v = int16_t(std::lround(v * g)); }
+			Eb = Ey;
+			for (int y = 0; y < H; y++)
+				for (int d = D0; d < RC; d++) {
+					const size_t i = at(d, y);
+					if (!have[i]) continue;
+					const float ease = L96(d);
+					for (int q = 0; q < 3; q++)
+						T[i * 3 + q] = Ey[size_t(y) * 3 + q] + slope[s][size_t(y) * 3 + q] * ease + (Q[i * 3 + q] - fm(sx[i], sy[i], q));
+				}
 		}
-		r.det[s].assign(size_t(reach) * H * 3, 0);
-		for (int y = 0; y < H; y++) std::copy(&C[size_t(y) * RC * 3], &C[size_t(y) * RC * 3] + size_t(reach) * 3, &r.det[s][size_t(y) * reach * 3]);
+		// (the picture's own pixels stay; the rest is what it's held to)
+		std::vector<float> S(Q);
+		for (size_t i = 0; i < have.size(); i++) if (have[i] && !real[i]) for (int q = 0; q < 3; q++) S[i * 3 + q] = T[i * 3 + q];
+		// Beside the preview: the panels' own brushing carried on down, line for line (each line the panel's lines
+		// mirrored out from the preview's top and bottom edges, back and forth within the panel; the two halves
+		// crossfaded over 8 lines in the middle), on the panels' colour between them
+		for (int y = 0; y < H; y++) {
+			if (!r.arena[size_t(y)]) continue;
+			int b = y;
+			while (b < H && r.arena[size_t(b)]) b++;
+			const int top0 = 0, top1 = y, bot0 = b, bot1 = H;   // (the panels: lines [top0, top1) and [bot0, bot1))
+			const int mid = (y + b) / 2;
+			// (the panels' colour smoothed over 17 lines: what's left of a line is its brushing, line to line, too)
+			std::vector<float> Es(size_t(H) * 3, 0);
+			for (int yy = 0; yy < H; yy++) {
+				if (r.arena[size_t(yy)]) continue;
+				for (int q = 0; q < 3; q++) {
+					float t = 0; int n = 0;
+					for (int k = -8; k <= 8; k++) { const int z = yy + k; if (z >= 0 && z < H && !r.arena[size_t(z)]) { t += E[s][size_t(z) * 3 + q]; n++; } }
+					Es[size_t(yy) * 3 + q] = t / float(n);
+				}
+			}
+			auto line_from = [&](int yy, bool up) {
+				const int n = up ? top1 - top0 : bot1 - bot0, k = up ? yy - y : b - 1 - yy, m = k % (2 * n);
+				const int off = m < n ? m : 2 * n - 1 - m;
+				return up ? top1 - 1 - off : bot0 + off;
+			};
+			for (int yy = y; yy < b; yy++) {
+				const float t = std::clamp(float(yy - (mid - 4)) / 8.0f, 0.0f, 1.0f);   // (0: the top half's, 1: the bottom's)
+				const int ya = line_from(yy, true), yb = line_from(yy, false);
+				for (int d = 0; d < RC; d++) {
+					const size_t i = at(d, yy), ia = at(d, ya), ib = at(d, yb);
+					if (!have[ia] && !have[ib]) continue;
+					for (int q = 0; q < 3; q++) {
+						const float da = have[ia] ? S[ia * 3 + q] - (Es[size_t(ya) * 3 + q] + slope[s][size_t(ya) * 3 + q] * L96(d)) : 0;
+						const float db = have[ib] ? S[ib * 3 + q] - (Es[size_t(yb) * 3 + q] + slope[s][size_t(yb) * 3 + q] * L96(d)) : 0;
+						S[i * 3 + q] = Eb[size_t(yy) * 3 + q] + da * (1 - t) + db * t;
+					}
+					have[i] = 1; real[i] = 0;
+				}
+			}
+			y = b - 1;
+		}
+		const int OW = KIN + reach;
+		r.px[s].assign(size_t(OW) * H * 3, 0);
+		r.mine[s].assign(size_t(OW) * H, 0);
+		for (int y = 0; y < H; y++)
+			for (int d = -KIN; d < reach; d++) {
+				const size_t i = at(d, y), o = size_t(y) * OW + size_t(d + KIN);
+				if (!have[i] || real[i] || (d < 0 && !free_[i])) continue;   // (in the picture: only its background replaced)
+				r.mine[s][o] = 1;
+				for (int q = 0; q < 3; q++) r.px[s][o * 3 + q] = int16_t(std::clamp(std::lround(S[i * 3 + q]), 0L, 255L));
+			}
 	}
 	r.ok = true;
 	r.ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
@@ -280,8 +469,10 @@ struct FillState
 	std::shared_ptr<FillResult> res;
 };
 
-// Option 2 (dark: 6) into out's sides, as far as reach. False while the fill's still being made (the sides left empty).
-inline bool fill(int key, const std::vector<uint32_t> &plate, std::vector<uint32_t> &out, FillState &st, int reach, bool dark)
+// Option 2 (dark: 6) into out: its sides as far as reach, and (where made) up to KIN columns into the 4:3 picture.
+// False while the fill's still being made (the sides left empty).
+inline bool fill(int key, const std::vector<uint32_t> &plate, const std::vector<uint32_t> &above, const std::vector<uint32_t> &below,
+                 std::vector<uint32_t> &out, FillState &st, int reach, bool dark)
 {
 	if (st.key != key) { st = FillState{}; st.key = key; }
 	st.frames++;
@@ -300,81 +491,48 @@ inline bool fill(int key, const std::vector<uint32_t> &plate, std::vector<uint32
 	if (want) {
 		const int r = std::max(reach, 96) + RCUT;
 		const int kind = key;
-		if (getenv("VF3_WIDE_SELECT_SYNC")) { st.res = std::make_shared<FillResult>(synth(plate, kind, r)); st.shown = 8; }   // (tests: at once)
+		std::vector<uint32_t> vis = visible_2d(above, below);
+		if (getenv("VF3_WIDE_SELECT_SYNC")) {   // (tests: at once)
+			st.res = std::make_shared<FillResult>(synth(plate, vis, kind, r));
+			st.shown = 8;
+			if (getenv("VF3_WIDE_SELECT_LOG")) fprintf(stderr, "(wide select) fill for screen %d: %.1f ms, %d candidates, %d patches\n", key, st.res->ms, st.res->candidates, st.res->patches);
+		}
 		else {
 			st.job = std::make_shared<FillJob>();
-			std::thread([j = st.job, p = plate, kind, r] { j->res = synth(p, kind, r); j->done.store(true, std::memory_order_release); }).detach();
+			std::thread([j = st.job, p = plate, v = std::move(vis), kind, r] { j->res = synth(p, v, kind, r); j->done.store(true, std::memory_order_release); }).detach();
 		}
 	}
 	if (!st.res || !st.res->ok) return false;
 	const FillResult &R = *st.res;
-	const float k = float(std::clamp(lum / std::max(R.lum, 1.0), 0.0, 1.5));
 	const float in = std::min(1.0f, ++st.shown / 8.0f);   // (faded in over 8 pictures once made)
+	const int OW = KIN + R.reach;
 	for (int s = 0; s < 2; s++) {
-		// the edge's colour now, each line (its first columns' background pixels; a line with none there, the line
-		// before's); beside the preview, the panels' above and below it, between them
-		std::vector<int> E(size_t(H) * 3, 0);
-		std::vector<uint8_t> has(H, 0);
+		// how far the edge's colour has moved since it was made (a fade), line by line; beside the preview, the panels'
+		std::vector<int> mv(size_t(H) * 3, 0);
+		long tot[3] = {}; int nt = 0;
 		for (int y = 0; y < H; y++) {
 			if (R.arena[size_t(y)]) continue;
-			long m[3] = {}; int n = 0;
-			for (int i = 0; i < R.zone[s][size_t(y)]; i++) {
-				const uint32_t v = plate[size_t(y) * W + (s ? W - 1 - RCUT - i : i)];
-				if (v >> 24) { for (int c = 0; c < 3; c++) m[c] += ch(v, c); n++; }
-			}
-			if (n) { for (int c = 0; c < 3; c++) E[size_t(y) * 3 + c] = int(m[c] / n); has[y] = 1; }
+			int e[3];
+			if (!edge_mean(plate, s, y, R.zone[s][size_t(y)], e)) continue;
+			for (int c = 0; c < 3; c++) { mv[size_t(y) * 3 + c] = e[c] - R.edge[s][size_t(y) * 3 + c]; tot[c] += mv[size_t(y) * 3 + c]; }
+			nt++;
 		}
-		// (lines with none: between the nearest with, above and below)
+		for (int y = 0; y < H; y++) if (R.arena[size_t(y)] && nt) for (int c = 0; c < 3; c++) mv[size_t(y) * 3 + c] = int(tot[c] / nt);
 		for (int y = 0; y < H; y++) {
-			if (has[y] || R.arena[size_t(y)]) continue;
-			int a = y - 1, b = y + 1;
-			while (a >= 0 && (!has[a] || R.arena[size_t(a)])) a--;
-			while (b < H && (!has[b] || R.arena[size_t(b)])) b++;
-			if (a < 0 && b >= H) break;
-			for (int yy = y; yy < std::min(b, H); yy++) {
-				if (R.arena[size_t(yy)]) continue;
-				const int *ea = &E[size_t(a >= 0 ? a : b) * 3], *eb = &E[size_t(b < H ? b : a) * 3];
-				const float t = a < 0 || b >= H ? 0.0f : float(yy - a) / float(b - a);
-				for (int c = 0; c < 3; c++) E[size_t(yy) * 3 + c] = int(ea[c] + (eb[c] - ea[c]) * t);
-				has[yy] = 2;
-			}
-			y = b - 1;
-		}
-		if (!dark) {
-			// beside the preview: the panels' colour above it and below it (their lines 8 to 24 off it, not their
-			// edges' bevels), between them
-			for (int y = 0; y < H; y++) {
-				if (!R.arena[size_t(y)]) continue;
-				int b = y;
-				while (b < H && R.arena[size_t(b)]) b++;
-				auto mean = [&](int y0, int y1, int m[3]) {
-					long t[3] = {}; int n = 0;
-					for (int yy = std::max(y0, 0); yy < std::min(y1, H); yy++)
-						if (has[yy] && !R.arena[size_t(yy)]) { for (int c = 0; c < 3; c++) t[c] += E[size_t(yy) * 3 + c]; n++; }
-					for (int c = 0; c < 3; c++) m[c] = n ? int(t[c] / n) : -1;
-					return n > 0;
-				};
-				int ea[3], eb[3];
-				const bool ha = mean(y - 24, y - 8, ea), hb = mean(b + 8, b + 24, eb);
-				if (ha || hb)
-					for (int yy = y; yy < b; yy++) {
-						const float t = float(yy - y + 1) / float(b - y + 1);
-						for (int c = 0; c < 3; c++) E[size_t(yy) * 3 + c] = !hb ? ea[c] : !ha ? eb[c] : int(ea[c] + (eb[c] - ea[c]) * t);
-						has[yy] = 1;
-					}
-				y = b - 1;
-			}
-		}
-		for (int y = 0; y < H; y++) {
-			if (!has[y]) continue;
-			const int *e = &E[size_t(y) * 3];
-			const int16_t *dt = &R.det[s][size_t(y) * R.reach * 3];
-			const bool frame = R.arena[size_t(y)];
-			for (int d = 0; d < std::min(reach + (s ? RCUT : 0), R.reach); d++) {
+			if (dark && R.arena[size_t(y)]) continue;
+			const int *m = &mv[size_t(y) * 3];
+			for (int d = -KIN; d < std::min(reach + (s ? RCUT : 0), R.reach); d++) {
+				const size_t o = size_t(y) * OW + size_t(d + KIN);
+				if (!R.mine[s][o]) continue;
+				const int16_t *p = &R.px[s][o * 3];
 				float c3[3];
-				for (int c = 0; c < 3; c++) c3[c] = (e[c] + dt[d * 3 + c] * k) * in;
-				if (frame && d < 2) for (float &c : c3) c *= 0.55f;   // (the frame's inner edge: a bevel's shadow)
-				out[size_t(y) * WW + (s ? EXT + W - RCUT + d : EXT - 1 - d)] = rgb(int(c3[0]), int(c3[1]), int(c3[2]));
+				for (int c = 0; c < 3; c++) c3[c] = float(p[c] + m[c]);
+				if (in < 1) {   // (fading in: from what's there)
+					uint32_t was = 0;
+					if (d < 0) { const size_t k = size_t(y) * W + size_t(s ? W - RCUT + d : -1 - d); was = (above[k] >> 24) ? above[k] : below[k]; }
+					for (int c = 0; c < 3; c++) c3[c] = float(ch(was, c)) + (c3[c] - float(ch(was, c))) * in;
+				}
+				out[size_t(y) * WW + size_t(s ? EXT + W - RCUT + d : EXT - 1 - d)] = rgb(int(c3[0] + 0.5f), int(c3[1] + 0.5f), int(c3[2] + 0.5f));
 			}
 		}
 	}

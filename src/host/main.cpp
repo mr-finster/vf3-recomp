@@ -2756,7 +2756,7 @@ int main(int argc, char **argv)
 				if (sel) {
 					const uint64_t tw = SDL_GetTicksNS();
 					const int reach = int(std::ceil(video::W * (picture_aspect() * 0.75 - 1) / 2)) + 2;   // (the sides' width shown, in the 2D's pixels)
-					wide_select::make(wide_select, game.view.select_kind, game.view.plate, game.view.plate_hw, wide_select_sides, wide_select_state, reach);
+					wide_select::make(wide_select, game.view.select_kind, game.view.plate, game.view.plate_hw, wide_select_sides, wide_select_state, reach, game.view.above, game.view.below);
 					// (the game's thin lines at the edges: across carried on, down the edge taken out: its above copy)
 					wide_select_above = game.view.above;
 					if (wide_select != 4) {
@@ -2781,6 +2781,11 @@ int main(int argc, char **argv)
 						std::copy(sd, sd + video::EXT, dst);
 						const int r0 = video::EXT + video::W - wide_select::RCUT;   // (the right side over the 4:3's last 2 columns: aligned()'s copies)
 						std::copy(sd + r0, sd + video::WW, dst + r0);
+						// (and where the fill goes on into the picture, over its own background)
+						for (int x = 0; x < video::W; x++) {
+							if (x == wide_select::KIN) x = video::W - wide_select::RCUT - wide_select::KIN;
+							if (sd[video::EXT + x] >> 24) dst[video::EXT + x] = sd[video::EXT + x];
+						}
 					}
 				}
 				// (above and below it, the screen mirrored at its edges)
@@ -2794,7 +2799,8 @@ int main(int argc, char **argv)
 			if (sel) {   // (the right side over the 2D's last 2 columns, aligned()'s copies of the one before)
 				std::vector<uint32_t> &a = wide_select_above;
 				for (int y = 0; y < video::H; y++)
-					for (int x = video::W - wide_select::RCUT; x < video::W; x++) {
+					for (int x = 0; x < video::W; x++) {
+						if (x == wide_select::KIN) x = video::W - wide_select::RCUT - wide_select::KIN;
 						const uint32_t v = wide_select_sides[size_t(y) * video::WW + video::EXT + x];
 						if (v >> 24) a[size_t(y) * video::W + x] = v;   // (opaque, the side's: a see-through edge there showed as a dark line)
 					}
@@ -5332,7 +5338,15 @@ int main(int argc, char **argv)
 				if (getenv("VF3_SHOT_LAYERS")) {   // (tests: the 2D layers, the tile RAM and registers as they are)
 					write_png(("build/host_" + s + "_below.png").c_str(), game.view.below.data(), video::W, video::H);
 					write_png(("build/host_" + s + "_above.png").c_str(), game.view.above.data(), video::W, video::H);
-					if (game.view.select_screen) write_png(("build/host_" + s + "_plate.png").c_str(), game.view.plate.data(), video::W, video::H);
+					if (game.view.select_screen) {
+						write_png(("build/host_" + s + "_plate.png").c_str(), game.view.plate.data(), video::W, video::H);
+						if (FILE *f = fopen(("build/host_" + s + "_view.bin").c_str(), "wb")) {   // (the plate, the layers above and below, RGBA as they are)
+							fwrite(game.view.plate.data(), 4, game.view.plate.size(), f);
+							fwrite(game.view.above.data(), 4, game.view.above.size(), f);
+							fwrite(game.view.below.data(), 4, game.view.below.size(), f);
+							fclose(f);
+						}
+					}
 					if (FILE *f = fopen(("build/host_" + s + "_tile.bin").c_str(), "wb")) {
 						fwrite(board.tile_ram.data(), 1, board.tile_ram.size(), f);
 						fwrite(board.tile_regs, 4, 64, f);
