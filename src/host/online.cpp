@@ -103,13 +103,18 @@ void log_line(const std::string &t) { fprintf(stderr, "online: %s\n", masked_tex
 
 std::string Online::log_masked(const std::string &t) { return masked_text(t); }
 
-struct Online::Job
-{
-	std::atomic<bool> done{ false };
-	vfnet::http::Reply reply;
-	std::string stun, turn, user, password;   // (getting ready's: the servers' addresses, the relay's login)
-	std::string country;                       // (and this side's, as the lobby has it)
-};
+// (for online_room.cpp: the helpers above, the same in both)
+namespace online_detail {
+std::string mask_list(const std::vector<std::string> &v) { return masked(v); }
+bool lobby_local(const std::string &url) { return lobby_on_this_machine(url); }
+tr::line lobby_answer(const vfnet::http::Reply &r, const std::string &code, const std::string &mine) { return lobby_says(r, code, mine); }
+std::string hex(uint64_t v) { return hex64(v); }
+void log(const std::string &t) { log_line(t); }
+bool lobby_key(const std::string &s, size_t n);
+bool lobby_room_code(const std::string &s);
+void goodbye(const std::string &url, const std::string &body);   // (a farewell: counted, a quit waits a moment for it)
+} // namespace online_detail
+
 
 Online::~Online() = default;
 
@@ -125,12 +130,15 @@ static bool lobby_hex(const std::string &s, size_t n = 0)   // (a key: hex; n it
 	return true;
 }
 static bool lobby_code(const std::string &s) { return s.size() == 6 && online_menu::clean_code(s) == s; }   // (a room's or a watch code)
+bool online_detail::lobby_key(const std::string &s, size_t n) { return lobby_hex(s, n); }
+bool online_detail::lobby_room_code(const std::string &s) { return lobby_code(s); }
 
 static void farewell(const std::string &url, const std::string &body)
 {
 	farewells++;
 	std::thread([url, body] { vfnet::http::request("POST", url, body, 5000); farewells--; }).detach();
 }
+void online_detail::goodbye(const std::string &url, const std::string &body) { farewell(url, body); }
 
 void Online::flush(int ms)
 {
@@ -664,11 +672,6 @@ void Online::close_room()
 // watcher from a snapshot, or catching up from the match's start, buffers this much before its first picture.)
 constexpr double WATCH_BUFFER_MIN_MS = 1500;
 
-struct Online::Fetch
-{
-	std::atomic<bool> done{ false };
-	vfnet::http::Reply reply;
-};
 
 std::shared_ptr<Online::Fetch> Online::fetch(const std::string &method, const std::string &url, std::string body, int timeout_ms, size_t most)
 {
@@ -961,6 +964,13 @@ bool Online::watch(const OnlineSettings &s, const std::string &c, tr::line &erro
 	lobby = s.lobby.empty() ? lobby_default() : s.lobby;
 	if (lobby.empty()) { error = tr::NO_LOBBY; return false; }
 	if (lobby.rfind("https://", 0) != 0 && !lobby_on_this_machine(lobby)) { error = tr::LOBBY_NOT_HTTPS; return false; }
+	watch_begin(w);
+	return true;
+}
+
+void Online::watch_begin(const std::string &w)
+{
+	if (ph != Phase::off || session) stop_activity();
 	wid = w;
 	watch_sid = hex64(vfnet::watch::new_match_id());
 	watch_match = watch_next = 0;
@@ -978,12 +988,16 @@ bool Online::watch(const OnlineSettings &s, const std::string &c, tr::line &erro
 	rooms = false;
 	ph = Phase::watching;
 	log_line("watching " + watch_code());
-	return true;
 }
 
 void Online::watch_failed(const tr::line &why)
 {
 	log_line("watching " + watch_code() + ": " + why.en());
+	if (r2) {   // (a Rooms 2 room's line: still in it; watched again in a moment, the room's next match)
+		stop_activity();
+		r2->watch_retry_at = now + 5000;
+		return;
+	}
 	const std::string tried_code = wid;
 	stop();
 	failure = why;
@@ -995,6 +1009,12 @@ void Online::watch_failed(const tr::line &why)
 
 void Online::watch_over(const tr::line &why)
 {
+	if (r2) {   // (a Rooms 2 room's line: its next match watched as it comes)
+		log_line("watching " + watch_code() + ": " + why.en() + " (still in the room's line)");
+		stop_activity();
+		r2->watch_retry_at = now + 1000;
+		return;
+	}
 	LastMatch m;
 	m.any = m.watched = true;
 	m.why = why;
@@ -1456,6 +1476,34 @@ const std::vector<Online::RoomRow> &Online::rooms_list(const OnlineSettings &s, 
 			for (const vfnet::json::Value &r : v["rooms"].items) {
 				if (r["game"].str() != identity.game) continue;   // (this game's: Revision D's or Team Battle's)
 				RoomRow row;
+				if (r["v"].kind == vfnet::json::Value::number && r["v"].n == 2) {   // (a Rooms 2 room: its table, streak and line)
+					row.v2 = true;
+					row.playing = r["state"].str() == "playing";
+					row.code = online_menu::clean_code(r["room2"]["code"].str());
+					row.watch = online_menu::clean_code(r["room2"]["watch"].str());
+					row.locked = r["locked"].kind == vfnet::json::Value::boolean && r["locked"].b;
+					if (row.code.size() != 6) row.code.clear();
+					if (row.watch.size() != 6) row.watch.clear();
+					if (row.code.empty() && !row.locked) continue;
+					row.room = online_menu::clean_room(r["name"].str());
+					for (int p = 0; p < 2 && r["table"].items.size() > size_t(p); p++) {
+						row.name[p] = online_menu::clean_name(r["table"].items[size_t(p)]["name"].str());
+						row.country[p] = country(r["table"].items[size_t(p)]["country"].str());
+					}
+					if (row.name[0].empty() && !row.name[1].empty()) { std::swap(row.name[0], row.name[1]); std::swap(row.country[0], row.country[1]); }
+					row.queue = int(std::clamp(r["line"].n, 0.0, 99.0));
+					row.streak = int(std::clamp(r["streak"].n, 0.0, 9999.0));
+					for (int p = 0; p < 2 && r["score"].items.size() == 2; p++) row.wins[p] = int(std::clamp(r["score"].items[size_t(p)].n, 0.0, 99.0));
+					row.round = int(std::clamp(r["round"].n, 0.0, 99.0));
+					row.watchers = int(std::clamp(r["watchers"].n, 0.0, 1e7));
+					row.since = int(std::clamp(r["since"].n, 0.0, 1e7));
+					const std::string reg2 = r["region"].str();
+					row.region = reg2.size() == 2 ? reg2 : "";
+					row.older = r["older"].kind == vfnet::json::Value::boolean && r["older"].b;
+					if (row.playing && (row.name[0].empty() || row.name[1].empty())) row.playing = false;
+					if (rooms_rows.size() < 100) rooms_rows.push_back(row);
+					continue;
+				}
 				row.playing = r["state"].str() == "playing";
 				row.code = online_menu::clean_code(r["code"].str());
 				row.watch = online_menu::clean_code(r["watch"].str());
@@ -1495,7 +1543,8 @@ const std::vector<Online::RoomRow> &Online::rooms_list(const OnlineSettings &s, 
 		const auto same = [](const RoomRow &a, const RoomRow &b) {
 			return a.playing == b.playing && a.older == b.older && a.locked == b.locked && a.quick == b.quick && a.room == b.room && a.code == b.code && a.watch == b.watch &&
 			       a.name[0] == b.name[0] && a.name[1] == b.name[1] && a.country[0] == b.country[0] && a.country[1] == b.country[1] && a.region == b.region &&
-			       a.wins[0] == b.wins[0] && a.wins[1] == b.wins[1] && a.round == b.round && a.watchers == b.watchers && a.queue == b.queue;
+			       a.wins[0] == b.wins[0] && a.wins[1] == b.wins[1] && a.round == b.round && a.watchers == b.watchers && a.queue == b.queue &&
+			       a.v2 == b.v2 && a.streak == b.streak;
 		};
 		if (rooms_said != said_was || lobby_watch_on != watch_was || rooms_region != region_was || !std::equal(had.begin(), had.end(), rooms_rows.begin(), rooms_rows.end(), same))
 			rooms_seen++;
@@ -1958,6 +2007,14 @@ std::string Online::country(const std::string &c)
 
 void Online::stop()
 {
+	stop_activity();
+	if (r2) room2_leave(false);
+}
+
+// What's on stopped (a match, waiting, watching), a Rooms 2 room's membership kept: its link back to it (said: the
+// match's end said already, ended(); quit_reason: the session's quit's, QUIT_NEXT_IN_LINE when a room's seat changes)
+void Online::stop_activity(bool said, uint8_t quit_reason)
+{
 	listed_as.clear();
 	if (room && ph != Phase::playing && st == Step::connecting) log_line("stopped while connecting: " + room->report(mask));
 	if (rooms && st == Step::searching && !ticket.empty()) {   // (out of the queue: no one's matched with a game gone)
@@ -1982,8 +2039,8 @@ void Online::stop()
 			farewells--;
 		}).detach();
 	}
-	if (session && ph == Phase::playing) ended(tr::NET_YOU_LEFT);
-	if (session && session->state() != vfnet::Session::State::ended) session->quit();
+	if (session && ph == Phase::playing && !said) ended(tr::NET_YOU_LEFT);
+	if (session && session->state() != vfnet::Session::State::ended) session->quit(quit_reason);
 	close_room();
 	if (ph == Phase::watching) log_line("stopped watching " + watch_code());
 	spec.reset();
@@ -2015,6 +2072,8 @@ void Online::stop()
 	adapter.mute = false;
 	drop_session();
 	link.reset();
+	if (r2 && room) { room->clear_peer(); r2->link = std::move(room); }   // (a Rooms 2 seat's: the membership's link, kept for the next)
+	if (r2) r2->in_seat = false;
 	room.reset();
 	job.reset();
 	ph = Phase::off;
@@ -2069,9 +2128,10 @@ void Online::begin_match(const std::string &who)
 void Online::poll(double t)
 {
 	now = t;
+	if (r2) room2_poll();   // (a Rooms 2 room's membership: above whatever's on, which it starts and stops)
 	if (ph == Phase::watching) { watch_poll(); return; }
 	if (peek_job) { peek_poll(); return; }
-	if (rooms) room_poll();
+	if (rooms && !room2_in_seat()) room_poll();   // (a Rooms 2 seat: the lobby's line, not the room's own steps)
 	if (!session) return;
 	feed_poll();
 	session->poll(t);
@@ -2093,6 +2153,7 @@ void Online::poll(double t)
 			begin_match(e.text);
 			break;
 		case vfnet::Session::Event::ended: {
+			if (room2_in_seat()) { room2_session_ended(e); return; }   // (a Rooms 2 seat's: still in the room)
 			const auto why = session->end_reason();
 			const bool was_playing = ph == Phase::playing;
 			checking = false;
@@ -2250,7 +2311,11 @@ void Online::poll(double t)
 
 bool Online::step(uint16_t input)
 {
+	static uint16_t was_input = 0;
+	const bool start_edge = (input & vf3net::START_BUTTON) && !(was_input & vf3net::START_BUTTON);
+	was_input = input;
 	if (ph == Phase::watching) {   // (a watched match: the frames due from what the lobby's given, no input)
+		if (start_edge && room2_ready_left() >= 0) room2_ready();   // (a Rooms 2 room's line, this player called: ready)
 		if (!spec) return false;
 		spec->time(now);
 		bool shown = false;
@@ -2292,6 +2357,13 @@ bool Online::step(uint16_t input)
 			log_line((want ? "the character select: in lockstep, input delay " + std::to_string(session->delay_now()) : "the character select over: rollback again, input delay " + std::to_string(session->delay())) +
 			         " (frame " + std::to_string(f) + ", " + std::to_string(session->confirmed()) + " confirmed)");
 		}
+	}
+	// A Rooms 2 seat, the match decided and someone in the room's line: the player out of the game gets no rematch,
+	// their Start taken out of their input here, before it's sent (so both sides run the same: the next in line comes on)
+	if (room2_in_seat() && ph == Phase::playing && session && !r2->line.empty() && both_in && score.players() != 3 &&
+	    !(score.players() >> local_player() & 1) && (input & vf3net::START_BUTTON)) {
+		if (start_edge) log_line("Rooms 2: Start for a rematch held back: " + online_menu::clean_name(r2->line[0].name) + " is next in the room's line");
+		input = uint16_t(input & ~vf3net::START_BUTTON);
 	}
 	if (session) snapper.before_step(*session);   // (a snapshot's copy the step could save over: stopped first, tried again)
 	if (!(ph == Phase::playing && session && session->step(input))) return false;
@@ -2660,7 +2732,7 @@ menu_page code_page(Online &o, OnlineSettings &s, game_menu &menu, std::function
 	auto join = [&o, &s, &menu, t, changed] {
 		if (t->text.size() != 6) { t->problem = tr::CODE_NEEDS_6; return; }
 		tr::line err;
-		if (!o.enter_code(s, t->text, err)) { t->problem = err.str(); return; }   // (a room open: joined; its match on: watched)
+		if (!o.room2_enter(s, t->text, err)) { t->problem = err.str(); return; }   // (a Rooms 2 room: its line; a room as before: joined, its match on watched)
 		while (menu.depth() > 1 && menu.top_name() != tr::P_ONLINE.c_str()) menu.pop();   // (back past a room's own page too: one Online page)
 		again(o, s, menu, changed);   // (the Online screen: joining, step by step)
 	};
@@ -2888,7 +2960,7 @@ menu_page create_room_page(Online &o, OnlineSettings &s, game_menu &menu, std::f
 	p.items.push_back({ tr::BUTTON_CREATE, "", {}, {}, [&o, &s, &menu, problem, changed] {
 		if (s.room_name.empty()) s.room_name = room_name_of(s);
 		tr::line err;
-		if (!o.host_room(s, err)) { *problem = err.str(); return; }
+		if (!o.room2_create(s, err)) { *problem = err.str(); return; }   // (a Rooms 2 room; a lobby without them: as before)
 		menu.pop();
 		again(o, s, menu, changed);   // (the Online screen: the room's code, step by step)
 	} });
@@ -2909,6 +2981,99 @@ menu_page create_room_page(Online &o, OnlineSettings &s, game_menu &menu, std::f
 	return p;
 }
 
+
+// ---- a Rooms 2 room's own page (online_room.h): the table, the line in order, this player's place; watch or not,
+// leave the line (still watching), leave the room; the creator's settings ----
+
+// The creator's: listed or not, the ready check's time, closing the room
+menu_page room2_settings_page(Online &o, OnlineSettings &s, game_menu &menu, std::function<void()> changed)
+{
+	menu_page p{ tr::ROOM2_SETTINGS, "", {} };
+	auto put = [&o] {
+		const RoomMember *m = o.room2();
+		if (!m) return;
+		tr::line err;
+		o.room2_settings(m->room_name, m->listed, m->ready_ms, err);
+	};
+	p.items.push_back({ tr::LISTED_IN_ROOMS, tr::ROOM2_LISTED_HELP,
+		[&o] { return std::string(o.room2() && o.room2()->listed ? tr::ON : tr::OFF); },
+		[&o, put](int) { if (RoomMember *m = const_cast<RoomMember *>(o.room2())) { m->listed = !m->listed; put(); } } });
+	p.items.push_back({ tr::ROOM2_READY_TIME, tr::ROOM2_READY_TIME_HELP,
+		[&o] { return tr::fill(tr::ROOM2_SECONDS, { { "n", std::to_string(o.room2() ? o.room2()->ready_ms / 1000 : 15) } }); },
+		[&o, put](int d) { if (RoomMember *m = const_cast<RoomMember *>(o.room2())) { m->ready_ms = std::clamp((m->ready_ms / 5000 + (d < 0 ? -1 : 1)) * 5000, 5000, 60000); put(); } } });
+	p.items.push_back({ tr::ROOM2_CLOSE_ROOM, tr::ROOM2_CLOSE_HELP, {}, {}, [&o, &s, &menu, changed] {
+		o.room2_close();
+		while (menu.depth() > 1 && menu.top_name() != tr::P_ONLINE.c_str()) menu.pop();
+		again(o, s, menu, changed);
+	} });
+	p.items.push_back({ tr::BACK, "", {}, {}, [&menu] { menu.pop(); } });
+	return p;
+}
+
+menu_page room2_page(Online &o, OnlineSettings &s, game_menu &menu, std::function<void()> changed)
+{
+	menu_page p{ tr::P_ONLINE, "", {} };
+	const RoomMember *m = o.room2();
+	const bool member = o.room2_member(), in_line = member && m->pos > 0;
+	int watch = -1, leave_line = -1, settings = -1;
+	auto redo = [&o, &s, &menu, changed] { while (menu.depth() > 1 && menu.top_name() != tr::P_ONLINE.c_str()) menu.pop(); again(o, s, menu, changed); };
+	if (in_line) {
+		watch = int(p.items.size());
+		p.items.push_back({ o.watching() ? tr::BUTTON_STOP_WATCHING : tr::BUTTON_WATCH, "", {}, {}, [&o, redo] { o.room2_watch(!o.watching()); redo(); } });
+		leave_line = int(p.items.size());
+		p.items.push_back({ tr::BUTTON_LEAVE_LINE, "", {}, {}, [&o, redo] { o.room2_leave(true); redo(); } });
+	}
+	const int leave = int(p.items.size());
+	p.items.push_back({ tr::BUTTON_LEAVE_ROOM, "", {}, {}, [&o, redo] { o.room2_leave(false); redo(); } });
+	if (member && !m->owner_key.empty()) {
+		settings = int(p.items.size());
+		p.items.push_back({ tr::BUTTON_ROOM_SETTINGS, "", {}, {}, [&o, &s, &menu, changed] { menu.push(room2_settings_page(o, s, menu, changed)); } });
+	}
+	p.start = watch >= 0 ? watch : leave;
+	p.on_event = [&menu](const SDL_Event &e) { return closes(menu, e); };
+	p.screen = [&o, watch, leave_line, leave, settings](int sel, bool pad) {
+		const RoomMember *m = o.room2();
+		if (!m) return std::string("<div class=\"scr\"></div>");
+		const std::string c = o.room_code(), title = !m->room_name.empty() ? m->room_name : c.empty() ? std::string(tr::ROOM_OPEN) : c;
+		std::string r = "<div class=\"scr\"><div class=\"col\"><div class=\"title\">" + E(title) + "</div><div class=\"sub small\">" +
+		                (c.empty() ? std::string("&nbsp;") : E(tr::fill(tr::ROOM2_CODE, { { "code", c } }))) + "</div>";
+		if (!o.room2_member()) {
+			r += "<div class=\"status\">" + E(tr::ROOM2_ENTERING) + "</div>";
+		} else {
+			// the table: the two (side a first, the session's host), the streak by its holder's name
+			r += "<div class=\"panes\"><div class=\"pane\"><div class=\"ph\">" + E(tr::ROOM2_TABLE) + "</div><div class=\"pvs\">";
+			const std::string dash = "\xE2\x80\x94";
+			if (m->has_a && m->has_b)
+				r += flag(m->a.country) + E(m->a.name) + "<span class=\"psc\">VS</span>" + E(m->b.name) + flag(m->b.country, "flag r");
+			else if (m->has_a || m->has_b) r += flag(m->has_a ? m->a.country : m->b.country) + E(m->has_a ? m->a.name : m->b.name);
+			else r += E(dash);
+			r += "</div>";
+			const std::string holder = m->holder == "a" ? m->a.name : m->holder == "b" ? m->b.name : "";
+			if (m->streak > 0 && !holder.empty()) r += "<div class=\"r2streak\">" + E(holder) + "  " + E(tr::fill(tr::ROOM2_STREAK, { { "n", std::to_string(m->streak) } })) + "</div>";
+			r += "<div class=\"pq\">" + E(m->pos == 0 ? std::string(tr::ROOM2_YOU_TABLE) : !(m->has_a && m->has_b) ? std::string(tr::ROOM2_WAITING) : std::string("&nbsp;")) + "</div>";
+			// the line, in order, this player's place marked
+			r += "</div><div class=\"pane\"><div class=\"ph\">" + E(tr::ROOM2_LINE) + "</div>";
+			if (m->line.empty()) r += "<div class=\"pq\">" + E(tr::ROOM2_LINE_EMPTY) + "</div>";
+			const int SHOWN = o.room2_ready_left() >= 0 ? 4 : 5;   // (the rest as a count: the page's height, the ready check's line under it)
+			const int n = int(m->line.size()), from = m->pos > SHOWN ? std::min(m->pos - SHOWN / 2 - 1, n - SHOWN) : 0;
+			for (int i = from; i < n && i < from + SHOWN; i++)
+				r += "<div class=\"r2l" + std::string(i + 1 == m->pos ? " me" : "") + "\"><span class=\"r2n\">" + std::to_string(i + 1) + "</span>" + flag(m->line[size_t(i)].country, "flag s") +
+				     E(m->line[size_t(i)].name) + "</div>";
+			if (n > from + SHOWN) r += "<div class=\"pq r2more\">+" + std::to_string(n - from - SHOWN) + "</div>";
+			if (m->pos > 0) r += "<div class=\"pq r2pos\">" + E(tr::fill(tr::ROOM2_LINE_POS, { { "n", std::to_string(m->pos) } })) + "</div>";
+			r += "</div></div>";
+			if (const int left = o.room2_ready_left(); left >= 0) r += "<div class=\"status good\">" + E(tr::fill(tr::ROOM2_PRESS_START_N, { { "n", std::to_string(left) } })) + "</div>";
+		}
+		r += "<div class=\"btns\">";
+		if (watch >= 0) r += "<div " + menu_row(watch, sel, "btn") + ">" + E(o.watching() ? tr::BUTTON_STOP_WATCHING : tr::BUTTON_WATCH) + "</div>";
+		if (leave_line >= 0) r += "<div " + menu_row(leave_line, sel, "btn") + ">" + E(tr::BUTTON_LEAVE_LINE) + "</div>";
+		r += "<div " + menu_row(leave, sel, "btn") + ">" + E(tr::BUTTON_LEAVE_ROOM) + "</div>";
+		if (settings >= 0) r += "<div " + menu_row(settings, sel, "btn") + ">" + E(tr::BUTTON_ROOM_SETTINGS) + "</div>";
+		r += "</div></div>";
+		return r + foot(pad, { { "A", "Enter", tr::HINT_SELECT }, { "B", "Esc", tr::HINT_CLOSE_MENU } }) + "</div>";
+	};
+	return p;
+}
 
 } // namespace
 
@@ -2963,6 +3128,7 @@ void room_act(Online &o, OnlineSettings &s, game_menu &menu, std::function<void(
 		if (r.quick || r.code.empty()) { *problem = std::string(tr::WATCH_OFF); return; }
 		join = true;
 	}
+	if (r.v2 && !join && (!r.playing || r.watch.empty())) join = true;   // (a Rooms 2 room with no match to watch: into its line)
 	if (r.playing && !join) {
 		tr::line err;
 		if (!o.watch(s, r.watch.empty() ? code : r.watch, err)) { *problem = err.str(); return; }
@@ -2970,9 +3136,10 @@ void room_act(Online &o, OnlineSettings &s, game_menu &menu, std::function<void(
 		again(o, s, menu, changed);
 		return;
 	}
-	named(s, menu, changed, [&o, &s, &menu, code, problem, changed] {
+	const bool v2 = r.v2;
+	named(s, menu, changed, [&o, &s, &menu, code, problem, changed, v2] {
 		tr::line err;
-		if (!o.join_room(s, code, err)) { *problem = err.str(); return; }
+		if (!(v2 ? o.room2_enter(s, code, err) : o.join_room(s, code, err))) { *problem = err.str(); return; }
 		while (menu.depth() > 1 && menu.top_name() != tr::P_ONLINE.c_str()) menu.pop();
 		again(o, s, menu, changed);
 	});
@@ -2984,7 +3151,7 @@ menu_page room_view(Online &o, OnlineSettings &s, game_menu &menu, std::function
 	menu_page p{ tr::P_ROOM, "", {} };
 	auto problem = std::make_shared<std::string>();
 	int watch = -1;
-	if (r.playing && o.lobby_watches()) {   // (watching off at the lobby: no Watch)
+	if (r.playing && o.lobby_watches() && !(r.v2 && r.watch.empty())) {   // (watching off at the lobby: no Watch)
 		watch = int(p.items.size());
 		p.items.push_back({ tr::BUTTON_WATCH, "", {}, {}, [&o, &s, &menu, r, problem, changed] { room_act(o, s, menu, changed, r, problem, false); } });
 	}
@@ -2997,8 +3164,21 @@ menu_page room_view(Online &o, OnlineSettings &s, game_menu &menu, std::function
 	p.screen = [r, watch, join, back, problem](int sel, bool pad) {
 		const std::string c = r.code.empty() ? r.watch : r.code, dashed = c.size() == 6 ? c.substr(0, 3) + "-" + c.substr(3) : std::string("\xE2\x80\x94");   // (a locked room: none)
 		std::string out = "<div class=\"scr\"><div class=\"col\"><div class=\"title\">" + E(room_title(r)) + "</div><div class=\"sub small\">" +
-		                  (r.quick ? E(tr::fill(tr::ROOM_QUICK_SUB, { { "code", dashed } })) : tr::fill(E(tr::ROOM_HOSTED_BY).c_str(), { { "flag", flag(r.country[0], "flag s hb") }, { "name", E(r.name[0]) }, { "code", E(dashed) } })) +
+		                  (r.quick ? E(tr::fill(tr::ROOM_QUICK_SUB, { { "code", dashed } })) : r.v2 ? E(tr::fill(tr::ROOM2_CODE, { { "code", dashed } })) : tr::fill(E(tr::ROOM_HOSTED_BY).c_str(), { { "flag", flag(r.country[0], "flag s hb") }, { "name", E(r.name[0]) }, { "code", E(dashed) } })) +
 		                  "</div><div class=\"panes\"><div class=\"pane\">";
+		if (r.v2) {   // (a Rooms 2 room: who's at its table, the streak, how many in its line)
+			out += "<div class=\"ph\">" + E(tr::ROOM2_TABLE) + "</div><div class=\"pvs\">" + flag(r.country[0]) + E(r.name[0].empty() ? std::string("\xE2\x80\x94") : r.name[0]) +
+			       (r.name[1].empty() ? std::string() : "<span class=\"psc\">VS</span>" + E(r.name[1]) + flag(r.country[1], "flag r")) + "</div><div class=\"pq\">" +
+			       E(r.streak > 0 ? tr::fill(tr::ROOM2_STREAK, { { "n", std::to_string(r.streak) } }) : r.name[1].empty() ? std::string(tr::ROOM2_WAITING) : tr::fill(tr::N_WATCHING, { { "n", std::to_string(r.watchers) } })) + "</div>";
+			out += "</div><div class=\"pane\"><div class=\"ph\">" + E(tr::ROOM2_LINE) + "</div><div class=\"pq\">" +
+			       E(r.queue > 0 ? tr::fill(tr::N_WAITING_TO_PLAY, { { "n", std::to_string(r.queue) } }) : std::string(tr::NOBODY_WAITING)) + "</div></div></div>";
+			if (!problem->empty()) out += "<div class=\"problem\">" + E(*problem) + "</div>";
+			out += "<div class=\"btns\">";
+			if (watch >= 0) out += "<div " + menu_row(watch, sel, "btn") + ">" + E(tr::BUTTON_WATCH) + "</div>";
+			if (join >= 0) out += "<div " + menu_row(join, sel, "btn") + ">" + E(tr::BUTTON_JOIN) + "</div>";
+			out += "<div " + menu_row(back, sel, "btn") + ">" + E(tr::BUTTON_BACK) + "</div></div></div>";
+			return out + foot(pad, { { "A", "Enter", tr::HINT_SELECT }, { "B", "Esc", tr::HINT_BACK } }) + "</div>";
+		}
 		if (r.playing)
 			out += "<div class=\"ph\">" + E(tr::ROOM_PLAYING) + "</div><div class=\"pvs\">" + flag(r.country[0]) + E(r.name[0]) + "<span class=\"psc\">" + std::to_string(r.wins[0]) + " \xE2\x80\x93 " + std::to_string(r.wins[1]) +
 			       "</span>" + E(r.name[1]) + flag(r.country[1], "flag r") + "</div><div class=\"pq\">" + E(tr::fill(tr::N_WATCHING, { { "n", std::to_string(r.watchers) } })) + "</div>";
@@ -3214,13 +3394,13 @@ bool follow_link(Online &o, OnlineSettings &s, game_menu &menu, std::function<vo
 		show();
 		named(s, menu, changed, [&o, &s, &menu, changed, code] {
 			tr::line err;
-			if (!o.enter_code(s, code, err)) o.tell_failure(err);
+			if (!o.room2_enter(s, code, err)) o.tell_failure(err);
 			while (menu.depth() > 1 && menu.top_name() != tr::P_ONLINE.c_str()) menu.pop();
 			again(o, s, menu, changed);
 		});
 		return true;
 	}
-	const bool ok = o.enter_code(s, code, error);
+	const bool ok = o.room2_enter(s, code, error);
 	show();
 	return ok;
 }
@@ -3267,6 +3447,7 @@ std::string clean_code(const std::string &s)
 // over, or the two choices
 menu_page page(Online &o, OnlineSettings &s, game_menu &menu, std::function<void()> changed)
 {
+	if (o.in_room2()) return room2_page(o, s, menu, changed);   // (a Rooms 2 room's member: its own page, whatever's on)
 	menu_page p{ tr::P_ONLINE, "", {} };
 	const bool hosting = o.phase() == Online::Phase::hosting, joining = o.phase() == Online::Phase::joining;
 
@@ -3555,6 +3736,13 @@ menu_page page(Online &o, OnlineSettings &s, game_menu &menu, std::function<void
 
 void match_rows(Online &o, OnlineSettings &s, game_menu &menu, std::function<void()> changed, std::vector<menu_item> &rows)
 {
+	if (o.in_room2()) {   // (a Rooms 2 room's member: its page, a step away; watching in its line stopped there, or not)
+		rows.push_back({ tr::P_ROOM, "", {}, {}, [&o, &s, &menu, changed] { menu.push(room2_page(o, s, menu, changed)); } });
+		if (o.watching()) {
+			rows.push_back({ tr::STOP_WATCHING, "", {}, {}, [&o, &menu] { o.room2_watch(false); menu.close(); } });
+			return;
+		}
+	}
 	if (o.watching()) {   // (a match watched: stop, or play the winner next: a room's match, not a Quick match's, which has no room)
 		rows.push_back({ tr::STOP_WATCHING, tr::STOP_WATCHING_HELP, {}, {}, [&o, &menu] { o.stop(); menu.close(); } });
 		if (!o.watching_quick())

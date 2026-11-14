@@ -1,6 +1,7 @@
 #include "vf3_netplay.h"
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
 #include <cstring>
 #include <random>
 
@@ -93,7 +94,9 @@ std::vector<uint8_t> start_blob(const m3::Model3 &b)
 	// (Rounds to win (vs player) ONLINE_VS_ROUNDS in the blob's copy, when the game has written its settings: 2-5 there)
 	if (const m3::Profile::Settings &set = b.profile->settings; set.at && set.at + size_t(set.rounds_vs) < b.backup.size()) {
 		uint8_t &rounds = out[4 + set.at + size_t(set.rounds_vs)];
-		if (rounds >= 2 && rounds <= 5) rounds = uint8_t(ONLINE_VS_ROUNDS);
+		// (tests: VF3_TEST_VS_ROUNDS=n, shorter matches for a run with many of them; the host's, which both play)
+		static const int test_rounds = getenv("VF3_TEST_VS_ROUNDS") ? std::clamp(atoi(getenv("VF3_TEST_VS_ROUNDS")), 1, 5) : 0;
+		if (rounds >= 2 && rounds <= 5) rounds = uint8_t(test_rounds ? test_rounds : ONLINE_VS_ROUNDS);
 	}
 	const uint8_t *e = reinterpret_cast<const uint8_t *>(b.eeprom.regs);
 	out.insert(out.end(), e, e + sizeof b.eeprom.regs);

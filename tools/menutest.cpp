@@ -1023,7 +1023,7 @@ int main(int argc, char **argv)
 			check(ok && top() == tr::P_YOUR_NAME.c_str() && o.phase() == Online::Phase::off, "a link's join with no name yet: the name asked for first");
 			text("AKIRA");
 			key(SDL_SCANCODE_RETURN);
-			check(s.name == "AKIRA" && top() == tr::P_ONLINE.c_str() && gm.depth() == 2 && o.phase() == Online::Phase::joining && o.room_code() == "KXQ-4M7",
+			check(s.name == "AKIRA" && top() == tr::P_ONLINE.c_str() && gm.depth() == 2 && (o.phase() == Online::Phase::joining || o.in_room2()) && o.room_code() == "KXQ-4M7",
 			      ("then on into the link's room, one Online page (" + o.room_code() + ", " + std::to_string(gm.depth()) + " deep)").c_str());
 			o.stop();
 			// the watcher's Play next, with no name yet: the same
@@ -1097,7 +1097,7 @@ int main(int argc, char **argv)
 			key(SDL_SCANCODE_RETURN);   // (Join: an open room's first)
 			check(top() == tr::P_ENTER_CODE.c_str(), "Join on a locked room's page: its code asked for");
 			text("KXQ4M7");
-			check(top() == tr::P_ONLINE.c_str() && gm.depth() == depth && o.phase() == Online::Phase::joining,
+			check(top() == tr::P_ONLINE.c_str() && gm.depth() == depth && (o.phase() == Online::Phase::joining || o.in_room2()),
 			      ("the code typed: joining, one Online page (" + std::to_string(gm.depth()) + " deep, " + std::to_string(depth) + " before)").c_str());
 			o.stop();
 			o.set_rooms({});
@@ -1333,6 +1333,15 @@ int main(int argc, char **argv)
 	shot("rematch.png", w, h);
 	gm.set_banner(tr::BANNER_PRESS, tr::BANNER_FOR_REMATCH, "+");   // (a pad's Start as the Deck names it: one sign, in the middle of its box)
 	shot("rematch_plus.png", w, h);
+	// Rooms 2's banners over the game: the ready check's countdown, you're next, a new challenger, the loser's
+	gm.set_banner(tr::fill(tr::ROOM2_PRESS_START_N, { { "n", "12" } }), tr::fill(tr::ROOM2_YOU_PLAY, { { "name", "AKIRAFAN" } }));
+	shot("room2_ready_banner.png", w, h);
+	gm.set_banner(tr::ROOM2_NEW_CHALLENGER, "WWWWWWWWWW");
+	shot("room2_challenger.png", w, h);
+	gm.set_banner(tr::fill(tr::ROOM2_LOST_NEXT, { { "name", "WWWWWWWWWW" } }), tr::ROOM2_TO_LINE);
+	shot("room2_lost.png", w, h);
+	gm.set_banner(tr::fill(tr::ROOM2_STREAK, { { "n", "12" } }), tr::fill(tr::ROOM2_FORFEIT, { { "name", "WWWWWWWWWW" } }));
+	shot("room2_forfeit.png", w, h);
 	gm.set_banner("");
 	{   // (the connection bar in a match: each cell's words in the middle of its box)
 		game_menu::net_cells c;
@@ -1385,6 +1394,43 @@ int main(int argc, char **argv)
 		fs::remove_all(dir, ec);
 	}
 #endif
+	{   // a Rooms 2 room's own page (online_room.h): the table and its streak, the line of 3 in order with this player's
+		// place marked; called, the ready check's countdown; the creator's settings
+		o.stop();
+		gm.close();
+		gm.open(root());
+		const std::string table = R"("table":{"a":{"name":"AKIRAFAN","country":"JP"},"b":{"name":"LAUCHAN","country":"KR"},"phase":"PLAYING","streak":3,"holder":"a","n":5,"last":null})";
+		o.set_room2_test(R"({"code":"KXQ4M7","room":{"name":"FRIDAY FIGHTS","listed":true,"locked":false,"ready_ms":15000,"owner":true},)" + table +
+		                 R"(,"line":[{"name":"PAIPAI","country":"US"},{"name":"MRFINSTER","country":"GB"},{"name":"JACKYB","country":"FR"}],"you":{"mid":"x","pos":2,"misses":0},"ready":null,"watch":"KXQ4M7"})");
+		gm.push(online_menu::page(o, s, gm, changed));
+		check(o.room2_member() && o.room2()->line.size() == 3 && o.room2()->pos == 2, "Rooms 2: a member, 2nd of 3 in the line");
+		settle_check("room2_page.png", w, h);
+		shot("room2_page.png", w, h);
+		check(gm.depth() == 2 && top() == tr::P_ONLINE.c_str(), "Rooms 2: the room's own page is the Online page");
+		o.set_room2_test(R"({"code":"KXQ4M7","room":{"name":"FRIDAY FIGHTS","listed":true,"locked":false,"ready_ms":15000,"owner":false},)" + table +
+		                 R"(,"line":[{"name":"MRFINSTER","country":"GB"},{"name":"PAIPAI","country":"US"},{"name":"JACKYB","country":"FR"},{"name":"WWWWWWWWWW","country":"AU"},{"name":"E","country":""},{"name":"F","country":""},{"name":"G","country":""},{"name":"H","country":""},{"name":"I","country":""}],"you":{"mid":"x","pos":1,"misses":0},"ready":{"pos":1,"deadline_ms":12000,"you":true},"watch":"KXQ4M7"})");
+		again();
+		check(o.room2_ready_left() >= 11 && o.room2_ready_left() <= 12, ("Rooms 2: called: the ready check's seconds (" + std::to_string(o.room2_ready_left()) + ")").c_str());
+		shot("room2_called.png", w, h);
+		o.set_room2_test(R"({"code":"KXQ4M7","room":{"name":"","listed":false,"locked":false,"ready_ms":15000,"owner":true},"table":{"a":{"name":"MRFINSTER","country":"GB"},"b":null,"phase":"SOLO","streak":0,"holder":"a","n":0,"last":null},"line":[],"you":{"mid":"x","pos":0,"side":"a","misses":0},"ready":null,"watch":"KXQ4M7"})");
+		again();
+		shot("room2_alone.png", w, h);
+		const int settings_row = int(gm.selected()) + 1;   // (Leave room, then Room settings)
+		gm.select_row(settings_row);
+		key(SDL_SCANCODE_RETURN);
+		check(top() == tr::ROOM2_SETTINGS.c_str(), "Rooms 2: the creator's Room settings");
+		shot("room2_settings.png", w, h);
+		settle_check("room2_settings.png", w, h);
+		for (int row : { 1, 2 }) {   // (each row's help, the ready check's longest)
+			gm.select_row(row);
+			for (int i = 0; i < 8; i++) { shot("", w, h); SDL_Delay(40); }
+			shot(row == 1 ? "room2_settings_ready.png" : "room2_settings_close.png", w, h);
+		}
+		gm.pop();
+		o.set_room2_test("");
+		check(!o.in_room2(), "Rooms 2: out of the room");
+		gm.close();
+	}
 	pages(gm, w, h);
 	// Game > Language changed with a page open (as main.cpp's set_language: tr::set, then the menu's set_language): the
 	// page at once in the other language, its letters' fonts first; and back, exactly the picture it was

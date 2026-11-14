@@ -171,7 +171,7 @@ void draw_flag(std::vector<uint32_t> &above, const HudFlag &fl, int fx, int text
 
 } // namespace
 
-bool hud_names(const m3::Model3 &board, std::vector<uint32_t> &above, const std::string names[2], const HudFlag *flags[2], int flag_at[2][2])
+bool hud_names(const m3::Model3 &board, std::vector<uint32_t> &above, const std::string names[2], const HudFlag *flags[2], int flag_at[2][2], const std::string *tags)
 {
 	if (flag_at) for (int p = 0; p < 2; p++) flag_at[p][0] = flag_at[p][1] = -1;
 	if (board.tile_ram.size() < 0x100000 || above.size() < size_t(W) * H) return false;
@@ -226,6 +226,7 @@ bool hud_names(const m3::Model3 &board, std::vector<uint32_t> &above, const std:
 				for (int X = from; X < to; X++) above[size_t(y) * W + X] = 0;
 			if (fl) draw_flag(above, *fl, p ? x + tw + gap : x, TEXT_Y, p, flag_at);
 			draw(above, p ? x : x + (fl ? fl->w + gap : 0), TEXT_Y, names[p]);
+			if (tags && !tags[p].empty()) draw(above, p ? P2_RIGHT - text_width(tags[p]) : P1_X, TEXT_Y + LINE * (TEAM_LINES + 1), tags[p]);   // (under the team)
 			continue;
 		}
 		const int tw = text_width(names[p]);
@@ -243,6 +244,7 @@ bool hud_names(const m3::Model3 &board, std::vector<uint32_t> &above, const std:
 			for (int X = from; X < to; X++) above[size_t(y) * W + X] = 0;
 		if (fl) draw_flag(above, *fl, p ? x + tw + gap : x, TEXT_Y, p, flag_at);
 		draw(above, p ? x : x + (fl ? fl->w + gap : 0), TEXT_Y, names[p]);
+		if (tags && !tags[p].empty()) draw(above, p ? P2_RIGHT - text_width(tags[p]) : P1_X, TEXT_Y + LINE, tags[p]);   // (the line under the name)
 	}
 	return true;
 }

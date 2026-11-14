@@ -343,3 +343,12 @@ div { display: block; }
 .pq { font-size: 23dp; color: #d8ddf5; }
 .flag.s.hb { margin: 0 8dp 0 8dp; }
 .note.quiet { margin-top: 20dp; font-size: 19dp; line-height: 24dp; }   /* (a line beside the point: Quick match can be watched) */
+
+/* a Rooms 2 room's page: the table's streak, the line in order (this player's place marked) */
+.r2streak { margin-top: 4dp; font-size: 22dp; font-weight: 700; font-style: italic; color: #f2d14b; }
+.r2l { font-size: 23dp; line-height: 29dp; color: #d8ddf5; white-space: nowrap; }
+.r2l .r2n { display: inline-block; width: 30dp; color: #8f9ac8; }
+.r2l.me { color: #f2d14b; font-weight: 700; }
+.r2l.me .r2n { color: #f2d14b; }
+.pq.r2more { margin-left: 30dp; color: #8f9ac8; }
+.pq.r2pos { margin-top: 8dp; color: #f2d14b; }

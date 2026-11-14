@@ -78,6 +78,16 @@
 //   VF3_RANDOM=1         looks for a random opponent at pass 60, as Online > Random
 //   VF3_WATCH_CODE=XXXXXX watches that match at pass 60, as Online > Rooms > Watch (VF_LOBBY: another lobby)
 //   VF3_HOST_PUBLIC=1    VF3_HOST_ROOM's room listed in Rooms (its matches may be watched by its code either way)
+//   VF3_ROOM2_CREATE=1   creates a Rooms 2 room at pass 60, as Online > Create room (the code in log.txt; a lobby without
+//                        Rooms 2: a room as before)
+//   VF3_ROOM2_ENTER=CODE enters that room at pass 60, as Online > Enter code (into its line, watching its match)
+//   VF3_ROOM2_READY=auto|never|late   the ready check, called: Start pressed 2 s in (auto), 11 s in (late), or never
+//   VF3_ROOM2_FIGHT=win|lose  this player's input in a Rooms 2 room's matches: Start when the match wants it, then
+//                        random play (win) or nothing (lose: the other wins), and Start again as the loser (a rematch,
+//                        held back when someone's in the line); for runs with several matches in a row
+//   VF3_ROOM2_LEAVE_AT=N leaves the room (Leave room) at pass N
+//   VF3_ROOM2_SHOT=1     the window to build/host_room2_ready.png 1 s into the ready check (its banner)
+//   VF3_TEST_VS_ROUNDS=n online matches first to n rounds (the host's, which both play), not 3: shorter matches
 //   VF3_MENU_KEYS=k,...  presses these keys (esc, up, down, left, right, enter, or SDL key names) 6 passes of the
 //                        loop apart from pass 30; "shot" among them: the window then, to build/host_window_menu_N.png
 //                        (N its place in the list, from 1). VF3_MENU_KEYS_FROM=F: from 30 passes after game frame F
@@ -1402,6 +1412,7 @@ struct Game
 	}
 	std::function<void(std::vector<uint8_t> &)> take_midi;   // (a netplay match's: the adapter's)
 	std::string hud_names[2];   // (a netplay match's: the players' names under the energy bars)
+	std::string hud_tags[2];    // (and a line under them: a Rooms 2 room's run of wins, "3 WINS")
 	video::HudFlag hud_flags[2];   // (and their countries' flags, beside them: none if not known)
 	std::atomic<int> hud_in{ 3 };   // (who's in the game, as the score holds it: each name shown only while they are; the host's)
 	int hud_flag_at[2][2] = { { -1, -1 }, { -1, -1 } };   // (where hud_names left each flag's place: the host draws it)
@@ -1474,7 +1485,8 @@ struct Game
 			const std::string shown[2] = { in & 1 ? hud_names[0] : std::string(), in & 2 ? hud_names[1] : std::string() };
 			if (!shown[0].empty() || !shown[1].empty()) {   // (a netplay match's)
 				const video::HudFlag *fl[2] = { &hud_flags[0], &hud_flags[1] };
-				if (!video::hud_names(board, above, shown, fl, hud_flag_at))
+				const std::string tags[2] = { in & 1 ? hud_tags[0] : std::string(), in & 2 ? hud_tags[1] : std::string() };
+				if (!video::hud_names(board, above, shown, fl, hud_flag_at, tags))
 					for (auto &a : hud_flag_at) a[0] = a[1] = -1;
 			} else
 				for (auto &a : hud_flag_at) a[0] = a[1] = -1;
@@ -1899,6 +1911,8 @@ int main(int argc, char **argv)
 	const uint64_t BOOT_FRAMES = uint64_t(board.profile->boot_frames);   // the boot, up to the SEGA logo (the PC way: unseen)
 	// Online play (online.h): in a match the board holds the host's NVRAM, and this player's own is kept here
 	static Online online(board);
+	online.set_room2_file(data + "/room2.txt");   // (a Rooms 2 room's membership: taken back after a crash, within 30 s)
+	if (const char *r = getenv("VF3_ROOM2_READY")) online.room2_test_ready = r;
 	std::vector<uint8_t> own_backup;
 	uint16_t own_eeprom[64] = {};
 	bool nvram_away = false;
@@ -4604,6 +4618,7 @@ int main(int argc, char **argv)
 	online.adapter.midi_unheard = [&](const std::vector<uint8_t> &b) { game.put_unheard(b); };   // (a watcher's frames caught up: Game::unheard)
 	online.adapter.midi_unheard_waiting = [&] { return game.unheard_waiting(); };
 	bool match_on = false;
+	bool room2_shot = false;   // (VF3_ROOM2_SHOT: the window, the ready check's banner on it)
 	Online::Phase online_was = Online::Phase::off;
 	std::string online_code_was;   // (the room code: its page made again when the lobby gives it)
 	uint64_t online_refresh_t = 0;
@@ -4613,6 +4628,22 @@ int main(int argc, char **argv)
 	// each read once) isn't lost
 	uint16_t step_carry = 0, match_job_bits = 0;
 	constexpr uint16_t ONE_SHOT = vf3net::START_BUTTON | 512;   // (Start and Coin: the input word's, vf3net::pack)
+	// A Rooms 2 room's seat over (or its watched match), the player still in the room: what was the match's shown no
+	// more, but no NVRAM given back nor the game restarted (the room's next match, watched or played, comes at once;
+	// the room left, end_match does it all)
+	auto end_seat = [&] {
+		if (game.emu_thread.joinable()) game.job_wait();
+		half = false;
+		if (match_on) fprintf(stderr, "online: Rooms 2: the room's match over for this player at frame %llu; still in the room\n", (unsigned long long)game_frame);
+		match_on = false;
+		game.take_midi = nullptr;
+		for (int p = 0; p < 2; p++) { game.hud_names[p].clear(); game.hud_tags[p].clear(); hud_country[p].clear(); game.hud_flags[p] = {}; }
+		game.tiles_on = true;
+		menu.set_notice("");
+		menu.hide_versus();
+		step_carry = 0;
+		menu.set_net("", 0);
+	};
 	auto end_match = [&] {   // back to playing on its own, from the boot, with this player's NVRAM
 		if (game.emu_thread.joinable()) game.job_wait();   // (nothing of a frame still running while it's all put back)
 		half = false;
@@ -4625,6 +4656,8 @@ int main(int argc, char **argv)
 		hud_country[0].clear();
 		hud_country[1].clear();
 		game.hud_names[1].clear();
+		game.hud_tags[0].clear();
+		game.hud_tags[1].clear();
 		game.tiles_on = true;
 		menu.set_notice("");
 		menu.set_banner("");
@@ -4679,6 +4712,12 @@ int main(int argc, char **argv)
 		game.sound_held = online.watch_hushed();   // (a watcher catching up: its frames' sound unheard, none to the real clock)
 		Online::Notice n;
 		while (online.next_notice(n)) {
+			if (n.kind == Online::Notice::called) {   // (a Rooms 2 room's line: this player's turn, the ready check: as a match found)
+				if (cfg.online.chime) chime::play(chime_stream, win, audio && !hidden ? float(cfg.volume) / 100.0f : 0.0f, game.coin_pcm(), coin_sound::RATE);
+				fprintf(stderr, "online: %s\n", Online::log_masked(n.text.en()).c_str());
+				continue;
+			}
+			if (n.kind == Online::Notice::tip && online.in_room2()) { menu.toast(n.text.str(), 6); fprintf(stderr, "online: %s\n", Online::log_masked(n.text.en()).c_str()); continue; }
 			if (n.kind == Online::Notice::joined || n.kind == Online::Notice::watching) {
 				const bool watching = n.kind == Online::Notice::watching;
 				if (cfg.online.chime && !watching) chime::play(chime_stream, win, audio && !hidden ? float(cfg.volume) / 100.0f : 0.0f, game.coin_pcm(), coin_sound::RATE);
@@ -4716,7 +4755,12 @@ int main(int argc, char **argv)
 			fprintf(stderr, "online: %s\n", Online::log_masked(n.text.en()).c_str());
 		}
 		game.hud_in = match_on ? online.players_in_game() : 3;   // (each player's name and flag on the HUD only while they're in the game)
-		if ((match_on && !online.playing()) || (nvram_away && !online.playing() && !online.starting())) end_match();   // (ended, left, or never got going)
+		for (int p = 0; p < 2; p++) {   // (a Rooms 2 room's run of wins, under its holder's name: the HUD's own letters, as the game's text, never translated)
+			const int k = match_on ? online.room2_streak(p) : 0;
+			game.hud_tags[p] = k > 0 ? std::to_string(k) + (k == 1 ? " WIN" : " WINS") : std::string();
+		}
+		if (online.in_room2()) { if (match_on && !online.playing()) end_seat(); }   // (a room's seat or watched match over: still in the room)
+		else if ((match_on && !online.playing()) || (nvram_away && !online.playing() && !online.starting())) end_match();   // (ended, left, or never got going)
 		// (quiet a second is often only both games restarting their boards at the match's start: said after two, and
 		// never over the versus screen; and Connection back only after it was said)
 		static bool said_interrupted = false;
@@ -4745,7 +4789,22 @@ int main(int argc, char **argv)
 		}
 		const bool press = wait == 1 || wait == 3;
 		// (a room's host, someone in its line: the guest about to make way for them, said for the moment before)
+		std::string r2_name;
+		const int r2_banner = online.room2_banner(r2_name), r2_ready = online.room2_ready_left();
+		const RoomMember *r2m = online.room2();
 		if (online.making_way()) menu.set_banner(tr::BANNER_NEXT_IN_LINE, tr::fill(tr::BANNER_MAKES_WAY, { { "name", online.opponent() } }));
+		else if (r2_ready >= 0) {   // (a Rooms 2 room's ready check: this player called, its seconds counting down)
+			const std::string stays = !r2m ? "" : r2m->holder == "a" ? r2m->a.name : r2m->holder == "b" ? r2m->b.name : r2m->has_a ? r2m->a.name : r2m->b.name;
+			menu.set_banner(tr::fill(tr::ROOM2_PRESS_START_N, { { "n", std::to_string(r2_ready) } }), stays.empty() ? std::string(tr::ROOM2_YOURE_NEXT) : tr::fill(tr::ROOM2_YOU_PLAY, { { "name", stays } }));
+			static uint64_t ready_since = 0;
+			static bool shot_taken = false;
+			if (!ready_since) ready_since = SDL_GetTicks();
+			if (getenv("VF3_ROOM2_SHOT") && !shot_taken && SDL_GetTicks() - ready_since > 1000) { shot_taken = true; room2_shot = true; }
+		} else if (r2_banner == 1) menu.set_banner(tr::fill(tr::ROOM2_LOST_NEXT, { { "name", r2_name } }), tr::ROOM2_TO_LINE);
+		else if (r2_banner == 2) menu.set_banner(tr::ROOM2_NEW_CHALLENGER, r2_name);
+		else if (r2_banner == 3) menu.set_banner(tr::ROOM2_YOURE_NEXT);
+		else if (r2_banner == 4 && r2m) menu.set_banner(tr::fill(tr::ROOM2_STREAK, { { "n", std::to_string(std::max(1, r2m->streak)) } }), tr::ROOM2_WON_STAYS);
+		else if (r2_banner == 5 && r2m) menu.set_banner(tr::fill(tr::ROOM2_STREAK, { { "n", std::to_string(r2m->streak) } }), tr::fill(tr::ROOM2_FORFEIT, { { "name", r2_name } }));
 		else menu.set_banner(press ? std::string(tr::BANNER_PRESS) : wait ? tr::fill(tr::BANNER_WAITING_FOR, { { "name", online.opponent() } }) : "",
 		                     wait == 2 ? std::string(tr::BANNER_TO_PRESS_START) : wait == 3 ? std::string(tr::BANNER_FOR_REMATCH) : wait == 4 ? std::string(tr::BANNER_TO_PRESS_REMATCH) : "", press ? start_button() : "");
 		if (interrupted)
@@ -4776,7 +4835,15 @@ int main(int argc, char **argv)
 			else menu.set_net(std::string(), 0);
 		}
 		// the Online page as things change: its rows made again with the phase, its status lines a few times a second
-		if (menu.is_open() && (online.phase() != online_was || online.room_code() != online_code_was) && menu.top_name() == tr::P_ONLINE.c_str() && !menu.capturing())
+		static int room2_was = 0;
+		const int room2_now = online.room2_version();
+		if (menu.is_open() && room2_now != room2_was && menu.top_name() == tr::P_ONLINE.c_str() && !menu.capturing()) {
+			room2_was = room2_now;   // (a Rooms 2 room's page: the table, the line, watching or not)
+			menu.replace(online_page(), -1);
+		} else if (menu.is_open() && online.room2_ready_left() >= 0 && menu.top_name() == tr::P_ONLINE.c_str() && SDL_GetTicks() - online_refresh_t > 250) {
+			online_refresh_t = SDL_GetTicks();   // (its ready check's countdown)
+			menu.refresh();
+		} else if (menu.is_open() && (online.phase() != online_was || online.room_code() != online_code_was) && menu.top_name() == tr::P_ONLINE.c_str() && !menu.capturing())
 			menu.replace(online_page(), -1);
 		else if (menu.is_open() && online.phase() != online_was && !menu.capturing())
 			menu.refresh();   // (the Join page: its line under Connect, joining no longer, and why)
@@ -4922,6 +4989,18 @@ int main(int argc, char **argv)
 				SDL_RaiseWindow(win);
 			}
 		}
+		static const char *test_r2_create = getenv("VF3_ROOM2_CREATE"), *test_r2_enter = getenv("VF3_ROOM2_ENTER");
+		if ((test_r2_create || test_r2_enter) && pass == 60) {
+			online_page();   // (the identity, as opening the Online page sets it)
+			tr::line err;
+			if (getenv("VF3_HOST_PUBLIC")) cfg.online.room_who = 2;
+			if (!(test_r2_enter ? online.room2_enter(cfg.online, test_r2_enter, err) : online.room2_create(cfg.online, err)))
+				fprintf(stderr, "online: (test) %s\n", err.en().c_str());
+		}
+		if (static const char *la = getenv("VF3_ROOM2_LEAVE_AT"); la && pass == uint64_t(atoll(la)) && online.in_room2()) {
+			fprintf(stderr, "online: (test) Leave room\n");
+			online.room2_leave(false);
+		}
 		static const char *test_watch = getenv("VF3_WATCH_CODE");
 		if ((test_host_room || test_join_code || test_random || test_watch) && pass == 60) {
 			online_page();   // (the identity, as opening the Online page sets it)
@@ -4957,6 +5036,14 @@ int main(int argc, char **argv)
 		SDL_Event e;
 		while (SDL_PollEvent(&e)) {
 			if (e.type == SDL_EVENT_QUIT) running = false;
+			// (a Rooms 2 room's ready check on this player: Start, the keyboard's or a pad's, says ready, whatever's on:
+			// watching, the game alone, or the room's page; the press goes on to whatever else takes it)
+			if (online.room2_ready_left() >= 0) {
+				const player_controls &c = cfg.ctl[0];
+				const bool k = e.type == SDL_EVENT_KEY_DOWN && !e.key.repeat && (e.key.scancode == c.key[C_START] || (c.key2[C_START] != SDL_SCANCODE_UNKNOWN && e.key.scancode == c.key2[C_START]));
+				const bool b = e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN && (e.gbutton.button == SDL_GAMEPAD_BUTTON_START || int(e.gbutton.button) == c.pad[C_START] || int(e.gbutton.button) == c.pad2[C_START]);
+				if ((k || b) && online.room2_ready()) fprintf(stderr, "online: Rooms 2: Start pressed (%s): ready\n", k ? "keyboard" : "pad");
+			}
 			// (a Mac's open-URL event, as SDL gives it: a link from the web, the game running or just started by it)
 			if (e.type == SDL_EVENT_DROP_FILE && e.drop.data && links::is_link(e.drop.data)) arg_link = std::string(e.drop.data).substr(0, 64);
 			if (e.type == SDL_EVENT_RENDER_DEVICE_RESET || e.type == SDL_EVENT_RENDER_TARGETS_RESET) textures_lost(e.type == SDL_EVENT_RENDER_DEVICE_RESET);
@@ -5293,6 +5380,27 @@ int main(int argc, char **argv)
 					vf3net::unpack(uint16_t(vf3net::pack(live, 0) | sb), 0, live);
 				}
 				uint16_t bits = menu.is_open() || fc.on ? 0 : uint16_t(vf3net::pack(live, 0) | vf3net::pack(live, 1) | step_carry);
+				if (static const char *rf = getenv("VF3_ROOM2_FIGHT"); rf && online.in_room2() && online.room2()->in_seat && !online.watching()) {
+					// (tests: Start whenever the match wants it from this player (its start, a rematch), tapped; then
+					// random play, or none: the other wins)
+					static uint64_t rng = 0x9E3779B97F4A7C15ull ^ uint64_t(SDL_GetTicksNS());
+					static int tap = 0, hold = 0;
+					static uint16_t held = 0;
+					const int w = online.start_wait();
+					bits = 0;
+					if ((w == 1 || w == 3) && ++tap % 40 < 6) bits |= vf3net::START_BUTTON;
+					if (strcmp(rf, "win") == 0 && w != 1) {
+						if (hold-- <= 0) {
+							rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17;
+							m3::Controls rc{};
+							rc.left[0] = (rng & 3) == 0; rc.right[0] = (rng & 3) == 1; rc.up[0] = ((rng >> 2) & 7) == 0; rc.down[0] = ((rng >> 2) & 7) == 1;
+							rc.punch[0] = (rng >> 5) & 1; rc.kick[0] = ((rng >> 6) & 3) == 0; rc.guard[0] = ((rng >> 8) & 7) == 0;
+							held = uint16_t(vf3net::pack(rc, 0) & ~vf3net::START_BUTTON);
+							hold = 3 + int((rng >> 12) & 7);
+						}
+						bits |= held;
+					}
+				}
 				if (!online.watching()) {   // (Cheats > Dural's stage: this player's own input word, from the board as both sides have it; inputs only)
 					stage_pick.trigger = cfg.dural_stage;
 					dural_stage::Picker::Said said;
@@ -5664,6 +5772,7 @@ int main(int argc, char **argv)
 			}
 			else ++it;
 		for (uint64_t s : shot_at) if (s == pass) read_window("build/host_window_at_" + std::to_string(pass) + ".png");
+		if (room2_shot) { room2_shot = false; read_window("build/host_room2_ready.png"); fprintf(stderr, "(test) the ready check's banner: build/host_room2_ready.png\n"); }
 		if (menu_shot) { read_window("build/host_window_menu_" + std::to_string(menu_shot) + ".png"); menu_shot = 0; }
 		if (static const char *ft = getenv("VF3_TEST_FREECAM"); ft) {   // (tests: the free camera at these frames)
 			struct Ev { std::string what, arg; uint64_t at; bool done; };
