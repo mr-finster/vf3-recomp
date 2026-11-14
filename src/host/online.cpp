@@ -3389,8 +3389,9 @@ menu_page page(Online &o, OnlineSettings &s, game_menu &menu, std::function<void
 					// (on several networks, a Wi-Fi Direct hotspot's and the internet's: each one's address and its
 					// adapter, the player types the one on the network they share; issue #46)
 					r += "<div class=\"title\">" + E(tr::WAITING_FOR_A_PLAYER) + "</div><div class=\"sub\">" + E(tr::ADDR_HOST_SUB_MANY) + "</div>"
-					     "<div class=\"addresses\">";
-					for (size_t i = 0; i < all.size() && i < 4; i++)
+					     "<div class=\"addresses" + std::string(all.size() > 3 ? " many" : "") + "\">";
+					// (6 at most, in two rows from 4: the real adapters' first, the virtual machines' last, lan_list.h)
+					for (size_t i = 0; i < all.size() && i < 6; i++)
 						r += "<div class=\"addr\"><span class=\"ip\">" + E(all[i].ip + port) + "</span><span class=\"nic\">" + E(all[i].adapter.empty() ? std::string(" ") : all[i].adapter) + "</span></div>";
 					r += "</div>";
 				}

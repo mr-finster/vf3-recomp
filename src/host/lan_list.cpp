@@ -1,4 +1,6 @@
 #include "lan_list.h"
+#include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -34,18 +36,35 @@ std::string dotted(const uint8_t b[4])
 	return s;
 }
 
+// A virtual machine's or container's network adapter (Hyper-V and WSL's vEthernet, VirtualBox, VMware, Docker; on
+// Linux docker0, virbr0, vboxnet0 and the like), by its name or (Windows) its description: listed after the real
+// ones, so a hotspot's address isn't pushed off the page by them (issue #46). (Not a description's bare "Virtual": the
+// Wi-Fi Direct hotspot's adapter is "Microsoft Wi-Fi Direct Virtual Adapter".)
+bool virtual_adapter(const std::string &name)
+{
+	std::string n;
+	for (char c : name) n += char(tolower((unsigned char)c));
+	static const char *const has[] = { "vethernet", "virtualbox", "vmware", "vmnet", "docker", "wsl", "hyper-v", "vbox" };
+	for (const char *h : has)
+		if (n.find(h) != std::string::npos) return true;
+	static const char *const starts[] = { "virbr", "veth", "br-", "lxcbr", "lxdbr", "cni", "flannel", "podman", "utun" };
+	for (const char *h : starts)
+		if (n.rfind(h, 0) == 0) return true;
+	return false;
+}
+
 struct Found
 {
 	std::vector<Address> v;
 	std::vector<Address> link_local;   // (169.254.x.x: kept only for when there's nothing else)
-	void add(const uint8_t b[4], const std::string &adapter)
+	void add(const uint8_t b[4], const std::string &adapter, const std::string &about = "")
 	{
 		if (b[0] == 127 || (b[0] | b[1] | b[2] | b[3]) == 0) return;   // (loopback; an adapter without one yet)
 		std::vector<Address> &to = b[0] == 169 && b[1] == 254 ? link_local : v;
 		const std::string ip = dotted(b);
 		for (const Address &a : to)
 			if (a.ip == ip) return;
-		to.push_back({ ip, adapter });
+		to.push_back({ ip, adapter, virtual_adapter(adapter) || virtual_adapter(about) });
 	}
 };
 
@@ -62,7 +81,8 @@ void system_addresses(Found &f)
 	}
 	if (r != NO_ERROR) return;
 	for (const IP_ADAPTER_ADDRESSES *a = reinterpret_cast<const IP_ADAPTER_ADDRESSES *>(buf.data()); a; a = a->Next) {
-		if (a->OperStatus != IfOperStatusUp || a->IfType == IF_TYPE_SOFTWARE_LOOPBACK) continue;
+		// (down adapters, loopback and tunnels (Teredo, 6to4: no address a player types) left out)
+		if (a->OperStatus != IfOperStatusUp || a->IfType == IF_TYPE_SOFTWARE_LOOPBACK || a->IfType == IF_TYPE_TUNNEL) continue;
 		std::string name;   // (the name the user sees, "Wi-Fi", "Local Area Connection* 10": UTF-16, made UTF-8)
 		if (a->FriendlyName && a->FriendlyName[0]) {
 			const int n = WideCharToMultiByte(CP_UTF8, 0, a->FriendlyName, -1, nullptr, 0, nullptr, nullptr);
@@ -72,10 +92,20 @@ void system_addresses(Found &f)
 				name.resize(size_t(n - 1));
 			}
 		}
+		std::string about;   // (its description: "Hyper-V Virtual Ethernet Adapter", "VirtualBox Host-Only Ethernet Adapter")
+		if (a->Description && a->Description[0]) {
+			const int n = WideCharToMultiByte(CP_UTF8, 0, a->Description, -1, nullptr, 0, nullptr, nullptr);
+			if (n > 1) {
+				about.resize(size_t(n));
+				WideCharToMultiByte(CP_UTF8, 0, a->Description, -1, &about[0], n, nullptr, nullptr);
+				about.resize(size_t(n - 1));
+			}
+		}
 		for (const IP_ADAPTER_UNICAST_ADDRESS *u = a->FirstUnicastAddress; u; u = u->Next) {
 			const sockaddr *sa = u->Address.lpSockaddr;
 			if (!sa || sa->sa_family != AF_INET) continue;
-			f.add(reinterpret_cast<const uint8_t *>(&reinterpret_cast<const sockaddr_in *>(sa)->sin_addr), name);
+			if (u->DadState != IpDadStatePreferred) continue;   // (still being checked, or found a duplicate: not usable)
+			f.add(reinterpret_cast<const uint8_t *>(&reinterpret_cast<const sockaddr_in *>(sa)->sin_addr), name, about);
 		}
 	}
 #else
@@ -83,7 +113,8 @@ void system_addresses(Found &f)
 	if (getifaddrs(&list) != 0) return;
 	for (const ifaddrs *i = list; i; i = i->ifa_next) {
 		if (!i->ifa_addr || i->ifa_addr->sa_family != AF_INET) continue;
-		if (!(i->ifa_flags & IFF_UP) || (i->ifa_flags & IFF_LOOPBACK)) continue;
+		// (up and running: docker0 and virbr0 are up with nothing plugged in)
+		if (!(i->ifa_flags & IFF_UP) || !(i->ifa_flags & IFF_RUNNING) || (i->ifa_flags & IFF_LOOPBACK)) continue;
 		f.add(reinterpret_cast<const uint8_t *>(&reinterpret_cast<const sockaddr_in *>(i->ifa_addr)->sin_addr), i->ifa_name ? i->ifa_name : "");
 	}
 	freeifaddrs(list);
@@ -124,13 +155,11 @@ std::vector<Address> addresses(const std::string &preferred)
 	if (!test) system_addresses(f);
 	std::vector<Address> out = f.v.empty() ? f.link_local : f.v;
 	if (out.empty() && !test && !preferred.empty()) out.push_back({ preferred, "" });   // (the system's list refused: the route's)
-	for (size_t i = 1; i < out.size(); i++)
-		if (out[i].ip == preferred) {
-			const Address p = out[i];
-			out.erase(out.begin() + long(i));
-			out.insert(out.begin(), p);
-			break;
-		}
+	// the internet's first, then the real adapters, then the virtual ones, each in the system's order
+	std::stable_sort(out.begin(), out.end(), [&](const Address &x, const Address &y) {
+		const int kx = x.ip == preferred ? 0 : x.virt ? 2 : 1, ky = y.ip == preferred ? 0 : y.virt ? 2 : 1;
+		return kx < ky;
+	});
 	return out;
 }
 

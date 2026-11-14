@@ -611,6 +611,18 @@ int main(int argc, char **argv)
 	check(lan_list::addresses("").size() == 1 && lan_list::addresses("")[0].ip == "169.254.10.3", "link-local when it's the only one");
 	setenv("VF3_TEST_LAN", "10.0.0.5=a,192.168.1.9=b", 1);
 	check(lan_list::addresses("192.168.1.9")[0].ip == "192.168.1.9", "the internet's address first");
+	// the most shown (6, in two rows), virtual machines' adapters after the real ones: the hotspot's not pushed off
+	setenv("VF3_TEST_LAN", "172.29.16.1=vEthernet (WSL),192.168.56.1=VirtualBox Host-Only Network,192.168.1.20=Wi-Fi,172.17.0.1=docker0,"
+	       "192.168.122.1=virbr0,192.168.137.1=Local Area Connection* 10,10.8.0.2=Ethernet 3", 1);
+	{
+		const auto l = lan_list::addresses("192.168.1.20");
+		check(l.size() == 7 && l[0].ip == "192.168.1.20" && l[1].ip == "192.168.137.1" && l[2].ip == "10.8.0.2" && l[3].virt && l[6].virt,
+		      "virtual adapters listed after the real ones");
+	}
+	if (!o.host(s, err)) fprintf(stderr, "menutest: hosting: %s\n", err.en().c_str());
+	again();
+	shot("address_hosting_most.png", w, h);
+	o.stop();
 	unsetenv("VF3_TEST_LAN");
 	s.address = "192.168.1.20";
 	if (!o.join(s, err)) fprintf(stderr, "menutest: joining: %s\n", err.en().c_str());

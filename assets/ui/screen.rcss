@@ -253,6 +253,11 @@ div { display: block; }
 .addr { text-align: center; }
 .addr .ip { display: block; font-size: 56dp; line-height: 62dp; font-weight: 700; font-style: italic; color: #ffffff; }
 .addr .nic { display: block; height: 28dp; font-size: 22dp; line-height: 28dp; font-weight: 600; color: #8f9ac8; }
+/* 4 to 6: smaller, in rows of 3 */
+.addresses.many { margin-top: 18dp; flex-wrap: wrap; row-gap: 6dp; column-gap: 24dp; width: 1100dp; margin-left: auto; margin-right: auto; }
+.addresses.many .addr { width: 340dp; }
+.addresses.many .ip { font-size: 40dp; line-height: 44dp; }
+.addresses.many .nic { height: 24dp; font-size: 19dp; line-height: 24dp; }
 .flag { width: 32dp; height: 24dp; margin: 0 10dp; border: 1dp #ffffff55; vertical-align: middle; }
 .mini .flag { width: 40dp; height: 30dp; }
 .chip .flag { width: 28dp; height: 21dp; margin: 0; }
