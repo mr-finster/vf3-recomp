@@ -23,6 +23,16 @@ const int EY = 64, HT = H + 2 * EY;
 class TileGen
 {
 public:
+	// (VF3_WIDE_SELECT, a proposal: the select screens' background for widescreen's sides, drawn only while want_plate)
+	// plate: W x H, each pixel the topmost layer's whose tile there is solid (no see-through texel: a picture's, not
+	// the letters, frames and cursors drawn over it), 0 where none is; plate_hw: WW x H, all four layers carried past
+	// the screen's edges as the board would draw them on a wider screen (the maps wrapping), as the 2D shows them
+	bool want_plate = false, plate_hw_on = false;   // (plate_hw: only while plate_hw_on)
+	static constexpr int PLATE_IN = 168;   // (the plate as far in from each edge as this)
+	std::vector<uint32_t> plate = std::vector<uint32_t>(W * H), plate_hw = std::vector<uint32_t>(WW * H);
+	void plate_line(const m3::Model3 &board, unsigned y);
+	// both aligned as aligned() (2 pixels left and up)
+	void aligned_plate(std::vector<uint32_t> &p, std::vector<uint32_t> &hw) const;
 	// RGBA8 (r in the low byte), alpha 0 where nothing is drawn
 	std::vector<uint32_t> below = std::vector<uint32_t>(W * H), above = std::vector<uint32_t>(W * H);
 	// The layer below the 3D WW wide, the screen's in the middle. The game writes its maps with no more than the
@@ -142,7 +152,8 @@ private:
 	// (this frame: a palette's see-through colours, by its first colour's place / 16: 4-bit, a bit each; 8-bit, 256 bits)
 	std::vector<uint64_t> clear_cols = std::vector<uint64_t>(4096 * 4);
 	std::vector<uint8_t> clear_known = std::vector<uint8_t>(4096);   // (8-bit's from 2048)
-	std::vector<uint8_t> solid_memo = std::vector<uint8_t>(1 << 17);   // (this frame: a pattern's entry and depth: 0 not looked at, 1 solid, 2 see-through)
+	std::vector<uint8_t> solid_memo = std::vector<uint8_t>(1 << 17);
+	std::vector<uint8_t> plate_memo = std::vector<uint8_t>(1 << 17);   // (plate_line's, as solid_memo, this frame)   // (this frame: a pattern's entry and depth: 0 not looked at, 1 solid, 2 see-through)
 	uint64_t full_failed_sum = 0;   // (the backdrop looked for in the whole map in vain: the screen's rows, the map and banks then)
 	static uint64_t banks_sum(const Backdrop &b);
 	std::unordered_map<uint64_t, uint64_t> row_failed;   // (a row's tiles, the map and banks: looked for in vain, and the frame)
