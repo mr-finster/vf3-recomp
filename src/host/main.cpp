@@ -1179,7 +1179,7 @@ struct Game
 	bool fight_screen = false;      // (the newest frame's: a fight, mode 7: Display > HUD Off hides the 2D over it)
 	// (widescreen's select screens, wide_select.h: the character select or the stage screen, its screen byte; its background)
 	bool select_screen = false;
-	int select_kind = 0;
+	int select_kind = 0, last_select_kind = -1, select_frames = 0;
 	std::atomic<bool> want_plate{ false }, want_plate_hw{ false };   // (set by the host: VF3_WIDE_SELECT on and the picture wider than 4:3, its option 4)
 	std::vector<uint32_t> plate, plate_hw;
 	video::TileGen::Scroll prev_scroll;   // the frame before's (for bg_dx, bg_dy)
@@ -1521,6 +1521,10 @@ struct Game
 		select_kind = mode == 5 ? board.ram[(board.profile->mode + 8) ^ 3] : 0;
 		select_screen = select_kind == 18 || select_kind == 19 || select_kind == 20;
 		tiles.want_plate = want_plate && select_screen;   // (from the next frame's lines)
+		// (the whole plate for a screen's first 120 frames, while its sides are made; then only its edges)
+		select_frames = select_kind == last_select_kind ? select_frames + 1 : 0;
+		last_select_kind = select_kind;
+		tiles.plate_full = select_frames < 120;
 		tiles.plate_hw_on = want_plate_hw && select_screen;
 	}
 	const video::Scene &cur() const { return scene[newest]; }

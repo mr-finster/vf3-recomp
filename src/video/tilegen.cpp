@@ -1851,20 +1851,40 @@ void TileGen::plate_frame(const m3::Model3 &board)
 {
 	const uint32_t *vram = reinterpret_cast<const uint32_t *>(board.tile_ram.data());
 	const uint32_t *regs = regs_of(board);
-	uint64_t h = 1469598103934665603ull;
-	auto add = [&](const uint32_t *p, size_t n) { for (size_t i = 0; i < n; i++) h = (h ^ p[i]) * 1099511628211ull; };
-	add(vram + 0xF6000 / 4, (0x100000 - 0xF6000) / 4);   // (the line scrolls, the masks, the four maps)
-	add(vram + 0x40000, 0x8000);                          // (the palette)
-	for (int i = 0; i < 64; i++) if (i != 0x40 / 4 && i != 0x44 / 4) add(regs + i, 1);
-	plate_age++;
-	plate_now = h != plate_sum || plate_age >= 16;
-	if (plate_now) {
-		plate_sum = h;
-		plate_age = 0;
-		plate_made++;
+	auto sum = [](const uint32_t *p, size_t n) {
+		uint64_t h = 1469598103934665603ull;
+		for (size_t i = 0; i < n; i++) h = (h ^ p[i]) * 1099511628211ull;
+		return h;
+	};
+	// all of it again when the palette, the registers (but the colour offsets), the line scrolls or masks change;
+	// else only the lines that show a map row that changed (and the rows either side: a tile's a background's by
+	// its neighbours too), and a sixteenth of the lines each frame in turn (the patterns, not summed)
+	uint64_t g = sum(vram + 0xF6000 / 4, (0xF8000 - 0xF6000) / 4) ^ sum(vram + 0x40000, 0x8000) * 31;
+	for (int i = 0; i < 64; i++) if (i != 0x40 / 4 && i != 0x44 / 4) g = (g ^ regs[i]) * 1099511628211ull;
+	plate_all = g != plate_sum || plate_age >= (1 << 20);
+	plate_sum = g;
+	bool any = plate_all;
+	for (int k = 0; k < 4; k++) {
+		plate_dirty[k] = 0;
+		for (int row = 0; row < 64; row++) {
+			const uint64_t h = sum(vram + (0xF8000 + k * 0x2000) / 4 + row * 32, 32);
+			if (h != plate_rows[k][row]) {
+				plate_rows[k][row] = h;
+				for (int d = -1; d <= 1; d++) plate_dirty[k] |= 1ull << ((row + d) & 63);
+			}
+		}
+		any |= plate_dirty[k] != 0;
+	}
+	plate_age = plate_all ? 0 : plate_age + 1;
+	plate_slice = plate_age & 15;
+	plate_made += any;
+	if (plate_all || plate_slice == 0) {   // (the patterns' kinds looked at again: every 16 frames, or all of it)
 		std::fill(plate_memo.begin(), plate_memo.end(), 0);
 		std::fill(plate_bg.begin(), plate_bg.end(), 0);
-	}
+	} else
+		for (int k = 0; k < 4; k++)   // (a changed row's tiles, and those beside them, as backgrounds or not again)
+			for (int row = 0; row < 64; row++)
+				if ((plate_dirty[k] >> row) & 1) std::fill_n(plate_bg.begin() + k * 4096 + row * 64, 64, 0);
 }
 
 // (VF3_WIDE_SELECT) the select screens' background, a line: tilegen.h's plate and plate_hw
@@ -1873,7 +1893,13 @@ void TileGen::plate_line(const m3::Model3 &board, unsigned y)
 	const uint32_t *regs = regs_of(board);
 	plate_offs[y][0] = regs[0x40 / 4];
 	plate_offs[y][1] = regs[0x44 / 4];
-	if (!plate_now && !plate_hw_on) return;
+	bool line_now = plate_all || int(y) / 24 == plate_slice;
+	if (!line_now)
+		for (int k = 0; k < 4 && !line_now; k++) {
+			const int row = (((int(y) + int((regs[0x60 / 4 + k] >> 16) & 0x1FF)) & 511) >> 3) & 63;
+			line_now = (plate_dirty[k] >> row) & 1;
+		}
+	if (!line_now && !plate_hw_on) return;
 	const uint32_t *vram = reinterpret_cast<const uint32_t *>(board.tile_ram.data());
 	const uint32_t *pal = vram + 0x40000;
 	const uint32_t order = regs[0x20 / 4];
@@ -1962,8 +1988,11 @@ void TileGen::plate_line(const m3::Model3 &board, unsigned y)
 		return 0xFF000000u | uint32_t(l.lut[2][(v >> 10) & 31]) << 16 | uint32_t(l.lut[1][(v >> 5) & 31]) << 8 | l.lut[0][v & 31];
 	};
 	for (int x = plate_hw_on ? -EXT : 0; x < (plate_hw_on ? W + EXT : W); x++) {
-		const bool in_plate = plate_now && x >= 0 && x < W;
-		if (!in_plate && x >= 0 && x < W) continue;
+		const bool in_plate = line_now && x >= 0 && x < W && (plate_full || x < PLATE_EDGE || x >= W - PLATE_EDGE);
+		if (!in_plate && x >= 0 && x < W) {
+			if (!plate_hw_on && !plate_full && x < W - PLATE_EDGE) x = W - PLATE_EDGE - 1;   // (on to the right edge's)
+			continue;
+		}
 		// the layers in the picture's order, top first: above the 3D A then B, below it A then B (each pair's layer
 		// the mask has for this 32-pixel column; past the screen, the edge's). plate_hw: the top's opaque pixel, as
 		// the board shows it; plate: the bottom's solid tile's (the picture the screen is drawn over: the letters,

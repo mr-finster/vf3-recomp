@@ -11,15 +11,19 @@
 //   cut can go up to 8 columns into the picture where those are background (the 2D's own pixels the plate's: never
 //   letters, frames, portraits or the 3D), so the edge isn't a straight line.
 // - Each pixel made is the edge's colour on its line, carried out with the picture's own large-scale slope there
-//   (eased out over 96 pixels), plus its source pixel's detail (it less its line's mean over 25 columns round it, in
-//   the plate): the texture whole and as sharp as the photo's, the shade the edge's, so no seam in colour where
-//   patches meet or at the 4:3 edge. (A gradient-domain solve, Poisson's, the side's steps the patches' own with the
-//   picture's pixels fixed, was tried: told apart from the photo more easily, 66% against 59%, its streaks shorter.)
+//   (eased out over 96 pixels; on the stage panels, whose shading runs steeply toward the 4:3 edges, over 200), plus
+//   its source pixel's detail (it less its line's mean over 97 columns round it, 49 on the stage panels, in the
+//   plate): the texture whole and as sharp as the photo's, its shading across with it, the shade the edge's, so no
+//   seam in colour where patches meet or at the 4:3 edge. (A gradient-domain solve, Poisson's, the side's steps the
+//   patches' own with the picture's pixels fixed, was tried: told apart from the photo more easily, its streaks
+//   shorter.)
+// - Beside the stage screen's preview the frame is quilted the same way from the panels' blocks, on the panels'
+//   colour and slope above and below it (between them), the detail less its mean over 17 lines too.
 // Made once a screen, on a thread of its own, once the screen has settled (its fade in); each picture then is that,
 // moved by how much the edge's colour has moved since (a fade: the game's colour offsets, added).
 // On the stage screen (both programs: the same layout) the preview of the stage, lines ARENA_Y0 to ARENA_Y1, isn't
-// carried on: beside it the panels' metal goes on down as a frame round it (option 2: the panels' own texture, their
-// colour between those above and below), or the sides are dark there (option 6).
+// carried on: beside it the panels' metal goes on down as a frame round it (option 2), or the sides are dark there
+// (option 6).
 #pragma once
 #include <atomic>
 #include <chrono>
@@ -30,6 +34,7 @@ namespace wide_select {
 
 constexpr float DETMAX = 40, LINEK = 3, LINEC = 48, SDK = 12, SPECK = 150;
 constexpr int OVS = 3, CXS = 3;
+constexpr int FMY = 8;
 constexpr int KR = 16, KIN = 8;               // (the picture's own columns the first patches overlap; of those, how many may be replaced)
 constexpr int ARENA_Y0 = 68, ARENA_Y1 = 262;   // (the stage screen's preview, aligned lines: both programs)
 
@@ -87,22 +92,42 @@ inline FillResult synth(std::vector<uint32_t> plate, std::vector<uint32_t> vis, 
 	std::vector<float> FP(size_t(FZ) * H * 3);
 	for (int y = 0; y < H; y++) for (int x = 0; x < FZ; x++) for (int c = 0; c < 3; c++) FP[(size_t(y) * FZ + x) * 3 + c] = float(ch(F.at(y, x), c));
 	auto fp = [&](int x, int y, int c) { return FP[(size_t(std::clamp(y, 0, H - 1)) * FZ + size_t(std::clamp(x, 0, FZ - 1))) * 3 + c]; };
-	// (each plate pixel's line's mean over 25 columns round it: a source pixel's detail is it less this, so a patch
-	// brings its texture but not its shade)
-	std::vector<float> FM(FP.size());
-	for (int y = 0; y < H; y++)
-		for (int c = 0; c < 3; c++) {
-			float sum = 0;
-			for (int x = -12; x <= 12; x++) sum += fp(x, y, c);
-			for (int x = 0; x < FZ; x++) {
-				FM[(size_t(y) * FZ + x) * 3 + c] = sum / 25;
-				sum += fp(x + 13, y, c) - fp(x - 12, y, c);
+	// (each plate pixel's mean over the 2 FMX + 1 columns and 2 FMY + 1 lines round it: a source pixel's detail is it less
+	// this, so a patch brings its texture, its streaks' lines too, but not its shade)
+	// (the line's mean over 2 FMX + 1 columns: wide, so a patch keeps its own shading across, as the photo has it;
+	// the stage panels' narrower, their shading near the edges steep)
+	const int FMX = kind == 19 || kind == 20 ? 24 : 48;
+	std::vector<float> FM(FP.size()), FR(FP.size());   // (FR: the line's mean alone)
+	{
+		std::vector<float> rowm(FP.size());
+		for (int y = 0; y < H; y++)
+			for (int c = 0; c < 3; c++) {
+				float sum = 0;
+				for (int x = -FMX; x <= FMX; x++) sum += fp(x, y, c);
+				for (int x = 0; x < FZ; x++) {
+					rowm[(size_t(y) * FZ + x) * 3 + c] = sum / float(2 * FMX + 1);
+					sum += fp(x + FMX + 1, y, c) - fp(x - FMX, y, c);
+				}
 			}
-		}
+		for (int y = 0; y < H; y++)
+			for (int x = 0; x < FZ; x++)
+				for (int c = 0; c < 3; c++) {
+					float t = 0;
+					for (int k = -FMY; k <= FMY; k++) t += rowm[(size_t(std::clamp(y + k, 0, H - 1)) * FZ + x) * 3 + c];
+					FM[(size_t(y) * FZ + x) * 3 + c] = t / float(2 * FMY + 1);
+					FR[(size_t(y) * FZ + x) * 3 + c] = rowm[(size_t(y) * FZ + x) * 3 + c];
+				}
+	}
+	auto fr = [&](int x, int y, int c) { return FR[(size_t(std::clamp(y, 0, H - 1)) * FZ + size_t(std::clamp(x, 0, FZ - 1))) * 3 + c]; };
 	auto fm = [&](int x, int y, int c) { return FM[(size_t(std::clamp(y, 0, H - 1)) * FZ + size_t(std::clamp(x, 0, FZ - 1))) * 3 + c]; };
 	// each side's zones (how far in the background goes), its colour at the edge line by line, its slope across
 	std::vector<int> bands[2];
 	std::vector<float> E[2], slope[2];
+	const float slc = kind == 19 || kind == 20 ? 1.0f : 0.4f;
+	const bool stage = kind == 19 || kind == 20;
+	// (the stage panels' blocks: nearer the edge's colour, and fewer bright specks, than the photo's: their bluish
+	// parts and the white dashes of their lettering showed as marks)
+	const float speck = stage ? 90.0f : SPECK, cdist = stage ? 40.0f : 70.0f;   // (the slope's most, a channel's step a pixel: the stage panels' shading toward the edges is steep)
 	for (int s = 0; s < 2; s++) {
 		Filled fs;
 		fs.make(plate.data(), s);
@@ -136,7 +161,7 @@ inline FillResult synth(std::vector<uint32_t> plate, std::vector<uint32_t> vis, 
 			for (int c = 0; c < 3; c++) {
 				float t = 0; int n = 0;
 				for (int k = -12; k <= 12; k++) { const int yy = y + k; if (yy >= 0 && yy < H && has[yy]) { t += sl[size_t(yy) * 3 + c]; n++; } }
-				slope[s][size_t(y) * 3 + c] = n && !r.arena[size_t(y)] ? std::clamp(t / float(n), -0.4f, 0.4f) : 0.0f;
+				slope[s][size_t(y) * 3 + c] = n && !r.arena[size_t(y)] ? std::clamp(t / float(n), -slc, slc) : 0.0f;
 			}
 	}
 	// the background to take patches from: 8 x 8 blocks all solid, not the preview, their colour near the edge's on
@@ -165,7 +190,7 @@ inline FillResult synth(std::vector<uint32_t> plate, std::vector<uint32_t> vis, 
 				for (int c = 0; c < 3; c++) d += std::fabs(m[c] / 64.0f - e[s][c] / 8);
 				dist = std::min(dist, d);
 			}
-			if (dist > 70 || det / 192 > DETMAX) continue;
+			if (dist > cdist || det / 192 > DETMAX) continue;
 			{   // (no speck far brighter than the rest, for its texture: a highlight copied out shows as a mark)
 				float lum[64];
 				int k = 0;
@@ -177,7 +202,7 @@ inline FillResult synth(std::vector<uint32_t> plate, std::vector<uint32_t> vis, 
 				float dev = 0;
 				for (float l : lum) dev += std::fabs(l - med);
 				dev /= 64;
-				if (*std::max_element(lum, lum + 64) > med + std::max(SPECK, 6 * dev)) continue;
+				if (*std::max_element(lum, lum + 64) > med + std::max(speck, 6 * dev)) continue;
 			}
 			blk_det[size_t(by) * BW + bx] = det / 192;
 			float so[8];
@@ -367,82 +392,55 @@ inline FillResult synth(std::vector<uint32_t> plate, std::vector<uint32_t> vis, 
 						have[i] = 1; real[i] = 0;
 					}
 			}
-		// Each pixel made: the edge's colour on its line, carried out with the picture's slope there (eased over L),
-		// plus its source's detail (the source pixel less its line's mean over 25 columns round it, in the plate: the
-		// patch's texture whole, not its shade, so no seam in colour where patches meet or at the edge). Beside the
-		// preview: the panels' colour above and below it (lines 8 to 24 off it), between them
+		// Each pixel made: the edge's colour on its line, carried out with the picture's slope there (eased over 96),
+		// plus its source's detail (the source pixel less its line's mean over 2 FMX + 1 columns round it, in the plate: the
+		// patch's texture whole, not its shade, so no seam in colour where patches meet). Beside the preview: the
+		// panels' colour and slope above and below it (lines 8 to 24 off it), between them, plus the detail less the
+		// mean over 2 FMY + 1 lines too (the panels' brushing, line to line, comes with it)
 		std::vector<float> T(size_t(CW) * H * 3, 0);
-		std::vector<float> Eb;
-		auto L96 = [](int d) { const float L = 96; return d > 0 ? L * (1 - std::exp(-float(d) / L)) : float(d); };
+		const float LE = stage ? 200.0f : 96.0f;   // (the stage panels' shading toward the edges carried further: nearly straight on)
+		auto L96 = [LE](int d) { return d > 0 ? LE * (1 - std::exp(-float(d) / LE)) : float(d); };
 		{
-			std::vector<float> Ey(E[s]);
+			std::vector<float> Es(size_t(H) * 3, 0), Sl(slope[s]);
+			for (int y = 0; y < H; y++) {
+				if (r.arena[size_t(y)]) continue;
+				for (int q = 0; q < 3; q++) {
+					float t = 0; int n = 0;
+					for (int k = -FMY; k <= FMY; k++) { const int z = y + k; if (z >= 0 && z < H && !r.arena[size_t(z)]) { t += E[s][size_t(z) * 3 + q]; n++; } }
+					Es[size_t(y) * 3 + q] = t / float(std::max(n, 1));
+				}
+			}
+			std::vector<float> Ey(Es);
 			for (int y = 0; y < H; y++) {
 				if (!r.arena[size_t(y)]) continue;
 				int b = y;
 				while (b < H && r.arena[size_t(b)]) b++;
-				float ea[3] = {}, eb[3] = {}; int na = 0, nb = 0;
-				for (int yy = std::max(y - 24, 0); yy < y - 8; yy++) { for (int c = 0; c < 3; c++) ea[c] += E[s][size_t(yy) * 3 + c]; na++; }
-				for (int yy = b + 8; yy < std::min(b + 24, H); yy++) { for (int c = 0; c < 3; c++) eb[c] += E[s][size_t(yy) * 3 + c]; nb++; }
-				for (int yy = y; yy < b; yy++)
+				float ea[3] = {}, eb[3] = {}, sa[3] = {}, sb[3] = {}; int na = 0, nb = 0;
+				for (int yy = std::max(y - 24, 0); yy < y - 8; yy++) { for (int c = 0; c < 3; c++) { ea[c] += Es[size_t(yy) * 3 + c]; sa[c] += slope[s][size_t(yy) * 3 + c]; } na++; }
+				for (int yy = b + 8; yy < std::min(b + 24, H); yy++) { for (int c = 0; c < 3; c++) { eb[c] += Es[size_t(yy) * 3 + c]; sb[c] += slope[s][size_t(yy) * 3 + c]; } nb++; }
+				for (int yy = y; yy < b; yy++) {
+					const float t = float(yy - y + 1) / float(b - y + 1);
 					for (int c = 0; c < 3; c++) {
 						const float a = na ? ea[c] / float(na) : eb[c] / float(std::max(nb, 1)), bb = nb ? eb[c] / float(nb) : a;
-						Ey[size_t(yy) * 3 + c] = a + (bb - a) * float(yy - y + 1) / float(b - y + 1);
+						const float p = na ? sa[c] / float(na) : sb[c] / float(std::max(nb, 1)), pb = nb ? sb[c] / float(nb) : p;
+						Ey[size_t(yy) * 3 + c] = a + (bb - a) * t;
+						Sl[size_t(yy) * 3 + c] = p + (pb - p) * t;
 					}
+				}
 				y = b - 1;
 			}
-			Eb = Ey;
 			for (int y = 0; y < H; y++)
 				for (int d = D0; d < RC; d++) {
 					const size_t i = at(d, y);
 					if (!have[i]) continue;
 					const float ease = L96(d);
 					for (int q = 0; q < 3; q++)
-						T[i * 3 + q] = Ey[size_t(y) * 3 + q] + slope[s][size_t(y) * 3 + q] * ease + (Q[i * 3 + q] - fm(sx[i], sy[i], q));
+						T[i * 3 + q] = (r.arena[size_t(y)] ? Ey[size_t(y) * 3 + q] + Q[i * 3 + q] - fm(sx[i], sy[i], q) : E[s][size_t(y) * 3 + q] + Q[i * 3 + q] - fr(sx[i], sy[i], q)) + Sl[size_t(y) * 3 + q] * ease;
 				}
 		}
 		// (the picture's own pixels stay; the rest is what it's held to)
 		std::vector<float> S(Q);
 		for (size_t i = 0; i < have.size(); i++) if (have[i] && !real[i]) for (int q = 0; q < 3; q++) S[i * 3 + q] = T[i * 3 + q];
-		// Beside the preview: the panels' own brushing carried on down, line for line (each line the panel's lines
-		// mirrored out from the preview's top and bottom edges, back and forth within the panel; the two halves
-		// crossfaded over 8 lines in the middle), on the panels' colour between them
-		for (int y = 0; y < H; y++) {
-			if (!r.arena[size_t(y)]) continue;
-			int b = y;
-			while (b < H && r.arena[size_t(b)]) b++;
-			const int top0 = 0, top1 = y, bot0 = b, bot1 = H;   // (the panels: lines [top0, top1) and [bot0, bot1))
-			const int mid = (y + b) / 2;
-			// (the panels' colour smoothed over 17 lines: what's left of a line is its brushing, line to line, too)
-			std::vector<float> Es(size_t(H) * 3, 0);
-			for (int yy = 0; yy < H; yy++) {
-				if (r.arena[size_t(yy)]) continue;
-				for (int q = 0; q < 3; q++) {
-					float t = 0; int n = 0;
-					for (int k = -8; k <= 8; k++) { const int z = yy + k; if (z >= 0 && z < H && !r.arena[size_t(z)]) { t += E[s][size_t(z) * 3 + q]; n++; } }
-					Es[size_t(yy) * 3 + q] = t / float(n);
-				}
-			}
-			auto line_from = [&](int yy, bool up) {
-				const int n = up ? top1 - top0 : bot1 - bot0, k = up ? yy - y : b - 1 - yy, m = k % (2 * n);
-				const int off = m < n ? m : 2 * n - 1 - m;
-				return up ? top1 - 1 - off : bot0 + off;
-			};
-			for (int yy = y; yy < b; yy++) {
-				const float t = std::clamp(float(yy - (mid - 4)) / 8.0f, 0.0f, 1.0f);   // (0: the top half's, 1: the bottom's)
-				const int ya = line_from(yy, true), yb = line_from(yy, false);
-				for (int d = 0; d < RC; d++) {
-					const size_t i = at(d, yy), ia = at(d, ya), ib = at(d, yb);
-					if (!have[ia] && !have[ib]) continue;
-					for (int q = 0; q < 3; q++) {
-						const float da = have[ia] ? S[ia * 3 + q] - (Es[size_t(ya) * 3 + q] + slope[s][size_t(ya) * 3 + q] * L96(d)) : 0;
-						const float db = have[ib] ? S[ib * 3 + q] - (Es[size_t(yb) * 3 + q] + slope[s][size_t(yb) * 3 + q] * L96(d)) : 0;
-						S[i * 3 + q] = Eb[size_t(yy) * 3 + q] + da * (1 - t) + db * t;
-					}
-					have[i] = 1; real[i] = 0;
-				}
-			}
-			y = b - 1;
-		}
 		const int OW = KIN + reach;
 		r.px[s].assign(size_t(OW) * H * 3, 0);
 		r.mine[s].assign(size_t(OW) * H, 0);

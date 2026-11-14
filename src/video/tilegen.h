@@ -29,17 +29,22 @@ public:
 	// where none is: its colour as the palette has it (bits 0-14), its
 	// pair (bit 15: B), bit 31 set; the pairs' colour offsets each line's (plate_offs), put on by aligned_plate.
 	// Made again only when what it's made from changes (the maps, the palette, the registers but the offsets, the
-	// line masks: plate_sum), or every 16 frames (the patterns, not summed). plate_hw: WW x H, all four layers carried
+	// line masks: plate_sum), else the lines whose map rows changed, and a sixteenth of the lines each frame in turn
+	// (the patterns, not summed). plate_hw: WW x H, all four layers carried
 	// past the screen's edges as the board would draw them on a wider screen (the maps wrapping), as the 2D shows them
 	bool want_plate = false, plate_hw_on = false;   // (plate_hw: only while plate_hw_on)
 	std::vector<uint32_t> plate = std::vector<uint32_t>(W * H), plate_hw = std::vector<uint32_t>(WW * H);
 	uint32_t plate_offs[H][2] = {};
-	uint64_t plate_sum = 0;
-	int plate_age = 1 << 20;     // (frames since the plate was last made whole)
-	bool plate_now = false;      // (this frame's lines make it)
-	long plate_made = 0;         // (tests: frames it was made in)
+	uint64_t plate_sum = 0, plate_rows[4][64] = {}, plate_dirty[4] = {};   // (the maps' rows' sums, and those changed this frame)
+	int plate_age = 1 << 20, plate_slice = 0;   // (frames since made whole; the sixteenth of the lines made again this frame)
+	bool plate_all = false;      // (this frame's lines all made again)
+	// (all of each line made, or only its PLATE_EDGE columns at either edge: what the sides' colours are taken from
+	// each picture; the whole plate's wanted only while the sides are being made, a screen's first frames)
+	bool plate_full = true;
+	static constexpr int PLATE_EDGE = 28;
+	long plate_made = 0;         // (tests: frames anything was made in)
 	void plate_line(const m3::Model3 &board, unsigned y);
-	void plate_frame(const m3::Model3 &board);   // (at a frame's first line: plate_now)
+	void plate_frame(const m3::Model3 &board);   // (at a frame's first line: what its lines make again)
 	// both aligned as aligned() (2 pixels left and up), the plate in RGBA with the offsets on
 	void aligned_plate(std::vector<uint32_t> &p, std::vector<uint32_t> &hw) const;
 	// RGBA8 (r in the low byte), alpha 0 where nothing is drawn
