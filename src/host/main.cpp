@@ -79,7 +79,8 @@
 //   VF3_WATCH_CODE=XXXXXX watches that match at pass 60, as Online > Rooms > Watch (VF_LOBBY: another lobby)
 //   VF3_HOST_PUBLIC=1    VF3_HOST_ROOM's room listed in Rooms (its matches may be watched by its code either way)
 //   VF3_MENU_KEYS=k,...  presses these keys (esc, up, down, left, right, enter, or SDL key names) 6 passes of the
-//                        loop apart from pass 30
+//                        loop apart from pass 30; "shot" among them: the window then, to build/host_window_menu_N.png
+//                        (N its place in the list, from 1). VF3_MENU_KEYS_FROM=F: from 30 passes after game frame F
 //   VF3_TEST_VJOY=...    a virtual stick SDL doesn't know (10 buttons, a hat, 2 axes), pressed at these passes of
 //                        the loop: b3@200 its button 3, h1@260 its hat (1 up, 2 right, 4 down, 8 left), +0@300 or
 //                        -1@300 an axis to one end (each 8 passes), q@900 quit (a run that saves), p@100 plugged
@@ -4288,6 +4289,11 @@ int main(int argc, char **argv)
 	if (const char *k = getenv("VF3_MENU_KEYS"))
 		for (std::string all = std::string(k) + ","; !all.empty(); all.erase(0, all.find(',') + 1))
 			if (all.find(',') > 0) menu_keys.push_back(all.substr(0, all.find(',')));
+	// VF3_MENU_KEYS_FROM=F: the keys from game frame F's pass (+30) instead of the start's; a key "shot": the window as
+	// drawn then, to build/host_window_menu_N.png (N: the key's place in the list, from 1)
+	const uint64_t menu_keys_from = getenv("VF3_MENU_KEYS_FROM") ? strtoull(getenv("VF3_MENU_KEYS_FROM"), nullptr, 10) : 0;
+	uint64_t menu_keys_base = 0;
+	int menu_shot = 0;
 	// VF3_TEST_VJOY=b3@200,h1@260,+0@300,q@900,...: the virtual stick's button 3, its hat up (1, 2 right, 4 down,
 	// 8 left), axis 0 to its + end held from those passes of the loop (8 passes); q: quit then (a run that saves)
 	struct vjoy_press { char what; int n; uint64_t at; };
@@ -4365,6 +4371,7 @@ int main(int argc, char **argv)
 	uint64_t frames_run = 0, clock_t = SDL_GetTicksNS(), pass = 0;
 	bool shown = false, first_shown = false;
 	bool new_frame = true;
+	bool restyle = false;   // (a setting changed the picture's make-up while the game stands still: drawn again)
 	auto restart_clock_real = [&] { frame_clock = double(frames_run); clock_t = SDL_GetTicksNS(); even_real = even_shown = 0; };
 	pace.t0 = SDL_GetTicksNS();
 	int shot_n = 0;
@@ -4786,12 +4793,14 @@ int main(int argc, char **argv)
 			      : test_join_code ? online.join_room(cfg.online, test_join_code, err) : online.host_room(cfg.online, err)))
 				fprintf(stderr, "online: (test) %s\n", err.en().c_str());
 		}
-		if (!menu_keys.empty() && pass >= 30 && (pass - 30) % 6 == 0 && (pass - 30) / 6 < menu_keys.size()) {
-			const std::string &k = menu_keys[(pass - 30) / 6];
-			SDL_Scancode sc = k == "esc" ? SDL_SCANCODE_ESCAPE : k == "up" ? SDL_SCANCODE_UP : k == "down" ? SDL_SCANCODE_DOWN
+		if (menu_keys_from && !menu_keys_base && game_frame >= menu_keys_from) menu_keys_base = pass;   // (VF3_MENU_KEYS_FROM)
+		if (!menu_keys.empty() && (!menu_keys_from || menu_keys_base) && pass >= menu_keys_base + 30 && (pass - menu_keys_base - 30) % 6 == 0 &&
+		    (pass - menu_keys_base - 30) / 6 < menu_keys.size()) {
+			const std::string &k = menu_keys[(pass - menu_keys_base - 30) / 6];
+			if (k == "shot") menu_shot = int((pass - menu_keys_base - 30) / 6) + 1;   // (the window after this pass's picture)
+			else send_key(k == "esc" ? SDL_SCANCODE_ESCAPE : k == "up" ? SDL_SCANCODE_UP : k == "down" ? SDL_SCANCODE_DOWN
 				: k == "left" ? SDL_SCANCODE_LEFT : k == "right" ? SDL_SCANCODE_RIGHT : k == "enter" ? SDL_SCANCODE_RETURN
-				: SDL_GetScancodeFromName(k.c_str());
-			send_key(sc);
+				: SDL_GetScancodeFromName(k.c_str()));
 		}
 		if (!vjoy_presses.empty())   // VF3_TEST_VJOY: each press held 8 passes
 			for (const auto &t : vjoy_presses) {
@@ -5325,8 +5334,30 @@ int main(int argc, char **argv)
 		static const bool no_pictures = getenv("VF3_TEST_NO_PICTURES") != nullptr;
 		// (a recording not yet started: the frames before it as fast as they go, a picture only now and then)
 		const bool rec_wait = !rec.dir.empty() && !rec.on && first_shown;
+		// A setting that changes the picture's make-up while the game stands still (the menu open, a pause): its shape,
+		// the window's (Fit), the render scale, the antialiasing, the 3D renderer, the textures' look. The picture on show
+		// is drawn again at once as it now is (issue #47: the paused picture behind the menu kept its old shape, 4:3's
+		// squeezed into 16:9's width, till the game went on). A wider shape's frame is built again from the board first,
+		// as the free camera's is (only its culling against the sides changes; between two frames only, offline), so
+		// what's past the old sides is there. Drawing reads the frames' copies only: the game's RAM is untouched.
+		{
+			int lw, lh, lgw;
+			size_3d(lw, lh, lgw);
+			const std::array<int, 6> look{ lw, lh, aa_now(), int(g3.on), int(cfg.sharp_textures), int(cfg.smooth) };
+			static std::array<int, 6> look_was = look;
+			if (look != look_was && stopped && first_shown) {
+				restyle = true;
+				const float widen = std::max(1.0f, float(picture_aspect()) * 0.75f) * 1.05f;
+				if (widen > game.builder.widen && !half && !online.playing() && !fc.on) {
+					if (game.emu_thread.joinable()) game.job_wait();
+					game.builder.widen = widen;
+					game.rebuild_view();
+				}
+			}
+			look_was = look;
+		}
 		const bool draw = no_pictures || rec_wait ? first_shown ? (pass % 120 == 0) : true
-		                              : rec.on || !first_shown || (fc.on && (every_refresh || smooth_budget >= 1)) ||   // (the free camera: moving, paused too)
+		                              : rec.on || !first_shown || std::exchange(restyle, false) || (fc.on && (every_refresh || smooth_budget >= 1)) ||   // (the free camera: moving, paused too)
 		                                (smooth && !stopped && !unseen ? smooth_budget >= 1 || every_refresh   // (a new frame's in the in-between pictures: the limit holds)
 		                                                               : new_frame && (!capped_low || smooth_budget >= 1 || stopped));
 		// (tests: the free camera hooks' clock, and the path's events and this picture's time on it: between two frames
@@ -5446,6 +5477,7 @@ int main(int argc, char **argv)
 			if (*it <= game_frame) { read_window("build/host_window_" + std::to_string(*it - 3) + ".png"); it = window_shots.erase(it); }
 			else ++it;
 		for (uint64_t s : shot_at) if (s == pass) read_window("build/host_window_at_" + std::to_string(pass) + ".png");
+		if (menu_shot) { read_window("build/host_window_menu_" + std::to_string(menu_shot) + ".png"); menu_shot = 0; }
 		if (static const char *ft = getenv("VF3_TEST_FREECAM"); ft) {   // (tests: the free camera at these frames)
 			struct Ev { std::string what, arg; uint64_t at; bool done; };
 			static std::vector<Ev> evs = [&] {
