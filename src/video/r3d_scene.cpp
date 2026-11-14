@@ -934,6 +934,8 @@ struct Plan {
 	std::vector<std::vector<int>> paired;    // every one of b's models' pair in a (blended or not)
 	std::vector<std::vector<Flip>> flips;    // per b's model
 	std::vector<std::vector<char>> swarm;    // b's models shown as a swarm's grains (snap 4)
+	struct Still { size_t v, j; Mat4 undo; };
+	std::vector<Still> still;                // b's models blended from where they stood in a (undo: their move undone)
 };
 Plan plan;
 // the addresses a swarm's grains were seen at, and the frames they stay a swarm's (interpolate)
@@ -1059,6 +1061,14 @@ const std::vector<std::vector<int>> *interp_paired(const Scene &a, const Scene &
 	return &plan.paired;
 }
 
+// A stage's piece with no partner blended from where it stood in a (its move undone, u: a = u b), as the pieces
+// beside it are
+void blend_still(const Mat4 &u, Model &m, float t)
+{
+	const Mat4 was = u * m.matrix;
+	for (int k = 0; k < 16; k++) m.matrix.m[k] = was.m[k] + (m.matrix.m[k] - was.m[k]) * t;
+}
+
 bool interpolate(const Scene &a, const Scene &b, float t, Scene &out, InterpStats *st)
 {
 	out = b;
@@ -1083,6 +1093,8 @@ bool interpolate(const Scene &a, const Scene &b, float t, Scene &out, InterpStat
 				m.alpha = p.alpha + (m.alpha - p.alpha) * t;
 			}
 		}
+		for (const Plan::Still &k : plan.still)
+			if (k.v < out.viewports.size() && k.j < out.viewports[k.v].models.size()) blend_still(k.undo, out.viewports[k.v].models[k.j], t);
 		apply_flips(b, t, out);
 		return true;
 	}
@@ -1430,6 +1442,60 @@ bool interpolate(const Scene &a, const Scene &b, float t, Scene &out, InterpStat
 			const Model &q = was[size_t(matrix_from)];
 			for (int i = 0; i < 16; i++) m.matrix.m[i] = q.matrix.m[i] + (m.matrix.m[i] - q.matrix.m[i]) * t;
 			m.alpha = q.alpha + (m.alpha - q.alpha) * t;
+		}
+		// A stage's piece shown where it is in b, not blended, while the pieces beside it are (issue #7: Wolf's desert
+		// floor, big tiles of two models, a black line between two for a picture). The tiles don't move as the camera's
+		// move has it (the floor and the camera's move found apart by up to half the near tile's distance a frame): the
+		// near tile, paired with itself, was too far from where the camera's move puts it for its distance and shown
+		// as in b, the farther ones blended; and a tile new this frame (the game picks which to draw each frame) has
+		// no partner. Each is blended as the nearest of its address's models blended moved (its move, d: b = d a),
+		// or the camera's when none was: with its partner if d brings it there, otherwise from where it stood in a (d
+		// undone) when one of a's models at its address points the way it does after d (another copy of it). Only a
+		// big piece (across a tenth of its distance or more), not a swarm's grain or a puff of sand.
+		static const bool no_still = getenv("VF3_NO_STILL") != nullptr;   // (tests: as before)
+		if (!no_still) {
+			std::unordered_map<uint32_t, std::vector<int>> was_at, now_at;
+			for (size_t j = 0; j < now.size(); j++) {
+				if (np.from[v][j] >= 0 || (pair[j] >= 0 && snap[j] != 2 && snap[j] != 3) || grain(now[j]) ||
+				    radius2(now[j]) < 0.01f * dist2(now[j])) continue;
+				if (was_at.empty()) {
+					for (size_t i = 0; i < was.size(); i++) was_at[was[i].addr].push_back(int(i));
+					for (size_t k = 0; k < now.size(); k++)
+						if (np.from[v][k] >= 0 && np.from[v][k] == pair[k] && !grain(now[k])) now_at[now[k].addr].push_back(int(k));
+				}
+				const Model &m = b.viewports[v].models[j];
+				auto it = was_at.find(m.addr);
+				if (it == was_at.end()) continue;
+				// the move: the nearest blended model's of its address, or the camera's
+				Mat4 d, inv;
+				bool have = false;
+				if (auto nt = now_at.find(m.addr); nt != now_at.end()) {
+					float best = 0;
+					for (int k : nt->second) {
+						const Model &q = b.viewports[v].models[size_t(k)];
+						const float e = moved2(q, m);
+						if ((!have || e < best) && affine_inverse(was[size_t(pair[size_t(k)])].matrix, inv)) { d = q.matrix * inv; best = e; have = true; }
+					}
+				}
+				if (!have && have_camera) { d = camera; have = true; }
+				if (!have) continue;
+				if (pair[j] >= 0 && predicted2(d, was[size_t(pair[j])], m) <= 1e-4f * dist2(m) + 1e-2f &&
+				    turned2(&d, was[size_t(pair[j])], m) < 1e-3f) {   // (its partner, moved as the others: blended with it)
+					const Model &p = was[size_t(pair[j])];
+					np.from[v][j] = pair[j];
+					for (int k = 0; k < 16; k++) now[j].matrix.m[k] = p.matrix.m[k] + (m.matrix.m[k] - p.matrix.m[k]) * t;
+					now[j].alpha = p.alpha + (m.alpha - p.alpha) * t;
+					continue;
+				}
+				Mat4 undo;
+				if (!affine_inverse(d, undo)) continue;
+				bool copy = false;
+				for (int i : it->second)
+					if (turned2(&d, was[size_t(i)], m) < 1e-3f) { copy = true; break; }
+				if (!copy) continue;
+				np.still.push_back({ v, j, undo });
+				blend_still(undo, now[j], t);
+			}
 		}
 	}
 	st->total = total;
