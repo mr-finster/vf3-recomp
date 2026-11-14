@@ -81,7 +81,8 @@
 //   VF3_ROOM2_CREATE=1   creates a Rooms 2 room at pass 60, as Online > Create room (the code in log.txt; a lobby without
 //                        Rooms 2: a room as before)
 //   VF3_ROOM2_ENTER=CODE enters that room at pass 60, as Online > Enter code (into its line, watching its match)
-//   VF3_ROOM2_READY=auto|never|late   the ready check, called: Start pressed 2 s in (auto), 11 s in (late), or never
+//   VF3_ROOM2_READY=now|esc|away   READY or AWAY: Start 1 s into GET READY (now: seated at once), Esc then (esc:
+//                        AWAY), or AWAY as soon as in the room (away); unset: seated by itself when GET READY's 3 s are up
 //   VF3_ROOM2_FIGHT=win|lose  this player's input in a Rooms 2 room's matches: Start when the match wants it, then
 //                        random play (win) or nothing (lose: the other wins), and Start again as the loser (a rematch,
 //                        held back when someone's in the line); for runs with several matches in a row
@@ -4805,7 +4806,8 @@ int main(int argc, char **argv)
 		if (online.making_way()) menu.set_banner(tr::BANNER_NEXT_IN_LINE, tr::fill(tr::BANNER_MAKES_WAY, { { "name", online.opponent() } }));
 		else if (r2_ready >= 0) {   // (a Rooms 2 room's ready check: this player called, its seconds counting down)
 			const std::string stays = !r2m ? "" : r2m->holder == "a" ? r2m->a.name : r2m->holder == "b" ? r2m->b.name : r2m->has_a ? r2m->a.name : r2m->b.name;
-			menu.set_banner(tr::fill(tr::ROOM2_PRESS_START_N, { { "n", std::to_string(r2_ready) } }), stays.empty() ? std::string(tr::ROOM2_YOURE_NEXT) : tr::fill(tr::ROOM2_YOU_PLAY, { { "name", stays } }), start_button());   // (which key or button is Start, as every banner that asks for it)
+			const std::string not_now = tr::fill(tr::ROOM2_NOT_NOW, { { "key", pads[0] ? "B" : "Esc" } });   // (Esc or B: AWAY; Start: now)
+			menu.set_banner(tr::fill(tr::ROOM2_GET_READY_N, { { "n", std::to_string(r2_ready) } }), (stays.empty() ? std::string(tr::ROOM2_YOURE_NEXT) : tr::fill(tr::ROOM2_YOU_PLAY, { { "name", stays } })) + "   " + not_now);
 			static uint64_t ready_since = 0;
 			static bool shot_taken = false;
 			if (!ready_since) ready_since = SDL_GetTicks();
@@ -4813,10 +4815,11 @@ int main(int argc, char **argv)
 		} else if (r2_banner == 1) menu.set_banner(tr::fill(tr::ROOM2_LOST_NEXT, { { "name", r2_name } }), tr::ROOM2_TO_LINE);
 		else if (r2_banner == 2) menu.set_banner(tr::ROOM2_NEW_CHALLENGER, r2_name);
 		else if (r2_banner == 3) menu.set_banner(tr::ROOM2_YOURE_NEXT);
-		else if (r2_banner == 4 && r2m) menu.set_banner(tr::fill(tr::ROOM2_STREAK, { { "n", std::to_string(std::max(1, r2m->streak)) } }), tr::ROOM2_WON_STAYS);
-		else if (r2_banner == 5 && r2m) menu.set_banner(tr::fill(tr::ROOM2_STREAK, { { "n", std::to_string(r2m->streak) } }), tr::fill(tr::ROOM2_FORFEIT, { { "name", r2_name } }));
+		else if (r2_banner == 4 && r2m) menu.set_banner(room2_streak_text(std::max(1, r2m->streak)), tr::ROOM2_WON_STAYS);
+		else if (r2_banner == 5 && r2m) menu.set_banner(room2_streak_text(r2m->streak), tr::fill(tr::ROOM2_FORFEIT, { { "name", r2_name } }));
 		else menu.set_banner(press ? std::string(tr::BANNER_PRESS) : wait ? tr::fill(tr::BANNER_WAITING_FOR, { { "name", online.opponent() } }) : "",
 		                     wait == 2 ? std::string(tr::BANNER_TO_PRESS_START) : wait == 3 ? std::string(tr::BANNER_FOR_REMATCH) : wait == 4 ? std::string(tr::BANNER_TO_PRESS_REMATCH) : "", press ? start_button() : "");
+		if (menu.is_open() && online.in_room2()) menu.set_banner("");   // (a Rooms 2 room's banners never over the menu's buttons: its page says the same)
 		if (interrupted)
 			menu.set_notice(tr::fill(tr::BANNER_WAITING_FOR, { { "name", online.opponent() } }), tr::fill(tr::NOTICE_DROPPED, { { "n", std::to_string(online.hold_left()) } }),
 			                tr::NOTICE_CARRIES_ON);
@@ -5122,6 +5125,15 @@ int main(int argc, char **argv)
 				const bool k = e.type == SDL_EVENT_KEY_DOWN && !e.key.repeat && (e.key.scancode == c.key[C_START] || (c.key2[C_START] != SDL_SCANCODE_UNKNOWN && e.key.scancode == c.key2[C_START]));
 				const bool b = e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN && (e.gbutton.button == SDL_GAMEPAD_BUTTON_START || int(e.gbutton.button) == c.pad[C_START] || int(e.gbutton.button) == c.pad2[C_START]);
 				if ((k || b) && online.room2_ready()) fprintf(stderr, "online: Rooms 2: Start pressed (%s): ready\n", k ? "keyboard" : "pad");
+				// (Esc or B with the menu closed: AWAY, not the menu: kept in the line, passed over; said)
+				const bool esc = !menu.is_open() && ((e.type == SDL_EVENT_KEY_DOWN && !e.key.repeat && e.key.scancode == SDL_SCANCODE_ESCAPE) ||
+				                                     (e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN && e.gbutton.button == SDL_GAMEPAD_BUTTON_EAST));
+				if (esc) {
+					online.room2_set_ready(false);
+					menu.toast(tr::line(tr::ROOM2_AWAY_SAID).str(), 6);
+					fprintf(stderr, "online: Rooms 2: %s pressed while getting ready: AWAY\n", e.type == SDL_EVENT_KEY_DOWN ? "Esc" : "B");
+					continue;
+				}
 			}
 			// (a Mac's open-URL event, as SDL gives it: a link from the web, the game running or just started by it)
 			if (e.type == SDL_EVENT_DROP_FILE && e.drop.data && links::is_link(e.drop.data)) arg_link = std::string(e.drop.data).substr(0, 64);

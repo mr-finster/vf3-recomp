@@ -8,6 +8,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <thread>
 
 namespace online_detail {   // (online.cpp's helpers)
@@ -37,10 +38,16 @@ constexpr double REJOIN_MS = 30000;      // (a membership kept in room2.txt this
 
 bool truthy(const Value &v) { return v.kind == Value::boolean && v.b; }
 int num(const Value &v, int lo, int hi, int none = 0) { return v.kind == Value::number ? int(std::clamp(v.n, double(lo), double(hi))) : none; }
-RoomMember::Who who_of(const Value &v) { return { online_menu::clean_name(v["name"].str()), v["country"].str().size() == 2 ? v["country"].str() : "" }; }
+RoomMember::Who who_of(const Value &v) { return { online_menu::clean_name(v["name"].str()), v["country"].str().size() == 2 ? v["country"].str() : "", !(v["ready"].kind == Value::boolean && !v["ready"].b) }; }
 double wall_ms() { return double(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count()); }
 
 } // namespace
+
+std::string room2_streak_text(int n)
+{
+	if (n <= 0) return "";
+	return n == 1 ? std::string(tr::ROOM2_STREAK_1) : tr::fill(tr::ROOM2_STREAK, { { "n", std::to_string(n) } });
+}
 
 // ---- entering ----
 
@@ -195,6 +202,8 @@ void Online::room2_state(const Value &st)
 	m.match_holder = mt.kind == Value::object ? online_menu::clean_name(mt["holder"].str()) : "";
 	m.side = you["side"].str();
 	m.misses = num(you["misses"], 0, 9);
+	const bool was_ready = m.me_ready;
+	m.me_ready = !(you["ready"].kind == Value::boolean && !you["ready"].b);
 	const Value &seat = you["seat"];
 	m.seated = seat.kind == Value::object && !seat["token"].str().empty();
 	if (m.seated) {
@@ -219,12 +228,13 @@ void Online::room2_state(const Value &st)
 	m.version++;
 	// (the log: the table and the line as they change, what a test reads)
 	std::string line;
-	for (const auto &w : m.line) line += (line.empty() ? "" : ",") + w.name;
+	for (const auto &w : m.line) line += (line.empty() ? "" : ",") + w.name + (w.ready ? "" : "*");
 	char b[400];
 	snprintf(b, sizeof b, "Rooms 2: room %s: %s %s vs %s, streak %d (%s), match %d; line [%s]; this player %s%s", room_code().c_str(), m.phase.c_str(),
 	         m.has_a ? m.a.name.c_str() : "-", m.has_b ? m.b.name.c_str() : "-", m.streak, m.holder.empty() ? "-" : m.holder.c_str(), m.n, line.c_str(),
 	         m.pos == 0 ? ("at the table, side " + m.side).c_str() : m.watcher ? "watching, not in line" : ("in line, " + std::to_string(m.pos) + " of " + std::to_string(m.line.size())).c_str(),
-	         m.ready_on ? (m.ready_you ? ", called: ready check on" : (", " + std::to_string(m.ready_pos) + " in line called").c_str()) : "");
+	         m.ready_on ? (m.ready_you ? ", getting ready" : (", " + std::to_string(m.ready_pos) + " in line getting ready").c_str()) : "");
+	if (!m.me_ready) snprintf(b + strlen(b), sizeof b - strlen(b), " (AWAY)");
 	static std::string said;
 	if (said != b) { log(b); said = b; }
 	if (last_n >= 0 && last_n != m.last_n) {
@@ -233,11 +243,11 @@ void Online::room2_state(const Value &st)
 		// (the other left mid-match: a forfeit said to the one who stays)
 		if (m.last_result == "forfeit" && m.pos == 0 && !m.seen_peer.empty()) { m.banner = 5; m.banner_name = m.seen_peer; m.banner_until = now + BANNER_MS; }
 	}
-	// the ready check's misses, said: down one place, to the back
-	if (was_on && !m.ready_you && m.pos > 0 && m.misses > 0 && (was_pos != m.pos)) {
-		const tr::line said_line = m.misses == 1 ? tr::line(tr::ROOM2_SKIPPED) : tr::line(tr::ROOM2_TO_BACK);
-		log("Rooms 2: " + said_line.en() + " (" + std::to_string(m.pos) + " in line)");
-		notices.push_back({ Notice::tip, said_line });
+	// AWAY by the lobby itself (seated, its session never started): said, with how to play again
+	(void)was_on; (void)was_pos;
+	if (was_ready && !m.me_ready && now - m.away_asked > 5000 && !m.test) {
+		log("Rooms 2: the lobby set this player AWAY (its session didn't start in time)");
+		notices.push_back({ Notice::tip, tr::line(tr::ROOM2_SET_AWAY) });
 	}
 	// a seat's watch key, come after its seat (the lobby arms the Watch first): this side's match sent from now
 	if (m.in_seat && m.seated && m.seat.token == m.played_token && is_host && wkey.empty() && !m.seat.wkey.empty()) {
@@ -412,11 +422,13 @@ void Online::room2_poll()
 	}
 	if (m.in_seat) room2_decided();
 	room2_shown();
-	// tests: VF3_ROOM2_READY's press
+	// tests: VF3_ROOM2_READY's press (now: Start while getting ready; esc: AWAY then; away: AWAY once in)
 	if (m.ready_you && !m.ready_sent && m.ready_auto_at > 0 && now >= m.ready_auto_at) {
-		log("Rooms 2: (test) Start pressed for the ready check (" + room2_test_ready + ")");
-		room2_ready();
+		m.ready_auto_at = 0;
+		log("Rooms 2: (test) " + std::string(room2_test_ready == "esc" ? "Esc" : "Start") + " pressed while getting ready");
+		if (room2_test_ready == "esc") room2_set_ready(false); else room2_ready();
 	}
+	if (room2_test_ready == "away" && !m.test_away_done && m.have_state) { m.test_away_done = true; log("Rooms 2: (test) READY: off"); room2_set_ready(false); }
 }
 
 // What to do now, by the lobby's last word and what's on
@@ -446,7 +458,7 @@ void Online::room2_react()
 		const std::string mine = m.seat.side;
 		room2_unseat(!m.watcher && (((m.last_result == "a" || m.last_result == "b") && m.last_result != mine) || (m.last_result == "forfeit" && m.last_winner != mine)));
 	}
-	if (m.in_seat && (m.banner == 1 || m.banner == 4) && m.line.empty()) m.banner = 0;   // (nobody next after all: the two play on)
+	if (m.in_seat && (m.banner == 1 || m.banner == 4) && !m.next_ready()) m.banner = 0;   // (nobody READY next after all: the two play on)
 	if (!r2) return;
 	// (a match there to watch: two at the table; a lone one waiting for the first in line has none yet)
 	if ((m.pos > 0 || m.watcher) && m.want_watch && !m.wid.empty() && m.has_a && m.has_b && ph == Phase::off && now >= m.watch_retry_at) watch_begin(m.wid);
@@ -454,14 +466,15 @@ void Online::room2_react()
 	if (m.ready_you && !m.was_called) {
 		m.was_called = true;
 		m.ready_sent = false;
-		log("Rooms 2: called: the ready check, " + std::to_string(int((m.ready_until - now) / 1000 + 0.5)) + " s to press Start");
+		log("Rooms 2: getting ready: seated in " + std::to_string(int((m.ready_until - now) / 1000 + 0.5)) + " s (Esc: AWAY)");
 		notices.push_back({ Notice::called, tr::line(tr::ROOM2_YOURE_NEXT) });
-		m.ready_auto_at = room2_test_ready == "auto" ? now + 2000 : room2_test_ready == "late" ? now + 11000 : 0;
+		m.ready_auto_at = room2_test_ready == "now" || room2_test_ready == "esc" ? now + 1000 : 0;
 	}
 	if (!m.ready_you) m.was_called = false;
-	// first in line (not called yet, a match on): said once
-	if (m.pos == 1 && m.last_pos != 1 && !m.ready_you) { m.banner = 3; m.banner_until = now + BANNER_MS; }
-	m.last_pos = m.pos;
+	// the next READY one (not getting ready yet, a match on): said once
+	const int place = m.ready_place();
+	if (place == 1 && m.last_pos != 1 && !m.ready_you && m.has_a && m.has_b) { m.banner = 3; m.banner_until = now + BANNER_MS; }
+	m.last_pos = place;
 }
 
 // A new pair at the table: watching stopped, the session before (the loser's, this side the winner) quit, a fresh
@@ -522,7 +535,7 @@ void Online::room2_unseat(bool lost)
 {
 	RoomMember &m = *r2;
 	// (who's next: the one at the table now who isn't the one this player played, the winner; else the first in line)
-	const std::string next = m.has_a && m.a.name != m.seen_peer ? m.a.name : m.has_b && m.b.name != m.seen_peer ? m.b.name : m.line.empty() ? "" : m.line.front().name;
+	const std::string next = m.has_a && m.a.name != m.seen_peer ? m.a.name : m.has_b && m.b.name != m.seen_peer ? m.b.name : m.next_ready() ? m.next_ready()->name : "";
 	if (lost) { m.banner = 1; m.banner_name = next; m.banner_until = now + BANNER_MS; }
 	if (ph == Phase::playing) ended(tr::line(tr::ROOM2_LOST_NEXT, { { "name", next } }));
 	log("Rooms 2: back in the line (" + std::to_string(m.pos) + " of " + std::to_string(m.line.size()) + ")" + (next.empty() ? "" : ": next is " + next) + "; watching the room");
@@ -575,9 +588,9 @@ void Online::room2_decided()
 	room2_send("result", ",\"winner\":\"" + std::string(winner) + "\",\"n\":" + std::to_string(m.n));
 	const bool won = (in >> local_player()) & 1;
 	log("Rooms 2: match " + std::to_string(m.n) + " decided: " + (in == 0 ? std::string("a draw") : std::string(won ? "this player" : opponent()) + " won") +
-	    " (side " + winner + "); " + (m.line.empty() ? "nobody in the line: the two play on" : m.line.front().name + " is next"));
-	if (!won && in != 0 && !m.line.empty()) { m.banner = 1; m.banner_name = m.line.front().name; m.banner_until = now + 600000; }   // (till the line moves)
-	if (won && !m.line.empty()) { m.banner = 4; m.banner_until = now + 600000; }   // (till the line moves: not "waiting for the loser to press Start for a rematch", which can't come)
+	    " (side " + winner + "); " + (!m.next_ready() ? "nobody READY in the line: the two play on" : m.next_ready()->name + " is next"));
+	if (!won && in != 0 && m.next_ready()) { m.banner = 1; m.banner_name = m.next_ready()->name; m.banner_until = now + 600000; }   // (till the line moves)
+	if (won && m.next_ready()) { m.banner = 4; m.banner_until = now + 600000; }   // (till the line moves: not "waiting for the loser to press Start for a rematch", which can't come)
 }
 
 // ---- what the player does ----
@@ -590,6 +603,18 @@ bool Online::room2_ready()
 	room2_send("ready");
 	log("Rooms 2: ready (Start pressed, " + std::to_string(left) + " s left)");
 	return true;
+}
+
+// READY: on (played in turn) or off (AWAY: kept in the line, passed over)
+void Online::room2_set_ready(bool on)
+{
+	if (!r2 || r2->mid.empty()) return;
+	r2->me_ready = on;
+	r2->away_asked = now;
+	if (!on && r2->ready_you) r2->ready_sent = true;   // (the countdown taken down at once)
+	room2_send(on ? "ready" : "away");
+	r2->version++;
+	log(std::string("Rooms 2: ") + (on ? "READY: on" : "READY: off (AWAY)"));
 }
 
 int Online::room2_ready_left() const

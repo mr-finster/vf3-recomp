@@ -1334,13 +1334,13 @@ int main(int argc, char **argv)
 	gm.set_banner(tr::BANNER_PRESS, tr::BANNER_FOR_REMATCH, "+");   // (a pad's Start as the Deck names it: one sign, in the middle of its box)
 	shot("rematch_plus.png", w, h);
 	// Rooms 2's banners over the game: the ready check's countdown, you're next, a new challenger, the loser's
-	gm.set_banner(tr::fill(tr::ROOM2_PRESS_START_N, { { "n", "12" } }), tr::fill(tr::ROOM2_YOU_PLAY, { { "name", "AKIRAFAN" } }));
+	gm.set_banner(tr::fill(tr::ROOM2_GET_READY_N, { { "n", "3" } }), tr::fill(tr::ROOM2_YOU_PLAY, { { "name", "AKIRAFAN" } }) + "   " + tr::fill(tr::ROOM2_NOT_NOW, { { "key", "Esc" } }));
 	shot("room2_ready_banner.png", w, h);
 	gm.set_banner(tr::ROOM2_NEW_CHALLENGER, "WWWWWWWWWW");
 	shot("room2_challenger.png", w, h);
 	gm.set_banner(tr::fill(tr::ROOM2_LOST_NEXT, { { "name", "WWWWWWWWWW" } }), tr::ROOM2_TO_LINE);
 	shot("room2_lost.png", w, h);
-	gm.set_banner(tr::fill(tr::ROOM2_STREAK, { { "n", "12" } }), tr::fill(tr::ROOM2_FORFEIT, { { "name", "WWWWWWWWWW" } }));
+	gm.set_banner(room2_streak_text(12), tr::fill(tr::ROOM2_FORFEIT, { { "name", "WWWWWWWWWW" } }));
 	shot("room2_forfeit.png", w, h);
 	gm.set_banner("");
 	{   // (the connection bar in a match: each cell's words in the middle of its box)
@@ -1401,7 +1401,7 @@ int main(int argc, char **argv)
 		gm.open(root());
 		const std::string table = R"("table":{"a":{"name":"AKIRAFAN","country":"JP"},"b":{"name":"LAUCHAN","country":"KR"},"phase":"PLAYING","streak":3,"holder":"a","n":5,"last":null})";
 		o.set_room2_test(R"({"code":"KXQ4M7","room":{"name":"FRIDAY FIGHTS","listed":true,"locked":false,"ready_ms":15000,"owner":true},)" + table +
-		                 R"(,"line":[{"name":"PAIPAI","country":"US"},{"name":"MRFINSTER","country":"GB"},{"name":"JACKYB","country":"FR"}],"you":{"mid":"x","pos":2,"misses":0},"ready":null,"watch":"KXQ4M7"})");
+		                 R"(,"line":[{"name":"PAIPAI","country":"US","ready":false},{"name":"MRFINSTER","country":"GB","ready":true},{"name":"JACKYB","country":"FR","ready":true}],"you":{"mid":"x","pos":2,"ready":true},"ready":null,"watch":"KXQ4M7"})");
 		gm.push(online_menu::page(o, s, gm, changed));
 		check(o.room2_member() && o.room2()->line.size() == 3 && o.room2()->pos == 2, "Rooms 2: a member, 2nd of 3 in the line");
 		settle_check("room2_page.png", w, h);
@@ -1420,16 +1420,16 @@ int main(int argc, char **argv)
 		o.set_room2_test(R"({"code":"KXQ4M7","room":{"name":"","listed":false,"locked":false,"ready_ms":15000,"owner":true},"table":{"a":{"name":"MRFINSTER","country":"GB"},"b":null,"phase":"SOLO","streak":0,"holder":"a","n":0,"last":null},"line":[],"you":{"mid":"x","pos":0,"side":"a","misses":0},"ready":null,"watch":"KXQ4M7"})");
 		again();
 		shot("room2_alone.png", w, h);
-		const int settings_row = int(gm.selected()) + 1;   // (Leave room, then Room settings)
+		const int settings_row = int(gm.selected()) + 2;   // (READY, COPY CODE, then ROOM SETTINGS)
 		gm.select_row(settings_row);
 		key(SDL_SCANCODE_RETURN);
 		check(top() == tr::ROOM2_SETTINGS.c_str(), "Rooms 2: the creator's Room settings");
 		shot("room2_settings.png", w, h);
 		settle_check("room2_settings.png", w, h);
-		for (int row : { 1, 2 }) {   // (each row's help, the ready check's longest)
+		for (int row : { 0, 1 }) {   // (each row's help, Close the room's the longest)
 			gm.select_row(row);
 			for (int i = 0; i < 8; i++) { shot("", w, h); SDL_Delay(40); }
-			shot(row == 1 ? "room2_settings_ready.png" : "room2_settings_close.png", w, h);
+			shot(row == 0 ? "room2_settings_listed.png" : "room2_settings_close.png", w, h);
 		}
 		gm.pop();
 		o.set_room2_test("");

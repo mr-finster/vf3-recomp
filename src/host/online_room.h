@@ -8,12 +8,13 @@
 // member's WebSocket ({state}), or a poll's answer every 10 s without one. What the game does with a state:
 //   at the table with an opponent and a token it hasn't played: a fresh session with them (seat), watching stopped;
 //   in the line and not watching: the room's match watched (its watch id, one for the room's life);
-//   called (the first in line, ready.you): the banner and its countdown, the chime; Start says ready;
+//   getting ready (the next READY one after a match, ready.you): GET READY and its 3 s, the chime; then seated by the
+//   lobby itself (Start: now; Esc or B: AWAY, kept in the line, passed over); an empty seat is taken at once, no countdown;
 //   in the line again after playing (the match lost): the session ended, back to watching.
 // A seat's match decided (one player out of the game, as its RAM has it) is reported once (result: a, b or draw);
-// a session that ended otherwise reports how (disconnect, desync). With someone in the line the out player's Start
-// is taken out of the input before it's sent (step), so there's no rematch and the next in line comes on; with nobody
-// in it the two play on, the loser's Start a rematch as ever.
+// a session that ended otherwise reports how (disconnect, desync). With someone READY in the line the out player's
+// Start is taken out of the input before it's sent (step), so there's no rematch and the next comes on; with nobody
+// READY in it the two play on, the loser's Start a rematch as ever.
 //
 // Kept for a game that crashed or was restarted: each room's code, member id and key, in memory and in the data
 // folder's room2.txt, so entering the same room within the lobby's 30 s takes back the same place (enter with mid and
@@ -33,7 +34,7 @@ struct RoomMember
 	bool creating = false;          // (create, not enter: the first answer's)
 	bool back = false;              // (the lobby took back a membership from before: a rejoin)
 	// The room as the lobby last said (its state)
-	struct Who { std::string name, country; };
+	struct Who { std::string name, country; bool ready = true; };   // (ready: in the line, READY (played when it's their turn) or AWAY (passed over))
 	struct Seat
 	{
 		std::string role, side, token, as, them, wkey;
@@ -53,6 +54,8 @@ struct RoomMember
 	int last_n = -1;
 	std::vector<Who> line;
 	int pos = -1;                   // (0 at the table, 1.. in the line, -1 not known yet or a watcher)
+	bool me_ready = true;           // (this member READY, or AWAY)
+	double away_asked = -1e9;       // (when this player last set READY or AWAY: a change the lobby made itself is said)
 	bool watcher = false;           // (in the room watching, no place in the line: Leave line; Join the line puts them back)
 	int watchers = 0;               // (the room's members watching without a place)
 	// The match on and the streak it's played for (the lobby's table.match), and what's shown over the match on screen:
@@ -107,4 +110,10 @@ struct RoomMember
 	std::string banner_name;
 	bool ready_sent = false;
 	double ready_auto_at = 0;       // (tests: VF3_ROOM2_READY's press)
+	bool test_away_done = false;    // (tests: VF3_ROOM2_READY=away, AWAY once a member)
+
+	// The first READY one in the line (the next to play), or null
+	const Who *next_ready() const { for (const Who &w : line) if (w.ready) return &w; return nullptr; }
+	// This member's place among the READY ones in the line (1: the next to play), 0 not in it or AWAY
+	int ready_place() const { if (pos <= 0 || !me_ready) return 0; int k = 0; for (int i = 0; i < pos && i < int(line.size()); i++) if (line[size_t(i)].ready) k++; return k; }
 };

@@ -199,6 +199,7 @@ public:
 	void room2_line(bool join);  // (Leave line: no place in it, still in the room watching; Join the line: at its back)
 	// Start pressed (main.cpp's, keyboard or pad, whatever's on): the ready check on, ready said. True if it was taken
 	bool room2_ready();
+	void room2_set_ready(bool on);   // (READY: on, played in turn; off: AWAY, kept in the line and passed over)
 	int room2_ready_left() const;   // (the ready check on this player: its seconds left; -1 none)
 	// A moment's word over the game: 1 you lost (name: who's next), 2 a new challenger (name: theirs), 3 you're next,
 	// 4 you won and stay on, 5 the other left: a forfeit (name: theirs); 0 none
@@ -209,7 +210,7 @@ public:
 	void room2_close();   // (the creator's: the room closed for everyone)
 	void set_room2_file(const std::string &path) { r2_file = path; }   // (the data folder's room2.txt: a rejoin after a crash)
 	void set_room2_test(const std::string &state_json, const std::string &code = "KXQ4M7");   // (menutest: a member in a made-up state)
-	std::string room2_test_ready;   // (tests, VF3_ROOM2_READY: "auto" ready 2 s after the call, "late" 11 s after, "never")
+	std::string room2_test_ready;   // (tests, VF3_ROOM2_READY: "now" Start 1 s into getting ready, "esc" Esc then (AWAY), "away" AWAY once in)
 
 	// ---- watching (src/net/watch.h): a match's watchers, and watching one ----
 	// Watch a match by its room's code (the browser's, Enter code's or a link's): the game starts from the match's start
@@ -485,6 +486,9 @@ struct Online::Fetch
 	std::atomic<bool> done{ false };
 	vfnet::http::Reply reply;
 };
+
+// A Rooms 2 table's run of wins in words: "1 WIN", "3 WINS IN A ROW" (none: "")
+std::string room2_streak_text(int n);
 
 namespace online_menu {
 

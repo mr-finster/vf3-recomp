@@ -352,3 +352,13 @@ div { display: block; }
 .r2l.me .r2n { color: #f2d14b; }
 .pq.r2more { margin-left: 30dp; color: #8f9ac8; }
 .pq.r2pos { margin-top: 8dp; color: #f2d14b; }
+/* Rooms 2's page: the status chip under the code (in line and READY or AWAY, watching only, your turn, at the table), a
+   name's READY / AWAY tag in the line */
+.r2chip { margin: 12dp auto 0dp auto; padding: 5dp 18dp; border-radius: 8dp; font-size: 23dp; font-weight: 700; font-style: italic; color: #0b1026; background-color: #f2d14b; display: inline-block; }
+.r2chip.ready { background-color: #8fd18f; }
+.r2chip.away, .r2chip.watch { background-color: #9aa6d8; }
+.r2chip.turn { background-color: #f2a33b; }
+.r2tag { margin-left: 10dp; font-size: 15dp; font-weight: 700; font-style: normal; color: #8fd18f; }
+.r2tag.away { color: #8f9ac8; }
+.btns.r2five { gap: 14dp; }   /* (a Rooms 2 page's five buttons: narrower, the page's width) */
+.btns.r2five .btn { width: 214dp; font-size: 26dp; }
