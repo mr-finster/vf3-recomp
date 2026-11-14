@@ -23,15 +23,24 @@ const int EY = 64, HT = H + 2 * EY;
 class TileGen
 {
 public:
-	// (VF3_WIDE_SELECT, a proposal: the select screens' background for widescreen's sides, drawn only while want_plate)
-	// plate: W x H, each pixel the topmost layer's whose tile there is solid (no see-through texel: a picture's, not
-	// the letters, frames and cursors drawn over it), 0 where none is; plate_hw: WW x H, all four layers carried past
-	// the screen's edges as the board would draw them on a wider screen (the maps wrapping), as the 2D shows them
+	// (VF3_WIDE_SELECT: the select screens' background for widescreen's sides, drawn only while want_plate)
+	// plate: W x H, each pixel the top layer's whose tile there is a background's (solid, no see-through texel, and
+	// most of those round it in its map too: a picture's, not the letters, frames and cursors drawn over it), 0
+	// where none is: its colour as the palette has it (bits 0-14), its
+	// pair (bit 15: B), bit 31 set; the pairs' colour offsets each line's (plate_offs), put on by aligned_plate.
+	// Made again only when what it's made from changes (the maps, the palette, the registers but the offsets, the
+	// line masks: plate_sum), or every 16 frames (the patterns, not summed). plate_hw: WW x H, all four layers carried
+	// past the screen's edges as the board would draw them on a wider screen (the maps wrapping), as the 2D shows them
 	bool want_plate = false, plate_hw_on = false;   // (plate_hw: only while plate_hw_on)
-	static constexpr int PLATE_IN = 168;   // (the plate as far in from each edge as this)
 	std::vector<uint32_t> plate = std::vector<uint32_t>(W * H), plate_hw = std::vector<uint32_t>(WW * H);
+	uint32_t plate_offs[H][2] = {};
+	uint64_t plate_sum = 0;
+	int plate_age = 1 << 20;     // (frames since the plate was last made whole)
+	bool plate_now = false;      // (this frame's lines make it)
+	long plate_made = 0;         // (tests: frames it was made in)
 	void plate_line(const m3::Model3 &board, unsigned y);
-	// both aligned as aligned() (2 pixels left and up)
+	void plate_frame(const m3::Model3 &board);   // (at a frame's first line: plate_now)
+	// both aligned as aligned() (2 pixels left and up), the plate in RGBA with the offsets on
 	void aligned_plate(std::vector<uint32_t> &p, std::vector<uint32_t> &hw) const;
 	// RGBA8 (r in the low byte), alpha 0 where nothing is drawn
 	std::vector<uint32_t> below = std::vector<uint32_t>(W * H), above = std::vector<uint32_t>(W * H);
@@ -153,7 +162,8 @@ private:
 	std::vector<uint64_t> clear_cols = std::vector<uint64_t>(4096 * 4);
 	std::vector<uint8_t> clear_known = std::vector<uint8_t>(4096);   // (8-bit's from 2048)
 	std::vector<uint8_t> solid_memo = std::vector<uint8_t>(1 << 17);
-	std::vector<uint8_t> plate_memo = std::vector<uint8_t>(1 << 17);   // (plate_line's, as solid_memo, this frame)   // (this frame: a pattern's entry and depth: 0 not looked at, 1 solid, 2 see-through)
+	std::vector<uint8_t> plate_memo = std::vector<uint8_t>(1 << 17);
+	std::vector<uint8_t> plate_bg = std::vector<uint8_t>(4 * 4096);   // (plate_line's: a layer's tile a background's, by its place: 1 yes, 2 no)   // (plate_line's, as solid_memo, this frame)   // (this frame: a pattern's entry and depth: 0 not looked at, 1 solid, 2 see-through)
 	uint64_t full_failed_sum = 0;   // (the backdrop looked for in the whole map in vain: the screen's rows, the map and banks then)
 	static uint64_t banks_sum(const Backdrop &b);
 	std::unordered_map<uint64_t, uint64_t> row_failed;   // (a row's tiles, the map and banks: looked for in vain, and the frame)

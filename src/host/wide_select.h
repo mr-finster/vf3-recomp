@@ -1,12 +1,11 @@
-// VF3_WIDE_SELECT (a proposal, off by default): widescreen's sides on the character select and the stage screen,
+// Widescreen's sides on the character select and the stage screen (VF3_WIDE_SELECT: 2 by default, 0 the bars as before),
 // made from the screen's own background (TileGen's plate: the pixels of solid tiles, the pictures the letters,
 // frames and cursors are drawn over). Only the sides: the 4:3 picture stays as the game draws it, in the middle.
 // Each side is cut into bands of lines with about the same clean zone (how far in from the edge the background goes
 // before the screen's pictures start: a frame's border, the grid's portraits, a panel's stills; 8 to 160 pixels).
 //   1 mirror: the zone's columns mirrored out, and back (the game's pixels, flipped)
-//   2 fill: the sides made of the zone's own columns, runs of them, each run starting where its first column best
-//     matches the column before it (rows kept together: a band's column of the picture is copied whole), crossfaded
-//     over a few columns; the runs chosen once a screen (cached), the pixels taken each frame (fades, animation)
+//   2 fill: a content-aware fill, made once a screen (wide_select_fill.h); on the stage screen the preview isn't
+//     carried on: the panels' metal goes on down beside it as a frame. 6: the same, dark beside the preview
 //   3 soft: the edge's colours carried out, blurred up and down and darkening outwards
 //   4 the board's own: the layers drawn on past the edges as the board would on a wider screen (their maps wrap)
 //   5 mirror then soft: option 1 near the edge going over into option 3 further out
@@ -34,33 +33,50 @@ inline uint32_t mix(uint32_t a, uint32_t b, float t)
 
 // the plate with its holes filled along each row (from the nearest pixels either side, blended), one side's view:
 // column i of side s is i pixels in from that edge. A row with nothing: 0s.
-constexpr int FZ = video::TileGen::PLATE_IN - 2;   // (as far in as the plate goes, aligned)
+// (the aligned picture's last 2 columns are the one before them again, aligned()'s: not the game's, so a line down
+// the right edge; the right side starts there, over them)
+constexpr int RCUT = 2;
+constexpr int FZ = W - RCUT;
 struct Filled
 {
 	std::vector<uint32_t> px;   // H x FZ, side's columns
 	std::vector<uint8_t> row_ok;
 	void make(const uint32_t *plate, int side)
 	{
+		// short gaps along a line (a frame's border, up to 8 pixels) from either side; the rest from the lines
+		// above and below in the same column (a line's start with no background: not smeared from across the screen);
+		// what's left, along the line
 		px.assign(size_t(FZ) * H, 0);
 		row_ok.assign(H, 0);
+		std::vector<uint8_t> got(size_t(FZ) * H, 0);
 		for (int y = 0; y < H; y++) {
 			uint32_t *o = &px[size_t(y) * FZ];
-			for (int i = 0; i < FZ; i++) o[i] = plate[size_t(y) * W + (side ? W - 1 - i : i)];
+			uint8_t *g = &got[size_t(y) * FZ];
+			for (int i = 0; i < FZ; i++) { o[i] = plate[size_t(y) * W + (side ? W - 1 - RCUT - i : i)]; g[i] = (o[i] >> 24) != 0; row_ok[y] |= g[i]; }
 			int prev = -1;
-			for (int i = 0; i <= FZ; i++) {
-				if (i < FZ && !(o[i] >> 24)) continue;
-				if (i < FZ) row_ok[y] = 1;
-				if (i > prev + 1) {   // (a hole between prev and i)
-					for (int j = prev + 1; j < i; j++) {
-						if (prev < 0 && i >= FZ) break;
-						if (prev < 0) o[j] = o[i];
-						else if (i >= FZ) o[j] = o[prev];
-						else o[j] = mix(o[prev], o[i], float(j - prev) / float(i - prev));
-					}
-				}
+			for (int i = 0; i < FZ; i++) {
+				if (!(o[i] >> 24)) continue;
+				if (prev >= 0 && i - prev > 1 && i - prev <= 9)
+					for (int j = prev + 1; j < i; j++) { o[j] = mix(o[prev], o[i], float(j - prev) / float(i - prev)); g[j] = 1; }
 				prev = i;
 			}
 		}
+		for (int i = 0; i < FZ; i++) {
+			int prev = -1;
+			for (int y = 0; y <= H; y++) {
+				if (y < H && !got[size_t(y) * FZ + i]) continue;
+				if (y - prev > 1)
+					for (int j = prev + 1; j < y; j++) {
+						uint32_t &v = px[size_t(j) * FZ + i];
+						if (prev < 0 && y >= H) break;
+						if (prev < 0) v = px[size_t(y) * FZ + i];
+						else if (y >= H) v = px[size_t(prev) * FZ + i];
+						else v = mix(px[size_t(prev) * FZ + i], px[size_t(y) * FZ + i], float(j - prev) / float(y - prev));
+					}
+				prev = y;
+			}
+		}
+		for (int y = 0; y < H; y++) for (int i = 0; i < FZ && !row_ok[y]; i++) row_ok[y] = px[size_t(y) * FZ + i] != 0;
 	}
 	uint32_t at(int y, int i) const { return px[size_t(y) * FZ + i]; }
 };
@@ -80,7 +96,7 @@ inline void clean_zones(const Filled &f, const uint32_t *plate, int side, std::v
 		for (; i < 160; i++) {
 			int m[3] = {}, holes = 0;
 			for (int y = b * 8; y < b * 8 + 8; y++) {
-				holes += !(plate[size_t(y) * W + (side ? W - 1 - i : i)] >> 24);
+				holes += !(plate[size_t(y) * W + (side ? W - 1 - RCUT - i : i)] >> 24);
 				for (int c = 0; c < 3; c++) m[c] += ch(f.at(y, i), c);
 			}
 			float col[3];
@@ -92,20 +108,21 @@ inline void clean_zones(const Filled &f, const uint32_t *plate, int side, std::v
 			for (int c = 0; c < 3; c++) ref[c] += (col[c] - ref[c]) * 0.3f;
 			if (i < 4) for (int c = 0; c < 3; c++) edge[c] += (col[c] - edge[c]) * 0.5f;
 		}
-		bands[size_t(b)] = std::max(i, 8);
+		bands[size_t(b)] = std::max(i, 1);
 	}
 }
 
+} // namespace wide_select
+#include "wide_select_fill.h"
+namespace wide_select {
+
 struct State
 {
+	FillState fill;
 	int key = -1, option = -1;
-	// option 2: each side's columns (d out from the edge) as a source column (in from that edge) and a blend with the
-	// one before (a run's start: crossfaded over a few columns)
-	struct Col { int16_t src, prev; float t; };
-	// each side's bands' zones, and its segments (bands in a row with about the same zone: the least of them), each
-	// with its own runs (option 2)
+	// (options 1, 3, 5) each side's bands' zones, and its segments (bands in a row with about the same zone: the least)
 	std::vector<int> bands[2];
-	struct Seg { int y0, y1, zone; std::vector<Col> cols; };
+	struct Seg { int y0, y1, zone; };
 	std::vector<Seg> segs[2];
 	std::vector<int16_t> seg_of[2];   // (each line's segment, -1: none)
 	double solved_lum[2] = {};
@@ -120,61 +137,7 @@ inline double zone_lum(const Filled &f, int z)
 	return n ? s / n : 0;
 }
 
-// option 2's runs for a side: greedy, out from the edge; each run read outwards through the source (i rising: the
-// picture's columns further in, mirrored: the next column out is the one further in), its start the column whose
-// neighbour best matches the last column made, not one used near before
-inline void solve(const Filled &f, std::vector<State::Col> &cols, int Z, int y0, int y1)
-{
-	const int RUN_MIN = std::max(6, Z / 4), RUN_MAX = std::max(RUN_MIN + 2, Z / 2), FADE = std::min(6, RUN_MIN / 2), YS = 2;
-	cols.assign(EXT, { 0, -1, 0 });
-	if (Z < 24) {   // (too little to make runs from: mirrored, as option 1)
-		for (int d = 0; d < EXT; d++) { const int m = d % (2 * Z); cols[size_t(d)] = { int16_t(m < Z ? m : 2 * Z - 1 - m), -1, 0 }; }
-		return;
-	}
-	std::vector<int> col_used(FZ, -1000);
-	auto dist = [&](int a, int b) {   // two source columns' difference, all rows
-		long s = 0;
-		for (int y = y0; y < y1; y += YS) {
-			const uint32_t p = f.at(y, a), q = f.at(y, b);
-			for (int c = 0; c < 3; c++) { const int d = ch(p, c) - ch(q, c); s += d * d; }
-		}
-		return s;
-	};
-	// out from the edge: d 0 is the column just past it, whose neighbour is the edge's own column 0. The source runs
-	// go towards the screen's middle (i rising), as a mirror's would, from a start chosen to match.
-	int last = 0;   // (the source column the last column out came from)
-	int d = 0;
-	uint32_t seed = 12345;
-	while (d < EXT) {
-		// the start: s such that column s - 1 (its neighbour back towards the edge... read as the one before) matches
-		// the last made: s in [1, Z - RUN_MIN)
-		long best = -1; int bs = 1;
-		for (int s = 1; s + RUN_MIN < Z; s++) {
-			if (d - col_used[s] < 3 * Z / 4 && d > 0) continue;   // (not what was just used: a repeat)
-			long v = dist(s - 1, last);
-			seed = seed * 1664525u + 1013904223u;
-			v += long(seed >> 24) * 8;   // (ties broken at random, the same each time)
-			if (best < 0 || v < best) { best = v; bs = s; }
-		}
-		if (d == 0) bs = 0;   // (the first run: the edge's own columns mirrored, no seam at the 4:3 edge)
-		seed = seed * 1664525u + 1013904223u;
-		const int len = std::max(1, std::min({ RUN_MIN + int(seed >> 16) % (RUN_MAX - RUN_MIN), EXT - d, Z - bs }));
-		const int prev_src = last;
-		for (int j = 0; j < len && d < EXT; j++, d++) {
-			const int s = std::min(bs + j, Z - 1);
-			State::Col c{ int16_t(s), -1, 0 };
-			if (d > 0 && j < FADE && bs != 0) {   // (crossfaded from the run before, carried on)
-				c.prev = int16_t(std::min(prev_src + 1 + j, FZ - 1));
-				c.t = float(j + 1) / float(FADE + 1);
-			}
-			cols[size_t(d)] = c;
-			col_used[s] = d;
-			last = s;
-		}
-	}
-}
-
-// out: WW x H; its sides (x < EXT, x >= EXT + W) written. key: the screen (a new one: option 2 solved again).
+// out: WW x H; its sides (x < EXT, x >= EXT + W) written. key: the screen (a new one: made again).
 // reach: how far out the picture shows (up to EXT): the sides made only that far
 inline void make(int option, int key, const std::vector<uint32_t> &plate, const std::vector<uint32_t> &hw, std::vector<uint32_t> &out, State &st, int reach = EXT)
 {
@@ -189,6 +152,7 @@ inline void make(int option, int key, const std::vector<uint32_t> &plate, const 
 		}
 		return;
 	}
+	if (option == 2 || option == 6) { fill(key, plate, out, st.fill, reach, option == 6); return; }
 	for (int s = 0; s < 2; s++) st.f[s].make(plate.data(), s);
 	// (the zones and option 2's runs made again for a new screen, or once it's much brighter than when made: a fade in)
 	for (int s = 0; s < 2; s++) {
@@ -199,16 +163,15 @@ inline void make(int option, int key, const std::vector<uint32_t> &plate, const 
 		st.segs[s].clear();
 		st.seg_of[s].assign(H, -1);
 		for (int b = 0; b < H / 8; b++) {
-			const int z = st.bands[s][size_t(b)];
+			const int z = st.bands[s][size_t(b)] < 0 ? -1 : std::max(st.bands[s][size_t(b)], 8);
 			if (z < 0) continue;
 			State::Seg *g = st.segs[s].empty() ? nullptr : &st.segs[s].back();
 			if (g && g->y1 == b * 8 && std::abs(z - g->zone) <= 4) { g->y1 += 8; g->zone = std::min(g->zone, z); }
-			else st.segs[s].push_back({ b * 8, b * 8 + 8, z, {} });
+			else st.segs[s].push_back({ b * 8, b * 8 + 8, z });
 		}
 		for (size_t g = 0; g < st.segs[s].size(); g++) {
 			State::Seg &sg = st.segs[s][g];
 			for (int y = sg.y0; y < sg.y1; y++) st.seg_of[s][size_t(y)] = int16_t(g);
-			solve(st.f[s], sg.cols, sg.zone, sg.y0, sg.y1);
 		}
 		if (getenv("VF3_WIDE_SELECT_LOG")) {
 			fprintf(stderr, "(wide select) screen %d side %d lum %.0f segments", key, s, lum);
@@ -218,26 +181,14 @@ inline void make(int option, int key, const std::vector<uint32_t> &plate, const 
 	}
 	st.key = key;
 	st.option = option;
-	auto put = [&](int s, int y, int d, uint32_t c) { out[size_t(y) * WW + (s ? EXT + W + d : EXT - 1 - d)] = c; };
-	auto at = [&](int s, int y, int d) { return out[size_t(y) * WW + (s ? EXT + W + d : EXT - 1 - d)]; };
+	auto put = [&](int s, int y, int d, uint32_t c) { out[size_t(y) * WW + (s ? EXT + W - RCUT + d : EXT - 1 - d)] = c; };
+	auto at = [&](int s, int y, int d) { return out[size_t(y) * WW + (s ? EXT + W - RCUT + d : EXT - 1 - d)]; };
 	if (option == 1 || option == 5) {
 		for (int s = 0; s < 2; s++)
 			for (int y = 0; y < H; y++) {
 				if (!st.f[s].row_ok[y] || st.seg_of[s][size_t(y)] < 0) continue;
 				const int P = st.segs[s][size_t(st.seg_of[s][size_t(y)])].zone;
-				for (int d = 0; d < reach; d++) { const int m = d % (2 * P); put(s, y, d, st.f[s].at(y, m < P ? m : 2 * P - 1 - m)); }
-			}
-	} else if (option == 2) {
-		for (int s = 0; s < 2; s++)
-			for (int y = 0; y < H; y++) {
-				if (!st.f[s].row_ok[y] || st.seg_of[s][size_t(y)] < 0) continue;
-				const auto &cols = st.segs[s][size_t(st.seg_of[s][size_t(y)])].cols;
-				for (int d = 0; d < reach; d++) {
-					const State::Col &c = cols[size_t(d)];
-					uint32_t v = st.f[s].at(y, c.src);
-					if (c.prev >= 0) v = mix(st.f[s].at(y, c.prev), v, c.t);
-					put(s, y, d, v);
-				}
+				for (int d = 0; d < reach + (s ? RCUT : 0); d++) { const int m = d % (2 * P); put(s, y, d, st.f[s].at(y, m < P ? m : 2 * P - 1 - m)); }
 			}
 	}
 	if (option == 3 || option == 5) {
@@ -262,7 +213,7 @@ inline void make(int option, int key, const std::vector<uint32_t> &plate, const 
 					for (int c = 0; c < 3; c++) sum[c] += e[size_t(yy) * 3 + c];
 					n++;
 				}
-				for (int d = 0; d < reach; d++) {
+				for (int d = 0; d < reach + (s ? RCUT : 0); d++) {
 					const float b = std::min(1.0f, d / 24.0f), k = 1.0f - (option == 5 ? 0.45f : 0.6f) * std::min(1.0f, d / 200.0f);
 					float c3[3];
 					for (int c = 0; c < 3; c++) c3[c] = (e[size_t(y) * 3 + c] * (1 - b) + float(sum[c]) / n * b) * k;
@@ -277,6 +228,56 @@ inline void make(int option, int key, const std::vector<uint32_t> &plate, const 
 						put(s, y, d, mix(rgb(int(ch(m, 0) * km), int(ch(m, 1) * km), int(ch(m, 2) * km)), soft, t));
 					}
 				}
+			}
+		}
+	}
+}
+
+// The game's own thin lines at the 4:3 edges (a box's outline round the title's timer): those across, a few lines
+// thick, ending at the edge, carried on across the sides (out: the sides, as far as reach); those down the edge's last
+// 3 columns, as thin, closing a box there, taken out of the 2D above (above: a copy of the layers above the 3D), the
+// background (plate) put back. A line is the 2D's own (its pixels not the background's) and of one colour. skip_y0
+// to skip_y1: lines left alone (Dural's cell, past the right edge).
+inline void edge_lines(std::vector<uint32_t> &above, const std::vector<uint32_t> &plate, std::vector<uint32_t> &out, int reach, int skip_y0 = 0, int skip_y1 = 0)
+{
+	if (plate.size() != size_t(W) * H || above.size() != size_t(W) * H) return;
+	auto diff = [](uint32_t a, uint32_t b) { return std::abs(ch(a, 0) - ch(b, 0)) + std::abs(ch(a, 1) - ch(b, 1)) + std::abs(ch(a, 2) - ch(b, 2)); };
+	auto ui = [&](int y, int x) {
+		const uint32_t a = above[size_t(y) * W + x], p = plate[size_t(y) * W + x];
+		return (a >> 24) && (!(p >> 24) || diff(a, p) > 36);
+	};
+	for (int s = 0; s < 2; s++) {
+		const int e = s ? W - 1 - RCUT : 0, dir = s ? -1 : 1;
+		std::vector<uint8_t> across(H, 0);
+		for (int y = 0; y < H; y++) {
+			if (y >= skip_y0 && y < skip_y1) continue;
+			int n = 0;
+			const uint32_t c = above[size_t(y) * W + e];
+			while (n < 24 && ui(y, e + dir * n) && diff(above[size_t(y) * W + e + dir * n], c) < 40) n++;
+			across[size_t(y)] = n >= 12;
+		}
+		for (int y = 0; y < H; y++) {
+			if (!across[size_t(y)]) continue;
+			int y1 = y;
+			while (y1 < H && across[size_t(y1)]) y1++;
+			if (y1 - y <= 3)   // (thin: a line, not a band of text)
+				for (int yy = y; yy < y1; yy++) {
+					const uint32_t c = above[size_t(yy) * W + e];
+					if (!(out[size_t(yy) * WW + (s ? EXT + W : EXT - 1)] >> 24)) continue;   // (no side there yet)
+					for (int d = 0; d < reach + (s ? RCUT : 0); d++) out[size_t(yy) * WW + (s ? EXT + W - RCUT + d : EXT - 1 - d)] = c;
+				}
+			y = y1 - 1;
+		}
+		for (int k = 0; k < 3; k++) {
+			const int x = e + dir * k;
+			for (int y = 0; y < H; y++) {
+				auto thin = [&](int yy) { return yy >= 0 && yy < H && !(yy >= skip_y0 && yy < skip_y1) && ui(yy, x) && !ui(yy, x + dir * 3) && !across[size_t(yy)]; };
+				if (!thin(y)) continue;
+				int y1 = y;
+				while (y1 < H && thin(y1)) y1++;
+				if (y1 - y >= 6)
+					for (int yy = y; yy < y1; yy++) above[size_t(yy) * W + x] = plate[size_t(yy) * W + x] >> 24 ? plate[size_t(yy) * W + x] : 0;
+				y = y1 - 1;
 			}
 		}
 	}

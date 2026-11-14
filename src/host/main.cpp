@@ -95,8 +95,8 @@
 //   VF3_GPU3D_PROBE_ANY=1 the probe on any driver, not only Direct3D 12
 //   VF3_GPU_CHECK_DIR=d  the GPU's start-up check's pictures (gpu.png, cpu.png) into d
 //   VF3_WIDE_SKY=0       the stages' 2D sky kept to the middle 4:3 (tests)
-//   VF3_WIDE_SELECT=1-5  (a proposal) the character select's and the stage screen's sides made from their background
-//                        (wide_select.h's options; off: 4:3 with bars, as ever). VF3_WIDE_SELECT_SHOTS=1: each
+//   VF3_WIDE_SELECT=0-6  the character select's and the stage screen's sides in widescreen (wide_select.h's options:
+//                        2 the default, 0 bars as before, the others to compare). VF3_WIDE_SELECT_SHOTS=1: each
 //                        script shot on those screens in every option, build/host_win_<name>_o<option>.png;
 //                        VF3_WIDE_SELECT_LOG=1: what it found and what it costs. VF3_SHOT_LAYERS=1: each script shot's
 //                        2D layers and tile RAM too (build/host_<name>_below.png, _above.png, _tile.bin)
@@ -1177,10 +1177,10 @@ struct Game
 	bool full_3d = false;
 	bool no_stage_screen = false;   // (the newest frame's: the character select's or the ranking's, never a stage)
 	bool fight_screen = false;      // (the newest frame's: a fight, mode 7: Display > HUD Off hides the 2D over it)
-	// (VF3_WIDE_SELECT, a proposal: the character select or the stage screen, its screen byte; and its background)
+	// (widescreen's select screens, wide_select.h: the character select or the stage screen, its screen byte; its background)
 	bool select_screen = false;
 	int select_kind = 0;
-	bool want_plate = false, want_plate_hw = false;   // (set by the host: VF3_WIDE_SELECT on, its option 4)
+	std::atomic<bool> want_plate{ false }, want_plate_hw{ false };   // (set by the host: VF3_WIDE_SELECT on and the picture wider than 4:3, its option 4)
 	std::vector<uint32_t> plate, plate_hw;
 	video::TileGen::Scroll prev_scroll;   // the frame before's (for bg_dx, bg_dy)
 	std::vector<uint32_t> prev_below;
@@ -2401,14 +2401,15 @@ int main(int argc, char **argv)
 	float bg_shift_x = 0, bg_shift_y = 0;   // the layers below the 3D moved back towards the frame before (draw_below)
 	// the layers below the 3D across the picture's width (VF3_WIDE_SKY=0: never)
 	const bool wide_sky = !getenv("VF3_WIDE_SKY") || atoi(getenv("VF3_WIDE_SKY")) != 0;
-	// VF3_WIDE_SELECT=1-5 (a proposal, off by default): the select screens' sides made from their background (wide_select.h)
-	int wide_select = getenv("VF3_WIDE_SELECT") ? std::clamp(atoi(getenv("VF3_WIDE_SELECT")), 0, 5) : 0;
+	// Widescreen on the character select and the stage screen: their sides made from their background (wide_select.h:
+	// option 2, the content-aware fill; VF3_WIDE_SELECT=0 the bars as before, 1-6 the other options to compare)
+	int wide_select = getenv("VF3_WIDE_SELECT") ? std::clamp(atoi(getenv("VF3_WIDE_SELECT")), 0, 6) : 2;
 	const bool wide_select_shots = getenv("VF3_WIDE_SELECT_SHOTS") != nullptr;   // (tests: each script shot in every option)
 	if (wide_select_shots && !wide_select) wide_select = 2;
-	game.want_plate = wide_select > 0;
 	game.want_plate_hw = wide_select == 4 || wide_select_shots;
 	wide_select::State wide_select_state;
-	std::vector<uint32_t> wide_select_sides;
+	std::vector<uint32_t> wide_select_sides, wide_select_above;
+	bool wide_select_on = false;   // (the picture's sides are the select's: the layer below drawn where it is, no sky lead's move)
 	// Widescreen's sides where the 2D over the 3D is opaque at the 4:3 edge (a close-up's frame, the title): that
 	// layer's edge carried on across the side, over the 3D (the game draws its stage behind such screens, hidden in
 	// 4:3); runs of rows of one colour
@@ -2728,6 +2729,8 @@ int main(int argc, char **argv)
 					side_cover[s].push_back({ 0, video::H, side_colour[s] });
 				}
 			}
+			bool sel = false;   // (VF3_WIDE_SELECT's sides on)
+			wide_select_on = false;
 			const uint64_t tu = SDL_GetTicksNS();
 			// Not a stage: the layer below as the game has it, the 4:3 alone (its edge columns carried a few pixels on,
 			// for the smooth backgrounds' filter and smooth motion's fraction of a pixel to read), not the widened
@@ -2747,11 +2750,19 @@ int main(int argc, char **argv)
 				static std::vector<uint32_t> narrow;
 				narrow.assign(size_t(video::WW) * video::HT, 0);
 				// (VF3_WIDE_SELECT: the select screens' sides, from their background, under the 3D and the 2D above it)
-				const bool sel = wide_select && game.view.select_screen && !fc_drawn;
+				const bool wider = picture_aspect() > 4.0 / 3.0 + 0.01;
+				game.want_plate = wide_select > 0 && wider;   // (the background made only while it's wanted: from the next frame)
+				sel = wide_select_on = wide_select && wider && game.view.select_screen && !fc_drawn;
 				if (sel) {
 					const uint64_t tw = SDL_GetTicksNS();
 					const int reach = int(std::ceil(video::W * (picture_aspect() * 0.75 - 1) / 2)) + 2;   // (the sides' width shown, in the 2D's pixels)
 					wide_select::make(wide_select, game.view.select_kind, game.view.plate, game.view.plate_hw, wide_select_sides, wide_select_state, reach);
+					// (the game's thin lines at the edges: across carried on, down the edge taken out: its above copy)
+					wide_select_above = game.view.above;
+					if (wide_select != 4) {
+						const bool dural = game.view.dural_wide.on;
+						wide_select::edge_lines(wide_select_above, game.view.plate, wide_select_sides, reach, dural ? video::WIDE_Y - 4 : 0, dural ? video::WIDE_Y + video::WIDE_H + 4 : 0);
+					}
 					if (static const bool wlog = getenv("VF3_WIDE_SELECT_LOG") != nullptr; wlog) {
 						static double ms = 0; static int n = 0;
 						ms += double(SDL_GetTicksNS() - tw) / 1e6;
@@ -2768,7 +2779,8 @@ int main(int argc, char **argv)
 					if (sel) {
 						const uint32_t *sd = &wide_select_sides[size_t(y) * video::WW];
 						std::copy(sd, sd + video::EXT, dst);
-						std::copy(sd + video::EXT + video::W, sd + video::WW, dst + video::EXT + video::W);
+						const int r0 = video::EXT + video::W - wide_select::RCUT;   // (the right side over the 4:3's last 2 columns: aligned()'s copies)
+						std::copy(sd + r0, sd + video::WW, dst + r0);
 					}
 				}
 				// (above and below it, the screen mirrored at its edges)
@@ -2779,7 +2791,15 @@ int main(int argc, char **argv)
 				}
 				send_2d(tex_below, narrow, video::WW, video::HT);
 			}
-			send_2d(tex_above, game.view.above, video::W);
+			if (sel) {   // (the right side over the 2D's last 2 columns, aligned()'s copies of the one before)
+				std::vector<uint32_t> &a = wide_select_above;
+				for (int y = 0; y < video::H; y++)
+					for (int x = video::W - wide_select::RCUT; x < video::W; x++) {
+						const uint32_t v = wide_select_sides[size_t(y) * video::WW + video::EXT + x];
+						if (v >> 24) a[size_t(y) * video::W + x] = v;   // (opaque, the side's: a see-through edge there showed as a dark line)
+					}
+				send_2d(tex_above, a, video::W);
+			} else send_2d(tex_above, game.view.above, video::W);
 			pace.upload_ms += double(SDL_GetTicksNS() - tu) / 1e6;
 		}
 	};
@@ -2871,8 +2891,8 @@ int main(int argc, char **argv)
 			}
 			return;
 		}
-		const float sx = std::clamp(bg_shift_x, -float(video::WW) + 1, float(video::WW) - 1);
-		const float sy = std::clamp(bg_shift_y, -float(video::H) + 1, float(video::H) - 1);
+		const float sx = wide_select_on ? 0.0f : std::clamp(bg_shift_x, -float(video::WW) + 1, float(video::WW) - 1);
+		const float sy = wide_select_on ? 0.0f : std::clamp(bg_shift_y, -float(video::H) + 1, float(video::H) - 1);
 		// The free camera turned further than the layer reaches (on a stage): the sky faded to its colour, over half a
 		// screen's turn past the layer's edge (mirrored there, it would be sky that isn't the stage's)
 		float fade = 1;
@@ -5312,6 +5332,7 @@ int main(int argc, char **argv)
 				if (getenv("VF3_SHOT_LAYERS")) {   // (tests: the 2D layers, the tile RAM and registers as they are)
 					write_png(("build/host_" + s + "_below.png").c_str(), game.view.below.data(), video::W, video::H);
 					write_png(("build/host_" + s + "_above.png").c_str(), game.view.above.data(), video::W, video::H);
+					if (game.view.select_screen) write_png(("build/host_" + s + "_plate.png").c_str(), game.view.plate.data(), video::W, video::H);
 					if (FILE *f = fopen(("build/host_" + s + "_tile.bin").c_str(), "wb")) {
 						fwrite(board.tile_ram.data(), 1, board.tile_ram.size(), f);
 						fwrite(board.tile_regs, 4, 64, f);
@@ -5542,11 +5563,13 @@ int main(int argc, char **argv)
 			if (it->first <= game_frame) {
 				if (wide_select_shots && game.view.select_screen) {   // (tests: the picture in each of VF3_WIDE_SELECT's options)
 					const int keep = wide_select;
-					for (int o = 0; o <= 5; o++) {
+					for (int o = 0; o <= 6; o++) {
 						wide_select = o;
 						draw_picture(1.0, true);
 						compose();
 						read_window("build/host_win_" + it->second + "_o" + std::to_string(o) + ".png");
+						if (getenv("VF3_SHOT_LAYERS") && o == 2 && wide_select_sides.size() == size_t(video::WW) * video::H)
+							write_png(("build/host_" + it->second + "_sides.png").c_str(), wide_select_sides.data(), video::WW, video::H);
 					}
 					wide_select = keep;
 					draw_picture(1.0, true);

@@ -737,7 +737,7 @@ void TileGen::line(const m3::Model3 &board, unsigned y, const uint32_t *line_reg
 		ext_rows.clear(); ext_how.clear(); ext_edge.clear(); wrap_votes.clear(); mem_mirror.clear();
 		std::fill(clear_known.begin(), clear_known.end(), 0);
 		std::fill(solid_memo.begin(), solid_memo.end(), 0);
-		if (want_plate) std::fill(plate_memo.begin(), plate_memo.end(), 0);
+		if (want_plate) plate_frame(board);
 	}
 	if (want_plate) {
 		static const bool wlog = getenv("VF3_WIDE_SELECT_LOG") != nullptr;
@@ -1847,11 +1847,35 @@ void TileGen::compose(const uint32_t *pic3d, uint32_t *out) const
 namespace video {
 
 // (VF3_WIDE_SELECT) the select screens' background, a line: tilegen.h's plate and plate_hw
-void TileGen::plate_line(const m3::Model3 &board, unsigned y)
+void TileGen::plate_frame(const m3::Model3 &board)
 {
 	const uint32_t *vram = reinterpret_cast<const uint32_t *>(board.tile_ram.data());
-	const uint32_t *pal = vram + 0x40000;
 	const uint32_t *regs = regs_of(board);
+	uint64_t h = 1469598103934665603ull;
+	auto add = [&](const uint32_t *p, size_t n) { for (size_t i = 0; i < n; i++) h = (h ^ p[i]) * 1099511628211ull; };
+	add(vram + 0xF6000 / 4, (0x100000 - 0xF6000) / 4);   // (the line scrolls, the masks, the four maps)
+	add(vram + 0x40000, 0x8000);                          // (the palette)
+	for (int i = 0; i < 64; i++) if (i != 0x40 / 4 && i != 0x44 / 4) add(regs + i, 1);
+	plate_age++;
+	plate_now = h != plate_sum || plate_age >= 16;
+	if (plate_now) {
+		plate_sum = h;
+		plate_age = 0;
+		plate_made++;
+		std::fill(plate_memo.begin(), plate_memo.end(), 0);
+		std::fill(plate_bg.begin(), plate_bg.end(), 0);
+	}
+}
+
+// (VF3_WIDE_SELECT) the select screens' background, a line: tilegen.h's plate and plate_hw
+void TileGen::plate_line(const m3::Model3 &board, unsigned y)
+{
+	const uint32_t *regs = regs_of(board);
+	plate_offs[y][0] = regs[0x40 / 4];
+	plate_offs[y][1] = regs[0x44 / 4];
+	if (!plate_now && !plate_hw_on) return;
+	const uint32_t *vram = reinterpret_cast<const uint32_t *>(board.tile_ram.data());
+	const uint32_t *pal = vram + 0x40000;
 	const uint32_t order = regs[0x20 / 4];
 	struct Ly { bool on, above, four; int sx, sy; const uint32_t *names; uint8_t lut[3][32]; };
 	Ly ls[4];
@@ -1869,8 +1893,9 @@ void TileGen::plate_line(const m3::Model3 &board, unsigned y)
 			l.sx = scroll_x(vram, regs, k, y);
 			l.sy = int((r >> 16) & 0x1FF);
 			l.names = vram + (0xF8000 + k * 0x2000) / 4;
-			for (int c = 0; c < 3; c++)
-				for (int i = 0; i < 32; i++) l.lut[c][i] = uint8_t(std::clamp(i * 255 / 31 + offs[c], 0, 255));
+			if (plate_hw_on)
+				for (int c = 0; c < 3; c++)
+					for (int i = 0; i < 32; i++) l.lut[c][i] = uint8_t(std::clamp(i * 255 / 31 + offs[c], 0, 255));
 		}
 	}
 	auto raw = [&](uint32_t e, bool four, int fy, int fx) {
@@ -1881,29 +1906,53 @@ void TileGen::plate_line(const m3::Model3 &board, unsigned y)
 		const uint32_t pat = (e & 0x3FFF) * 16;
 		return pal[((e & 0x7F00) | ((vram[(pat + fy * 2 + (fx >> 2)) & 0x3FFFF] >> ((3 - (fx & 3)) * 8)) & 0xFF)) & 0x7FFF];
 	};
-	auto solid = [&](uint32_t e, bool four) {
+	// a pattern: 1 solid (no see-through texel), 2 partly see-through, 3 all see-through (nothing)
+	auto kind = [&](uint32_t e, bool four) {
 		uint8_t &m = plate_memo[size_t(e & 0xFFFF) << 1 | size_t(four)];
 		if (!m) {
-			m = 1;
-			for (int fy = 0; fy < 8 && m == 1; fy++)
-				for (int fx = 0; fx < 8; fx++) if (raw(e, four, fy, fx) & 0x8000) { m = 2; break; }
+			int clear = 0;
+			for (int fy = 0; fy < 8; fy++)
+				for (int fx = 0; fx < 8; fx++) clear += (raw(e, four, fy, fx) & 0x8000) != 0;
+			m = clear == 0 ? 1 : clear == 64 ? 3 : 2;
 		}
-		return m == 1;
+		return int(m);
 	};
 	uint32_t *pl = plate.data() + size_t(y) * W, *hw = plate_hw.data() + size_t(y) * WW + EXT;
 	// (each layer's tile at the last pixel looked at, its entry and whether it's solid: looked up once a tile)
 	int at_tile[4] = { INT32_MIN, INT32_MIN, INT32_MIN, INT32_MIN };
 	uint32_t at_e[4] = {};
 	bool at_solid[4] = {};
+	// a background tile: solid, and of the 8 round it in its map (those with anything in them) at least twice as many
+	// solid as not (a picture's; a big letter's tile can be solid, the letters round it aren't): memoed this frame, by
+	// layer and place in the map
+	auto entry = [&](const Ly &l, int row, int col) {
+		const uint32_t w = l.names[(row & 63) * 32 + ((col & 63) >> 1)];
+		return (col & 1) ? (w & 0xFFFF) : (w >> 16);
+	};
+	auto bg_tile = [&](int li, int row, int col) {
+		uint8_t &m = plate_bg[size_t(li) * 4096 + size_t(row & 63) * 64 + size_t(col & 63)];
+		if (!m) {
+			const Ly &l = ls[li];
+			int n = 0, part = 0;
+			if (kind(entry(l, row, col), l.four) == 1)
+				for (int dy = -1; dy <= 1; dy++)
+					for (int dx = -1; dx <= 1; dx++) {
+						if (!dx && !dy) continue;
+						const int k = kind(entry(l, row + dy, col + dx), l.four);
+						n += k == 1; part += k == 2;
+					}
+			m = n > 0 && n >= 2 * part ? 1 : 2;
+		}
+		return m == 1;
+	};
 	auto px_of = [&](int li, int x, bool &is_solid) {
 		const Ly &l = ls[li];
 		const int px = (x + l.sx) & 511, py = (int(y) + l.sy) & 511;
 		const int t = px >> 3;
 		if (at_tile[li] != t) {
 			at_tile[li] = t;
-			const uint32_t w = l.names[(py / 8) * 32 + (px / 16)];
-			at_e[li] = (px & 8) ? (w & 0xFFFF) : (w >> 16);
-			at_solid[li] = solid(at_e[li], l.four);
+			at_e[li] = entry(l, py / 8, t);
+			at_solid[li] = bg_tile(li, py / 8, t);
 		}
 		is_solid = at_solid[li];
 		return raw(at_e[li], l.four, py & 7, px & 7);
@@ -1912,11 +1961,9 @@ void TileGen::plate_line(const m3::Model3 &board, unsigned y)
 		const Ly &l = ls[li];
 		return 0xFF000000u | uint32_t(l.lut[2][(v >> 10) & 31]) << 16 | uint32_t(l.lut[1][(v >> 5) & 31]) << 8 | l.lut[0][v & 31];
 	};
-	// (the plate only as far in from the edges as wide_select.h looks: PLATE_IN; the rest 0)
-	std::fill_n(pl + PLATE_IN, W - 2 * PLATE_IN, 0u);
 	for (int x = plate_hw_on ? -EXT : 0; x < (plate_hw_on ? W + EXT : W); x++) {
-		const bool in_plate = x >= 0 && x < W && (x < PLATE_IN || x >= W - PLATE_IN);
-		if (!in_plate && !plate_hw_on) { x = W - PLATE_IN - 1; continue; }
+		const bool in_plate = plate_now && x >= 0 && x < W;
+		if (!in_plate && x >= 0 && x < W) continue;
 		// the layers in the picture's order, top first: above the 3D A then B, below it A then B (each pair's layer
 		// the mask has for this 32-pixel column; past the screen, the edge's). plate_hw: the top's opaque pixel, as
 		// the board shows it; plate: the bottom's solid tile's (the picture the screen is drawn over: the letters,
@@ -1938,9 +1985,9 @@ void TileGen::plate_line(const m3::Model3 &board, unsigned y)
 		}
 		if (!in_plate) continue;
 		pl[x] = 0;
-		for (int i = n - 1; i >= 0; i--) {
+		for (int i = 0; i < n; i++) {   // (the top layer's pixel there, past the letters and frames over it)
 			const uint32_t v = px_of(order4[i], x, sol);
-			if (!(v & 0x8000) && sol) { pl[x] = rgba_of(order4[i], v); break; }
+			if (!(v & 0x8000) && sol) { pl[x] = 0x80000000u | (v & 0x7FFF) | uint32_t(order4[i] >= 2) << 15; break; }
 		}
 	}
 }
@@ -1953,8 +2000,22 @@ void TileGen::aligned_plate(std::vector<uint32_t> &p, std::vector<uint32_t> &hw)
 	else hw.clear();
 	for (int y = 0; y < H; y++) {
 		const int sy = std::min(y + S, H - 1);
-		memcpy(&p[size_t(y) * W], &plate[size_t(sy) * W + S], size_t(W - S) * 4);
-		for (int x = W - S; x < W; x++) p[size_t(y) * W + x] = p[size_t(y) * W + W - S - 1];
+		uint8_t lut[2][3][32];
+		for (int pair = 0; pair < 2; pair++) {
+			const Offset off = offset_of(plate_offs[sy][pair]);
+			const int offs[3] = { off.r, off.g, off.b };
+			for (int c = 0; c < 3; c++)
+				for (int i = 0; i < 32; i++) lut[pair][c][i] = uint8_t(std::clamp(i * 255 / 31 + offs[c], 0, 255));
+		}
+		const uint32_t *src = &plate[size_t(sy) * W + S];
+		uint32_t *dst = &p[size_t(y) * W];
+		for (int x = 0; x < W - S; x++) {
+			const uint32_t v = src[x];
+			if (!(v >> 31)) continue;
+			const auto &l = lut[(v >> 15) & 1];
+			dst[x] = 0xFF000000u | uint32_t(l[2][(v >> 10) & 31]) << 16 | uint32_t(l[1][(v >> 5) & 31]) << 8 | l[0][v & 31];
+		}
+		for (int x = W - S; x < W; x++) dst[x] = dst[W - S - 1];
 		if (plate_hw_on) memcpy(&hw[size_t(y) * WW], &plate_hw[size_t(sy) * WW + S], size_t(WW - S) * 4);
 	}
 }
