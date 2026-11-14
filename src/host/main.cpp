@@ -87,6 +87,9 @@
 //                        held back when someone's in the line); for runs with several matches in a row
 //   VF3_ROOM2_LEAVE_AT=N leaves the room (Leave room) at pass N
 //   VF3_ROOM2_SHOT=1     the window to build/host_room2_ready.png 1 s into the ready check (its banner)
+//   VF3_TEST_STORY=1     the window shot as a Rooms 2 room's story moves on (each change: the game, then the Online page
+//                        over it), to build/story_*.png; VF3_TEST_STORY_AT=s:open,s:key:K,s:shot:NAME,s:close,s:text:T,
+//                        s:leave,s:leaveline,s:joinline,s:closeroom,... by time
 //   VF3_TEST_VS_ROUNDS=n online matches first to n rounds (the host's, which both play), not 3: shorter matches
 //   VF3_TEST_NET_DROP=S,D[,N] every packet of a room's session dropped from S s after it's made for D s, each way, the
 //                        first N sessions (1): the connection lost with both games still up
@@ -4623,6 +4626,8 @@ int main(int argc, char **argv)
 	online.adapter.midi_unheard_waiting = [&] { return game.unheard_waiting(); };
 	bool match_on = false;
 	bool room2_shot = false;   // (VF3_ROOM2_SHOT: the window, the ready check's banner on it)
+	std::string story_shot;    // (VF3_TEST_STORY: the window to build/<this>.png after this pass's drawing)
+	int story_acts = 0;        // (VF3_TEST_STORY_AT's actions done: a menu it opened or closed not closed by VF3_TEST_STORY)
 	Online::Phase online_was = Online::Phase::off;
 	std::string online_code_was;   // (the room code: its page made again when the lobby gives it)
 	uint64_t online_refresh_t = 0;
@@ -5004,6 +5009,75 @@ int main(int argc, char **argv)
 		if (static const char *la = getenv("VF3_ROOM2_LEAVE_AT"); la && pass == uint64_t(atoll(la)) && online.in_room2()) {
 			fprintf(stderr, "online: (test) Leave room\n");
 			online.room2_leave(false);
+		}
+		// VF3_TEST_STORY=1 (tests, a storyboard): 1.2 s after each change of what a Rooms 2 room's player sees (the room's
+		// state, the call, a banner, Online's phase) the window as it is (build/story_NNN_<s>s_game.png), then the Online page
+		// opened over it (..._page.png) and closed again. VF3_TEST_STORY_AT=s:open,s:key:NAME,s:shot:NAME,s:close,...: at s
+		// seconds from the start, the Online page opened, a key pressed (esc, up, down, left, right, enter or an SDL name), the
+		// window to build/story_NAME.png, the menu closed
+		if (static const bool story = getenv("VF3_TEST_STORY") != nullptr; story) {
+			static std::string key;
+			static uint64_t due = 0;
+			static int stage = 0, n = 0;
+			static bool opened = false;
+			static int acts_at = 0;
+			static std::string tag;
+			const uint64_t t = SDL_GetTicks();
+			std::string nm, k = "out";
+			const int bn = online.room2_banner(nm);
+			if (const RoomMember *m = online.room2())
+				k = m->phase + "|" + std::to_string(m->pos) + "|" + std::to_string(m->line.size()) + "|" + (online.room2_ready_left() >= 0 ? "R" : "-") + "|" +
+				    std::to_string(m->has_a) + std::to_string(m->has_b) + std::to_string(m->watcher) + std::to_string(online.room2_member());
+			k += "|" + std::to_string(int(online.phase())) + "|" + std::to_string(bn) + "|" + std::to_string(online.in_room2() ? 1 : 0);
+			if (stage <= 1 && k != key) { key = k; due = t + 1200; stage = 1; }
+			if (stage >= 1 && t >= due && n < 80) {
+				char b[64];
+				snprintf(b, sizeof b, "story_%03d_%05.1fs", n, t / 1000.0);
+				if (stage == 1) { tag = b; story_shot = tag + "_game"; stage = 2; due = t + 100; }
+				else if (stage == 2) {
+					opened = !menu.is_open();
+					acts_at = story_acts;
+					if (opened) { menu.open(main_page()); menu.select_row(online_row()); menu.push(online_page()); }
+					stage = 3; due = t + 1500;
+				} else if (stage == 3) { story_shot = tag + "_page"; stage = 4; due = t + 100; }
+				else { if (opened && acts_at == story_acts && menu.is_open()) menu.close(); opened = false; stage = 0; n++; fprintf(stderr, "(test) story: %s [%s]\n", tag.c_str(), key.c_str()); }
+			}
+		}
+		if (static const char *sa = getenv("VF3_TEST_STORY_AT"); sa) {
+			struct Act { uint64_t ms; std::string what; };
+			static std::vector<Act> acts = [&] {
+				std::vector<Act> v;
+				for (std::string all = std::string(sa) + ","; !all.empty(); all.erase(0, all.find(',') + 1)) {
+					const std::string a = all.substr(0, all.find(','));
+					if (a.find(':') != std::string::npos) v.push_back({ uint64_t(atof(a.c_str()) * 1000), a.substr(a.find(':') + 1) });
+				}
+				return v;
+			}();
+			for (auto it = acts.begin(); it != acts.end();) {
+				if (SDL_GetTicks() < it->ms) { ++it; continue; }
+				const std::string &w = it->what;
+				if (w == "open") { if (menu.is_open()) menu.close(); menu.open(main_page()); menu.select_row(online_row()); menu.push(online_page()); }
+				else if (w == "close") { if (menu.is_open()) menu.close(); }
+				else if (w == "leave") online.room2_leave(false);   // (Leave room, Leave line, Join the line, the creator's Close room)
+				else if (w == "leaveline" || w == "joinline") online.room2_line(w == "joinline");
+				else if (w == "closeroom") online.room2_close();
+				else if (w.rfind("shot:", 0) == 0) story_shot = "story_" + w.substr(5);
+				else if (w.rfind("text:", 0) == 0) {   // (typed, as text: a code)
+					static std::deque<std::string> kept;
+					kept.push_back(w.substr(5));
+					SDL_Event e{};
+					e.type = SDL_EVENT_TEXT_INPUT;
+					e.text.text = kept.back().c_str();
+					SDL_PushEvent(&e);
+				} else if (w.rfind("key:", 0) == 0) {
+					const std::string kk = w.substr(4);
+					send_key(kk == "esc" ? SDL_SCANCODE_ESCAPE : kk == "up" ? SDL_SCANCODE_UP : kk == "down" ? SDL_SCANCODE_DOWN : kk == "left" ? SDL_SCANCODE_LEFT
+					         : kk == "right" ? SDL_SCANCODE_RIGHT : kk == "enter" ? SDL_SCANCODE_RETURN : SDL_GetScancodeFromName(kk.c_str()));
+				}
+				story_acts++;
+				fprintf(stderr, "(test) story at %.1f s: %s\n", it->ms / 1000.0, w.c_str());
+				it = acts.erase(it);
+			}
 		}
 		static const char *test_watch = getenv("VF3_WATCH_CODE");
 		if ((test_host_room || test_join_code || test_random || test_watch) && pass == 60) {
@@ -5776,6 +5850,7 @@ int main(int argc, char **argv)
 			}
 			else ++it;
 		for (uint64_t s : shot_at) if (s == pass) read_window("build/host_window_at_" + std::to_string(pass) + ".png");
+		if (!story_shot.empty()) { read_window("build/" + story_shot + ".png"); story_shot.clear(); }
 		if (room2_shot) { room2_shot = false; read_window("build/host_room2_ready.png"); fprintf(stderr, "(test) the ready check's banner: build/host_room2_ready.png\n"); }
 		if (menu_shot) { read_window("build/host_window_menu_" + std::to_string(menu_shot) + ".png"); menu_shot = 0; }
 		if (static const char *ft = getenv("VF3_TEST_FREECAM"); ft) {   // (tests: the free camera at these frames)
