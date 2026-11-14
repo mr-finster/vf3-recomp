@@ -90,7 +90,7 @@
 //   VF3_ROOM2_SHOT=1     the window to build/host_room2_ready.png 1 s into the ready check (its banner)
 //   VF3_TEST_STORY=1     the window shot as a Rooms 2 room's story moves on (each change: the game, then the Online page
 //                        over it), to build/story_*.png; VF3_TEST_STORY_AT=s:open,s:key:K,s:shot:NAME,s:close,s:text:T,
-//                        s:leave,s:leaveline,s:joinline,s:closeroom,... by time
+//                        s:leave,s:leaveline,s:joinline,s:closeroom,s:readyon,s:readyoff,... by time
 //   VF3_TEST_VS_ROUNDS=n online matches first to n rounds (the host's, which both play), not 3: shorter matches
 //   VF3_TEST_NET_DROP=S,D[,N] every packet of a room's session dropped from S s after it's made for D s, each way, the
 //                        first N sessions (1): the connection lost with both games still up
@@ -5031,7 +5031,8 @@ int main(int argc, char **argv)
 			const int bn = online.room2_banner(nm);
 			if (const RoomMember *m = online.room2())
 				k = m->phase + "|" + std::to_string(m->pos) + "|" + std::to_string(m->line.size()) + "|" + (online.room2_ready_left() >= 0 ? "R" : "-") + "|" +
-				    std::to_string(m->has_a) + std::to_string(m->has_b) + std::to_string(m->watcher) + std::to_string(online.room2_member());
+				    std::to_string(m->has_a) + std::to_string(m->has_b) + std::to_string(m->watcher) + std::to_string(online.room2_member()) + (m->me_ready ? "R" : "A") +
+				    [&] { std::string f; for (const auto &w : m->line) f += w.ready ? 'r' : 'a'; return f; }();
 			k += "|" + std::to_string(int(online.phase())) + "|" + std::to_string(bn) + "|" + std::to_string(online.in_room2() ? 1 : 0);
 			if (stage <= 1 && k != key) { key = k; due = t + 1200; stage = 1; }
 			if (stage >= 1 && t >= due && n < 80) {
@@ -5065,6 +5066,7 @@ int main(int argc, char **argv)
 				else if (w == "leave") online.room2_leave(false);   // (Leave room, Leave line, Join the line, the creator's Close room)
 				else if (w == "leaveline" || w == "joinline") online.room2_line(w == "joinline");
 				else if (w == "closeroom") online.room2_close();
+				else if (w == "readyon" || w == "readyoff") online.room2_set_ready(w == "readyon");
 				else if (w.rfind("shot:", 0) == 0) story_shot = "story_" + w.substr(5);
 				else if (w.rfind("text:", 0) == 0) {   // (typed, as text: a code)
 					static std::deque<std::string> kept;

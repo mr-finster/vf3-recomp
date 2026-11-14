@@ -422,11 +422,11 @@ void Online::room2_poll()
 	}
 	if (m.in_seat) room2_decided();
 	room2_shown();
-	// tests: VF3_ROOM2_READY's press (now: Start while getting ready; esc: AWAY then; away: AWAY once in)
+	// tests: VF3_ROOM2_READY's press (now: Start while getting ready; esc: AWAY the first time; away: AWAY once in)
 	if (m.ready_you && !m.ready_sent && m.ready_auto_at > 0 && now >= m.ready_auto_at) {
 		m.ready_auto_at = 0;
 		log("Rooms 2: (test) " + std::string(room2_test_ready == "esc" ? "Esc" : "Start") + " pressed while getting ready");
-		if (room2_test_ready == "esc") room2_set_ready(false); else room2_ready();
+		if (room2_test_ready == "esc") { room2_set_ready(false); room2_test_ready.clear(); } else room2_ready();   // (esc: once)
 	}
 	if (room2_test_ready == "away" && !m.test_away_done && m.have_state) { m.test_away_done = true; log("Rooms 2: (test) READY: off"); room2_set_ready(false); }
 }
