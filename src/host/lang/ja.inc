@@ -371,6 +371,8 @@ T(ROOM2_LISTED_HELP, "みんなのルーム一覧に表示するか、コード�
 T(ROOM2_CLOSE_ROOM, "ルームを閉じる")
 T(ROOM2_CLOSE_HELP, "ルームにいるみんなに対してルームを閉じます。進行中の対戦は終わります。")
 T(ROOM2_SECONDS, "{n} 秒")
+T(BUTTON_JOIN_LINE, "順番待ちに並ぶ")
+T(ROOM2_WATCHER, "観戦中（順番待ちには並んでいません）")
 T(NOTICE_DROPPED, "接続が切れました。対戦を{n}秒保持しています...")
 T(NOTICE_CARRIES_ON, "つながり直せば、ここからそのまま続きます")
 T(NOTICE_STARTING, "対戦を開始しています")

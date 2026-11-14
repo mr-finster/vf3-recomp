@@ -371,6 +371,8 @@ T(ROOM2_LISTED_HELP, "Mostrata nell'elenco stanze di tutti, o solo a chi ha il c
 T(ROOM2_CLOSE_ROOM, "Chiudi la stanza")
 T(ROOM2_CLOSE_HELP, "Chiude la stanza per tutti quelli dentro: l'incontro in corso finisce.")
 T(ROOM2_SECONDS, "{n} s")
+T(BUTTON_JOIN_LINE, "METTITI IN FILA")
+T(ROOM2_WATCHER, "Stai guardando, senza posto in fila")
 T(NOTICE_DROPPED, "La connessione è caduta. Incontro in attesa per {n} s...")
 T(NOTICE_CARRIES_ON, "Riprende da qui se torna")
 T(NOTICE_STARTING, "L'INCONTRO STA INIZIANDO")

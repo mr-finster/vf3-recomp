@@ -196,6 +196,7 @@ public:
 	// Leave room (the lobby told; a match on, forfeited); keep_watching: Leave line, the room's matches still watched as anyone's
 	void room2_leave(bool keep_watching);
 	void room2_watch(bool on);   // (in the line: its match watched, or not)
+	void room2_line(bool join);  // (Leave line: no place in it, still in the room watching; Join the line: at its back)
 	// Start pressed (main.cpp's, keyboard or pad, whatever's on): the ready check on, ready said. True if it was taken
 	bool room2_ready();
 	int room2_ready_left() const;   // (the ready check on this player: its seconds left; -1 none)
@@ -458,6 +459,7 @@ private:
 	void room2_unseat(bool lost);
 	void room2_session_ended(const vfnet::Session::Event &e);
 	void room2_decided();
+	void room2_shown();   // (the streak over the match on screen)
 	void room2_end(const std::string &why);   // (the lobby let this member go, or the room closed: why's said)
 	void room2_keep();                         // (its code, id and key to room2.txt)
 	std::string room2_body(const std::string &extra = "") const;

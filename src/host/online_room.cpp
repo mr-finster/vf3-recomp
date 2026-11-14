@@ -186,7 +186,13 @@ void Online::room2_state(const Value &st)
 	m.line.clear();
 	for (const Value &w : st["line"].items) m.line.push_back(who_of(w));
 	const int was_pos = m.pos;
-	m.pos = num(you["pos"], 0, 99, -1);
+	m.pos = num(you["pos"], -1, 99, -1);
+	m.watcher = truthy(you["watcher"]);
+	m.watchers = num(st["watchers"], 0, 99);
+	const Value &mt = t["match"];
+	m.match_n = mt.kind == Value::object ? num(mt["n"], 0, 1 << 30, -1) : -1;
+	m.match_streak = mt.kind == Value::object ? num(mt["streak"], 0, 9999) : 0;
+	m.match_holder = mt.kind == Value::object ? online_menu::clean_name(mt["holder"].str()) : "";
 	m.side = you["side"].str();
 	m.misses = num(you["misses"], 0, 9);
 	const Value &seat = you["seat"];
@@ -217,7 +223,7 @@ void Online::room2_state(const Value &st)
 	char b[400];
 	snprintf(b, sizeof b, "Rooms 2: room %s: %s %s vs %s, streak %d (%s), match %d; line [%s]; this player %s%s", room_code().c_str(), m.phase.c_str(),
 	         m.has_a ? m.a.name.c_str() : "-", m.has_b ? m.b.name.c_str() : "-", m.streak, m.holder.empty() ? "-" : m.holder.c_str(), m.n, line.c_str(),
-	         m.pos == 0 ? ("at the table, side " + m.side).c_str() : ("in line, " + std::to_string(m.pos) + " of " + std::to_string(m.line.size())).c_str(),
+	         m.pos == 0 ? ("at the table, side " + m.side).c_str() : m.watcher ? "watching, not in line" : ("in line, " + std::to_string(m.pos) + " of " + std::to_string(m.line.size())).c_str(),
 	         m.ready_on ? (m.ready_you ? ", called: ready check on" : (", " + std::to_string(m.ready_pos) + " in line called").c_str()) : "");
 	static std::string said;
 	if (said != b) { log(b); said = b; }
@@ -402,6 +408,7 @@ void Online::room2_poll()
 		log("Rooms 2: connected with " + opponent() + ": started");
 	}
 	if (m.in_seat) room2_decided();
+	room2_shown();
 	// tests: VF3_ROOM2_READY's press
 	if (m.ready_you && !m.ready_sent && m.ready_auto_at > 0 && now >= m.ready_auto_at) {
 		log("Rooms 2: (test) Start pressed for the ready check (" + room2_test_ready + ")");
@@ -423,14 +430,14 @@ void Online::room2_react()
 		stop_activity(true, QUIT_NEXT_IN_LINE);
 	}
 	// in the line: back from the table (lost, or a void match), then the room's match watched
-	if (m.pos > 0 && m.in_seat) {
+	if ((m.pos > 0 || m.watcher) && m.in_seat) {
 		const std::string mine = m.seat.side;
-		room2_unseat(((m.last_result == "a" || m.last_result == "b") && m.last_result != mine) || (m.last_result == "forfeit" && m.last_winner != mine));
+		room2_unseat(!m.watcher && (((m.last_result == "a" || m.last_result == "b") && m.last_result != mine) || (m.last_result == "forfeit" && m.last_winner != mine)));
 	}
 	if (m.in_seat && m.banner == 1 && m.line.empty()) m.banner = 0;   // (nobody next after all: the two play on)
 	if (!r2) return;
 	// (a match there to watch: two at the table; a lone one waiting for the first in line has none yet)
-	if (m.pos > 0 && m.want_watch && !m.wid.empty() && m.has_a && m.has_b && ph == Phase::off && now >= m.watch_retry_at) watch_begin(m.wid);
+	if ((m.pos > 0 || m.watcher) && m.want_watch && !m.wid.empty() && m.has_a && m.has_b && ph == Phase::off && now >= m.watch_retry_at) watch_begin(m.wid);
 	// called: the chime and the window flashed (main), the banner's countdown; tests press Start by VF3_ROOM2_READY
 	if (m.ready_you && !m.was_called) {
 		m.was_called = true;
@@ -584,10 +591,33 @@ int Online::room2_banner(std::string &name) const
 	return r2->banner;
 }
 
+// The streak shown over the match on screen: the one its match began with (table.match), taken while the table's two are
+// the two on screen; a watcher still on the last match (the lobby on to the next pair) keeps that match's
+void Online::room2_shown()
+{
+	RoomMember &m = *r2;
+	if (!playing()) return;
+	const std::string p0 = player_name(0), p1 = player_name(1), pair = p0 + "|" + p1;
+	if (m.match_n >= 0 && m.has_a && m.has_b && m.a.name == p0 && m.b.name == p1 && (m.shown_n != m.match_n || m.shown_pair != pair)) {
+		m.shown_n = m.match_n;
+		m.shown_pair = pair;
+		m.shown_streak = m.match_streak;
+		m.shown_holder = m.match_holder;
+	}
+}
+
 int Online::room2_streak(int p) const
 {
-	if (!r2 || !r2->have_state || r2->streak <= 0 || r2->holder.empty()) return 0;
-	return (r2->holder == "a" ? 0 : 1) == p ? r2->streak : 0;
+	if (!r2 || !r2->have_state || r2->shown_streak <= 0 || r2->shown_holder.empty()) return 0;
+	if (r2->shown_pair != player_name(0) + "|" + player_name(1)) return 0;   // (another match on screen than the one taken)
+	return player_name(p) == r2->shown_holder ? r2->shown_streak : 0;
+}
+
+void Online::room2_line(bool join)
+{
+	if (!r2 || r2->mid.empty()) return;
+	room2_send(join ? "join_line" : "leave_line");
+	log(std::string("Rooms 2: ") + (join ? "Join the line" : "Leave line: watching the room, no place in its line"));
 }
 
 void Online::room2_watch(bool on)

@@ -371,6 +371,8 @@ T(ROOM2_LISTED_HELP, "In der Raumliste aller zu sehen, oder nur für die mit dem
 T(ROOM2_CLOSE_ROOM, "Raum schließen")
 T(ROOM2_CLOSE_HELP, "Schließt den Raum für alle darin: ein laufendes Match endet.")
 T(ROOM2_SECONDS, "{n} s")
+T(BUTTON_JOIN_LINE, "ANSTELLEN")
+T(ROOM2_WATCHER, "Du schaust zu, ohne Platz in der Reihe")
 T(NOTICE_DROPPED, "Die Verbindung ist abgebrochen. Das Match wartet {n}\xC2\xA0s...")
 T(NOTICE_CARRIES_ON, "Kommt sie wieder, geht es genau hier weiter")
 T(NOTICE_STARTING, "DAS MATCH STARTET")

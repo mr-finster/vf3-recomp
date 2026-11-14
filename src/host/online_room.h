@@ -52,7 +52,16 @@ struct RoomMember
 	std::string last_result, last_why, last_winner;   // (how the last match ended: a, b, draw, forfeit, void)
 	int last_n = -1;
 	std::vector<Who> line;
-	int pos = -1;                   // (0 at the table, 1.. in the line, -1 not known yet)
+	int pos = -1;                   // (0 at the table, 1.. in the line, -1 not known yet or a watcher)
+	bool watcher = false;           // (in the room watching, no place in the line: Leave line; Join the line puts them back)
+	int watchers = 0;               // (the room's members watching without a place)
+	// The match on and the streak it's played for (the lobby's table.match), and what's shown over the match on screen:
+	// the streak its pair's match began with, taken when the table's pair is the one on screen (a watcher behind the
+	// lobby keeps the last match's while it's still on screen)
+	int match_n = -1, match_streak = 0;
+	std::string match_holder;
+	std::string shown_pair, shown_holder;
+	int shown_n = -1, shown_streak = 0;
 	std::string side;               // ("a" or "b" at the table)
 	bool seated = false;            // (a seat: an opponent, a token)
 	Seat seat;

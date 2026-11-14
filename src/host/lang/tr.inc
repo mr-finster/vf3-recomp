@@ -372,6 +372,8 @@ T(ROOM2_LISTED_HELP, "Herkesin oda listesinde görünür ya da yalnızca kodu bi
 T(ROOM2_CLOSE_ROOM, "Odayı kapat")
 T(ROOM2_CLOSE_HELP, "Odayı içindeki herkes için kapatır: süren maç biter.")
 T(ROOM2_SECONDS, "{n} sn")
+T(BUTTON_JOIN_LINE, "SIRAYA GİR")
+T(ROOM2_WATCHER, "İzliyorsun, sırada değilsin")
 T(NOTICE_DROPPED, "Bağlantı koptu. Maç {n} sn bekletiliyor...")
 T(NOTICE_CARRIES_ON, "Bağlantı dönerse tam buradan devam eder")
 T(NOTICE_STARTING, "MAÇ BAŞLIYOR")

@@ -371,6 +371,8 @@ T(ROOM2_LISTED_HELP, "显示在所有人的房间列表中，或只给有代码�
 T(ROOM2_CLOSE_ROOM, "关闭房间")
 T(ROOM2_CLOSE_HELP, "为房间里的所有人关闭房间：正在进行的对战会结束。")
 T(ROOM2_SECONDS, "{n} 秒")
+T(BUTTON_JOIN_LINE, "加入排队")
+T(ROOM2_WATCHER, "你在观战，未在排队")
 T(NOTICE_DROPPED, "连接中断。对战保持 {n} 秒...")
 T(NOTICE_CARRIES_ON, "连接恢复后会从这里继续")
 T(NOTICE_STARTING, "对战开始中")

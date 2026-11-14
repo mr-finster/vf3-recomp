@@ -371,6 +371,8 @@ T(ROOM2_LISTED_HELP, "Widoczny na liście pokoi u wszystkich albo tylko dla tych
 T(ROOM2_CLOSE_ROOM, "Zamknij pokój")
 T(ROOM2_CLOSE_HELP, "Zamyka pokój dla wszystkich w nim: trwający mecz się kończy.")
 T(ROOM2_SECONDS, "{n} s")
+T(BUTTON_JOIN_LINE, "STAŃ W KOLEJCE")
+T(ROOM2_WATCHER, "Oglądasz, bez miejsca w kolejce")
 T(NOTICE_DROPPED, "Połączenie zerwane. Mecz czeka {n} s...")
 T(NOTICE_CARRIES_ON, "Jeśli wróci, gra potoczy się dokładnie stąd")
 T(NOTICE_STARTING, "MECZ SIĘ ZACZYNA")

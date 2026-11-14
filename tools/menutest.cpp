@@ -1412,6 +1412,11 @@ int main(int argc, char **argv)
 		again();
 		check(o.room2_ready_left() >= 11 && o.room2_ready_left() <= 12, ("Rooms 2: called: the ready check's seconds (" + std::to_string(o.room2_ready_left()) + ")").c_str());
 		shot("room2_called.png", w, h);
+		o.set_room2_test(R"({"code":"KXQ4M7","room":{"name":"FRIDAY FIGHTS","listed":true,"locked":false,"ready_ms":15000,"owner":false},)" + table +
+		                 R"(,"line":[{"name":"PAIPAI","country":"US"}],"you":{"mid":"x","pos":-1,"watcher":true,"misses":0},"watchers":1,"ready":null,"watch":"KXQ4M7"})");
+		again();
+		check(o.room2()->watcher && o.room2()->pos == -1, "Rooms 2: Leave line: watching, no place in the line");
+		shot("room2_watcher.png", w, h);
 		o.set_room2_test(R"({"code":"KXQ4M7","room":{"name":"","listed":false,"locked":false,"ready_ms":15000,"owner":true},"table":{"a":{"name":"MRFINSTER","country":"GB"},"b":null,"phase":"SOLO","streak":0,"holder":"a","n":0,"last":null},"line":[],"you":{"mid":"x","pos":0,"side":"a","misses":0},"ready":null,"watch":"KXQ4M7"})");
 		again();
 		shot("room2_alone.png", w, h);

@@ -371,6 +371,8 @@ T(ROOM2_LISTED_HELP, "Affiché dans la liste des salons de tous, ou seulement po
 T(ROOM2_CLOSE_ROOM, "Fermer le salon")
 T(ROOM2_CLOSE_HELP, "Ferme le salon pour tous ceux qui y sont\xC2\xA0: le match en cours s'arrête.")
 T(ROOM2_SECONDS, "{n}\xC2\xA0s")
+T(BUTTON_JOIN_LINE, "REJOINDRE LA FILE")
+T(ROOM2_WATCHER, "Tu regardes, sans place dans la file")
 T(NOTICE_DROPPED, "La connexion a sauté. Match gardé pendant {n}\xC2\xA0s...")
 T(NOTICE_CARRIES_ON, "Il reprend d'ici même si elle revient")
 T(NOTICE_STARTING, "LE MATCH COMMENCE")

@@ -371,6 +371,8 @@ T(ROOM2_LISTED_HELP, "Aparece na lista de salas de todos, ou só para quem tem o
 T(ROOM2_CLOSE_ROOM, "Fechar a sala")
 T(ROOM2_CLOSE_HELP, "Fecha a sala para todos nela: a partida em andamento termina.")
 T(ROOM2_SECONDS, "{n} s")
+T(BUTTON_JOIN_LINE, "ENTRAR NA FILA")
+T(ROOM2_WATCHER, "Você está assistindo, sem lugar na fila")
 T(NOTICE_DROPPED, "A conexão caiu. Segurando a partida por {n} s...")
 T(NOTICE_CARRIES_ON, "Continua daqui mesmo se voltar")
 T(NOTICE_STARTING, "COMEÇANDO A PARTIDA")

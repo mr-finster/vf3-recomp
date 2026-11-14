@@ -3014,14 +3014,15 @@ menu_page room2_page(Online &o, OnlineSettings &s, game_menu &menu, std::functio
 {
 	menu_page p{ tr::P_ONLINE, "", {} };
 	const RoomMember *m = o.room2();
-	const bool member = o.room2_member(), in_line = member && m->pos > 0;
+	const bool member = o.room2_member(), in_line = member && (m->pos > 0 || m->watcher);
 	int watch = -1, leave_line = -1, settings = -1;
 	auto redo = [&o, &s, &menu, changed] { while (menu.depth() > 1 && menu.top_name() != tr::P_ONLINE.c_str()) menu.pop(); again(o, s, menu, changed); };
 	if (in_line) {
 		watch = int(p.items.size());
 		p.items.push_back({ o.watching() ? tr::BUTTON_STOP_WATCHING : tr::BUTTON_WATCH, "", {}, {}, [&o, redo] { o.room2_watch(!o.watching()); redo(); } });
 		leave_line = int(p.items.size());
-		p.items.push_back({ tr::BUTTON_LEAVE_LINE, "", {}, {}, [&o, redo] { o.room2_leave(true); redo(); } });
+		const bool join = m->watcher;   // (a watcher: back into the line; in it: out of it, still watching)
+		p.items.push_back({ join ? tr::BUTTON_JOIN_LINE : tr::BUTTON_LEAVE_LINE, "", {}, {}, [&o, redo, join] { o.room2_line(join); redo(); } });
 	}
 	const int leave = int(p.items.size());
 	p.items.push_back({ tr::BUTTON_LEAVE_ROOM, "", {}, {}, [&o, redo] { o.room2_leave(false); redo(); } });
@@ -3061,12 +3062,13 @@ menu_page room2_page(Online &o, OnlineSettings &s, game_menu &menu, std::functio
 				     E(m->line[size_t(i)].name) + "</div>";
 			if (n > from + SHOWN) r += "<div class=\"pq r2more\">+" + std::to_string(n - from - SHOWN) + "</div>";
 			if (m->pos > 0) r += "<div class=\"pq r2pos\">" + E(tr::fill(tr::ROOM2_LINE_POS, { { "n", std::to_string(m->pos) } })) + "</div>";
+			else if (m->watcher) r += "<div class=\"pq r2pos\">" + E(tr::ROOM2_WATCHER) + "</div>";
 			r += "</div></div>";
 			if (const int left = o.room2_ready_left(); left >= 0) r += "<div class=\"status good\">" + E(tr::fill(tr::ROOM2_PRESS_START_N, { { "n", std::to_string(left) } })) + "</div>";
 		}
 		r += "<div class=\"btns\">";
 		if (watch >= 0) r += "<div " + menu_row(watch, sel, "btn") + ">" + E(o.watching() ? tr::BUTTON_STOP_WATCHING : tr::BUTTON_WATCH) + "</div>";
-		if (leave_line >= 0) r += "<div " + menu_row(leave_line, sel, "btn") + ">" + E(tr::BUTTON_LEAVE_LINE) + "</div>";
+		if (leave_line >= 0) r += "<div " + menu_row(leave_line, sel, "btn") + ">" + E(m->watcher ? tr::BUTTON_JOIN_LINE : tr::BUTTON_LEAVE_LINE) + "</div>";
 		r += "<div " + menu_row(leave, sel, "btn") + ">" + E(tr::BUTTON_LEAVE_ROOM) + "</div>";
 		if (settings >= 0) r += "<div " + menu_row(settings, sel, "btn") + ">" + E(tr::BUTTON_ROOM_SETTINGS) + "</div>";
 		r += "</div></div>";

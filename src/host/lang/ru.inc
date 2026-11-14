@@ -371,6 +371,8 @@ T(ROOM2_LISTED_HELP, "Видна в списке комнат у всех или
 T(ROOM2_CLOSE_ROOM, "Закрыть комнату")
 T(ROOM2_CLOSE_HELP, "Закрывает комнату для всех в ней: идущий матч закончится.")
 T(ROOM2_SECONDS, "{n} с")
+T(BUTTON_JOIN_LINE, "В ОЧЕРЕДЬ")
+T(ROOM2_WATCHER, "Ты смотришь, без места в очереди")
 T(NOTICE_DROPPED, "Связь прервалась. Матч ждёт {n} с...")
 T(NOTICE_CARRIES_ON, "Если связь вернётся, продолжим с этого места")
 T(NOTICE_STARTING, "НАЧИНАЕМ МАТЧ")

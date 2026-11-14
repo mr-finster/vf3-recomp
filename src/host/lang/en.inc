@@ -377,6 +377,8 @@ T(ROOM2_LISTED_HELP, "Shown in everyone's Rooms list, or only to those with its 
 T(ROOM2_CLOSE_ROOM, "Close the room")   // (a row: the room's creator's)
 T(ROOM2_CLOSE_HELP, "Closes the room for everyone in it: a match on now ends.")
 T(ROOM2_SECONDS, "{n} s")   // (seconds: the ready check's)
+T(BUTTON_JOIN_LINE, "JOIN THE LINE")   // (big buttons, 260dp: a watcher back into the line, at its back)
+T(ROOM2_WATCHER, "You're watching, not in the line")   // (the room page: Leave line, still in the room)
 T(NOTICE_DROPPED, "The connection dropped. Holding the match for {n} s...")
 T(NOTICE_CARRIES_ON, "It carries on from right here if it comes back")
 T(NOTICE_STARTING, "STARTING THE MATCH")

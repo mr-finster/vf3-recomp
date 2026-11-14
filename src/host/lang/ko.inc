@@ -371,6 +371,8 @@ T(ROOM2_LISTED_HELP, "모두의 방 목록에 표시하거나, 코드를 아는 
 T(ROOM2_CLOSE_ROOM, "방 닫기")
 T(ROOM2_CLOSE_HELP, "방에 있는 모두에게 방을 닫아요. 진행 중인 대전은 끝나요.")
 T(ROOM2_SECONDS, "{n}초")
+T(BUTTON_JOIN_LINE, "대기열에 서기")
+T(ROOM2_WATCHER, "관전 중 (대기열에는 없어요)")
 T(NOTICE_DROPPED, "연결이 끊겼어요. 대전을 {n}초 유지하는 중...")
 T(NOTICE_CARRIES_ON, "다시 연결되면 바로 여기서 이어져요")
 T(NOTICE_STARTING, "대전 시작 중")
