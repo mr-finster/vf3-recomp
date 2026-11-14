@@ -46,6 +46,11 @@ struct FillResult
 	std::vector<uint8_t> zone[2];     // (each line's columns averaged for its colour at the edge)
 	std::vector<int16_t> edge[2];     // (H x 3: that colour when made)
 	std::vector<uint8_t> arena;       // (H: the stage screen's preview lines)
+	// (each side's colour at the edge and its slope outwards, line by line, as the side was made from them; LE: the
+	// slope's easing: the vignette takes the slope off and darkens instead)
+	std::vector<float> base[2], slope[2];
+	float LE = 96;
+	bool stage = false;
 	double lum = 0, ms = 0;
 	int patches = 0, candidates = 0;
 	bool ok = false;
@@ -399,6 +404,8 @@ inline FillResult synth(std::vector<uint32_t> plate, std::vector<uint32_t> vis, 
 		// mean over 2 FMY + 1 lines too (the panels' brushing, line to line, comes with it)
 		std::vector<float> T(size_t(CW) * H * 3, 0);
 		const float LE = stage ? 200.0f : 96.0f;   // (the stage panels' shading toward the edges carried further: nearly straight on)
+		r.LE = LE;
+		r.stage = stage;
 		auto L96 = [LE](int d) { return d > 0 ? LE * (1 - std::exp(-float(d) / LE)) : float(d); };
 		{
 			std::vector<float> Es(size_t(H) * 3, 0), Sl(slope[s]);
@@ -429,6 +436,9 @@ inline FillResult synth(std::vector<uint32_t> plate, std::vector<uint32_t> vis, 
 				}
 				y = b - 1;
 			}
+			r.slope[s] = Sl;
+			r.base[s].assign(size_t(H) * 3, 0);
+			for (int y = 0; y < H; y++) for (int q = 0; q < 3; q++) r.base[s][size_t(y) * 3 + q] = r.arena[size_t(y)] ? Ey[size_t(y) * 3 + q] : E[s][size_t(y) * 3 + q];
 			for (int y = 0; y < H; y++)
 				for (int d = D0; d < RC; d++) {
 					const size_t i = at(d, y);
@@ -457,6 +467,10 @@ inline FillResult synth(std::vector<uint32_t> plate, std::vector<uint32_t> vis, 
 	return r;
 }
 
+// The stage screen's sides darkened toward the picture's outer edges, down to this percent of the edge's brightness
+// there (0: none, the panels' slope carried on straight; the host sets 55)
+inline int vignette_floor = 0;
+
 // The fill's state: the screen it's for, its frames so far and how settled, the job making it, what it made
 struct FillJob { std::atomic<bool> done{ false }; FillResult res; };
 struct FillState
@@ -465,6 +479,10 @@ struct FillState
 	double last_lum = -1;
 	std::shared_ptr<FillJob> job;   // (made on a thread of its own, let go of if the screen changes first)
 	std::shared_ptr<FillResult> res;
+	// (the vignette's lines' value and slope at the edge, each side's, and what they were made for)
+	std::vector<float> vg0[2], vk[2];
+	const FillResult *vig_for = nullptr;
+	int vig_dn[2] = {}, vig_age = 0;
 };
 
 // Option 2 (dark: 6) into out: its sides as far as reach, and (where made) up to KIN columns into the 4:3 picture.
@@ -516,15 +534,87 @@ inline bool fill(int key, const std::vector<uint32_t> &plate, const std::vector<
 			nt++;
 		}
 		for (int y = 0; y < H; y++) if (R.arena[size_t(y)] && nt) for (int c = 0; c < 3; c++) mv[size_t(y) * 3 + c] = int(tot[c] / nt);
+		const int dn = std::min(reach + (s ? RCUT : 0), R.reach);
+		// The vignette (the stage screen, vignette_floor > 0): the panels' own end shading carried on as a darkening
+		// and eased (a cubic) to vignette_floor of the edge's brightness at the picture's outer edge (dn out), in place
+		// of the slope carried on straight. Its value and slope at the 4:3 edge the panel's own there, line by line
+		// (9 lines' mean): its last 3 columns' brightness against the side's colour there (g0), and their step from
+		// the 9 columns before them (vk, a fraction a pixel); beside the preview, between the panels above and below
+		// (made again every 30 pictures, for a new fill, or a new width: a ratio and a slope of the panels', which
+		// a fade hardly moves)
+		std::vector<float> &vg0 = st.vg0[s], &vk = st.vk[s];
+		const bool vig_again = st.vig_for != st.res.get() || st.vig_dn[s] != dn || st.vig_age >= 30 || vg0.size() != size_t(H);
+		st.vig_dn[s] = dn;
+		// (the cubic's terms and the slope's easing, by d: the same for every line)
+		std::vector<float> h00, h10, h01, lev;
+		if (vignette_floor > 0 && R.stage) {
+			h00.resize(size_t(dn) + 1); h10.resize(size_t(dn) + 1); h01.resize(size_t(dn) + 1); lev.resize(size_t(dn) + 1);
+			for (int d = 0; d <= dn; d++) {
+				const float t = float(d) / float(dn), t2 = t * t, t3 = t2 * t;
+				h00[size_t(d)] = 2 * t3 - 3 * t2 + 1; h10[size_t(d)] = (t3 - 2 * t2 + t) * float(dn); h01[size_t(d)] = -2 * t3 + 3 * t2;
+				lev[size_t(d)] = R.LE * (1 - std::exp(-float(d) / R.LE));
+			}
+		}
+		if (vig_again) { vg0.assign(H, 1.0f); vk.assign(H, 0.0f); }
+		if (vig_again && vignette_floor > 0 && R.stage && !R.base[s].empty()) {
+			std::vector<float> le(H, -1), li(H, -1);
+			auto lum_of = [&](int y, int i0, int i1) {
+				float t = 0; int n = 0;
+				for (int i = i0; i < i1; i++) {
+					const uint32_t v = plate[size_t(y) * W + size_t(s ? W - 1 - RCUT - i : i)];
+					if (v >> 24) { t += float(ch(v, 0) + ch(v, 1) + ch(v, 2)); n++; }
+				}
+				return n ? t / float(n) : -1.0f;
+			};
+			for (int y = 0; y < H; y++) if (!R.arena[size_t(y)]) { le[size_t(y)] = lum_of(y, 0, 3); li[size_t(y)] = lum_of(y, 3, 12); }
+			std::vector<uint8_t> ok(H, 0);
+			for (int y = 0; y < H; y++) {
+				if (R.arena[size_t(y)]) continue;
+				float a = 0, b = 0, c = 0; int n = 0;
+				for (int k = -4; k <= 4; k++) {
+					const int z = y + k;
+					if (z < 0 || z >= H || R.arena[size_t(z)] || le[size_t(z)] < 0 || li[size_t(z)] < 0) continue;
+					const float *bs = &R.base[s][size_t(z) * 3];
+					a += le[size_t(z)]; b += li[size_t(z)]; c += bs[0] + bs[1] + bs[2]; n++;
+				}
+				if (!n || c <= 0) continue;
+				vg0[size_t(y)] = std::clamp(a / c, 0.5f, 1.2f);
+				vk[size_t(y)] = (a - b) / 7.5f / c;   // (the two groups' middles 7.5 columns apart; outwards)
+				ok[y] = 1;
+			}
+			for (int y = 0; y < H; y++) {
+				if (ok[y]) continue;
+				int a = y - 1, b = y + 1;
+				while (a >= 0 && !ok[a]) a--;
+				while (b < H && !ok[b]) b++;
+				if (a < 0 && b >= H) break;
+				const float t = a < 0 ? 1.0f : b >= H ? 0.0f : float(y - a) / float(b - a);
+				const int ia = a < 0 ? b : a, ib = b >= H ? a : b;
+				vg0[size_t(y)] = vg0[size_t(ia)] + (vg0[size_t(ib)] - vg0[size_t(ia)]) * t;
+				vk[size_t(y)] = vk[size_t(ia)] + (vk[size_t(ib)] - vk[size_t(ia)]) * t;
+			}
+		}
 		for (int y = 0; y < H; y++) {
 			if (dark && R.arena[size_t(y)]) continue;
 			const int *m = &mv[size_t(y) * 3];
+			float k0 = 0, fl = 0, g0 = 1;
+			const bool vig = vignette_floor > 0 && R.stage && !R.base[s].empty();
+			if (vig) {
+				fl = float(vignette_floor) / 100.0f;
+				g0 = vg0[size_t(y)];
+				k0 = std::clamp(vk[size_t(y)], -3.0f * std::max(g0 - fl, 0.0f) / float(dn), 0.0f);
+			}
+			auto g_of = [&](int d) { return h00[size_t(d)] * g0 + h10[size_t(d)] * k0 + h01[size_t(d)] * fl; };
 			for (int d = -KIN; d < std::min(reach + (s ? RCUT : 0), R.reach); d++) {
 				const size_t o = size_t(y) * OW + size_t(d + KIN);
 				if (!R.mine[s][o]) continue;
 				const int16_t *p = &R.px[s][o * 3];
 				float c3[3];
 				for (int c = 0; c < 3; c++) c3[c] = float(p[c] + m[c]);
+				if (vig && d > 0) {
+					const float g = g_of(std::min(d, dn)), le = lev[size_t(std::min(d, dn))];
+					for (int c = 0; c < 3; c++) c3[c] = (c3[c] - R.slope[s][size_t(y) * 3 + c] * le) * g;
+				}
 				if (in < 1) {   // (fading in: from what's there)
 					uint32_t was = 0;
 					if (d < 0) { const size_t k = size_t(y) * W + size_t(s ? W - RCUT + d : -1 - d); was = (above[k] >> 24) ? above[k] : below[k]; }
@@ -534,6 +624,8 @@ inline bool fill(int key, const std::vector<uint32_t> &plate, const std::vector<
 			}
 		}
 	}
+	st.vig_age = st.vig_for != st.res.get() || st.vig_age >= 30 ? 0 : st.vig_age + 1;
+	st.vig_for = st.res.get();
 	return true;
 }
 

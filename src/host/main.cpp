@@ -95,6 +95,8 @@
 //   VF3_GPU3D_PROBE_ANY=1 the probe on any driver, not only Direct3D 12
 //   VF3_GPU_CHECK_DIR=d  the GPU's start-up check's pictures (gpu.png, cpu.png) into d
 //   VF3_WIDE_SKY=0       the stages' 2D sky kept to the middle 4:3 (tests)
+//   VF3_WIDE_SELECT_VIGNETTE=n the stage screen's sides darkened toward the picture's outer edges to n% of the 4:3
+//                        edge's brightness (55 by default, 0 none); VF3_WIDE_SELECT_SHOTS shots it at 0, 55, 40 and 25 too
 //   VF3_WIDE_SELECT=0-6  the character select's and the stage screen's sides in widescreen (wide_select.h's options:
 //                        2 the default, 0 bars as before, the others to compare). VF3_WIDE_SELECT_SHOTS=1: each
 //                        script shot on those screens in every option, build/host_win_<name>_o<option>.png;
@@ -2410,6 +2412,10 @@ int main(int argc, char **argv)
 	int wide_select = getenv("VF3_WIDE_SELECT") ? std::clamp(atoi(getenv("VF3_WIDE_SELECT")), 0, 6) : 2;
 	const bool wide_select_shots = getenv("VF3_WIDE_SELECT_SHOTS") != nullptr;   // (tests: each script shot in every option)
 	if (wide_select_shots && !wide_select) wide_select = 2;
+	// (the stage screen's sides darkened toward the picture's outer edges, to 55% of the edge's brightness there:
+	// VF3_WIDE_SELECT_VIGNETTE=percent, 0 none, the panels' slope carried on straight)
+	wide_select::vignette_floor = 55;
+	if (const char *v = getenv("VF3_WIDE_SELECT_VIGNETTE")) wide_select::vignette_floor = std::clamp(atoi(v), 0, 100);
 	game.want_plate_hw = wide_select == 4 || wide_select_shots;
 	wide_select::State wide_select_state;
 	std::vector<uint32_t> wide_select_sides, wide_select_above;
@@ -5586,6 +5592,16 @@ int main(int argc, char **argv)
 						draw_picture(1.0, true);
 						compose();
 						read_window("build/host_win_" + it->second + "_o" + std::to_string(o) + ".png");
+						if (o == 2 && (game.view.select_kind == 19 || game.view.select_kind == 20)) {   // (and the vignette's strengths)
+							const int keep_v = wide_select::vignette_floor;
+							for (int v : { 0, 55, 40, 25 }) {
+								wide_select::vignette_floor = v;
+								draw_picture(1.0, true);
+								compose();
+								read_window("build/host_win_" + it->second + "_o2v" + std::to_string(v) + ".png");
+							}
+							wide_select::vignette_floor = keep_v;
+						}
 						if (getenv("VF3_SHOT_LAYERS") && o == 2 && wide_select_sides.size() == size_t(video::WW) * video::H)
 							write_png(("build/host_" + it->second + "_sides.png").c_str(), wide_select_sides.data(), video::WW, video::H);
 					}
