@@ -475,8 +475,11 @@ inline int vignette_floor = 0;
 struct FillJob { std::atomic<bool> done{ false }; FillResult res; };
 struct FillState
 {
-	int key = -1, frames = 0, settled = 0, shown = 0;
+	int key = -1, frames = 0, settled = 0;
 	double last_lum = -1;
+	// (game frames, not pictures: at 144-240 a second with smooth motion a picture is a fraction of one)
+	uint64_t last_frame = UINT64_MAX, made_at = 0;   // (the last frame seen; the frame the fill showed first)
+	std::chrono::steady_clock::time_point made_when{};   // (and when: paused, the fade goes on by the clock)
 	std::shared_ptr<FillJob> job;   // (made on a thread of its own, let go of if the screen changes first)
 	std::shared_ptr<FillResult> res;
 	// (the vignette's lines' value and slope at the edge, each side's, and what they were made for)
@@ -486,19 +489,24 @@ struct FillState
 };
 
 // Option 2 (dark: 6) into out: its sides as far as reach, and (where made) up to KIN columns into the 4:3 picture.
-// False while the fill's still being made (the sides left empty).
+// False while the fill's still being made (the sides left empty). frame: the game's frame shown (its counts and fade
+// by frames, whatever the pictures' rate).
 inline bool fill(int key, const std::vector<uint32_t> &plate, const std::vector<uint32_t> &above, const std::vector<uint32_t> &below,
-                 std::vector<uint32_t> &out, FillState &st, int reach, bool dark)
+                 std::vector<uint32_t> &out, FillState &st, int reach, bool dark, uint64_t frame)
 {
 	if (st.key != key) { st = FillState{}; st.key = key; }
-	st.frames++;
 	const double lum = plate_lum(plate);
-	st.settled = std::fabs(lum - st.last_lum) < std::max(1.0, lum * 0.01) ? st.settled + 1 : 0;
-	st.last_lum = lum;
+	if (frame != st.last_frame) {   // (a new frame: the background as the game has it now)
+		st.last_frame = frame;
+		st.frames++;
+		st.settled = std::fabs(lum - st.last_lum) < std::max(1.0, lum * 0.01) ? st.settled + 1 : 0;
+		st.last_lum = lum;
+	}
 	if (st.job && st.job->done.load(std::memory_order_acquire)) {
 		st.res = std::make_shared<FillResult>(std::move(st.job->res));
 		st.job.reset();
-		st.shown = 0;
+		st.made_at = frame;
+		st.made_when = std::chrono::steady_clock::now();
 		if (getenv("VF3_WIDE_SELECT_LOG"))
 			fprintf(stderr, "(wide select) fill for screen %d: %.1f ms, %d candidates, %d patches%s\n", key, st.res->ms, st.res->candidates, st.res->patches, st.res->ok ? "" : " (no background to take it from)");
 	}
@@ -510,7 +518,7 @@ inline bool fill(int key, const std::vector<uint32_t> &plate, const std::vector<
 		std::vector<uint32_t> vis = visible_2d(above, below);
 		if (getenv("VF3_WIDE_SELECT_SYNC")) {   // (tests: at once)
 			st.res = std::make_shared<FillResult>(synth(plate, vis, kind, r));
-			st.shown = 8;
+			st.made_at = frame - std::min<uint64_t>(frame, 8);
 			if (getenv("VF3_WIDE_SELECT_LOG")) fprintf(stderr, "(wide select) fill for screen %d: %.1f ms, %d candidates, %d patches\n", key, st.res->ms, st.res->candidates, st.res->patches);
 		}
 		else {
@@ -520,7 +528,9 @@ inline bool fill(int key, const std::vector<uint32_t> &plate, const std::vector<
 	}
 	if (!st.res || !st.res->ok) return false;
 	const FillResult &R = *st.res;
-	const float in = std::min(1.0f, ++st.shown / 8.0f);   // (faded in over 8 pictures once made)
+	// (faded in over 8 frames once made, or as long by the clock: the game paused)
+	const double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - st.made_when).count();
+	const float in = std::min(1.0f, std::max(float(frame - std::min(frame, st.made_at) + 1) / 8.0f, float(secs * 57.52 / 8.0)));
 	const int OW = KIN + R.reach;
 	for (int s = 0; s < 2; s++) {
 		// how far the edge's colour has moved since it was made (a fade), line by line; beside the preview, the panels'

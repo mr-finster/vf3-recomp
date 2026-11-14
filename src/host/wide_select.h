@@ -138,9 +138,10 @@ inline double zone_lum(const Filled &f, int z)
 }
 
 // out: WW x H; its sides (x < EXT, x >= EXT + W) written. key: the screen (a new one: made again).
-// reach: how far out the picture shows (up to EXT): the sides made only that far
+// reach: how far out the picture shows (up to EXT): the sides made only that far. frame: the game's frame shown (option
+// 2's fill counts frames, not pictures)
 inline void make(int option, int key, const std::vector<uint32_t> &plate, const std::vector<uint32_t> &hw, std::vector<uint32_t> &out, State &st, int reach = EXT,
-                 const std::vector<uint32_t> &above = {}, const std::vector<uint32_t> &below = {})
+                 const std::vector<uint32_t> &above = {}, const std::vector<uint32_t> &below = {}, uint64_t frame = 0)
 {
 	reach = std::clamp(reach, 0, EXT);
 	out.assign(size_t(WW) * H, 0);
@@ -153,7 +154,7 @@ inline void make(int option, int key, const std::vector<uint32_t> &plate, const 
 		}
 		return;
 	}
-	if (option == 2 || option == 6) { fill(key, plate, above, below, out, st.fill, reach, option == 6); return; }
+	if (option == 2 || option == 6) { fill(key, plate, above, below, out, st.fill, reach, option == 6, frame); return; }
 	for (int s = 0; s < 2; s++) st.f[s].make(plate.data(), s);
 	// (the zones and option 2's runs made again for a new screen, or once it's much brighter than when made: a fade in)
 	for (int s = 0; s < 2; s++) {

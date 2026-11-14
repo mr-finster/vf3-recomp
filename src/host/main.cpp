@@ -2769,7 +2769,7 @@ int main(int argc, char **argv)
 				if (sel) {
 					const uint64_t tw = SDL_GetTicksNS();
 					const int reach = int(std::ceil(video::W * (picture_aspect() * 0.75 - 1) / 2)) + 2;   // (the sides' width shown, in the 2D's pixels)
-					wide_select::make(wide_select, game.view.select_kind, game.view.plate, game.view.plate_hw, wide_select_sides, wide_select_state, reach, game.view.above, game.view.below);
+					wide_select::make(wide_select, game.view.select_kind, game.view.plate, game.view.plate_hw, wide_select_sides, wide_select_state, reach, game.view.above, game.view.below, game_frame);
 					// (the game's thin lines at the edges: across carried on, down the edge taken out: its above copy)
 					wide_select_above = game.view.above;
 					if (wide_select != 4) {
