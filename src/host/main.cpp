@@ -1537,7 +1537,10 @@ struct Game
 	{
 		builder.build(board, scene[newest]);
 		view.scene[view.newest] = scene[newest];
-		tiles.panorama(board, pano);
+		// (the whole backdrop only for the free camera, as end_frame: a display setting changed while paused with it
+		// off made it for nothing)
+		if (builder.cull_off) tiles.panorama(board, pano);
+		else pano.ok = false;
 		publish_pano();
 	}
 	video::TileGen::Panorama pano;   // (the stage's whole backdrop, made while the free camera is on: TileGen::panorama)
