@@ -722,6 +722,15 @@ std::shared_ptr<Online::Fetch> Online::fetch(const std::string &method, const st
 	return f;
 }
 
+// A code the rooms list has as a Rooms 2 room's (its own code or its match's watch code)
+bool Online::watching_room2(const std::string &c) const
+{
+	const std::string k = online_menu::clean_code(c);
+	for (const RoomRow &r : rooms_rows)
+		if (r.v2 && !k.empty() && (r.code == k || r.watch == k)) return true;
+	return false;
+}
+
 std::string Online::watch_code() const
 {
 	if (wid.size() != 6) return "";
@@ -3293,7 +3302,7 @@ void browser_page(Online &o, OnlineSettings &s, game_menu &menu, std::function<v
 	p.items.push_back({ tr::FILTER_OPEN, "", {}, {}, filter(1) });
 	p.items.push_back({ tr::FILTER_PLAYING, "", {}, {}, filter(2) });
 	for (const Online::RoomRow &r : rows)
-		p.items.push_back({ room_title(r), "", {}, {}, [&o, &s, &menu, r, problem, changed] { room_act(o, s, menu, changed, r, problem, false); } });
+		p.items.push_back({ room_title(r), "", {}, {}, [&o, &s, &menu, r, problem, changed] { room_act(o, s, menu, changed, r, problem, r.v2); } });   // (a Rooms 2 room: entered, its line and its match watched, not watched from outside)
 	p.start = sel_row >= 0 ? B_ROW0 + sel_row : std::min(b.sel_item, B_ROW0 - 1);
 	const int n = int(rows.size());
 	auto to_row = [&menu, n](int row) {   // (a room selected, the window following it)
@@ -3384,7 +3393,7 @@ void browser_page(Online &o, OnlineSettings &s, game_menu &menu, std::function<v
 				r += "<span class=\"mark\">\xE2\x97\x8F</span><span class=\"pn\">" + flag(w.country[0], "flag s") + E(w.name[0]) + "</span><span class=\"sc\">" + std::to_string(w.wins[0]) + "\xE2\x80\x93" + std::to_string(w.wins[1]) +
 				     "</span><span class=\"pn\">" + flag(w.country[1], "flag s") + E(w.name[1]) + "</span>";
 			else r += "<span class=\"mark open\">\xE2\x97\x8B</span><span class=\"wt\">" + E(tr::ROW_OPEN) + "</span>";
-			r += "</div><div class=\"c5\">" + (w.watchers ? std::to_string(w.watchers) : std::string()) + "</div><div class=\"c7\">" + E(w.playing && o.lobby_watches() ? tr::ROW_WATCH : tr::ROW_JOIN) + "</div></div>";
+			r += "</div><div class=\"c5\">" + (w.watchers ? std::to_string(w.watchers) : std::string()) + "</div><div class=\"c7\">" + E(w.playing && o.lobby_watches() && !w.v2 ? tr::ROW_WATCH : tr::ROW_JOIN) + "</div></div>";
 		}
 		r += "</div>";
 		if (n > B_ROWS) {   // (where the window is: a bar and its thumb)
@@ -3394,7 +3403,7 @@ void browser_page(Online &o, OnlineSettings &s, game_menu &menu, std::function<v
 		if (o.lobby_watches()) r += "<div class=\"bnote\">" + E(tr::BROWSER_NOTE) + "</div>";   // (not said where watching's off)
 		if (!problem->empty()) r += "<div class=\"bproblem\">" + E(*problem) + "</div>";
 		const bool on_row = row >= 0 && row < n;
-		const tr::text act = on_row ? (rows[size_t(row)].playing && o.lobby_watches() ? tr::HINT_WATCH : tr::HINT_JOIN) : tr::HINT_SELECT;
+		const tr::text act = on_row ? (rows[size_t(row)].playing && o.lobby_watches() && !rows[size_t(row)].v2 ? tr::HINT_WATCH : tr::HINT_JOIN) : tr::HINT_SELECT;
 		if (pad) return r + foot(true, { { "A", "", act }, { "Y", "", on_row ? tr::HINT_ROOM : tr::HINT_NAME }, { "LB/RB", "", tr::HINT_PAGE }, { "B", "", tr::HINT_BACK } }) + "</div>";
 		return r + foot(false, { { "", "Enter", act }, { "", "Tab", on_row ? tr::HINT_ROOM : tr::HINT_NAME }, { "", "PgUp/PgDn", tr::HINT_PAGE }, { "", "Esc", tr::HINT_BACK } }) + "</div>";
 	};
@@ -3791,7 +3800,8 @@ void match_rows(Online &o, OnlineSettings &s, game_menu &menu, std::function<voi
 				const std::string c = o.watch_code();
 				named(s, menu, changed, [&o, &s, &menu, c] {   // (a name first if there's none, as every join: the host and the watchers see it)
 					tr::line err;
-					if (!o.join_room(s, c, err)) o.tell_failure(err);   // (the watch stopped: why, on the Online page it goes back to)
+					// (a Rooms 2 room's match: into its line, Enter code's way; a room as before: joined, in its line)
+					if (!(o.watching_room2(c) ? o.room2_enter(s, c, err) : o.join_room(s, c, err))) o.tell_failure(err);   // (the watch stopped: why, on the Online page it goes back to)
 					menu.close();
 				});
 			} });

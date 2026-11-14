@@ -56,7 +56,7 @@ public:
 	enum class Step { none, getting_ready, opening, waiting, finding, searching, connecting };   // (searching: a random opponent)
 	// (tip: a toast, nothing more; watching: a watched match's first picture; called: a room's line has this player next,
 	// their ready check on: the match found chime and the window flashed, nothing shown)
-	struct Notice { enum Kind { joined, ended, refused, tip, watching, called } kind; tr::line text; };
+	struct Notice { enum Kind { joined, ended, refused, tip, watching, called, left_room } kind; tr::line text; };   // (left_room: a Rooms 2 room let this player go, or closed: said over whatever's on)
 	// The match that ended last: what ended it, who and how long, for the Online page to show after it (and offer
 	// the same again)
 	struct LastMatch
@@ -233,6 +233,7 @@ public:
 	// How many watch: this match's (the host told by the lobby with each upload, the guest asking now and then), or
 	// the watched one's; -1 a match nobody can watch
 	int watchers() const;
+	bool watching_room2(const std::string &code) const;   // (the rooms list has that code as a Rooms 2 room's: Play next enters it)
 	std::string watch_code() const;     // "KXQ-4M7": the room's code this match is watched by, or the watched one's ("" none)
 	const std::string &rooms_you() const { return rooms_region; }   // (the lobby's continent for this player: "near me")
 	// The rooms list (the lobby's /v1/online: listed rooms, open or playing), this game's; asked again every 15 s while

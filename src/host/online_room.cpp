@@ -256,10 +256,13 @@ void Online::room2_end(const std::string &why)
 	log("Rooms 2: out of room " + room_code() + ": " + why + " (" + said.en() + ")");
 	stop_activity();
 	r2.reset();
+	last = {};   // (a seat's match isn't one to Play again: that's a room as before's, by this room's code (a new room, or "another version"))
 	if (!r2_file.empty()) remove(r2_file.c_str());
-	failure = said;
+	// (not a try that failed: no "Couldn't connect" page with Try again (a closed room's code, or one this player was
+	// removed from), just what happened, said over whatever's on; the Online page goes back to the rooms)
+	failure.clear();
 	fail_step = Step::none;
-	notices.push_back({ Notice::refused, said });
+	notices.push_back({ Notice::left_room, said });
 }
 
 // An op to the lobby: on the socket if it's open, else POSTed (its answer a state)
@@ -443,7 +446,7 @@ void Online::room2_react()
 		const std::string mine = m.seat.side;
 		room2_unseat(!m.watcher && (((m.last_result == "a" || m.last_result == "b") && m.last_result != mine) || (m.last_result == "forfeit" && m.last_winner != mine)));
 	}
-	if (m.in_seat && m.banner == 1 && m.line.empty()) m.banner = 0;   // (nobody next after all: the two play on)
+	if (m.in_seat && (m.banner == 1 || m.banner == 4) && m.line.empty()) m.banner = 0;   // (nobody next after all: the two play on)
 	if (!r2) return;
 	// (a match there to watch: two at the table; a lone one waiting for the first in line has none yet)
 	if ((m.pos > 0 || m.watcher) && m.want_watch && !m.wid.empty() && m.has_a && m.has_b && ph == Phase::off && now >= m.watch_retry_at) watch_begin(m.wid);
@@ -507,6 +510,7 @@ void Online::room2_seat()
 	ph = is_host ? Phase::hosting : Phase::joining;
 	st = Step::connecting;
 	step_at = now;
+	if (m.banner == 4) m.banner = 0;   // (the win's banner, held till the line moved: it has)
 	if (stayed && !was_peer.empty() && was_peer != m.seat.peer.name) { m.banner = 2; m.banner_name = m.seat.peer.name; m.banner_until = now + BANNER_MS; }
 	log("Rooms 2: at the table with " + online_menu::clean_name(peer_name) + " (match " + std::to_string(m.seat.n) + ", side " + m.seat.side + ", " +
 	    (is_host ? "the session's host" : "its guest") + (stayed ? ", staying on: a new challenger" : "") + "): their addresses " +
@@ -573,7 +577,7 @@ void Online::room2_decided()
 	log("Rooms 2: match " + std::to_string(m.n) + " decided: " + (in == 0 ? std::string("a draw") : std::string(won ? "this player" : opponent()) + " won") +
 	    " (side " + winner + "); " + (m.line.empty() ? "nobody in the line: the two play on" : m.line.front().name + " is next"));
 	if (!won && in != 0 && !m.line.empty()) { m.banner = 1; m.banner_name = m.line.front().name; m.banner_until = now + 600000; }   // (till the line moves)
-	if (won && !m.line.empty()) { m.banner = 4; m.banner_until = now + BANNER_MS; }
+	if (won && !m.line.empty()) { m.banner = 4; m.banner_until = now + 600000; }   // (till the line moves: not "waiting for the loser to press Start for a rematch", which can't come)
 }
 
 // ---- what the player does ----
@@ -657,6 +661,7 @@ void Online::room2_leave(bool keep_watching)
 	if (!r2_file.empty()) remove(r2_file.c_str());
 	if (keep_watching && !w.empty() && !watching_now) watch_begin(w);
 	else if (!keep_watching && watching_now) stop_activity();
+	last = {};   // (as room2_end: no Play again of a seat's match, which would make a room as before)
 }
 
 bool Online::room2_settings(const std::string &name, bool listed, int ready_ms, tr::line &error)

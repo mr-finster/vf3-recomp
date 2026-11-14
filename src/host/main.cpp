@@ -4726,6 +4726,7 @@ int main(int argc, char **argv)
 				fprintf(stderr, "online: %s\n", Online::log_masked(n.text.en()).c_str());
 				continue;
 			}
+			if (n.kind == Online::Notice::left_room) { menu.toast(n.text.str(), 8); fprintf(stderr, "online: %s\n", Online::log_masked(n.text.en()).c_str()); continue; }
 			if (n.kind == Online::Notice::tip && online.in_room2()) { menu.toast(n.text.str(), 6); fprintf(stderr, "online: %s\n", Online::log_masked(n.text.en()).c_str()); continue; }
 			if (n.kind == Online::Notice::joined || n.kind == Online::Notice::watching) {
 				const bool watching = n.kind == Online::Notice::watching;
@@ -4804,7 +4805,7 @@ int main(int argc, char **argv)
 		if (online.making_way()) menu.set_banner(tr::BANNER_NEXT_IN_LINE, tr::fill(tr::BANNER_MAKES_WAY, { { "name", online.opponent() } }));
 		else if (r2_ready >= 0) {   // (a Rooms 2 room's ready check: this player called, its seconds counting down)
 			const std::string stays = !r2m ? "" : r2m->holder == "a" ? r2m->a.name : r2m->holder == "b" ? r2m->b.name : r2m->has_a ? r2m->a.name : r2m->b.name;
-			menu.set_banner(tr::fill(tr::ROOM2_PRESS_START_N, { { "n", std::to_string(r2_ready) } }), stays.empty() ? std::string(tr::ROOM2_YOURE_NEXT) : tr::fill(tr::ROOM2_YOU_PLAY, { { "name", stays } }));
+			menu.set_banner(tr::fill(tr::ROOM2_PRESS_START_N, { { "n", std::to_string(r2_ready) } }), stays.empty() ? std::string(tr::ROOM2_YOURE_NEXT) : tr::fill(tr::ROOM2_YOU_PLAY, { { "name", stays } }), start_button());   // (which key or button is Start, as every banner that asks for it)
 			static uint64_t ready_since = 0;
 			static bool shot_taken = false;
 			if (!ready_since) ready_since = SDL_GetTicks();
