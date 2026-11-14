@@ -49,6 +49,18 @@ namespace {
 //   same place as before for 1P's 9 and 2P's 22, and nothing changes for another fighter (or the dojo's model, which
 //   goes through 0x450F8 too). Team Battle's own 0x4A650 already picks it by side (lbz r3,4(r14): Sega's fix), so
 //   its patches stay as they were.
+// - her reflection's place against the CPU (issue #44, offline only, REV_D_OFFLINE): the side is right for a versus
+//   only. The loads that put her picture there (0x4CD24-0x4CD58, 0x4D118-0x4D14C) take sheet 1's place from the
+//   table at 0x7C68C (row 0) for a first costume (fighter ids below 13: 9) and from 0x7C6BC (row 256) for a second
+//   (22), the two swapped when the game is a versus (the byte at -0x1FD7(r13) is 3) and the player's bit
+//   (0x71(r14)) of -0x5F78(r13) is set (picked with Start): so by side in a versus, by costume against the CPU.
+//   Gold on 1P against the CPU (Start held) had her picture in row 256 and read row 0, where the next opponent's
+//   portrait goes (Jacky's face and hair over her: the reporter's), and chrome on 2P the same the other way round.
+//   Now 0x451E0 goes to 0x9F194-0x9F1CC, which works the row out as the loads do: (id >= 13) xor (versus and the
+//   player's bit), 0x126460 for row 0 and 0x126468 for row 256. In a versus that is the side, as before, so it's
+//   the offline set's: online (a versus, and the patches' words the same on both sides, v0.1.16-alpha's and
+//   "+dural3"'s) plays as it did. Team Battle loads hers by side in both (checked: gold and chrome on either side
+//   against the CPU), as it reads it.
 // - two Durals at once (issue #23 again): 0x444C0 redoes her reflection in two halves, a frame each: the byte at
 //   -0x5F94(r13) is flipped on each call and picks the half (0x4450C: bne 0x44584, the 6 pieces from 0x2C on and the
 //   shared ones after; else the first 11). It's one byte for the game, not hers: with two Durals it's flipped twice a
@@ -207,7 +219,14 @@ const uint32_t TB_PATCH[][3] = {
 // to be among them, so for her (9, 22) the list is most fighters' (each stage played Dural against Dural, CPU and
 // GPU: none freezes). Team Battle's 1 vs 1 has the same lists at 0x7DB14 (0x7DB7C, 0x7DBD6), and its 3 vs 3 takes
 // the least of the team's stage counts (bytes at 0x7DBF0 by fighter: hers 1) from the list at 0x7DC0A: hers made 10.
-const uint32_t REV_D_OFFLINE[][3] = { { 0x77050, 0x00077094, 0x000770EE }, { 0x77084, 0x00077094, 0x000770EE } };
+const uint32_t REV_D_OFFLINE[][3] = { { 0x77050, 0x00077094, 0x000770EE }, { 0x77084, 0x00077094, 0x000770EE },
+	// (issue #44's: her reflection's row as the loads chose it, see above)
+	{ 0x451E0, 0x48059F64, 0x48059FB4 }, { 0x9F194, 0xFFFFFFFF, 0x886DE029 }, { 0x9F198, 0xFFFFFFFF, 0x38800000 },
+	{ 0x9F19C, 0xFFFFFFFF, 0x2C030003 }, { 0x9F1A0, 0xFFFFFFFF, 0x40820014 }, { 0x9F1A4, 0xFFFFFFFF, 0x886E0071 },
+	{ 0x9F1A8, 0xFFFFFFFF, 0x808DA088 }, { 0x9F1AC, 0xFFFFFFFF, 0x5C841800 }, { 0x9F1B0, 0xFFFFFFFF, 0x54840FFE },
+	{ 0x9F1B4, 0xFFFFFFFF, 0x2C02000D }, { 0x9F1B8, 0xFFFFFFFF, 0x41800008 }, { 0x9F1BC, 0xFFFFFFFF, 0x68840001 },
+	{ 0x9F1C0, 0xFFFFFFFF, 0x2C040000 }, { 0x9F1C4, 0xFFFFFFFF, 0x40820008 }, { 0x9F1C8, 0xFFFFFFFF, 0x3B7BFFF8 },
+	{ 0x9F1CC, 0xFFFFFFFF, 0x4BFA6020 } };
 const uint32_t TB_OFFLINE[][3] = {
 	{ 0x7DB38, 0x0007DB7C, 0x0007DBD6 }, { 0x7DB6C, 0x0007DB7C, 0x0007DBD6 },
 	{ 0x7DBF8, 0x0A010A01, 0x0A0A0A01 }, { 0x7DC04, 0x0A0A0109, 0x0A0A0A09 },
