@@ -537,6 +537,7 @@ T(ADDR_NO_BRACKET, "주소가 완전하지 않아요: ]가 빠졌어요.")
 T(ADDR_BAD_PORT, ": 뒤의 포트는 1에서 65535 사이의 숫자예요.")
 T(WAITING_FOR_A_PLAYER, "상대를 기다리는 중")
 T(ADDR_HOST_SUB, "같은 네트워크나 VPN에서: 상대가 주소로 대전 > 주소로 참가를 고르고 이 주소를 입력해요")
+T(ADDR_HOST_SUB_MANY, "같은 네트워크나 VPN에서: 상대가 주소로 대전 > 주소로 참가를 고르고 같이 쓰는 네트워크의 주소를 입력해요")
 T(NO_NETWORK, "네트워크 없음")
 T(BY_ADDRESS, "주소로")
 

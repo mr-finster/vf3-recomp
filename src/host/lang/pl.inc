@@ -537,6 +537,7 @@ T(ADDR_NO_BRACKET, "Ten adres jest niepełny: brakuje ].")
 T(ADDR_BAD_PORT, "Port po : to liczba od 1 do 65535.")
 T(WAITING_FOR_A_PLAYER, "CZEKAMY NA GRACZA")
 T(ADDR_HOST_SUB, "W twojej sieci lub VPN: wybiera Gra przez adres, potem Dołącz przez adres i wpisuje to")
+T(ADDR_HOST_SUB_MANY, "W twojej sieci lub VPN: wybiera Gra przez adres, potem Dołącz przez adres i wpisuje adres z waszej wspólnej sieci")
 T(NO_NETWORK, "Brak sieci")
 T(BY_ADDRESS, "Przez adres")
 

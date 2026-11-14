@@ -9,6 +9,7 @@
 #pragma once
 #include "menu.h"
 #include "text.h"
+#include "lan_list.h"
 #include "vf3_netplay.h"
 #include "../net/link.h"
 #include "../net/room_link.h"
@@ -177,7 +178,9 @@ public:
 	void forget_failure() { failure.clear(); }              // (the menu closed after it)
 	// (a try made from the match's menu that didn't get going, the match left already: said on the Online page)
 	void tell_failure(const tr::line &why) { failure = why; fail_step = Step::none; notices.push_back({ Notice::refused, why }); }
-	const std::string &local_address() const { return lan; }
+	const std::string &local_address() const { return lan; }   // (the first of local_addresses())
+	// (hosting by address: every address this machine has on its networks, the internet's first: issue #46)
+	const std::vector<lan_list::Address> &local_addresses() const { return lans; }
 
 	// ---- watching (src/net/watch.h): a match's watchers, and watching one ----
 	// Watch a match by its room's code (the browser's, Enter code's or a link's): the game starts from the match's start
@@ -235,6 +238,7 @@ private:
 	bool is_host = false, auto_delay = true, auto_done = false, rooms = false;
 	int port = 0;
 	std::string lan, joining_to;
+	std::vector<lan_list::Address> lans;
 	double now = 0, logged_at = 0, began_at = 0;
 	LastMatch last;
 	tr::line failure;

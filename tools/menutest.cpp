@@ -592,10 +592,26 @@ int main(int argc, char **argv)
 
 	// by address: hosting, then joining a host that isn't there
 	tr::line err;
+	setenv("VF3_TEST_LAN", "192.168.1.20=eth0", 1);   // (the addresses shown: these, not this machine's)
 	if (!o.host(s, err)) fprintf(stderr, "menutest: hosting: %s\n", err.en().c_str());
 	again();
 	shot("address_hosting.png", w, h);
 	o.stop();
+	// on several networks (a Wi-Fi Direct hotspot without internet beside the home's: issue #46): each, with its
+	// adapter; loopback never, link-local (169.254) only when it's all there is
+	setenv("VF3_TEST_LAN", "127.0.0.1=lo,192.168.1.20=Wi-Fi,169.254.10.3=Ethernet 2,192.168.137.1=Local Area Connection* 10,10.8.0.2=", 1);
+	if (!o.host(s, err)) fprintf(stderr, "menutest: hosting: %s\n", err.en().c_str());
+	check(o.local_addresses().size() == 3 && o.local_addresses()[1].ip == "192.168.137.1" && o.local_addresses()[1].adapter == "Local Area Connection* 10" &&
+	          o.local_address() == "192.168.1.20",
+	      "hosting on several networks: every address, loopback and link-local left out");
+	again();
+	shot("address_hosting_many.png", w, h);
+	o.stop();
+	setenv("VF3_TEST_LAN", "127.0.0.1=lo,169.254.10.3=Ethernet 2", 1);
+	check(lan_list::addresses("").size() == 1 && lan_list::addresses("")[0].ip == "169.254.10.3", "link-local when it's the only one");
+	setenv("VF3_TEST_LAN", "10.0.0.5=a,192.168.1.9=b", 1);
+	check(lan_list::addresses("192.168.1.9")[0].ip == "192.168.1.9", "the internet's address first");
+	unsetenv("VF3_TEST_LAN");
 	s.address = "192.168.1.20";
 	if (!o.join(s, err)) fprintf(stderr, "menutest: joining: %s\n", err.en().c_str());
 	o.poll(1000);

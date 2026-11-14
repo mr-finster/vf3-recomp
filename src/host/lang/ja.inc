@@ -537,6 +537,7 @@ T(ADDR_NO_BRACKET, "アドレスが不完全です：] がありません。")
 T(ADDR_BAD_PORT, "：の後のポートは1から65535の数字です。")
 T(WAITING_FOR_A_PLAYER, "対戦相手を待っています")
 T(ADDR_HOST_SUB, "同じネットワークかVPNで：相手がアドレスで対戦 > アドレスで参加を選び、これを入力します")
+T(ADDR_HOST_SUB_MANY, "同じネットワークかVPNで：相手がアドレスで対戦 > アドレスで参加を選び、相手と同じネットワークのアドレスを入力します")
 T(NO_NETWORK, "ネットワークなし")
 T(BY_ADDRESS, "アドレスで")
 

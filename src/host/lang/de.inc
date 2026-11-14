@@ -537,6 +537,7 @@ T(ADDR_NO_BRACKET, "Diese Adresse ist unvollständig: ein ] fehlt.")
 T(ADDR_BAD_PORT, "Der Port nach dem : ist eine Zahl von 1 bis 65535.")
 T(WAITING_FOR_A_PLAYER, "WARTE AUF EINEN SPIELER")
 T(ADDR_HOST_SUB, "In deinem Netz oder einem VPN: er wählt Über Adresse spielen, dann Über Adresse beitreten, und tippt das hier")
+T(ADDR_HOST_SUB_MANY, "In deinem Netz oder einem VPN: er wählt Über Adresse spielen, dann Über Adresse beitreten, und tippt die aus eurem gemeinsamen Netz")
 T(NO_NETWORK, "Kein Netz")
 T(BY_ADDRESS, "Über Adresse")
 

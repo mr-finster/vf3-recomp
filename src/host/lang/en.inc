@@ -542,6 +542,7 @@ T(ADDR_NO_BRACKET, "That address isn't complete: a ] is missing.")
 T(ADDR_BAD_PORT, "The port after the : is a number from 1 to 65535.")
 T(WAITING_FOR_A_PLAYER, "WAITING FOR A PLAYER")
 T(ADDR_HOST_SUB, "On your network, or a VPN: they choose Play by address, then Join by address, and type this")
+T(ADDR_HOST_SUB_MANY, "On your network, or a VPN: they choose Play by address, then Join by address, and type the one on the network you share")
 T(NO_NETWORK, "No network")
 T(BY_ADDRESS, "By address")
 

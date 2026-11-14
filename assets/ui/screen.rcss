@@ -248,6 +248,11 @@ div { display: block; }
 
 /* a host's address, read out (by address) */
 .address { margin-top: 36dp; font-size: 84dp; line-height: 90dp; font-weight: 700; font-style: italic; color: #ffffff; }
+/* several (a machine on more than one network): side by side, each address over its adapter's name */
+.addresses { margin-top: 36dp; display: flex; justify-content: center; gap: 56dp; }
+.addr { text-align: center; }
+.addr .ip { display: block; font-size: 56dp; line-height: 62dp; font-weight: 700; font-style: italic; color: #ffffff; }
+.addr .nic { display: block; height: 28dp; font-size: 22dp; line-height: 28dp; font-weight: 600; color: #8f9ac8; }
 .flag { width: 32dp; height: 24dp; margin: 0 10dp; border: 1dp #ffffff55; vertical-align: middle; }
 .mini .flag { width: 40dp; height: 30dp; }
 .chip .flag { width: 28dp; height: 21dp; margin: 0; }

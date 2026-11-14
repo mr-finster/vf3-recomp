@@ -537,6 +537,7 @@ T(ADDR_NO_BRACKET, "地址不完整：缺少 ]。")
 T(ADDR_BAD_PORT, "：后面的端口是 1 到 65535 之间的数字。")
 T(WAITING_FOR_A_PLAYER, "等待玩家")
 T(ADDR_HOST_SUB, "在你的网络或 VPN 上：对方选择 IP 直连，再选 用 IP 加入，然后输入这个")
+T(ADDR_HOST_SUB_MANY, "在你的网络或 VPN 上：对方选择 IP 直连，再选 用 IP 加入，然后输入你们共用的网络的那个地址")
 T(NO_NETWORK, "无网络")
 T(BY_ADDRESS, "IP 直连")
 

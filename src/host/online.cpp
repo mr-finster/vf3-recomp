@@ -236,9 +236,12 @@ bool Online::host(const OnlineSettings &s, tr::line &error)
 	auto_delay = s.delay < 0;
 	auto_done = false;
 	port = std::clamp(s.port, 1024, 65535);
-	lan = vfnet::lan_address();
+	lans = lan_list::addresses(vfnet::lan_address());
+	lan = lans.empty() ? std::string() : lans[0].ip;
 	if (!open_host(error)) return false;
-	log_line("hosting on UDP port " + std::to_string(port) + " (" + (lan.empty() ? std::string("no network address") : lan) + ")");
+	std::string at;
+	for (const lan_list::Address &a : lans) at += (at.empty() ? "" : ", ") + a.ip + (a.adapter.empty() ? "" : " on " + a.adapter);
+	log_line("hosting on UDP port " + std::to_string(port) + " (" + (at.empty() ? std::string("no network address") : at) + ")");
 	return true;
 }
 
@@ -3376,9 +3379,21 @@ menu_page page(Online &o, OnlineSettings &s, game_menu &menu, std::function<void
 			std::string r = "<div class=\"scr\"><div class=\"col\">";
 			std::vector<std::pair<std::string, Mark>> v;
 			if (hosting) {
-				const std::string here = o.local_address().empty() ? std::string(tr::NO_NETWORK) : o.local_address() + (o.local_port() != 7700 ? ":" + std::to_string(o.local_port()) : "");
-				r += "<div class=\"title\">" + E(tr::WAITING_FOR_A_PLAYER) + "</div><div class=\"sub\">" + E(tr::ADDR_HOST_SUB) + "</div>"
-				     "<div class=\"address\">" + E(here) + "</div>";
+				const std::string port = o.local_port() != 7700 ? ":" + std::to_string(o.local_port()) : "";
+				const auto &all = o.local_addresses();
+				if (all.size() <= 1) {
+					const std::string here = o.local_address().empty() ? std::string(tr::NO_NETWORK) : o.local_address() + port;
+					r += "<div class=\"title\">" + E(tr::WAITING_FOR_A_PLAYER) + "</div><div class=\"sub\">" + E(tr::ADDR_HOST_SUB) + "</div>"
+					     "<div class=\"address\">" + E(here) + "</div>";
+				} else {
+					// (on several networks, a Wi-Fi Direct hotspot's and the internet's: each one's address and its
+					// adapter, the player types the one on the network they share; issue #46)
+					r += "<div class=\"title\">" + E(tr::WAITING_FOR_A_PLAYER) + "</div><div class=\"sub\">" + E(tr::ADDR_HOST_SUB_MANY) + "</div>"
+					     "<div class=\"addresses\">";
+					for (size_t i = 0; i < all.size() && i < 4; i++)
+						r += "<div class=\"addr\"><span class=\"ip\">" + E(all[i].ip + port) + "</span><span class=\"nic\">" + E(all[i].adapter.empty() ? std::string(" ") : all[i].adapter) + "</span></div>";
+					r += "</div>";
+				}
 				v = { { tr::STEP_OPPONENT, talking ? done : now }, { tr::STEP_CONNECT, started ? done : talking ? now : todo }, { tr::STEP_FIGHT, started ? now : todo } };
 			} else {
 				r += "<div class=\"title\">" + E(tr::fill(tr::JOINING_X, { { "what", s.address } })) + "</div><div class=\"sub\">" + E(tr::BY_ADDRESS) + "</div>";

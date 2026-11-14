@@ -538,6 +538,7 @@ T(ADDR_NO_BRACKET, "Bu adres eksik: bir ] yok.")
 T(ADDR_BAD_PORT, ": işaretinden sonraki port 1 ile 65535 arasında bir sayıdır.")
 T(WAITING_FOR_A_PLAYER, "OYUNCU BEKLENİYOR")
 T(ADDR_HOST_SUB, "Ağında ya da bir VPN'de: Adresle oyna'yı, sonra Adresle katıl'ı seçip bunu yazsınlar")
+T(ADDR_HOST_SUB_MANY, "Ağında ya da bir VPN'de: Adresle oyna'yı, sonra Adresle katıl'ı seçip ortak ağınızdaki adresi yazsınlar")
 T(NO_NETWORK, "Ağ yok")
 T(BY_ADDRESS, "Adresle")
 

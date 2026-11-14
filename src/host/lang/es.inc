@@ -537,6 +537,7 @@ T(ADDR_NO_BRACKET, "Esa dirección está incompleta: falta un ].")
 T(ADDR_BAD_PORT, "El puerto tras los : es un número del 1 al 65535.")
 T(WAITING_FOR_A_PLAYER, "ESPERANDO A UN JUGADOR")
 T(ADDR_HOST_SUB, "En tu red o una VPN: elige Jugar por dirección, luego Entrar por dirección, y escribe esto")
+T(ADDR_HOST_SUB_MANY, "En tu red o una VPN: elige Jugar por dirección, luego Entrar por dirección, y escribe la de la red que compartís")
 T(NO_NETWORK, "Sin red")
 T(BY_ADDRESS, "Por dirección")
 
