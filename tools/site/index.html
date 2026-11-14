@@ -401,13 +401,23 @@ dialog .x:hover{background:rgba(255,255,255,.2)}
       <div class="pop" role="dialog" aria-label="Changelog">
         <p><b>%VERSION%</b> &middot; %DATE%</p>
         <ul>
+          <li><b>Reverb</b> (vf3-recomp #24): the sound chip&rsquo;s reverb as the hardware has it. Hits and voices get their reverb (the cave stages, the round calls), and the music&rsquo;s echo fades away as it should.</li>
+          <li><b>Widescreen select screens</b>: on a picture wider than 4:3, the character select&rsquo;s and the stage screen&rsquo;s sides are filled from their own background, no more black bars.</li>
+          <li><b>Play as Dural in gold on player 1</b> (vf3-recomp #44): against the CPU her reflection no longer shows the next opponent&rsquo;s face.</li>
+          <li><b>The picture&rsquo;s shape changed while paused</b> (vf3-recomp #47): the paused picture behind the menu is drawn again at once (it kept its old shape, squeezed, till the game went on). The same for the render scale, antialiasing, the 3D renderer, the textures and smooth motion.</li>
+          <li><b>Cheats &rarr; Dural&rsquo;s stage</b> (vf3-recomp #50): hold Start and confirm the stage with any button. A button without Start is the plain stage, so confirming with Guard out of habit no longer gives Dural&rsquo;s by accident.</li>
+          <li><b>Online &rarr; Host by address</b> (vf3-recomp #46): every address this PC has, each with its adapter&rsquo;s name (a Wi-Fi Direct hotspot&rsquo;s too), virtual adapters last.</li>
+          <li><b>Wolf&rsquo;s stage with smooth motion</b> (vf3-recomp #7): no more dark line across the sand between the floor&rsquo;s tiles.</li>
+          <li>No update is forced: plays v0.1.21-alpha and every build it played online as before.</li>
+        </ul>
+        <details><summary>v0.1.21-alpha</summary><ul>
           <li><b>Free camera</b>: fly a camera around the fight with <b>F4</b>, a pad&rsquo;s View (Back) + R3, or Display &rarr; Free camera. The mouse or the right stick looks; W A S D or the left stick moves (E and Q, or the triggers, up and down; Shift faster). The fight goes on, or press P to pause it and fly around the frozen moment. Offline, and while watching an online match. Only the picture: the game plays exactly the same.</li>
           <li><b>The top of the sky</b> (vf3-recomp #43): when the camera tilts up fast (a round&rsquo;s start, a throw, a jump), it now shows the stage&rsquo;s real sky from the game&rsquo;s own data, not a mirrored band.</li>
           <li><b>The menus are back to their full size</b>, and Display is now three pages: Picture, Quality, and Screen filter and colours, each showing its settings at a glance (Free camera is on Display itself). A player&rsquo;s button combinations have a page of their own. No page scrolls.</li>
           <li><b>The menus match across Virtua Fighter 1, 2 and 3 Recomp</b>: the same order and wording in all three, and help texts brought up to date.</li>
           <li><b>Frame limit</b> starts at the screen&rsquo;s refresh on a new install, as in Virtua Fighter 1 and 2 Recomp (a setting you saved is kept).</li>
           <li>No update is forced: plays v0.1.20-alpha and every build it played online as before.</li>
-        </ul>
+        </ul></details>
         <details><summary>v0.1.20-alpha</summary><ul>
           <li><b>A room&rsquo;s line moves after every match</b> (vf3-recomp #42): when someone is waiting in a room&rsquo;s line, the guest makes way after each match, whoever won, and the next in line plays the host. With nobody waiting, the loser can press Start and play on as before.</li>
           <li><b>Watching is smoother</b>: a watcher stays at least 1.5 s behind the players (it was about 0.2 s), so on a steady connection it no longer skips or repeats a frame now and then.</li>
