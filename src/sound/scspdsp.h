@@ -1,7 +1,7 @@
 // license:BSD-3-Clause
 // copyright-holders:ElSemi, R. Belmont
 // The SCSP's effects DSP, from MAME's sound/scspdsp.h (unchanged but for its memory: the sound
-// RAM it shares with the 68000, instead of an address_space).
+// RAM it shares with the 68000, instead of an address_space; and the MEMS timing: see mame).
 #pragma once
 #include "../core/mame_shim.h"
 
@@ -29,6 +29,13 @@ struct SCSPDSP
 
 //output
 	s16 EFREG[16];    //EFREG, 16 bit signed
+
+	// MAME's step: a MEMS register written (IWT) and read (IRA) in the same step reads the value being written. On
+	// the chip (Mednafen's and Supermodel's DSP, which follow its pipeline) INPUTS is read before the write, so the
+	// step reads the register's old value. VF3's echo (its first SCSP's program, steps 55 and 95) reads MEMS 3 so:
+	// MAME's way, each delay line feeds back on itself at a gain of 0.999 and its tail never dies (it grows, from
+	// the float format's rounding); the chip's way, the two lines share it and the echo is gone in about 2.5 s.
+	bool mame = false;
 
 	bool Stopped;
 	int LastStep;

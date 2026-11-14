@@ -47,8 +47,8 @@ differ:
 
 ## The sound board (`src/sound/*`)
 
-MAME's 68000 and two SCSPs, as VF2 has them, each SCSP with 1 MB of RAM (and MAME's mirror of the reverb's
-addresses, which VF2 had to drop: VF3's sound program relies on it, its echoes otherwise ring on); the main board's MIDI
+MAME's 68000 and two SCSPs, as VF2 has them, each SCSP with 1 MB of RAM (without MAME's mirror of the reverb's
+addresses at 0x7C0, and with the chip's MEMS timing in the DSP, without which the echo rings on: scspdsp.h); the main board's MIDI
 bytes into the first SCSP's MIDI input; run a frame at a time, 256 68000 cycles a sample at 44.1 kHz. The sound
 ROMs are little-endian words as the files hold them (they had been byte-swapped once too often).
 

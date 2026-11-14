@@ -128,6 +128,10 @@ The AI wrote nearly all the code. A person decided what was right.
 - **The coin's echo rang on for seconds** → VF2 had needed MAME's mirror of the reverb's addresses removed. VF3's
   sound program needs it: it sets the reverb's addresses, then clears the mirrored range → the mirror is kept for
   VF3, and the echo is now down 30 dB in 0.97 s (the reference's 1.09 s). The same chip, the opposite fix.
+  Later corrected: 0x7C0 is not MADRS on the chip (as VF2 had it), and the echo rang on because of a second MAME
+  departure the mirror hid: a MEMS register written and read in one DSP step reads the new value in MAME, the old one
+  on the chip. With both as the chip has them the echo dies in about 2.5 s and the second SCSP's reverb, silent under
+  the mirror, comes back (VF3_SCSP_DSP_MAME=1: the old way).
 - **The subway stage's floor rasterised wrong** → a polygon reaching the camera projected to millions of pixels,
   beyond what the rasteriser's floats can take → polygons are clipped by the view's sides too, with a guard band.
 - **The lava cave wasn't lit red** → its spotlight is 9,000 units away, and with New3D's units it barely shows →

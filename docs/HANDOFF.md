@@ -40,6 +40,10 @@ How to release: [RELEASE.md](RELEASE.md). The site's production branch is `claud
   coin-settings screen's 67 addresses the recompiler's map missed (interpreted: correct, slower).
 - The music: every song in the sound test matches Supermodel within 0.2 dB per band. The remaining 1-5 s stereo
   flickers (Aoi, Itou5) are 68000 timing noise (they swing as much against ourselves with the 68000 3% slower).
+- The SCSP DSP's reverb as the chip has it (branch `reverb`): 0x7C0-0x7FF not a mirror of MADRS, and a MEMS register
+  written and read in one step reads its old value (src/sound/scspdsp.h). The second SCSP's reverb (hits, voices) was
+  silent under MAME's mirror; the first's echo no longer repeats every 0.74 s. Game RAM unchanged (VF3_TEST_RAM_LOG
+  over a fight). VF3_SCSP_DSP_MAME=1: MAME's way, for comparisons. Not yet heard against an arcade recording.
 
 ## Tools added in v0.1.2 / v0.1.3
 

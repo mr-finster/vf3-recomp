@@ -1,6 +1,7 @@
 // license:BSD-3-Clause
 // copyright-holders:ElSemi, R. Belmont
-// From MAME's sound/scspdsp.cpp; the DSP reads and writes the sound RAM directly.
+// From MAME's sound/scspdsp.cpp; the DSP reads and writes the sound RAM directly, and a MEMS register written and
+// read in one step reads its old value, as the chip does (MAME's way with mame set).
 #include "scspdsp.h"
 
 #include <cstring>
@@ -62,9 +63,11 @@ void SCSPDSP::Init()
 {
 	u16 *const r = ram;
 	const u32 n = ram_bytes;
+	const bool m = mame;
 	std::memset(this, 0, sizeof(*this));
 	ram = r;
 	ram_bytes = n;
+	mame = m;
 	RBL = (8*1024); // Initial RBL is 0
 	Stopped = true;
 }
@@ -144,7 +147,7 @@ void SCSPDSP::Step()
 		if (IWT)
 		{
 			MEMS[IWA] = MEMVAL;  // MEMVAL was selected in previous MRD
-			if (IRA == IWA)
+			if (IRA == IWA && mame)   // (MAME's: see mame)
 				INPUTS = MEMVAL;
 		}
 

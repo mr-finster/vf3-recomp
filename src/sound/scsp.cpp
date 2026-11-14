@@ -549,6 +549,7 @@ void scsp_device::init()
 	int i;
 
 	m_DSP.Init();
+	m_DSP.mame = m_dsp_mame;
 
 	m_IrqTimA = m_IrqTimBC = m_IrqMidi = m_IrqCPU = m_IrqDMA = 0;
 	m_MidiR = m_MidiW = 0;
@@ -966,10 +967,9 @@ void scsp_device::w16(u32 addr, u16 val)
 			*((u16 *) (m_DSP.COEF + (addr - 0x700) / 2)) = val;
 		else if (addr < 0x7c0)
 			*((u16 *) (m_DSP.MADRS + (addr - 0x780) / 2)) = val;
-		else if (addr < 0x800)   // 0x7c0-0x7ff: its own storage (see m_madrs_hi)
+		else if (addr < 0x800)   // 0x7c0-0x7ff: nothing (MAME: MADRS again; see m_dsp_mame)
 		{
-			m_madrs_hi[(addr - 0x7c0) / 2] = val;
-			if (m_madrs_mirror) m_DSP.MADRS[(addr - 0x7c0) / 2] = val;
+			if (m_dsp_mame) m_DSP.MADRS[(addr - 0x7c0) / 2] = val;
 		}
 		else if (addr < 0xC00)
 		{
@@ -1013,7 +1013,7 @@ u16 scsp_device::r16(u32 addr)
 		else if (addr < 0x7c0)
 			v= *((u16 *) (m_DSP.MADRS + (addr - 0x780) / 2));
 		else if (addr < 0x800)
-			v = m_madrs_mirror ? m_DSP.MADRS[(addr - 0x7c0) / 2] : m_madrs_hi[(addr - 0x7c0) / 2];
+			v = m_dsp_mame ? m_DSP.MADRS[(addr - 0x7c0) / 2] : 0;
 		else if (addr < 0xC00)
 			v= *((u16 *) (m_DSP.MPRO + (addr - 0x800) / 2));
 		else if (addr < 0xE00)

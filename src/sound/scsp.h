@@ -161,21 +161,14 @@ private:
 
 	SCSP_SLOT m_Slots[32];
 	s16 m_RINGBUF[128];
-	// 0x7c0-0x7ff, after the DSP's MADRS (0x780-0x7bf): a deliberate departure from MAME, whose
-	// SCSP mirrors MADRS there. Mednafen's SCSP (its MADRS at 0x780-0x7bf only) and Yabause's
-	// keep them apart, and VF2 shows why: its sound program writes COEF and MADRS, then zeros
-	// 0x7c0-0x7ff. With the mirror that wipes every delay-line address, and its stereo reverb
-	// collapses to a loud near-mono smear (left/right correlation 0.99, the music about 11 dB
-	// louder); kept apart, the reverb is wide (correlation 0.73-0.85 in the music) and the music
-	// sits under the hits as the game means. Another VF2 port reported the same finding. Writes
-	// here are kept and read back; nothing else uses them. VF2_SCSP_MADRS_MIRROR=1 restores
-	// MAME's mirror, for comparing the sound with MAME's (tools/sound_compare.py).
-	u16 m_madrs_hi[32] = {};
-	// 0x7C0-0x7FF a mirror of MADRS (MAME's, and what Supermodel's VF3 sounds like): VF3's sound program sets its
-	// reverb's addresses, then clears that range, which with the mirror leaves them all at one place: the reverb
-	// short, as the reference's (the coin's and start's echoes die in about a second; kept apart, VF2's way, they
-	// rang on for several). VF3_SCSP_MADRS_SEPARATE=1: kept apart.
-	const bool m_madrs_mirror = [] { const char *e = getenv("VF3_SCSP_MADRS_SEPARATE"); return !(e && *e == '1'); }();
+	// 0x7c0-0x7ff, after the DSP's MADRS (0x780-0x7bf), is not MADRS on the chip: writes there are dropped and reads
+	// give 0 (Mednafen's SCSP decodes MADRS at 0x780-0x7bf only, an FPGA SCSP ignores those writes, and an arcade
+	// recording of a Model 2 game sounds that way). MAME mirrors MADRS there. VF3's sound program writes its MADRS
+	// table, then 32 zero words at 0x7c0: with the mirror, nearly every delay-line address is 0, the second SCSP's
+	// reverb (the hits and voices) gives nothing and the first's echo repeats every 0.74 s (the whole ring buffer).
+	// Kept apart, the echo needs the DSP's MEMS timing too (scspdsp.h, SCSPDSP::mame), or it never dies away.
+	// VF3_SCSP_DSP_MAME=1: MAME's mirror and DSP, as before (for comparisons).
+	const bool m_dsp_mame = [] { const char *e = getenv("VF3_SCSP_DSP_MAME"); return e && *e == '1'; }();
 	// VF3_SCSP_MSLC_LATCH=1: MAME's MSLC status latched once a sample (for comparisons)
 	const bool m_latch_mslc_per_sample = [] { const char *e = getenv("VF3_SCSP_MSLC_LATCH"); return e && *e == '1'; }();
 	u8 m_BUFPTR;
