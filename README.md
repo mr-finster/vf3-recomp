@@ -55,7 +55,7 @@ the hardware; none of its code is in this one.
 | Board, tile generator, Real3D (CPU renderer) | Working: the pictures match the reference's, but for the differences below |
 | The 3D on the GPU (Display > 3D renderer: Auto, GPU or CPU) | Working on Metal (Apple M4 Max: 120 pictures a second at 4x and 6x) and Vulkan (checked against the CPU's picture as the game starts); Direct3D 12 (an RTX 3070 Laptop, #4). On Windows the GPU renderer starts on Vulkan for every card (Direct3D 12 was far slower on some AMD and NVIDIA cards), Direct3D 12 if Vulkan fails or as chosen in Display > Graphics driver. Direct3D 12 that draws nothing falls back to Vulkan, and any difference or error to the CPU |
 | Sound board (68000, two SCSPs) | Working: against the reference's on the same inputs, every song of the sound test within 0.2 dB of it in each band over the song (MAME's SCSP, with the reference's VF3 tunings: its timers, FM depth and pitch LFO depth), the voices bit-identical |
-| Render scale up to 6x, antialiasing, widescreen and ultrawide, smooth motion | Working. Widescreen: the fights see more to the sides, and the stages' backgrounds carry on from the game's own panoramas |
+| Render scale up to 6x, antialiasing, widescreen and ultrawide, smooth motion | Working. Widescreen: the fights see more to the sides, and the stages' backgrounds carry on from the game's own panoramas; the character select and the stage screen fill the sides too, made from their own background (4:3 with bars only when the picture is 4:3) |
 | Menu, keyboard and gamepads, two players, the arcade's settings, screen filters | Working |
 | Portable mode, your own ROM folder | Working |
 | macOS, Windows, Linux / Steam Deck | macOS (Apple silicon) and the Steam Deck: the downloads working, a steady 60 pictures a second on the Deck; Windows tested under Wine; Intel Macs not yet tried (the Mac build is universal) |
@@ -308,7 +308,8 @@ connection display says RELAY then (DIRECT otherwise). The room code only finds 
 lobby. The flags are the countries Cloudflare places each player's connection in (a VPN shows its own).
 
 **Play by address (the same network, or a VPN like Tailscale: no online service):** Menu > Online, then **Play by
-address** beside Settings. One player picks **Host by address** (it shows the address to give the other), the other
+address** beside Settings. One player picks **Host by address** (it shows this PC's addresses, one for each network it's on, with the network adapter's name:
+give the other the one on the network you share, for example a Wi-Fi Direct hotspot's), the other
 **Join by address** and types it. **Port** sets the port (7700 unless you change it). From a command line or a
 launcher: `--host` (and `--port N`), or `--join ADDRESS` (with `:PORT` if not 7700), starts it as the game opens.
 
