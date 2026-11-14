@@ -8,7 +8,7 @@
 //          [--set vf3tb] [--stage] [--dural] [--dural-stage host|guest|both] [--vs-rounds N] [--hashes FILE] [--blob-out FILE] [--blob-in FILE]
 // --set: another program (the zip must hold it); --stage: the match's stage select on (the adapter's stage_select_on,
 // Online > Settings); --dural: Dural on the select (the adapter's dural, Cheats); --dural-stage: Cheats > Dural's stage
-// (Guard) on that side's own input word, as the game does it online (src/host/dural_stage.h: inputs only, the delay its lead). The script's p1 is the host's, p2 the guest's.
+// (Start held and a button: issue #50) on that side's own input word, as the game does it online (src/host/dural_stage.h: inputs only, the delay its lead). The script's p1 is the host's, p2 the guest's.
 // --vs-rounds N: the host's own Rounds to win (vs player), set in its backup RAM before the match, as the Arcade settings
 // menu does (the match plays the blob's); --hashes FILE: the straight board's state hash every 30 frames ("frame hash",
 // hex); --blob-out FILE: the host's start blob written to FILE; --blob-in FILE: the match started from FILE's blob instead

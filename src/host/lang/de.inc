@@ -239,7 +239,7 @@ T(A_SERVICE_HELP, "Das Testmenü des Automaten: Eingabe- und Tontests, die übri
 T(C_DURAL, "Dural in der Auswahl")
 T(C_DURAL_HELP, "Dural, der Boss, auf einem 13. Platz nach Kage in der Auswahl, für beide Spieler. Eine Änderung startet das Spiel neu. ONLINE: ein Match spielt die Wahl des Hosts (am Anfang gesagt), so triffst du jeden; gegen eine ältere Version nur jemanden mit derselben.")
 T(C_DURAL_STAGE, "Durals Stage")
-T(C_DURAL_STAGE_HELP, "Auf dem Stage-Bildschirm (Stage-Wahl: Challenger) eine Stage mit diesem Knopf bestätigen gibt ihre Dural-Version: Start wird für dich gehalten und gewählt, sobald das Spiel es erlaubt (bis etwa 12\xC2\xA0s). Auch online (nur deine Eingaben), dort kann aber nicht jede Wahl Durals sein.")
+T(C_DURAL_STAGE_HELP, "Auf dem Stage-Bildschirm (Stage-Wahl: Challenger) Start halten und mit einem beliebigen Knopf bestätigen: die Dural-Version, gewählt, sobald das Spiel es erlaubt (bis 12\xC2\xA0s). Start bis zum Zeitende halten: die Stage aus VF3. Auch online (nur deine Eingaben), dort nicht immer.")
 T(DURAL_STAGE_WAIT, "Durals Stage: Start für dich gehalten, Wahl in {n}\xC2\xA0s (sobald das Spiel es erlaubt).")
 T(DURAL_STAGE_NONE, "Durals Stage: der Stage-Bildschirm des Automaten gibt nie die Dural-Version dieser Stage.")
 T(DURAL_STAGE_NOT_NOW, "Durals Stage: online diesmal nicht (das Spiel erlaubt es nur zu bestimmten Sekunden, und für diese Wahl ist keine übrig).")

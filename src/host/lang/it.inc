@@ -239,7 +239,7 @@ T(A_SERVICE_HELP, "Il menu di test dell'arcade: test dei comandi e dell'audio, l
 T(C_DURAL, "Dural nella selezione")
 T(C_DURAL_HELP, "Dural, il boss, in un 13° posto dopo Kage nella selezione, per entrambi i giocatori. Cambiarlo riavvia il gioco. ONLINE: un incontro usa la scelta dell'host (detta all'inizio), così giochi con tutti; contro una versione vecchia, solo con chi ha la stessa.")
 T(C_DURAL_STAGE, "Stage di Dural")
-T(C_DURAL_STAGE_HELP, "Nella schermata degli stage (Scelta: Sfidante), conferma uno stage con questo pulsante per la sua versione Dural: Start viene tenuto per te e la scelta fatta nel secondo che il gioco permette (fino a circa 12 s). Anche online (solo i tuoi comandi), ma lì alcune scelte non possono essere di Dural.")
+T(C_DURAL_STAGE_HELP, "Nella schermata degli stage (Scelta: Sfidante), tieni Start e conferma con un pulsante qualsiasi per la versione Dural, scelta nel secondo che il gioco permette (fino a 12 s). Start finché il tempo scade: lo stage di VF3. Anche online (solo i tuoi comandi), ma non sempre.")
 T(DURAL_STAGE_WAIT, "Stage di Dural: Start tenuto per te, scelta tra {n} s (nel secondo che il gioco permette).")
 T(DURAL_STAGE_NONE, "Stage di Dural: la schermata degli stage del cabinato non dà mai la versione Dural di questo stage.")
 T(DURAL_STAGE_NOT_NOW, "Stage di Dural: non stavolta online (il gioco lo permette solo in certi secondi, e per questa scelta non ne resta nessuno).")

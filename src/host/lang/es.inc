@@ -239,7 +239,7 @@ T(A_SERVICE_HELP, "El menú de test del arcade: pruebas de controles y sonido, e
 T(C_DURAL, "Dural en la selección")
 T(C_DURAL_HELP, "Dural, la jefa, en un 13.º hueco tras Kage en la selección, para los dos jugadores. Cambiarlo reinicia el juego. ONLINE: se juega lo que elija el anfitrión (se avisa al empezar), así juegas con todos; con versiones antiguas, solo con quien tenga lo mismo.")
 T(C_DURAL_STAGE, "Escenario de Dural")
-T(C_DURAL_STAGE_HELP, "En la pantalla de escenarios (Selección: Retador), confirma con este botón para su versión Dural: se mantiene Start por ti y se elige en el segundo que el juego permite (hasta unos 12 s). También online (solo tus controles), aunque allí algunas elecciones no pueden ser de Dural.")
+T(C_DURAL_STAGE_HELP, "En la pantalla de escenarios (Selección: Retador), mantén Start y confirma con cualquier botón para la versión Dural, elegida en el segundo que el juego permite (hasta 12 s). Start hasta que acabe el tiempo: el escenario de VF3. También online (solo tus controles), aunque no siempre.")
 T(DURAL_STAGE_WAIT, "Escenario de Dural: Start mantenido por ti, se elige en {n} s (el segundo que el juego lo permite).")
 T(DURAL_STAGE_NONE, "Escenario de Dural: la pantalla de escenarios de la recreativa nunca da la versión Dural de este escenario.")
 T(DURAL_STAGE_NOT_NOW, "Escenario de Dural: esta vez no online (el juego solo lo permite en ciertos segundos y no queda ninguno para esta elección).")

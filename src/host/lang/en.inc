@@ -244,7 +244,7 @@ T(A_SERVICE_HELP, "The arcade's own test menu: input and sound tests, the rest o
 T(C_DURAL, "Dural on the select")
 T(C_DURAL_HELP, "Dural, the boss, in a 13th spot past Kage on the select, for either player. Changing it restarts the game. ONLINE: a match plays the host's choice (said as it starts), so you meet everyone; against an older version, only one with the same.")
 T(C_DURAL_STAGE, "Dural's stage")
-T(C_DURAL_STAGE_HELP, "On the stage screen (Stage select: Challenger), confirm a stage with this button for its Dural version: Start is held for you and the pick made at the second the game allows (up to about 12 s). Online too (your inputs only), though some picks can't be Dural's there.")
+T(C_DURAL_STAGE_HELP, "On the stage screen (Stage select: Challenger), hold Start and confirm with any button for the Dural version, picked at the second the game allows (up to 12 s). Start held till the time runs out: VF3's stage. Online too (your inputs only), though not always there.")
 T(DURAL_STAGE_WAIT, "Dural's stage: Start held for you, picked in {n} s (the second the game allows it).")
 T(DURAL_STAGE_NONE, "Dural's stage: the arcade's stage screen never gives this stage's Dural version.")
 T(DURAL_STAGE_NOT_NOW, "Dural's stage: not this time online (the game allows it only at certain seconds, and none is left for this pick).")

@@ -239,7 +239,7 @@ T(A_SERVICE_HELP, "O menu de teste do arcade: testes de controle e som, o resto 
 T(C_DURAL, "Dural na seleção")
 T(C_DURAL_HELP, "Dural, a chefe, num 13º espaço depois do Kage na seleção, para os dois jogadores. Mudar reinicia o jogo. ONLINE: a partida usa a escolha do anfitrião (avisado no começo), então você joga com todos; contra uma versão antiga, só com quem tem o mesmo.")
 T(C_DURAL_STAGE, "Cenário da Dural")
-T(C_DURAL_STAGE_HELP, "Na tela de cenários (Seleção: Desafiante), confirme com este botão para a versão Dural: o Start é segurado por você e a escolha feita no segundo que o jogo permite (até uns 12 s). Online também (só seus comandos), mas lá algumas escolhas não podem ser da Dural.")
+T(C_DURAL_STAGE_HELP, "Na tela de cenários (Seleção: Desafiante), segure Start e confirme com qualquer botão para a versão Dural, escolhida no segundo que o jogo permite (até 12 s). Start até o tempo acabar: o cenário do VF3. Online também (só seus comandos), mas nem sempre.")
 T(DURAL_STAGE_WAIT, "Cenário da Dural: Start segurado por você, escolha em {n} s (o segundo que o jogo permite).")
 T(DURAL_STAGE_NONE, "Cenário da Dural: a tela de cenários do fliperama nunca dá a versão Dural deste cenário.")
 T(DURAL_STAGE_NOT_NOW, "Cenário da Dural: não desta vez online (o jogo só permite em certos segundos, e não sobrou nenhum para esta escolha).")

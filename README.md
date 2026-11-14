@@ -247,15 +247,20 @@ patches, still only meets the same version). Against v0.1.16-alpha she's on too,
 sides (said as "Dural on (older version's)"): two Durals' reflection as it was there, the gold 1P / chrome 2P glitch
 fixed in v0.1.17-alpha (issue #23) only between two players of v0.1.17-alpha or later.
 
-Menu > **Cheats** > **Dural's stage** (issue #22; Off or Guard: Start stays the game's own, so in Team Battle holding Start and picking with Punch or Kick still gives a stage's VF3 version, issue #36): on the stage screen (Stage select:
-Challenger), confirm a stage with that button for its Dural version. The arcade gives it only to the picker holding
-Start at the right second of the screen's timer (a count kept since power-on decides which), so holding Start till the
-timer runs out yourself, the arcade's own trick, works only about 1 time in 17 after the first match. The cheat holds
-Start for you and makes the pick at that second, at once or up to about 12 s later. Offline it always works. Online
-it's only your inputs, so your opponent needs nothing and sees the same stage, but about a third of the picks have no
-second left for it: the stage is then the plain one (a notice says so). The arcade's stage screen never gives the
-Dural version of two stages, the cave and Aoi's river, and the cheat leaves those plain too (issue #36), but for Team
-Battle's cave: its VF3 version, which the cheat picks there, looks the same as its Dural version.
+Menu > **Cheats** > **Dural's stage** (issue #22; Off or On): on the stage screen (Stage select: Challenger), hold
+Start and confirm a stage with any button (Punch, Kick, Guard or Escape) for its Dural version; hold Start till the
+timer runs out for the stage as VF3 had it (Team Battle's VF3 version, Revision D's plain stage); a button without
+Start is the plain stage, as the game has it (issue #50: before, Guard alone gave Dural's, and players who confirm with
+Guard out of habit got it by accident). The arcade gives the Dural version only to the picker holding Start at the
+right second of the screen's timer (a count kept since power-on decides which), so the arcade's own trick works only
+about 1 time in 17 after the first match, and holding Start till the end gives it now and then when you didn't want
+it. The cheat holds Start for you and makes the pick at the right second, at once or up to about 12 s later, and with
+Start held to the end it picks a second early when the end would have been Dural's. Offline it always works. Online
+it's only your inputs, so your opponent needs nothing (any version) and sees the same stage, but about a third of the
+Dural picks have no second left for it: the stage is then the plain one (a notice says so). The arcade's stage screen
+never gives the Dural version of two stages, the cave and Aoi's river, and the cheat leaves those to the game too
+(issue #36), but for Team Battle's cave: its VF3 version, which the cheat picks there, looks the same as its Dural
+version.
 
 ## Online play (experimental)
 

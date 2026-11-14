@@ -661,7 +661,7 @@ struct settings
 	int arcade_coin = -2;   // the arcade way's coin setting, while the PC way's FREE PLAY replaces it (-1 none to give back, -2 none kept yet)
 	std::string roms_folder;
 	int dural = 0;      // Dural on the select (a cheat): 0 off, else on (1-3, from when it was per player)
-	int dural_stage = 0;   // Dural's stage (a cheat, issue #22): the stage screen's pick confirmed with 1 Guard, 2 Start (0 off)
+	int dural_stage = 0;   // Dural's stage (a cheat, issue #22): 1 on (Start held and a button: issue #50; it was Guard, before that Start), 0 off
 	bool random_order = false;   // Revision D's CPU opponents in a random order (issue #30; offline only)
 	bool debug_mode = false;     // Arcade settings > Debug mode, the arcade's own (Model3::debug_mode; offline only, issue #37)
 	std::string language = "auto";   // Game > Language: auto (the system's), or a language's code (tr::choice_key)
@@ -3645,7 +3645,7 @@ int main(int argc, char **argv)
 			} });
 		// (inputs only, src/host/dural_stage.h: online it's what the other side plays too, so no version of its own)
 		p.items.push_back({ tr::C_DURAL_STAGE, tr::C_DURAL_STAGE_HELP,
-			[&] { return std::string(cfg.dural_stage ? tr::CTL_GUARD : tr::OFF); },
+			[&] { return std::string(cfg.dural_stage ? tr::ON : tr::OFF); },
 			[&](int) { cfg.dural_stage = cfg.dural_stage ? 0 : 1; cfg_dirty = true; } });
 		p.items.push_back(back_item());
 		return p;

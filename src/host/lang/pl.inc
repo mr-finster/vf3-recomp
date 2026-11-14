@@ -239,7 +239,7 @@ T(A_SERVICE_HELP, "Menu testowe automatu: testy sterowania i dźwięku, reszta u
 T(C_DURAL, "Dural w wyborze postaci")
 T(C_DURAL_HELP, "Bossowa Dural na 13. polu za Kage w wyborze, dla obu graczy. Zmiana restartuje grę. ONLINE: mecz idzie z wyborem hosta (podanym na starcie), więc grasz z każdym; ze starszą wersją tylko z kimś o tym samym.")
 T(C_DURAL_STAGE, "Arena Dural")
-T(C_DURAL_STAGE_HELP, "Na ekranie aren (Wybór areny: Challenger) zatwierdź arenę tym przyciskiem, by dostać jej wersję Dural: Start jest trzymany za ciebie, a wybór pada w sekundzie, na którą gra pozwala (do ok. 12 s). Online też (tylko twoje wejścia), choć tam nie każdy wybór może być Dural.")
+T(C_DURAL_STAGE_HELP, "Na ekranie aren (Wybór areny: Challenger) trzymaj Start i zatwierdź dowolnym przyciskiem: wersja Dural, wybrana w sekundzie, na którą gra pozwala (do 12 s). Start trzymany do końca czasu: arena z VF3. Online też (tylko twoje wejścia), choć nie zawsze.")
 T(DURAL_STAGE_WAIT, "Arena Dural: Start trzymany za ciebie, wybór za {n} s (w sekundzie, na którą gra pozwala).")
 T(DURAL_STAGE_NONE, "Arena Dural: ekran aren automatu nigdy nie daje wersji Dural tej areny.")
 T(DURAL_STAGE_NOT_NOW, "Arena Dural: tym razem nie online (gra pozwala tylko w określonych sekundach, a na ten wybór żadna nie została).")

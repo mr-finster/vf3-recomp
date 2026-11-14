@@ -240,7 +240,7 @@ T(A_SERVICE_HELP, "Salon makinesinin kendi test menüsü: giriş ve ses testleri
 T(C_DURAL, "Seçim ekranında Dural")
 T(C_DURAL_HELP, "Boss Dural, seçim ekranında Kage'nin ötesinde 13. yerde, iki oyuncu için de. Değiştirmek oyunu yeniden başlatır. ÇEVRİMİÇİ: maç kurucunun seçimiyle oynanır (başlarken söylenir), böylece herkesle karşılaşırsın; eski bir sürüme karşı yalnızca aynı seçime sahip olanla.")
 T(C_DURAL_STAGE, "Dural'ın sahnesi")
-T(C_DURAL_STAGE_HELP, "Sahne ekranında (Sahne seçimi: Challenger) bir sahneyi Dural sürümü için bu düğmeyle onayla: Start senin için basılı tutulur ve seçim oyunun izin verdiği saniyede yapılır (en fazla 12 sn kadar). Çevrimiçide de (yalnızca senin girişlerin), ama orada bazı seçimler Dural'ın olamaz.")
+T(C_DURAL_STAGE_HELP, "Sahne ekranında (Sahne seçimi: Challenger) Start'ı tutup herhangi bir düğmeyle onayla: Dural sürümü, oyunun izin verdiği saniyede seçilir (en fazla 12 sn). Süre bitene kadar Start: VF3'ün sahnesi. Çevrimiçide de (yalnızca senin girişlerin), ama her zaman değil.")
 T(DURAL_STAGE_WAIT, "Dural'ın sahnesi: Start senin için basılı, {n} sn içinde seçiliyor (oyunun izin verdiği saniye).")
 T(DURAL_STAGE_NONE, "Dural'ın sahnesi: salon makinesinin sahne ekranı bu sahnenin Dural sürümünü hiç vermez.")
 T(DURAL_STAGE_NOT_NOW, "Dural'ın sahnesi: çevrimiçide bu sefer olmaz (oyun buna yalnızca belli saniyelerde izin verir ve bu seçim için hiç kalmadı).")
