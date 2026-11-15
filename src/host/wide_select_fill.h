@@ -30,6 +30,10 @@
 #include <chrono>
 #include <memory>
 #include <thread>
+#include <filesystem>
+#include <mutex>
+#include <system_error>
+#include <cmath>
 
 namespace wide_select {
 
@@ -684,7 +688,14 @@ inline void save_kept()
 	if (fill_kept_path.empty()) return;
 	std::vector<FillKept> keep = fill_kept;   // (the results are never changed once made: shared with the writer)
 	std::string path = fill_kept_path;
-	std::thread([keep = std::move(keep), path = std::move(path)] {
+	// (one save at a time: two on the same .tmp, on slow storage, could interleave; and the newest only: an older one
+	// that gets the lock after a newer has saved is dropped, so the file never goes back to fewer fills)
+	static std::mutex save_lock;
+	static std::atomic<uint64_t> save_gen{ 0 };
+	const uint64_t gen = ++save_gen;
+	try { std::thread([keep = std::move(keep), path = std::move(path), gen] {
+		std::lock_guard<std::mutex> hold(save_lock);
+		if (gen != save_gen.load()) return;
 		const std::string tmp = path + ".tmp";
 		FILE *f = fopen(tmp.c_str(), "wb");
 		if (!f) return;
@@ -700,8 +711,12 @@ inline void save_kept()
 		}
 		const bool ok = ferror(f) == 0;
 		fclose(f);
-		if (ok) std::rename(tmp.c_str(), path.c_str()); else std::remove(tmp.c_str());
-	}).detach();
+		// (std::filesystem::rename replaces an existing file on Windows too, as main.cpp's replace_file: msvcrt's
+		// rename fails there when the file's there, so the cache was never updated after its first save)
+		std::error_code ec;
+		if (ok) std::filesystem::rename(tmp, path, ec);
+		if (!ok || ec) std::filesystem::remove(tmp, ec);
+	}).detach(); } catch (...) {}   // (no thread: not saved this time)
 }
 inline void load_kept(const std::string &path)
 {
@@ -726,13 +741,14 @@ inline void load_kept(const std::string &path)
 			R->reach = int(u32());
 			R->stage = u32() != 0; R->ok = u32() != 0;
 			if (bad || R->reach <= 0 || R->reach > 4096) { bad = true; break; }
-			if (fread(&R->LE, sizeof R->LE, 1, f) != 1 || fread(&R->lum, sizeof R->lum, 1, f) != 1) { bad = true; break; }
+			if (fread(&R->LE, sizeof R->LE, 1, f) != 1 || fread(&R->lum, sizeof R->lum, 1, f) != 1 || !std::isfinite(R->LE) || R->LE <= 0) { bad = true; break; }
 			const size_t OW = size_t(KIN + R->reach);
 			for (int s = 0; s < 2 && !bad; s++) {
 				vec(R->px[s], OW * H * 3); vec(R->mine[s], OW * H); vec(R->zone[s], size_t(H)); vec(R->edge[s], size_t(H) * 3);
 				// (base and slope: as made, empty or a colour a line)
 				const uint32_t nb = u32(); if (nb != 0 && nb != uint32_t(H) * 3) bad = true; else { R->base[s].resize(nb); if (nb && fread(R->base[s].data(), 4, nb, f) != nb) bad = true; }
 				const uint32_t ns = u32(); if (ns != 0 && ns != uint32_t(H) * 3) bad = true; else { R->slope[s].resize(ns); if (ns && fread(R->slope[s].data(), 4, ns, f) != ns) bad = true; }
+				if (R->slope[s].size() != R->base[s].size()) bad = true;   // (both or neither: fill() reads slope where base is)
 			}
 			vec(R->arena, size_t(H));
 			if (!bad && R->ok) got.push_back({ key, R });
@@ -847,7 +863,8 @@ inline bool fill(int key, const std::vector<uint32_t> &plate, const std::vector<
 		}
 		else {
 			st.job = std::make_shared<FillJob>();
-			std::thread([j = st.job, p = plate, v = std::move(vis), kind, r, quick] { j->res = synth(p, v, kind, r, quick); j->done.store(true, std::memory_order_release); }).detach();
+			try { std::thread([j = st.job, p = plate, v = std::move(vis), kind, r, quick] { j->res = synth(p, v, kind, r, quick); j->done.store(true, std::memory_order_release); }).detach(); }
+			catch (...) { st.job.reset(); }   // (no thread: the stand-in stays, tried again next frame)
 		}
 	}
 	st.full = false;

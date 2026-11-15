@@ -1455,10 +1455,12 @@ bool interpolate(const Scene &a, const Scene &b, float t, Scene &out, InterpStat
 		static const bool no_still = getenv("VF3_NO_STILL") != nullptr;   // (tests: as before)
 		if (!no_still) {
 			std::unordered_map<uint32_t, std::vector<int>> was_at, now_at;
+			bool built = false;   // (made once: was_at empty doesn't mean not made, when the frame before had none)
 			for (size_t j = 0; j < now.size(); j++) {
 				if (np.from[v][j] >= 0 || (pair[j] >= 0 && snap[j] != 2 && snap[j] != 3) || grain(now[j]) ||
 				    radius2(now[j]) < 0.01f * dist2(now[j])) continue;
-				if (was_at.empty()) {
+				if (!built) {
+					built = true;
 					for (size_t i = 0; i < was.size(); i++) was_at[was[i].addr].push_back(int(i));
 					for (size_t k = 0; k < now.size(); k++)
 						if (np.from[v][k] >= 0 && np.from[v][k] == pair[k] && !grain(now[k])) now_at[now[k].addr].push_back(int(k));

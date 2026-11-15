@@ -127,6 +127,11 @@ struct State
 	std::vector<int16_t> seg_of[2];   // (each line's segment, -1: none)
 	double solved_lum[2] = {};
 	Filled f[2];
+	// (the fill's stand-in, made once a game frame and kept for the pictures between: at 144-240 a second with smooth
+	// motion it was made again for each)
+	std::vector<uint32_t> stand;
+	uint64_t stand_frame = UINT64_MAX;
+	int stand_key = -1, stand_reach = -1;
 };
 
 // Option 3's sides into out: the edge's colours (its 8 columns averaged, from st.f) carried out, blurred over R lines up
@@ -193,7 +198,9 @@ inline void make(int option, int key, const std::vector<uint32_t> &plate, const 
 		// (until the fill is made and faded in, a stand-in from the screen's first frame: the edge's colours carried
 		// out (option 3's), made each frame from the plate as it is (so it fades with the screen); the fill fades in
 		// over it. The first time a screen's seen, its fill takes 0.1-0.5 s: before, the sides were black)
-		if (!st.fill.full) {
+		if (!st.fill.full && st.stand_frame == frame && st.stand_key == key && st.stand_reach == reach && st.stand.size() == out.size())
+			out = st.stand;
+		else if (!st.fill.full) {
 			// (not darkened outwards: the select's warm orange darkened read as pink. The edge mirrored (option 5)
 			// was tried: its repeats showed in rows for those frames)
 			// (from the picture as shown at the plate's background pixels: the plate isn't faded, so the stand-in was
@@ -226,6 +233,7 @@ inline void make(int option, int key, const std::vector<uint32_t> &plate, const 
 					}
 				}
 			}
+			st.stand = out; st.stand_frame = frame; st.stand_key = key; st.stand_reach = reach;
 		}
 		fill(key, plate, above, below, out, st.fill, reach, option == 6, frame);
 		return;
