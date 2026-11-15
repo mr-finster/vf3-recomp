@@ -2405,6 +2405,7 @@ int main(int argc, char **argv)
 	}
 	SDL_Texture *tex3d = nullptr, *tex_below = nullptr, *tex_above = nullptr;
 	bool g3_shown = false;   // the picture on show is the GPU's
+	bool shown_3d_hidden = false;   // the picture's 3D wasn't drawn, the 2D opaque over it (hidden_3d): its texture is an older frame's
 	uint32_t side_colour[2] = { 0xFF000000u, 0xFF000000u };   // widescreen's bars beside the 2D (left, right)
 	bool sky_wide = false;
 	float bg_shift_x = 0, bg_shift_y = 0;   // the layers below the 3D moved back towards the frame before (draw_below)
@@ -2641,6 +2642,7 @@ int main(int argc, char **argv)
 			for (const uint32_t px : game.view.above) if ((px >> 24) != 0xFF) return false;
 			return true;
 		}();
+		shown_3d_hidden = hidden_3d;
 		if (hidden_3d) {
 			if (g3.on) gpu3d.retexture();
 			game.view.uploads.clear();
@@ -3173,8 +3175,12 @@ int main(int argc, char **argv)
 			const SDL_FRect bar = s ? SDL_FRect{ mid.x + mid.w, all.y, all.x + all.w - (mid.x + mid.w), all.h } : SDL_FRect{ all.x, all.y, mid.x - all.x, all.h };
 			if (bar.w > 0) SDL_RenderFillRect(ren, &bar);
 		}
-		draw_below(all, mid);
-		SDL_RenderTexture(ren, g3_shown && g3.tex ? g3.tex : tex3d, nullptr, &all);
+		// (and the layers below the 3D neither, but for the select screens' sides: hidden over the 4:3 by the 2D, past it
+		// they'd show an older frame's stage beside a black screen; the sides are the bars of the 2D's edge colour then)
+		if (!shown_3d_hidden || wide_select_on) draw_below(all, mid);
+		// (not when it wasn't drawn: the 2D hides it over the 4:3, but past it, widescreen, the texture's older frame showed:
+		// the fight's stage in the sides for a frame or two under New Challenger's black, as the select came in)
+		if (!shown_3d_hidden) SDL_RenderTexture(ren, g3_shown && g3.tex ? g3.tex : tex3d, nullptr, &all);
 		const float ky = mid.h / video::H;
 		for (int s = 0; s < 2 && !fc_drawn; s++)   // (the free camera's: the 2D over the 3D hidden, the HUD and all)
 			for (const SideRun &r : side_cover[s]) {
