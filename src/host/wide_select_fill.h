@@ -36,6 +36,9 @@ namespace wide_select {
 constexpr float DETMAX = 40, LINEK = 3, LINEC = 48, SDK = 12, SPECK = 150;
 constexpr int OVS = 3, CXS = 3;
 constexpr int FMY = 8;
+inline int STREAK = 6;
+inline float NOISEK = 1.0f; inline int NOISE_OWN = 0;   // (the stage screen's grain: the panels' noise, times NOISEK)   // (the stage screen: its sides averaged across over 2 STREAK + 1 columns)
+inline float USEK = 4000;   // (the stage screen: a window's cost for each time its part of the plate was copied already)
 constexpr int KR = 16, KIN = 8;               // (the picture's own columns the first patches overlap; of those, how many may be replaced)
 constexpr int ARENA_Y0 = 68, ARENA_Y1 = 262;   // (the stage screen's preview, aligned lines: both programs)
 
@@ -55,6 +58,7 @@ struct FillResult
 	double lum = 0, ms = 0;
 	int patches = 0, candidates = 0;
 	bool ok = false;
+	bool quick = false;   // (the first, from a share of the windows: shown at once, the whole one made after)
 };
 
 inline double plate_lum(const std::vector<uint32_t> &p)
@@ -85,7 +89,31 @@ inline bool edge_mean(const std::vector<uint32_t> &plate, int s, int y, int z, i
 	return n > 0;
 }
 
-inline FillResult synth(std::vector<uint32_t> plate, std::vector<uint32_t> vis, int kind, int reach)
+// How far the picture as shown (vis, faded with the screen) is from the plate (the layers' tiles in their palette, not
+// faded), at a side: the median, per channel, of shown less plate over the plate's background pixels in the side's
+// first 16 columns. The plate isn't faded, so beside a fade in its colours were at full strength (and before the
+// palette's loaded, whatever it holds: magenta on the owner's first launch, the picture still black). One offset a
+// side, a median: what's drawn over the background at the edge (the title's line, Dural's cell) doesn't move it (a
+// line by line one carried those out across the sides)
+inline void fade_offset(const std::vector<uint32_t> &plate, const std::vector<uint32_t> &vis, int s, int off[3])
+{
+	off[0] = off[1] = off[2] = 0;
+	if (vis.size() != plate.size() || plate.size() != size_t(W) * H) return;
+	std::vector<int> d[3];
+	for (int y = 0; y < H; y += 2)
+		for (int i = 0; i < 16; i++) {
+			const size_t k = size_t(y) * W + size_t(s ? W - 1 - RCUT - i : i);
+			if (!(plate[k] >> 24)) continue;
+			for (int c = 0; c < 3; c++) d[c].push_back(ch(vis[k], c) - ch(plate[k], c));
+		}
+	for (int c = 0; c < 3; c++) {
+		if (d[c].size() < 32) continue;
+		std::nth_element(d[c].begin(), d[c].begin() + std::ptrdiff_t(d[c].size() / 2), d[c].end());
+		off[c] = d[c][d[c].size() / 2];
+	}
+}
+
+inline FillResult synth(std::vector<uint32_t> plate, std::vector<uint32_t> vis, int kind, int reach, bool quick = false)
 {
 	const auto t0 = std::chrono::steady_clock::now();
 	FillResult r;
@@ -246,8 +274,10 @@ inline FillResult synth(std::vector<uint32_t> plate, std::vector<uint32_t> vis, 
 	int pw = 40, ph = 24, ox = 10, oy = 8;
 	for (int pass = 0; pass < 2; pass++) {
 		cands.clear();
-		for (int y = 0; y + ph <= H; y += 2)
-			for (int x = 0; x + pw <= FZ; x += CXS)
+		// (the stage screen's panels are few windows: every pixel's, not every 2nd line's and 3rd column's)
+		const int sty = stage && pass ? 1 : 2, stx = stage && pass ? 1 : CXS;
+		for (int y = 0; y + ph <= H; y += sty)
+			for (int x = 0; x + pw <= FZ; x += stx)
 				if (area(x, y, x + pw, y + ph) == pw * ph) cands.push_back({ int16_t(x), int16_t(y), 0 });
 		if (cands.size() >= 1000 || pass) break;
 		pw = 20; ph = 12; ox = 6; oy = 4;
@@ -258,9 +288,61 @@ inline FillResult synth(std::vector<uint32_t> plate, std::vector<uint32_t> vis, 
 		for (int v = 0; v + 1 < ph; v += 2) for (int u = 0; u + 1 < pw; u += 2) for (int q = 0; q < 3; q++) t += std::fabs(fp(c.x + u + 1, c.y + v, q) - fp(c.x + u, c.y + v, q)) + std::fabs(fp(c.x + u, c.y + v + 1, q) - fp(c.x + u, c.y + v, q));
 		c.sd = t / float(((ph - 1) / 2 + 1) * ((pw - 1) / 2 + 1));
 	}
+	// (quick: about 1,200 windows, every nth: a screen's first fill, in about a fifth of the time; the whole one after)
+	if (quick && cands.size() > 1200) {
+		const size_t n = cands.size() / 1200 + 1;
+		std::vector<Cand> few;
+		for (size_t i = 0; i < cands.size(); i += n) few.push_back(cands[i]);
+		cands.swap(few);
+	}
+	r.quick = quick;
 	r.candidates = int(cands.size());
 	if (cands.empty()) return r;
+	// (the stage screen: each window's brightness line by line (its 3 channels summed, the window's mean taken off),
+	// to match the edge's own line by line: its panels' rows (the light line under the preview, their edges) then
+	// land where the picture has them, not a few lines off. A source 8 lines off put that line 8 lines low)
+	// (the stage screen's panels' pixel noise: each background pixel of the windows less the mean of the 3 x 3 round it)
+	std::vector<float> noise;
+	if (stage) {
+		std::vector<uint8_t> seen(size_t(W) * H, 0);
+		for (const Cand &c : cands)
+			for (int v = 1; v + 1 < ph; v++)
+				for (int u = 1; u + 1 < pw; u++) {
+					const int x = c.x + u, y = c.y + v;
+					if (seen[size_t(y) * W + x]) continue;
+					seen[size_t(y) * W + x] = 1;
+					for (int q = 0; q < 3; q++) {
+						float m = 0;
+						for (int dy = -1; dy <= 1; dy++) for (int dx = -1; dx <= 1; dx++) m += fp(x + dx, y + dy, q);
+						noise.push_back(fp(x, y, q) - m / 9.0f);
+					}
+				}
+	}
+	std::vector<float> cprof;
+	if (stage) {
+		cprof.assign(cands.size() * size_t(ph), 0);
+		for (size_t i = 0; i < cands.size(); i++) {
+			float m = 0;
+			for (int v = 0; v < ph; v++) {
+				float t = 0;
+				for (int u = 0; u < pw; u++) for (int q = 0; q < 3; q++) t += fp(cands[i].x + u, cands[i].y + v, q);
+				cprof[i * size_t(ph) + size_t(v)] = t / float(pw);
+				m += t / float(pw);
+			}
+			for (int v = 0; v < ph; v++) cprof[i * size_t(ph) + size_t(v)] -= m / float(ph);
+		}
+	}
 	uint32_t seed = 0x9E3779B9u;
+	// (the stage screen: how often each part of the plate has been copied, in 4 x 4 cells, both sides: a window over
+	// parts used already costs more, so the few panels' windows aren't stamped again and again (their rust specks
+	// in rows); the photo's windows are many enough)
+	const int UW = W / 4 + 1, UH = H / 4 + 1;
+	std::vector<float> used(stage ? size_t(UW) * UH : 0, 0.0f);
+	auto used_at = [&](const Cand &c) {
+		float t = 0;
+		for (int cy = c.y / 4; cy <= (c.y + ph - 1) / 4; cy++) for (int cx = c.x / 4; cx <= (c.x + pw - 1) / 4; cx++) t += used[size_t(cy) * UW + cx];
+		return t / float(((ph - 1) / 4 + 1) * ((pw - 1) / 4 + 1));
+	};
 	for (int s = 0; s < 2; s++) {
 		const int D0 = -KR, RC = reach + pw;   // (the canvas: d from D0 to RC)
 		const int CW = RC - D0;
@@ -315,16 +397,41 @@ inline FillResult synth(std::vector<uint32_t> plate, std::vector<uint32_t> vis, 
 				for (float &q : cm) q /= n;
 				float best = -1;
 				Cand bc = cands[0];
-				for (int win : { 48, 128, H }) {   // (near its own lines; further if there's nothing near)
+				float tprof[48] = {};
+				bool rows_on = stage && !beside;
+				if (rows_on) {   // (the edge's own brightness on the patch's lines, its mean taken off)
+					float m = 0;
+					for (int v = 0; v < ph; v++) {
+						const int y = std::min(y0 + v, H - 1);
+						if (r.arena[size_t(y)]) { rows_on = false; break; }
+						tprof[v] = E[s][size_t(y) * 3] + E[s][size_t(y) * 3 + 1] + E[s][size_t(y) * 3 + 2];
+						m += tprof[v];
+					}
+					for (int v = 0; v < ph; v++) tprof[v] -= m / float(ph);
+				}
+				// (near its own lines; further if there's nothing near. The stage screen's panels are rows (their edges,
+				// the light line under the preview): from the same lines first, so the rows go on level, then 2 or 4
+				// lines off: a source 10 lines off put the preview's line 10 lines low in the sides)
+				static const int wins_photo[] = { 48, 128, H, -1 }, wins_stage[] = { 48, 128, H, -1 };
+				int prev_win = -1;
+				for (const int *wp = stage ? wins_stage : wins_photo; *wp >= 0; prev_win = *wp++) {
+				const int win = *wp;
 				if (best >= 0) break;
-				for (const Cand &c : cands) {
+				for (size_t ci = 0; ci < cands.size(); ci++) {
+					const Cand &c = cands[ci];
 					if (!beside && std::abs(c.y - y0) > win) continue;
-					if (!beside && win > 48 && std::abs(c.y - y0) <= 48) continue;
+					if (!beside && prev_win >= 0 && std::abs(c.y - y0) <= prev_win) continue;
 					float pen = 0, mul = 1;
-					if (!beside) { const float dy = float(c.y - y0); pen += dy * dy * 0.6f; }
+					if (!beside) { const float dy = float(c.y - y0); pen += dy * dy * (stage ? 4.0f : 0.6f); }
 					if (tsd > 0) { const float k = (c.sd - tsd) / std::max(tsd, 4.0f); mul += SDK * k * k; }   // (a texture as strong as the edge's: matching alone favours the faintest)
+					if (rows_on) {   // (its rows where the edge's are)
+						float d2 = 0;
+						for (int v = 0; v < ph; v++) { const float d = cprof[ci * size_t(ph) + size_t(v)] - tprof[v]; d2 += d * d; }
+						pen += 2.0f * d2 / float(ph);
+					}
 					seed = seed * 1664525u + 1013904223u;
 					pen += float(seed >> 28);
+					if (stage) pen += USEK * used_at(c);
 					if (best >= 0 && pen >= best) continue;
 					float sm[3] = {};
 					for (const auto &[v, u] : ov) for (int q = 0; q < 3; q++) sm[q] += src(c, u, v, q);
@@ -341,6 +448,7 @@ inline FillResult synth(std::vector<uint32_t> plate, std::vector<uint32_t> vis, 
 				}
 				}
 				r.patches++;
+				if (stage) for (int cy = bc.y / 4; cy <= (bc.y + ph - 1) / 4; cy++) for (int cx = bc.x / 4; cx <= (bc.x + pw - 1) / 4; cx++) used[size_t(cy) * UW + cx] += 1;
 				// the cuts, on the overlap's error with each side's mean off (as matched): down the left, across the top
 				float pm[3] = {};
 				for (const auto &[v, u] : ov) for (int q = 0; q < 3; q++) pm[q] += src(bc, u, v, q);
@@ -452,6 +560,45 @@ inline FillResult synth(std::vector<uint32_t> plate, std::vector<uint32_t> vis, 
 		// (the picture's own pixels stay; the rest is what it's held to)
 		std::vector<float> S(Q);
 		for (size_t i = 0; i < have.size(); i++) if (have[i] && !real[i]) for (int q = 0; q < 3; q++) S[i * 3 + q] = T[i * 3 + q];
+		// (the stage screen: its panels are brushed metal, their grain across. Their windows are few, so a blob of
+		// rust copied many times showed as a stamp in rows: the made pixels averaged across, over 2 STREAK + 1
+		// columns, coming in over the first 16 out, so the grain goes on and a copied blob is a streak)
+		if (stage && STREAK > 0) {
+			// (each made pixel: its line's mean over 2 STREAK + 1 columns, plus a grain: the panels' own pixel noise
+			// (a random panel pixel less the mean of the 3 x 3 round it, the game's dithering), not the copied
+			// pixel's, which carried the stamps; NOISE_OWN 1: the copied pixel's own grain across instead)
+			auto mean_across = [&](const size_t i0, int d, int y, int rad, float out3[3]) {
+				float t[3] = {}; int n = 0;
+				for (int k = -rad; k <= rad; k++) {
+					const int dd = d + k;
+					if (dd < D0 || dd >= RC) continue;
+					const size_t j = at(dd, y);
+					if (!have[j]) continue;
+					for (int q = 0; q < 3; q++) t[q] += S[j * 3 + q];
+					n++;
+				}
+				for (int q = 0; q < 3; q++) out3[q] = n ? t[q] / float(n) : S[i0 * 3 + q];
+			};
+			std::vector<float> B(S);
+			for (int y = 0; y < H; y++)
+				for (int d = 0; d < RC; d++) {
+					const size_t i = at(d, y);
+					if (!have[i] || real[i]) continue;
+					float wide[3], near3[3], g[3];
+					mean_across(i, d, y, STREAK, wide);
+					mean_across(i, d, y, 1, near3);
+					if (NOISE_OWN || noise.empty()) for (int q = 0; q < 3; q++) g[q] = S[i * 3 + q] - near3[q];
+					else {
+						uint32_t h = uint32_t(d + 4096) * 0x9E3779B1u ^ uint32_t(y) * 0x85EBCA77u ^ uint32_t(s) * 0xC2B2AE3Du;
+						h ^= h >> 15; h *= 0x2C1B3C6Du; h ^= h >> 12;
+						const float *n = &noise[(h % (noise.size() / 3)) * 3];
+						for (int q = 0; q < 3; q++) g[q] = n[q] * NOISEK;
+					}
+					const float w = std::min(1.0f, float(d) / 16.0f);
+					for (int q = 0; q < 3; q++) B[i * 3 + q] = S[i * 3 + q] + (wide[q] + g[q] - S[i * 3 + q]) * w;
+				}
+			S.swap(B);
+		}
 		const int OW = KIN + reach;
 		r.px[s].assign(size_t(OW) * H * 3, 0);
 		r.mine[s].assign(size_t(OW) * H, 0);
@@ -531,7 +678,7 @@ inline std::vector<FillKept> fill_kept;
 // from the game's pictures on this machine and kept beside its saves, never shipped. A file of another version or
 // size is ignored (made again)
 inline std::string fill_kept_path;
-inline constexpr uint32_t KEPT_MAGIC = 0x56334B31, KEPT_VERSION = 1;
+inline constexpr uint32_t KEPT_MAGIC = 0x56334B31, KEPT_VERSION = 4;   // (2: the stage screen's rows matched to the edge's; 3: its windows not stamped again; 4: its grain the panels' noise)
 inline void save_kept()
 {
 	if (fill_kept_path.empty()) return;
@@ -626,6 +773,11 @@ inline bool fill(int key, const std::vector<uint32_t> &plate, const std::vector<
 {
 	if (st.key != key) { st = FillState{}; st.key = key; }
 	const double lum = plate_lum(plate);
+	if (static const bool dbg = getenv("VF3_WIDE_SELECT_PLATE_LOG") != nullptr; dbg && frame != st.last_frame) {
+		double m[3] = {}; long n = 0;
+		for (size_t i = 0; i < plate.size(); i += 13) if (plate[i] >> 24) { for (int c = 0; c < 3; c++) m[c] += ch(plate[i], c); n++; }
+		if (n) fprintf(stderr, "(plate) screen %d frame %llu mean %.0f %.0f %.0f n %ld\n", key, (unsigned long long)frame, m[0] / n, m[1] / n, m[2] / n, n);
+	}
 	const bool new_frame = frame != st.last_frame;
 	if (new_frame) {   // (a new frame: the background as the game has it now)
 		st.last_frame = frame;
@@ -656,13 +808,13 @@ inline bool fill(int key, const std::vector<uint32_t> &plate, const std::vector<
 		st.job.reset();
 		st.made_at = again ? frame - std::min<uint64_t>(frame, 8) : frame;
 		st.made_when = std::chrono::steady_clock::now() - (again ? std::chrono::seconds(1) : std::chrono::seconds(0));
-		if (st.res->ok) {
+		if (st.res->ok && !st.res->quick) {
 			fill_kept.insert(fill_kept.begin(), FillKept{ key, st.res });
 			if (fill_kept.size() > 8) fill_kept.pop_back();
 			save_kept();
 		}
 		if (getenv("VF3_WIDE_SELECT_LOG"))
-			fprintf(stderr, "(wide select) fill for screen %d: %.1f ms, %d candidates, %d patches%s\n", key, st.res->ms, st.res->candidates, st.res->patches, st.res->ok ? "" : " (no background to take it from)");
+			fprintf(stderr, "(wide select) fill for screen %d: %.1f ms, %d candidates, %d patches%s%s\n", key, st.res->ms, st.res->candidates, st.res->patches, st.res->quick ? " (quick)" : "", st.res->ok ? "" : " (no background to take it from)");
 	}
 	// (the picture at the edge changed since the fill was made, not just faded: a 2P panel in where 1P's profile was,
 	// a challenger's select on the same screen number. A fade moves every line's colour about alike, so what's
@@ -677,7 +829,9 @@ inline bool fill(int key, const std::vector<uint32_t> &plate, const std::vector<
 	if (new_frame) st.moved = moved ? st.moved + 1 : 0;
 	const bool remake = st.moved >= 3 && frame - std::min(frame, st.moved_at) >= 60;
 	const bool want = !st.job && lum > 30 && (st.settled >= 3 || st.frames >= 45) &&
-	                  (!st.res || st.res->reach < reach || lum > st.res->lum * 1.25 + 6 || remake);
+	                  (!st.res || st.res->quick || st.res->reach < reach || lum > st.res->lum * 1.25 + 6 || remake);
+	// (a screen's first fill, none kept for it: a quick one first, the whole one when that's in)
+	const bool quick = want && !st.res;
 	if (want && remake) {
 		st.moved_at = frame;
 		if (getenv("VF3_WIDE_SELECT_LOG")) fprintf(stderr, "(wide select) screen %d: the edge's picture changed, made again\n", key);
@@ -693,17 +847,20 @@ inline bool fill(int key, const std::vector<uint32_t> &plate, const std::vector<
 		}
 		else {
 			st.job = std::make_shared<FillJob>();
-			std::thread([j = st.job, p = plate, v = std::move(vis), kind, r] { j->res = synth(p, v, kind, r); j->done.store(true, std::memory_order_release); }).detach();
+			std::thread([j = st.job, p = plate, v = std::move(vis), kind, r, quick] { j->res = synth(p, v, kind, r, quick); j->done.store(true, std::memory_order_release); }).detach();
 		}
 	}
 	st.full = false;
 	if (!st.res || !st.res->ok) return false;
 	const FillResult &R = *st.res;
+	const std::vector<uint32_t> shown = visible_2d(above, below);   // (the picture as the screen shows it, faded)
 	// (faded in over 8 frames once made, or as long by the clock: the game paused)
 	const double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - st.made_when).count();
 	const float in = std::min(1.0f, std::max(float(frame - std::min(frame, st.made_at) + 1) / 8.0f, float(secs * 57.52 / 8.0)));
 	const int OW = KIN + R.reach;
 	for (int s = 0; s < 2; s++) {
+		int fo[3];
+		fade_offset(plate, shown, s, fo);
 		// how far the edge's colour has moved since it was made (a fade), line by line; beside the preview, the panels'
 		std::vector<int> mv(size_t(H) * 3, 0);
 		long tot[3] = {}; int nt = 0;
@@ -711,6 +868,7 @@ inline bool fill(int key, const std::vector<uint32_t> &plate, const std::vector<
 			if (R.arena[size_t(y)]) continue;
 			int e[3];
 			if (!edge_mean(plate, s, y, R.zone[s][size_t(y)], e)) continue;
+			for (int c = 0; c < 3; c++) e[c] += fo[c];
 			for (int c = 0; c < 3; c++) { mv[size_t(y) * 3 + c] = e[c] - R.edge[s][size_t(y) * 3 + c]; tot[c] += mv[size_t(y) * 3 + c]; }
 			nt++;
 		}

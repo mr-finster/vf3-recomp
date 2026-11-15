@@ -2420,6 +2420,10 @@ int main(int argc, char **argv)
 	wide_select::vignette_floor = 55;
 	wide_select::load_kept(nvram_dir + "/wide_select.cache");   // (the select screens' sides made before: at once)
 	if (const char *v = getenv("VF3_WIDE_SELECT_VIGNETTE")) wide_select::vignette_floor = std::clamp(atoi(v), 0, 100);
+	if (const char *v = getenv("VF3_WIDE_SELECT_USEK")) wide_select::USEK = float(atof(v));   // (tests: the stage screen's reuse cost)
+	if (const char *v = getenv("VF3_WIDE_SELECT_STREAK")) wide_select::STREAK = atoi(v);   // (tests: the stage screen's averaging across)
+	if (const char *v = getenv("VF3_WIDE_SELECT_NOISE")) wide_select::NOISEK = float(atof(v));   // (tests: its grain)
+	if (const char *v = getenv("VF3_WIDE_SELECT_NOISE_OWN")) wide_select::NOISE_OWN = atoi(v);
 	game.want_plate_hw = wide_select == 4 || wide_select_shots;
 	wide_select::State wide_select_state;
 	std::vector<uint32_t> wide_select_sides, wide_select_above;
@@ -2772,6 +2776,20 @@ int main(int argc, char **argv)
 				const bool wider = picture_aspect() > 4.0 / 3.0 + 0.01;
 				game.want_plate = wide_select > 0 && wider;   // (the background made only while it's wanted: from the next frame)
 				sel = wide_select_on = wide_select && wider && game.view.select_screen && !fc_drawn;
+				// (and only once the picture shows something at its edges: while they're black (a fade's start, the
+				// select not yet drawn) the sides are black too, whatever the background layer holds then: the owner's
+				// first launch showed the sides magenta beside a black picture)
+				if (sel) {
+					long t = 0; int n = 0;
+					for (int y = 0; y < video::H; y += 4)
+						for (int x : { 0, 2, 4, video::W - 5, video::W - 3, video::W - 1 }) {
+							const size_t k = size_t(y) * video::W + size_t(x);
+							const uint32_t a = game.view.above[k], b = game.view.below[k];
+							const uint32_t v = (a >> 24) ? a : (b >> 24) ? b : 0;
+							t += long(v & 255) + long(v >> 8 & 255) + long(v >> 16 & 255); n++;
+						}
+					if (n && t < long(n) * 3 * 6) sel = wide_select_on = false;
+				}
 				if (sel) {
 					const uint64_t tw = SDL_GetTicksNS();
 					const int reach = int(std::ceil(video::W * (picture_aspect() * 0.75 - 1) / 2)) + 2;   // (the sides' width shown, in the 2D's pixels)
@@ -2805,6 +2823,14 @@ int main(int argc, char **argv)
 							if (x == wide_select::KIN) x = video::W - wide_select::RCUT - wide_select::KIN;
 							if (sd[video::EXT + x] >> 24) dst[video::EXT + x] = sd[video::EXT + x];
 						}
+						// (the picture's first and last 2 columns of this layer, where it has none: the side's edge pixel,
+						// so a GPU's smooth scaling doesn't blend the side with a see-through black there: a dark line
+						// down the 4:3 edge while the stand-in was up)
+						for (int k = 0; k < 2; k++) {
+							uint32_t &l = dst[video::EXT + k], &r = dst[video::EXT + video::W - 1 - k];
+							if (!(l >> 24)) l = dst[video::EXT - 1];
+							if (!(r >> 24)) r = dst[video::EXT + video::W];
+						}
 					}
 				}
 				// (above and below it, the screen mirrored at its edges)
@@ -2817,9 +2843,13 @@ int main(int argc, char **argv)
 			}
 			if (sel) {   // (the right side over the 2D's last 2 columns, aligned()'s copies of the one before)
 				std::vector<uint32_t> &a = wide_select_above;
+				// (not over Dural's cell, past Kage across the 4:3 edge: hers, drawn there, not the background the plate
+				// has under it; the fill's columns into the picture ran down through her picture as a strip)
+				const bool dural = game.view.dural_wide.on;
 				for (int y = 0; y < video::H; y++)
 					for (int x = 0; x < video::W; x++) {
 						if (x == wide_select::KIN) x = video::W - wide_select::RCUT - wide_select::KIN;
+						if (dural && x >= video::W / 2 && y >= video::WIDE_Y - 4 && y < video::WIDE_Y + video::WIDE_H + 4) continue;
 						const uint32_t v = wide_select_sides[size_t(y) * video::WW + video::EXT + x];
 						if (v >> 24) a[size_t(y) * video::W + x] = v;   // (opaque, the side's: a see-through edge there showed as a dark line)
 					}
@@ -2845,7 +2875,10 @@ int main(int argc, char **argv)
 	// 4:3 screen's edges (tilegen.h); stretched only past the widened layer's own edges (wider than about 2.6:1).
 	// Else 4:3.
 	auto draw_below = [&](const SDL_FRect &all, const SDL_FRect &mid) {
-		const float k = mid.w / video::W;
+		// (the layer's pixels to the picture's: across as the 4:3 screen's 496, down as its 384, as the layer above and
+		// the 3D are: the screen's pixels aren't square. Down by the across scale too, the layer was 3.4% too tall,
+		// its line 262 drawn at 270: the stage screen's sides 8 lines below its panels, the sky as much off the 3D)
+		const float k = mid.w / video::W, ky = mid.h / video::H;
 		// the picture's sides, in the layer's pixels from the 4:3 screen's left
 		const float l = sky_wide ? (all.x - mid.x) / k : 0.0f, r = sky_wide ? (all.x + all.w - mid.x) / k : float(video::W);
 		// The layer's place (u, v: in its pixels; v from the EY lines above the screen's) for each of the picture's,
@@ -2872,7 +2905,7 @@ int main(int argc, char **argv)
 			const float n = r - l;   // (the picture's width in the layer's pixels; x0, y0: its top left's place in the map)
 			auto set = [&](uint32_t c) { SDL_SetRenderDrawColor(ren, uint8_t(c), uint8_t(c >> 8), uint8_t(c >> 16), 255); };
 			const uint32_t sky = pn.above ? pn.above : fc_sky_colour, ground = pn.below ? pn.below : sky;
-			auto rect = [&](float u0, float v0, float u1, float v1) { return SDL_FRect{ mid.x + (l + u0) * k, mid.y + v0 * k, (u1 - u0) * k, (v1 - v0) * k }; };
+			auto rect = [&](float u0, float v0, float u1, float v1) { return SDL_FRect{ mid.x + (l + u0) * k, mid.y + v0 * ky, (u1 - u0) * k, (v1 - v0) * ky }; };
 			// the rows: above the map, the map's, below it (v: the picture's lines)
 			const float va = std::clamp(-y0, 0.0f, float(video::H)), vb = std::clamp(float(pn.h) - y0, 0.0f, float(video::H));
 			set(sky);
@@ -2916,6 +2949,10 @@ int main(int argc, char **argv)
 			}
 			return;
 		}
+		// (the stage screen's sides as sharp as its panels: they're in the layer above, drawn as blocks; the sides,
+		// in this one, smoothed when it's scaled, looked soft and stretched beside them)
+		const bool stage_sides = wide_select_on && (game.view.select_kind == 19 || game.view.select_kind == 20);
+		SDL_SetTextureScaleMode(tex_below, stage_sides || !cfg.smooth_bg ? SDL_SCALEMODE_NEAREST : SDL_SCALEMODE_LINEAR);
 		const float sx = wide_select_on ? 0.0f : std::clamp(bg_shift_x, -float(video::WW) + 1, float(video::WW) - 1);
 		const float sy = wide_select_on ? 0.0f : std::clamp(bg_shift_y, -float(video::H) + 1, float(video::H) - 1);
 		// The free camera turned further than the layer reaches (on a stage): the sky faded to its colour, over half a
@@ -2938,7 +2975,7 @@ int main(int argc, char **argv)
 		auto piece = [&](float p0, float p1, float q0, float q1, float d0, float d1, float e0, float e1, bool fx, bool fy) {
 			if (p1 - p0 < 0.01f || q1 - q0 < 0.01f) return;
 			const SDL_FRect src = { p0, q0, p1 - p0, q1 - q0 };
-			const SDL_FRect dst = { mid.x + d0 * k, mid.y + e0 * k, (d1 - d0) * k, (e1 - e0) * k };
+			const SDL_FRect dst = { mid.x + d0 * k, mid.y + e0 * ky, (d1 - d0) * k, (e1 - e0) * ky };
 			if (!fx && !fy) SDL_RenderTexture(ren, tex_below, &src, &dst);
 			else if (fx && fy) SDL_RenderTextureRotated(ren, tex_below, &src, &dst, 180.0, nullptr, SDL_FLIP_NONE);
 			else SDL_RenderTextureRotated(ren, tex_below, &src, &dst, 0.0, nullptr, fx ? SDL_FLIP_HORIZONTAL : SDL_FLIP_VERTICAL);

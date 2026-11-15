@@ -187,12 +187,45 @@ inline void make(int option, int key, const std::vector<uint32_t> &plate, const 
 		return;
 	}
 	if (option == 2 || option == 6) {
+		// (the stage screen's two numbers, 19 as it comes in and then 20, one screen: its fill not dropped and begun
+		// again when 19 turns to 20 a few frames in, which made its first sides come in 15 frames after its panels)
+		if (key == 19) key = 20;
 		// (until the fill is made and faded in, a stand-in from the screen's first frame: the edge's colours carried
 		// out (option 3's), made each frame from the plate as it is (so it fades with the screen); the fill fades in
 		// over it. The first time a screen's seen, its fill takes 0.1-0.5 s: before, the sides were black)
 		if (!st.fill.full) {
+			// (not darkened outwards: the select's warm orange darkened read as pink. The edge mirrored (option 5)
+			// was tried: its repeats showed in rows for those frames)
+			// (from the picture as shown at the plate's background pixels: the plate isn't faded, so the stand-in was
+			// at full strength beside a fade, or whatever the palette held before it was loaded: magenta, the picture
+			// still black)
 			for (int s = 0; s < 2; s++) st.f[s].make(plate.data(), s);
-			soft_sides(st, out, reach, 0.6f);
+			soft_sides(st, out, reach, 0.0f);
+			{   // (moved as far as the picture shown is from the plate, a side: fade_offset)
+				const std::vector<uint32_t> shown = visible_2d(above, below);
+				for (int s = 0; s < 2; s++) {
+					int fo[3];
+					fade_offset(plate, shown, s, fo);
+					for (int y = 0; y < H; y++)
+						for (int d = 0; d < reach + (s ? RCUT : 0); d++) {
+							uint32_t &v = out[size_t(y) * WW + size_t(s ? EXT + W - RCUT + d : EXT - 1 - d)];
+							if (v >> 24) v = rgb(std::clamp(ch(v, 0) + fo[0], 0, 255), std::clamp(ch(v, 1) + fo[1], 0, 255), std::clamp(ch(v, 2) + fo[2], 0, 255));
+						}
+				}
+			}
+			if (key == 19 || key == 20) {
+				// (the stage screen: beside the preview, the panels' rows above and below it blended down, not the
+				// preview's colours carried out (its wood, across the sides for a few frames))
+				const int a = ARENA_Y0 - 1, b = ARENA_Y1;
+				for (int y = ARENA_Y0; y < ARENA_Y1; y++) {
+					const float t = float(y - a) / float(b - a);
+					for (int x = 0; x < WW; x++) {
+						if (x >= EXT && x < EXT + W - RCUT) continue;
+						const uint32_t u = out[size_t(a) * WW + x], v = out[size_t(b) * WW + x];
+						out[size_t(y) * WW + x] = mix(u, v, t);
+					}
+				}
+			}
 		}
 		fill(key, plate, above, below, out, st.fill, reach, option == 6, frame);
 		return;
