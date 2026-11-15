@@ -471,12 +471,20 @@ inline FillResult synth(std::vector<uint32_t> plate, std::vector<uint32_t> vis, 
 // there (0: none, the panels' slope carried on straight; the host sets 55)
 inline int vignette_floor = 0;
 
+// How unevenly the edge's lines may move (each line's colour move less the side's mean, its 3 channels summed,
+// averaged over the lines) before the fill's made again: the picture there changed, not faded
+inline double MOVED = 40;
+
 // The fill's state: the screen it's for, its frames so far and how settled, the job making it, what it made
 struct FillJob { std::atomic<bool> done{ false }; FillResult res; };
 struct FillState
 {
 	int key = -1, frames = 0, settled = 0;
 	double last_lum = -1;
+	// (frames in a row the edge has changed unevenly since the fill was made: a new picture there, not a fade; and
+	// the frame the last such remake was asked for)
+	int moved = 0;
+	uint64_t moved_at = 0;
 	// (game frames, not pictures: at 144-240 a second with smooth motion a picture is a fraction of one)
 	uint64_t last_frame = UINT64_MAX, made_at = 0;   // (the last frame seen; the frame the fill showed first)
 	std::chrono::steady_clock::time_point made_when{};   // (and when: paused, the fade goes on by the clock)
@@ -496,7 +504,8 @@ inline bool fill(int key, const std::vector<uint32_t> &plate, const std::vector<
 {
 	if (st.key != key) { st = FillState{}; st.key = key; }
 	const double lum = plate_lum(plate);
-	if (frame != st.last_frame) {   // (a new frame: the background as the game has it now)
+	const bool new_frame = frame != st.last_frame;
+	if (new_frame) {   // (a new frame: the background as the game has it now)
 		st.last_frame = frame;
 		st.frames++;
 		st.settled = std::fabs(lum - st.last_lum) < std::max(1.0, lum * 0.01) ? st.settled + 1 : 0;
@@ -510,8 +519,40 @@ inline bool fill(int key, const std::vector<uint32_t> &plate, const std::vector<
 		if (getenv("VF3_WIDE_SELECT_LOG"))
 			fprintf(stderr, "(wide select) fill for screen %d: %.1f ms, %d candidates, %d patches%s\n", key, st.res->ms, st.res->candidates, st.res->patches, st.res->ok ? "" : " (no background to take it from)");
 	}
+	// (the picture at the edge changed since the fill was made, not just faded: a 2P panel in where 1P's profile was,
+	// a challenger's select on the same screen number. A fade moves every line's colour about alike, so what's
+	// measured is how unevenly they moved: each line's move less the side's mean move, averaged over the lines. Made
+	// again once that's held 3 frames, at most once a second)
+	bool moved = false;
+	if (st.res && st.res->ok && !st.job) {
+		const FillResult &R = *st.res;
+		double worst = 0;
+		for (int s = 0; s < 2; s++) {
+			std::vector<int> mv(size_t(H) * 3, 0);
+			std::vector<uint8_t> has(H, 0);
+			long tot[3] = {}; int nt = 0;
+			for (int y = 0; y < H; y++) {
+				int e[3];
+				if (R.arena[size_t(y)] || !edge_mean(plate, s, y, R.zone[s][size_t(y)], e)) continue;
+				for (int c = 0; c < 3; c++) { mv[size_t(y) * 3 + c] = e[c] - R.edge[s][size_t(y) * 3 + c]; tot[c] += mv[size_t(y) * 3 + c]; }
+				has[size_t(y)] = 1; nt++;
+			}
+			if (nt < H / 4) continue;
+			double dev = 0;
+			for (int y = 0; y < H; y++) if (has[size_t(y)]) for (int c = 0; c < 3; c++) dev += std::abs(double(mv[size_t(y) * 3 + c]) - double(tot[c]) / nt);
+			worst = std::max(worst, dev / nt);
+		}
+		moved = worst > MOVED;
+		if (getenv("VF3_WIDE_SELECT_LOG") && frame % 30 == 0) fprintf(stderr, "(wide select) screen %d frame %llu edge moved unevenly %.1f\n", key, (unsigned long long)frame, worst);
+	}
+	if (new_frame) st.moved = moved ? st.moved + 1 : 0;
+	const bool remake = st.moved >= 3 && frame - std::min(frame, st.moved_at) >= 60;
 	const bool want = !st.job && lum > 30 && (st.settled >= 3 || st.frames >= 45) &&
-	                  (!st.res || st.res->reach < reach || lum > st.res->lum * 1.25 + 6);
+	                  (!st.res || st.res->reach < reach || lum > st.res->lum * 1.25 + 6 || remake);
+	if (want && remake) {
+		st.moved_at = frame;
+		if (getenv("VF3_WIDE_SELECT_LOG")) fprintf(stderr, "(wide select) screen %d: the edge's picture changed, made again\n", key);
+	}
 	if (want) {
 		const int r = std::max(reach, 96) + RCUT;
 		const int kind = key;

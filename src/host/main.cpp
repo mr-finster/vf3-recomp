@@ -2750,6 +2750,11 @@ int main(int argc, char **argv)
 			// layer: its middle is the screen moved 2 pixels as the 3D is, so the 4:3's last 2 columns were the right
 			// side's first, what the sides make of a screen that isn't a stage (Team Battle's select: a black notch
 			// and a pink bar at the sea panel's right edge)
+			// (the game off the select screens, for a fight: the next one's sides made again, from its own background.
+			// Kept by the screen's number alone, a challenger's select after a fight against the CPU had 1P's select's
+			// sides, their colour moved by the 2P panel's frame at the edge: grey-green)
+			if (const int k = game.view.select_kind; k != 18 && k != 19 && k != 20 && (wide_select_state.key != -1 || wide_select_state.fill.key != -1))
+				wide_select_state = wide_select::State{};
 			if (stage) {
 				send_2d(tex_below, game.view.below_wide, video::WW, video::HT);
 				// (the sky's colour, the free camera's past the layer: the screen's top line's opaque pixels, averaged)
