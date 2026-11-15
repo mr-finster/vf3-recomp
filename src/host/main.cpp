@@ -2418,6 +2418,7 @@ int main(int argc, char **argv)
 	// (the stage screen's sides darkened toward the picture's outer edges, to 55% of the edge's brightness there:
 	// VF3_WIDE_SELECT_VIGNETTE=percent, 0 none, the panels' slope carried on straight)
 	wide_select::vignette_floor = 55;
+	wide_select::load_kept(nvram_dir + "/wide_select.cache");   // (the select screens' sides made before: at once)
 	if (const char *v = getenv("VF3_WIDE_SELECT_VIGNETTE")) wide_select::vignette_floor = std::clamp(atoi(v), 0, 100);
 	game.want_plate_hw = wide_select == 4 || wide_select_shots;
 	wide_select::State wide_select_state;

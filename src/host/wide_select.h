@@ -129,6 +129,38 @@ struct State
 	Filled f[2];
 };
 
+// Option 3's sides into out: the edge's colours (its 8 columns averaged, from st.f) carried out, blurred over R lines up
+// and down further out, darkening by dark (0.6: to 40%) at 200 pixels. Also the fill's stand-in while it's made
+inline void soft_sides(State &st, std::vector<uint32_t> &out, int reach, float dark)
+{
+	const int A = 8, R = 10;
+	for (int s = 0; s < 2; s++) {
+		std::vector<int> e(size_t(H) * 3, 0), ok(H, 0);
+		for (int y = 0; y < H; y++) {
+			if (!st.f[s].row_ok[y]) continue;
+			ok[y] = 1;
+			for (int i = 0; i < A; i++) for (int c = 0; c < 3; c++) e[size_t(y) * 3 + c] += ch(st.f[s].at(y, i), c);
+			for (int c = 0; c < 3; c++) e[size_t(y) * 3 + c] /= A;
+		}
+		for (int y = 0; y < H; y++) {
+			if (!ok[y]) continue;
+			int sum[3] = {}, n = 0;
+			for (int k = -R; k <= R; k++) {
+				const int yy = y + k;
+				if (yy < 0 || yy >= H || !ok[yy]) continue;
+				for (int c = 0; c < 3; c++) sum[c] += e[size_t(yy) * 3 + c];
+				n++;
+			}
+			for (int d = 0; d < reach + (s ? RCUT : 0); d++) {
+				const float b = std::min(1.0f, d / 24.0f), k = 1.0f - dark * std::min(1.0f, d / 200.0f);
+				float c3[3];
+				for (int c = 0; c < 3; c++) c3[c] = (e[size_t(y) * 3 + c] * (1 - b) + float(sum[c]) / n * b) * k;
+				out[size_t(y) * WW + (s ? EXT + W - RCUT + d : EXT - 1 - d)] = rgb(int(c3[0]), int(c3[1]), int(c3[2]));
+			}
+		}
+	}
+}
+
 // mean luminance of the plate's first Z columns in from a side
 inline double zone_lum(const Filled &f, int z)
 {
@@ -154,7 +186,17 @@ inline void make(int option, int key, const std::vector<uint32_t> &plate, const 
 		}
 		return;
 	}
-	if (option == 2 || option == 6) { fill(key, plate, above, below, out, st.fill, reach, option == 6, frame); return; }
+	if (option == 2 || option == 6) {
+		// (until the fill is made and faded in, a stand-in from the screen's first frame: the edge's colours carried
+		// out (option 3's), made each frame from the plate as it is (so it fades with the screen); the fill fades in
+		// over it. The first time a screen's seen, its fill takes 0.1-0.5 s: before, the sides were black)
+		if (!st.fill.full) {
+			for (int s = 0; s < 2; s++) st.f[s].make(plate.data(), s);
+			soft_sides(st, out, reach, 0.6f);
+		}
+		fill(key, plate, above, below, out, st.fill, reach, option == 6, frame);
+		return;
+	}
 	for (int s = 0; s < 2; s++) st.f[s].make(plate.data(), s);
 	// (the zones and option 2's runs made again for a new screen, or once it's much brighter than when made: a fade in)
 	for (int s = 0; s < 2; s++) {
@@ -184,7 +226,6 @@ inline void make(int option, int key, const std::vector<uint32_t> &plate, const 
 	st.key = key;
 	st.option = option;
 	auto put = [&](int s, int y, int d, uint32_t c) { out[size_t(y) * WW + (s ? EXT + W - RCUT + d : EXT - 1 - d)] = c; };
-	auto at = [&](int s, int y, int d) { return out[size_t(y) * WW + (s ? EXT + W - RCUT + d : EXT - 1 - d)]; };
 	if (option == 1 || option == 5) {
 		for (int s = 0; s < 2; s++)
 			for (int y = 0; y < H; y++) {
@@ -193,45 +234,25 @@ inline void make(int option, int key, const std::vector<uint32_t> &plate, const 
 				for (int d = 0; d < reach + (s ? RCUT : 0); d++) { const int m = d % (2 * P); put(s, y, d, st.f[s].at(y, m < P ? m : 2 * P - 1 - m)); }
 			}
 	}
-	if (option == 3 || option == 5) {
-		// 3: the edge's colours (its 8 columns averaged) carried out, blurred over R lines up and down further out,
-		// darkening to 40% at 200 pixels; 5: option 1's mirror near the edge going over into that (from 12 to 96
-		// pixels out), darkening to 55%
-		const int A = 8, R = 10;
-		for (int s = 0; s < 2; s++) {
-			std::vector<int> e(size_t(H) * 3, 0), ok(H, 0);
+	if (option == 3) soft_sides(st, out, reach, 0.6f);
+	if (option == 5) {
+		// option 1's mirror near the edge going over into option 3's soft colours (from 12 to 96 pixels out),
+		// darkening to 55%
+		std::vector<uint32_t> mirror = out;
+		soft_sides(st, out, reach, 0.45f);
+		for (int s = 0; s < 2; s++)
 			for (int y = 0; y < H; y++) {
 				if (!st.f[s].row_ok[y]) continue;
-				ok[y] = 1;
-				for (int i = 0; i < A; i++) for (int c = 0; c < 3; c++) e[size_t(y) * 3 + c] += ch(st.f[s].at(y, i), c);
-				for (int c = 0; c < 3; c++) e[size_t(y) * 3 + c] /= A;
-			}
-			for (int y = 0; y < H; y++) {
-				if (!ok[y]) continue;
-				int sum[3] = {}, n = 0;
-				for (int k = -R; k <= R; k++) {
-					const int yy = y + k;
-					if (yy < 0 || yy >= H || !ok[yy]) continue;
-					for (int c = 0; c < 3; c++) sum[c] += e[size_t(yy) * 3 + c];
-					n++;
-				}
 				for (int d = 0; d < reach + (s ? RCUT : 0); d++) {
-					const float b = std::min(1.0f, d / 24.0f), k = 1.0f - (option == 5 ? 0.45f : 0.6f) * std::min(1.0f, d / 200.0f);
-					float c3[3];
-					for (int c = 0; c < 3; c++) c3[c] = (e[size_t(y) * 3 + c] * (1 - b) + float(sum[c]) / n * b) * k;
-					const uint32_t soft = rgb(int(c3[0]), int(c3[1]), int(c3[2]));
-					if (option == 3) put(s, y, d, soft);
-					else {
-						float t = std::clamp((d - 12) / 84.0f, 0.0f, 1.0f);
-						t = t * t * (3 - 2 * t);
-						const uint32_t m = at(s, y, d);
-						// (the mirror darkened as the soft colour is, so they meet)
-						const float km = 1.0f - 0.45f * std::min(1.0f, d / 200.0f);
-						put(s, y, d, mix(rgb(int(ch(m, 0) * km), int(ch(m, 1) * km), int(ch(m, 2) * km)), soft, t));
-					}
+					const size_t o = size_t(y) * WW + (s ? EXT + W - RCUT + d : EXT - 1 - d);
+					float t = std::clamp((d - 12) / 84.0f, 0.0f, 1.0f);
+					t = t * t * (3 - 2 * t);
+					const uint32_t m = mirror[o];
+					// (the mirror darkened as the soft colour is, so they meet)
+					const float km = 1.0f - 0.45f * std::min(1.0f, d / 200.0f);
+					out[o] = mix(rgb(int(ch(m, 0) * km), int(ch(m, 1) * km), int(ch(m, 2) * km)), out[o], t);
 				}
 			}
-		}
 	}
 }
 

@@ -26,6 +26,7 @@
 // (option 6).
 #pragma once
 #include <atomic>
+#include <string>
 #include <chrono>
 #include <memory>
 #include <thread>
@@ -473,7 +474,127 @@ inline int vignette_floor = 0;
 
 // How unevenly the edge's lines may move (each line's colour move less the side's mean, its 3 channels summed,
 // averaged over the lines) before the fill's made again: the picture there changed, not faded
-inline double MOVED = 40;
+inline double MOVED = 20;   // (a challenger's select measured 37 against 1P's: grey-green; the same screen 0)
+// and how little, for a kept fill to be shown for a screen (the same screen again measures 0)
+inline double KEPT_FITS = 8;
+
+// How unevenly the edge's lines moved from a fill's to the plate's now, the worse side: each line's colour move less
+// the side's mean move (a fade: the game's colour offsets, added, move every line alike), its 3 channels summed,
+// averaged over the lines. Over MOVED: the picture at the edge isn't the one the fill was made for
+inline double uneven(const std::vector<uint32_t> &plate, const FillResult &R)
+{
+	// (a fade's offset is the same on every line, but a colour can't go under 0 or over 255: the offset is measured
+	// on the lines and channels away from both, as their median, and each line compared with its colour then moved
+	// by it and held to 0-255. So the dark first frames of a fade measure as little as the bright ones)
+	double worst = 0;
+	for (int s = 0; s < 2; s++) {
+		std::vector<int> now(size_t(H) * 3, 0);
+		std::vector<uint8_t> has(H, 0);
+		std::vector<int> mv[3];
+		int nt = 0;
+		for (int y = 0; y < H; y++) {
+			int e[3];
+			if (R.arena[size_t(y)] || !edge_mean(plate, s, y, R.zone[s][size_t(y)], e)) continue;
+			for (int c = 0; c < 3; c++) {
+				now[size_t(y) * 3 + c] = e[c];
+				const int was = R.edge[s][size_t(y) * 3 + c];
+				if (e[c] > 4 && e[c] < 251 && was > 4 && was < 251) mv[c].push_back(e[c] - was);
+			}
+			has[size_t(y)] = 1; nt++;
+		}
+		if (nt < H / 4) continue;
+		int off[3];
+		for (int c = 0; c < 3; c++) {
+			if (mv[c].size() < size_t(nt / 4)) { off[c] = INT32_MIN; continue; }   // (all of it dark or white: unknown)
+			std::nth_element(mv[c].begin(), mv[c].begin() + std::ptrdiff_t(mv[c].size() / 2), mv[c].end());
+			off[c] = mv[c][mv[c].size() / 2];
+		}
+		if ((off[0] == INT32_MIN) + (off[1] == INT32_MIN) + (off[2] == INT32_MIN) > 1) return 1e9;   // (too dark to tell)
+		double dev = 0;
+		for (int y = 0; y < H; y++)
+			if (has[size_t(y)])
+				for (int c = 0; c < 3; c++)
+					if (off[c] != INT32_MIN) dev += std::abs(now[size_t(y) * 3 + c] - std::clamp(R.edge[s][size_t(y) * 3 + c] + off[c], 0, 255));
+		worst = std::max(worst, dev / nt);
+	}
+	return worst;
+}
+
+// The fills made so far, kept for the game's next visit to the same screen (each select the game comes back to, a
+// challenger's): one that still fits the edge (uneven under MOVED) shows from the screen's first bright frame, not made
+// again. The newest first, at most 8 (each about 1 MB)
+struct FillKept { int key; std::shared_ptr<FillResult> res; };
+inline std::vector<FillKept> fill_kept;
+
+// The kept fills saved in the game's data folder and read at the next start, so even the first select screen of a
+// session has its sides at once (a fill takes 0.1-0.5 s to make, on a thread: until then the sides are black). Made
+// from the game's pictures on this machine and kept beside its saves, never shipped. A file of another version or
+// size is ignored (made again)
+inline std::string fill_kept_path;
+inline constexpr uint32_t KEPT_MAGIC = 0x56334B31, KEPT_VERSION = 1;
+inline void save_kept()
+{
+	if (fill_kept_path.empty()) return;
+	std::vector<FillKept> keep = fill_kept;   // (the results are never changed once made: shared with the writer)
+	std::string path = fill_kept_path;
+	std::thread([keep = std::move(keep), path = std::move(path)] {
+		const std::string tmp = path + ".tmp";
+		FILE *f = fopen(tmp.c_str(), "wb");
+		if (!f) return;
+		auto u32 = [&](uint32_t v) { fwrite(&v, 4, 1, f); };
+		auto vec = [&](const auto &v) { u32(uint32_t(v.size())); if (!v.empty()) fwrite(v.data(), sizeof(v[0]), v.size(), f); };
+		u32(KEPT_MAGIC); u32(KEPT_VERSION); u32(uint32_t(W)); u32(uint32_t(H)); u32(uint32_t(KIN)); u32(uint32_t(keep.size()));
+		for (const FillKept &k : keep) {
+			const FillResult &R = *k.res;
+			u32(uint32_t(k.key)); u32(uint32_t(R.reach)); u32(R.stage); u32(R.ok);
+			fwrite(&R.LE, sizeof R.LE, 1, f); fwrite(&R.lum, sizeof R.lum, 1, f);
+			for (int s = 0; s < 2; s++) { vec(R.px[s]); vec(R.mine[s]); vec(R.zone[s]); vec(R.edge[s]); vec(R.base[s]); vec(R.slope[s]); }
+			vec(R.arena);
+		}
+		const bool ok = ferror(f) == 0;
+		fclose(f);
+		if (ok) std::rename(tmp.c_str(), path.c_str()); else std::remove(tmp.c_str());
+	}).detach();
+}
+inline void load_kept(const std::string &path)
+{
+	fill_kept_path = path;
+	fill_kept.clear();
+	FILE *f = fopen(path.c_str(), "rb");
+	if (!f) return;
+	bool bad = false;
+	auto u32 = [&]() { uint32_t v = 0; if (fread(&v, 4, 1, f) != 1) bad = true; return v; };
+	auto vec = [&](auto &v, size_t want) {
+		const uint32_t n = u32();
+		if (bad || n != want) { bad = true; return; }
+		v.resize(n);
+		if (n && fread(v.data(), sizeof(v[0]), n, f) != n) bad = true;
+	};
+	std::vector<FillKept> got;
+	if (u32() == KEPT_MAGIC && u32() == KEPT_VERSION && u32() == uint32_t(W) && u32() == uint32_t(H) && u32() == uint32_t(KIN) && !bad) {
+		const uint32_t n = u32();
+		for (uint32_t i = 0; i < n && i < 8 && !bad; i++) {
+			auto R = std::make_shared<FillResult>();
+			const int key = int(u32());
+			R->reach = int(u32());
+			R->stage = u32() != 0; R->ok = u32() != 0;
+			if (bad || R->reach <= 0 || R->reach > 4096) { bad = true; break; }
+			if (fread(&R->LE, sizeof R->LE, 1, f) != 1 || fread(&R->lum, sizeof R->lum, 1, f) != 1) { bad = true; break; }
+			const size_t OW = size_t(KIN + R->reach);
+			for (int s = 0; s < 2 && !bad; s++) {
+				vec(R->px[s], OW * H * 3); vec(R->mine[s], OW * H); vec(R->zone[s], size_t(H)); vec(R->edge[s], size_t(H) * 3);
+				// (base and slope: as made, empty or a colour a line)
+				const uint32_t nb = u32(); if (nb != 0 && nb != uint32_t(H) * 3) bad = true; else { R->base[s].resize(nb); if (nb && fread(R->base[s].data(), 4, nb, f) != nb) bad = true; }
+				const uint32_t ns = u32(); if (ns != 0 && ns != uint32_t(H) * 3) bad = true; else { R->slope[s].resize(ns); if (ns && fread(R->slope[s].data(), 4, ns, f) != ns) bad = true; }
+			}
+			vec(R->arena, size_t(H));
+			if (!bad && R->ok) got.push_back({ key, R });
+		}
+	}
+	fclose(f);
+	if (!bad) fill_kept = std::move(got);
+	if (getenv("VF3_WIDE_SELECT_LOG")) fprintf(stderr, "(wide select) %zu kept fills read from %s%s\n", fill_kept.size(), path.c_str(), bad ? " (not this version's: ignored)" : "");
+}
 
 // The fill's state: the screen it's for, its frames so far and how settled, the job making it, what it made
 struct FillJob { std::atomic<bool> done{ false }; FillResult res; };
@@ -485,6 +606,7 @@ struct FillState
 	// the frame the last such remake was asked for)
 	int moved = 0;
 	uint64_t moved_at = 0;
+	bool full = false;   // (the fill shown whole, faded in: no stand-in under it)
 	// (game frames, not pictures: at 144-240 a second with smooth motion a picture is a fraction of one)
 	uint64_t last_frame = UINT64_MAX, made_at = 0;   // (the last frame seen; the frame the fill showed first)
 	std::chrono::steady_clock::time_point made_when{};   // (and when: paused, the fade goes on by the clock)
@@ -507,15 +629,38 @@ inline bool fill(int key, const std::vector<uint32_t> &plate, const std::vector<
 	const bool new_frame = frame != st.last_frame;
 	if (new_frame) {   // (a new frame: the background as the game has it now)
 		st.last_frame = frame;
-		st.frames++;
+		if (lum > 30) st.frames++;   // (from the screen's fade in: a fill made from a half faded screen was grey, then dark)
 		st.settled = std::fabs(lum - st.last_lum) < std::max(1.0, lum * 0.01) ? st.settled + 1 : 0;
 		st.last_lum = lum;
 	}
+	if (!st.res && !st.job && lum > 4) {   // (a kept fill, if it fits: shown at once, no fade, from the screen's first frames)
+		for (const FillKept &k : fill_kept) {
+			// (the stage screen's two numbers, 19 as it comes in and 20, share theirs: the same panels)
+			const bool same = k.key == key || ((k.key == 19 || k.key == 20) && (key == 19 || key == 20));
+			if (!same || !k.res->ok || k.res->reach < reach) continue;
+			const double u = uneven(plate, *k.res);
+			if (u > KEPT_FITS) {
+				if (getenv("VF3_WIDE_SELECT_LOG") && frame % 10 == 0) fprintf(stderr, "(wide select) screen %d frame %llu: a kept fill doesn't fit (uneven %.1f)\n", key, (unsigned long long)frame, u);
+				continue;
+			}
+			st.res = k.res;
+			st.made_at = frame - std::min<uint64_t>(frame, 8);
+			st.made_when = std::chrono::steady_clock::now() - std::chrono::seconds(1);
+			if (getenv("VF3_WIDE_SELECT_LOG")) fprintf(stderr, "(wide select) screen %d frame %llu: a kept fill (uneven %.1f)\n", key, (unsigned long long)frame, u);
+			break;
+		}
+	}
 	if (st.job && st.job->done.load(std::memory_order_acquire)) {
+		const bool again = st.res != nullptr;   // (made again over one shown: in at once, not faded from black)
 		st.res = std::make_shared<FillResult>(std::move(st.job->res));
 		st.job.reset();
-		st.made_at = frame;
-		st.made_when = std::chrono::steady_clock::now();
+		st.made_at = again ? frame - std::min<uint64_t>(frame, 8) : frame;
+		st.made_when = std::chrono::steady_clock::now() - (again ? std::chrono::seconds(1) : std::chrono::seconds(0));
+		if (st.res->ok) {
+			fill_kept.insert(fill_kept.begin(), FillKept{ key, st.res });
+			if (fill_kept.size() > 8) fill_kept.pop_back();
+			save_kept();
+		}
 		if (getenv("VF3_WIDE_SELECT_LOG"))
 			fprintf(stderr, "(wide select) fill for screen %d: %.1f ms, %d candidates, %d patches%s\n", key, st.res->ms, st.res->candidates, st.res->patches, st.res->ok ? "" : " (no background to take it from)");
 	}
@@ -525,23 +670,7 @@ inline bool fill(int key, const std::vector<uint32_t> &plate, const std::vector<
 	// again once that's held 3 frames, at most once a second)
 	bool moved = false;
 	if (st.res && st.res->ok && !st.job) {
-		const FillResult &R = *st.res;
-		double worst = 0;
-		for (int s = 0; s < 2; s++) {
-			std::vector<int> mv(size_t(H) * 3, 0);
-			std::vector<uint8_t> has(H, 0);
-			long tot[3] = {}; int nt = 0;
-			for (int y = 0; y < H; y++) {
-				int e[3];
-				if (R.arena[size_t(y)] || !edge_mean(plate, s, y, R.zone[s][size_t(y)], e)) continue;
-				for (int c = 0; c < 3; c++) { mv[size_t(y) * 3 + c] = e[c] - R.edge[s][size_t(y) * 3 + c]; tot[c] += mv[size_t(y) * 3 + c]; }
-				has[size_t(y)] = 1; nt++;
-			}
-			if (nt < H / 4) continue;
-			double dev = 0;
-			for (int y = 0; y < H; y++) if (has[size_t(y)]) for (int c = 0; c < 3; c++) dev += std::abs(double(mv[size_t(y) * 3 + c]) - double(tot[c]) / nt);
-			worst = std::max(worst, dev / nt);
-		}
+		const double worst = uneven(plate, *st.res);
 		moved = worst > MOVED;
 		if (getenv("VF3_WIDE_SELECT_LOG") && frame % 30 == 0) fprintf(stderr, "(wide select) screen %d frame %llu edge moved unevenly %.1f\n", key, (unsigned long long)frame, worst);
 	}
@@ -567,6 +696,7 @@ inline bool fill(int key, const std::vector<uint32_t> &plate, const std::vector<
 			std::thread([j = st.job, p = plate, v = std::move(vis), kind, r] { j->res = synth(p, v, kind, r); j->done.store(true, std::memory_order_release); }).detach();
 		}
 	}
+	st.full = false;
 	if (!st.res || !st.res->ok) return false;
 	const FillResult &R = *st.res;
 	// (faded in over 8 frames once made, or as long by the clock: the game paused)
@@ -666,8 +796,8 @@ inline bool fill(int key, const std::vector<uint32_t> &plate, const std::vector<
 					const float g = g_of(std::min(d, dn)), le = lev[size_t(std::min(d, dn))];
 					for (int c = 0; c < 3; c++) c3[c] = (c3[c] - R.slope[s][size_t(y) * 3 + c] * le) * g;
 				}
-				if (in < 1) {   // (fading in: from what's there)
-					uint32_t was = 0;
+				if (in < 1) {   // (fading in: from what's there, the picture inside, the stand-in outside)
+					uint32_t was = out[size_t(y) * WW + size_t(s ? EXT + W - RCUT + d : EXT - 1 - d)];
 					if (d < 0) { const size_t k = size_t(y) * W + size_t(s ? W - RCUT + d : -1 - d); was = (above[k] >> 24) ? above[k] : below[k]; }
 					for (int c = 0; c < 3; c++) c3[c] = float(ch(was, c)) + (c3[c] - float(ch(was, c))) * in;
 				}
@@ -675,6 +805,7 @@ inline bool fill(int key, const std::vector<uint32_t> &plate, const std::vector<
 			}
 		}
 	}
+	st.full = in >= 1;
 	st.vig_age = st.vig_for != st.res.get() || st.vig_age >= 30 ? 0 : st.vig_age + 1;
 	st.vig_for = st.res.get();
 	return true;
