@@ -195,6 +195,12 @@ T(G_1V1, "1 gegen 1")
 T(G_3V3, "3 gegen 3")
 T(G_LOG, "Logdatei")
 T(G_LOG_HELP, "log.txt im Datenordner: was das Spiel getan hat, ein paar KB pro Sitzung, für Fehlerberichte (schick sie mit). Aus: nichts wird geschrieben. Ab dem nächsten Start.")
+T(UPD_OUT, "Version {v} ist da")
+T(UPD_GET, "Holen")
+T(UPD_OUT_HELP, "Öffnet ihre Seite auf GitHub im Browser, dort lädst du sie herunter. Das Spiel prüft nur, einmal am Tag; es lädt und installiert nie etwas.")
+T(UPD_TOAST, "Version {v} ist da. Im Menü: Holen.")
+T(G_UPDATES, "Nach Updates suchen")
+T(G_UPDATES_HELP, "Einmal am Tag beim Start fragt es GitHub, ob eine neuere Version da ist, und zeigt es im Menü. Lädt und installiert nie etwas. Aus: gar keine Anfrage.")
 
 // ---- Arcade settings ----
 T(P_ARCADE, "Automat: eine Änderung startet das Spiel beim Schließen des Menüs neu")

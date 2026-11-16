@@ -108,6 +108,9 @@
 //                        WxH+X+Y@n: and moved to X, Y
 //   VF3_TEST_WINDOW_LOG=1 the window's pixels, Window size and the picture's place every 20 passes
 //   VF3_ROMS=folder      the player's ROM folder (as --roms)
+//   VF3_UPDATE_URL=u     the update check (update_check.h) asks u, not GitHub's API: http(s)://..., or file://... or a
+//                        path (a JSON file, read as a 200 answer). Still once a day (settings.ini's update_checked); a
+//                        test (VF3_HIDDEN, VF3_QUIT_AFTER) checks only with it set
 //   VF3_3D=cpu|gpu|auto  the 3D renderer for this run (as Display > 3D renderer)
 //   VF3_GPU3D_NO_PROBE=1 no start-up probe of Direct3D 12 (a quad drawn and read back) before the GPU's check
 //   VF3_GPU3D_PROBE_ANY=1 the probe on any driver, not only Direct3D 12
@@ -148,6 +151,7 @@
 //                        to build/host_freecam_name.png), log@F (the game camera, the models' place, the sky's map), trace@F (each frame's camera and backdrop place), quit@F; F a game frame, counted on by the passes while the
 //                        game is stopped (paused), so a paused game's camera can be flown and shot
 #include "version.h"      // VF3_VERSION, VF3_DATE (made by the Makefile from git)
+#include "update_check.h"
 #include "online.h"
 #include "links.h"
 #include "text.h"
@@ -724,6 +728,12 @@ struct settings
 	bool window_max = false;
 	player_controls ctl[2] = { player_controls::defaults(0), player_controls::defaults(1) };
 	std::vector<std::string> pad_mappings;   // pad_mapping lines: SDL mappings made in Controls > Set up buttons (one a pad)
+	// Game > Check for updates (update_check.h): at the start, once a day; update_checked the last time asked (Unix
+	// seconds), update_tag and update_url the newer release it found (kept till a check finds this build up to date:
+	// the menu's line on the days not asked), update_seen the one its note was shown for (once)
+	bool update_check = true;
+	int64_t update_checked = 0;
+	std::string update_tag, update_url, update_seen;
 
 	void load(const std::string &path)
 	{
@@ -812,6 +822,15 @@ struct settings
 		if (window_w < 64 || window_h < 48) window_w = window_h = 0;
 		flag("team_battle_1v1", tb_one);
 		flag("log", log);
+		flag("update_check", update_check);
+		if (auto it = kv.find("update_checked"); it != kv.end()) update_checked = std::max<int64_t>(0, strtoll(it->second.c_str(), nullptr, 10));
+		{
+			update_check::version v;
+			auto tag = kv.find("update_tag"), url = kv.find("update_url"), seen = kv.find("update_seen");
+			if (tag != kv.end() && url != kv.end() && update_check::parse(tag->second, v) && update_check::page_ok(url->second))
+				update_tag = tag->second, update_url = url->second;
+			if (seen != kv.end() && update_check::parse(seen->second, v)) update_seen = seen->second;
+		}
 		if (auto it = kv.find("language"); it != kv.end()) {   // (one this build doesn't know: auto)
 			tr::choice c;
 			language = tr::choice_from(it->second, c) ? it->second : "auto";
@@ -879,6 +898,9 @@ struct settings
 		if (debug_mode) fprintf(f, "cheat_debug_mode = 1\n");
 		fprintf(f, "team_battle_1v1 = %d\n", int(tb_one));
 		if (!log) fprintf(f, "log = 0\n");
+		fprintf(f, "update_check = %d\nupdate_checked = %lld\n", int(update_check), (long long)update_checked);
+		if (!update_tag.empty()) fprintf(f, "update_tag = %s\nupdate_url = %s\n", update_tag.c_str(), update_url.c_str());
+		if (!update_seen.empty()) fprintf(f, "update_seen = %s\n", update_seen.c_str());
 		fprintf(f, "language = %s\n", language.c_str());
 		if (fs_window) fprintf(f, "fullscreen_window = 1\n");
 		if (fs_exclusive) fprintf(f, "fullscreen_exclusive = 1\n");
@@ -1861,6 +1883,28 @@ int main(int argc, char **argv)
 		fprintf(stderr, "the menus' language: %s (Game > Language: %s)\n", tr::code(tr::current()), cfg.language.c_str());
 	}
 	if (cfg.upgraded && !getenv("VF3_QUIT_AFTER") && !cfg.save(settings_path)) cfg_dirty = true;   // (not written: tried again later)
+	// Version X is out (update_check.h): GitHub asked on a thread of its own, at most once a day; the answer taken in
+	// the loop below. Only asks: never downloads or installs anything
+	update_check::checker updates;
+	const uint64_t started_ms = SDL_GetTicks();
+	if (update_check::AVAILABLE) {
+		const char *test_url = getenv("VF3_UPDATE_URL");
+		const int64_t now = int64_t(time(nullptr));
+		update_check::version mine;
+		if (!cfg.update_check) fprintf(stderr, "updates: not checked (Game > Check for updates is Off)\n");
+		else if ((getenv("VF3_HIDDEN") || getenv("VF3_QUIT_AFTER")) && !test_url) {}   // (tests ask nothing, unless pointed somewhere)
+		else if (!update_check::due(cfg.update_checked, now))
+			fprintf(stderr, "updates: checked less than a day ago%s\n", cfg.update_tag.empty() ? "" : (" (" + cfg.update_tag + " was out)").c_str());
+		else if (!test_url && !update_check::parse(VF3_VERSION, mine))
+			fprintf(stderr, "updates: not checked: this build (%s) isn't a release\n", VF3_VERSION);
+		else {
+			const std::string url = test_url ? test_url : "https://api.github.com/repos/mr-finster/vf3-recomp/releases/latest";
+			cfg.update_checked = now;
+			cfg_dirty = true;
+			updates.start(url, std::string("VF3Recomp/") + VF3_VERSION + " (update check)", VF3_VERSION);
+			fprintf(stderr, "updates: asking %s\n", test_url ? "the test's address" : "GitHub");
+		}
+	}
 	if (arg_scale) cfg.scale = arg_scale;
 	if (arg_aspect >= 0) cfg.aspect = arg_aspect;
 	if (arg_full >= 0) cfg.fullscreen = arg_full;
@@ -3900,6 +3944,10 @@ int main(int argc, char **argv)
 				[&](int) { tb_mode_flip(); }, [&] { tb_mode_flip(); } });
 		p.items.push_back({ tr::G_LOG, tr::G_LOG_HELP,
 			[&] { return on_off(cfg.log); }, [&](int) { cfg.log = !cfg.log; cfg_dirty = true; }, [&] { cfg.log = !cfg.log; cfg_dirty = true; } });
+		if (update_check::AVAILABLE) {   // (Off: no request at all; the main page's line gone at once, the pages made again as a language change's)
+			auto flip = [&] { cfg.update_check = !cfg.update_check; cfg_dirty = true; if (menus_relabelled) menus_relabelled(); };
+			p.items.push_back({ tr::G_UPDATES, tr::G_UPDATES_HELP, [&] { return on_off(cfg.update_check); }, [flip](int) { flip(); }, flip });
+		}
 		p.items.push_back(back_item());
 		return p;
 	};
@@ -4378,6 +4426,11 @@ int main(int argc, char **argv)
 		});
 	};
 	auto online_row = [&] { return board.profile->settings.at ? 5 : 4; };   // (the main page's Online row: Arcade settings before it when known)
+	// a newer release out, to be said: the check on, nothing online going on (never in or around a match)
+	auto update_out = [&] {
+		return update_check::AVAILABLE && cfg.update_check && update_check::newer(cfg.update_tag, VF3_VERSION) && update_check::page_ok(cfg.update_url) &&
+		       online.phase() == Online::Phase::off && !online.in_room2() && !nvram_away;
+	};
 	auto main_page = [&] {
 		menu_page p{ "", "", {} };
 		if (online.playing() || nvram_away) {   // (the match goes on under the menu; or it's starting, on its board)
@@ -4402,6 +4455,15 @@ int main(int argc, char **argv)
 		p.items.push_back({ tr::P_CONTROLS, tr::M_CONTROLS_HELP, {}, {}, [&] { menu.push(controls_page()); } });
 		if (board.profile->dural)   // (issue #12; after Online and Controls, as VF1's and VF2's main page: online_row's place kept)
 			p.items.push_back({ tr::P_CHEATS, cfg.dural ? tr::M_CHEATS_ON_HELP : tr::M_CHEATS_HELP, {}, {}, [&] { menu.push(cheats_page()); } });
+		if (update_out()) {   // (Version X is out: Get it opens the release's page; selected the first time it's seen)
+			const std::string url = cfg.update_url;
+			p.items.push_back({ tr::fill(tr::UPD_OUT, { { "v", update_check::shown(cfg.update_tag) } }), tr::UPD_OUT_HELP, [] { return std::string(tr::UPD_GET); }, {},
+				[url] {
+					if (SDL_OpenURL(url.c_str())) fprintf(stderr, "updates: opened %s\n", url.c_str());
+					else fprintf(stderr, "updates: couldn't open %s: %s\n", url.c_str(), SDL_GetError());
+				} });
+			if (cfg.update_seen != cfg.update_tag) { p.start = int(p.items.size()) - 1; cfg.update_seen = cfg.update_tag; cfg_dirty = true; }
+		}
 		p.items.push_back({ tr::M_QUIT, tr::M_QUIT_HELP, {}, {}, [&] { running = false; } });
 		return p;
 	};
@@ -6110,6 +6172,20 @@ int main(int argc, char **argv)
 			pace = {};
 			pace.t0 = SDL_GetTicksNS();
 			between_n = cut_n = 0;
+		}
+		// the update check's answer (update_check.h), logged: a newer release kept for the main page's line; a check
+		// that finds this build up to date forgets an older find. Its note said once, at the start (over the boot or the
+		// attract, never a match), else the main page's line is selected the first time it's seen
+		if (update_check::result u; updates.take(u)) {
+			fprintf(stderr, "updates: %s\n", u.why.c_str());
+			if (u.is == update_check::result::what::newer) { cfg.update_tag = u.tag; cfg.update_url = u.url; cfg_dirty = true; }
+			else if (u.is == update_check::result::what::none && !cfg.update_tag.empty()) { cfg.update_tag.clear(); cfg.update_url.clear(); cfg_dirty = true; }
+		}
+		if (cfg.update_seen != cfg.update_tag && SDL_GetTicks() - started_ms < 30000 && !menu.is_open() && !menu.toast_showing() && update_out()) {
+			menu.toast(tr::fill(tr::UPD_TOAST, { { "v", update_check::shown(cfg.update_tag) } }), 6);
+			fprintf(stderr, "updates: the note said (%s is out)\n", cfg.update_tag.c_str());
+			cfg.update_seen = cfg.update_tag;
+			cfg_dirty = true;
 		}
 		// the settings (a hotkey's change: Steam can end the game without a quit) saved every 3 s when changed, and the
 		// NVRAM (the game writes its rankings and settings as it goes: the arcade's bookkeeping changes it all through

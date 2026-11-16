@@ -147,6 +147,11 @@ $(BIN)/langtest: $(call objs,src/host/i18n.cpp src/host/text.cpp tools/langtest.
 	$(CXX) $(CXXFLAGS) $^ -o $@ $(SDL_LIBS) $(FT_LIBS)
 $(OBJ)/tools/langtest.o: CXXFLAGS += $(FT_CFLAGS)
 
+# updatetest: the update check's versions compared and GitHub's answers read (src/host/update_check.h); no network
+$(BIN)/updatetest: $(call objs,tools/updatetest.cpp)
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDLIBS) -lpthread
+
 $(BIN)/vf3: $(call objs,$(CORE) $(HOST) $(RML_SRC)) $(SLJIT_OBJ)
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) $^ -o $@ $(SDL_LIBS) $(FT_LIBS) $(LDLIBS) -lpthread
@@ -154,11 +159,12 @@ $(BIN)/vf3: $(call objs,$(CORE) $(HOST) $(RML_SRC)) $(SLJIT_OBJ)
 clean:
 	rm -rf build
 
-# The menus' tests, always from this tree's sources: langtest (the strings' tables and fonts) and menutest (every page
-# drawn and checked, English; tools/langcheck.py for every language). The default make builds neither, and a menutest
-# built before a change passes for a tree it isn't: run them through here
-test: $(BIN)/langtest $(BIN)/menutest
+# The tests, always from this tree's sources: langtest (the strings' tables and fonts), menutest (every page drawn and
+# checked, English; tools/langcheck.py for every language) and updatetest (the update check's versions and answers).
+# The default make builds none, and a menutest built before a change passes for a tree it isn't: run them through here
+test: $(BIN)/langtest $(BIN)/menutest $(BIN)/updatetest
 	$(BIN)/langtest
+	$(BIN)/updatetest
 	mkdir -p build/menutest
 	SDL_VIDEO_DRIVER=offscreen SDL_RENDER_DRIVER=software SDL_AUDIO_DRIVER=dummy $(BIN)/menutest build/menutest
 

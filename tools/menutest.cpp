@@ -205,7 +205,7 @@ void text(const char *t)
 // The settings pages (main.cpp's: they need the game to be made, so here their rows as they are there, by the same
 // strings, each with its longest value): each page drawn, each row selected (its help under the rows), and every
 // line checked against its box. One picture a page: pages_<name>.png, its longest help showing.
-struct row { tr::text label; std::string help, value; };
+struct row { std::string label, help, value; };
 void page_shots(game_menu &gm, int w, int h, const char *file, tr::text title, const std::vector<row> &rows, const std::string &note = "")
 {
 	const bool top = title.id == tr::M_RESUME.id;   // (the main page: the menu's first, no name over its rows)
@@ -245,7 +245,9 @@ void pages(game_menu &gm, int w, int h)
 	page_shots(gm, w, h, "pages_main.png", M_RESUME, {   // (the main page: its rows' helps)
 		{ M_RESUME, M_RESUME_HELP, "" }, { P_DISPLAY, M_DISPLAY_HELP, "" }, { P_SOUND, M_SOUND_HELP, "" }, { P_GAME, M_GAME_HELP, "" },
 		{ M_ARCADE, M_ARCADE_HELP, "" }, { P_ONLINE, F(M_ONLINE_NOT_READY, { { "game", "Virtua Fighter 3 Team Battle" } }), "" },
-		{ P_CONTROLS, M_CONTROLS_MATCH_HELP, "" }, { P_CHEATS, M_CHEATS_ON_HELP, "" }, { M_QUIT, M_QUIT_HELP, "" } });
+		{ P_CONTROLS, M_CONTROLS_MATCH_HELP, "" }, { P_CHEATS, M_CHEATS_ON_HELP, "" },
+		{ F(UPD_OUT, { { "v", "0.1.23-alpha" } }), UPD_OUT_HELP, UPD_GET },   // (a newer release out: update_check.h)
+		{ M_QUIT, M_QUIT_HELP, "" } });
 	// Display: its three pages' rows, each with what it's set to, and the free camera's; then each page (as main.cpp's
 	// display_page, picture_page, quality_page and screen_page)
 	auto listed = [&](std::initializer_list<std::string> parts) {
@@ -298,7 +300,7 @@ void pages(game_menu &gm, int w, int h)
 		{ G_LANGUAGE, G_LANGUAGE_HELP, F(LANG_AUTO_IS, { { "lang", info(tr::current() == lang::en || tr::current() == lang::pseudo ? lang::pt_br : tr::current()).name } }) },
 		{ G_PLAY_STYLE, G_PLAY_STYLE_HELP, G_ARCADE }, { G_RESET, G_RESET_HELP, "" },
 		{ G_VERSION, G_VERSION_HELP, "Virtua Fighter 3" }, { G_ADD_TB, G_ADD_TB_HELP, G_CHOOSING },
-		{ G_TB_MODE, G_TB_MODE_HELP, G_3V3 }, { G_LOG, G_LOG_HELP, on } });
+		{ G_TB_MODE, G_TB_MODE_HELP, G_3V3 }, { G_LOG, G_LOG_HELP, on }, { G_UPDATES, G_UPDATES_HELP, on } });
 	{   // (Game > Language: each of its choices, its name in its own letters)
 		std::vector<row> v;
 		for (int i = 0; i < CHOICES; i++) v.push_back({ G_LANGUAGE, G_LANGUAGE_HELP, choice_name(tr::choice{ i }) });
@@ -372,7 +374,8 @@ void pages(game_menu &gm, int w, int h)
 	// the toasts (bottom right): each of the longest
 	for (const std::string &t : { fill(CPU_NOTICE_CUT, { { "why", CPU_WHY_NO_DRIVER }, { "todo", CPU_TODO_OTHER_DRIVER } }), std::string(SETUP_HELD),
 	                              fill(DURAL_STAGE_WAIT, { { "n", "12" } }), std::string(DURAL_STAGE_NOT_NOW), fill(SETUP_DONE_BOTH, { { "player", "1" }, { "other", "2" } }),
-	                              std::string(CTL_RESET_FORGOTTEN), std::string(SETUP_STEAM), std::string(LINK_IS_TEAM_BATTLE) }) {
+	                              std::string(CTL_RESET_FORGOTTEN), std::string(SETUP_STEAM), std::string(LINK_IS_TEAM_BATTLE),
+	                              fill(UPD_TOAST, { { "v", "0.1.23-alpha" } }) }) {
 		gm.toast(t);
 		shot("", w, h);
 		for (const std::string &o : gm.overflow()) overflows.push_back("a toast: " + o);

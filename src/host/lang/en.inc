@@ -200,6 +200,12 @@ T(G_1V1, "1 vs 1")
 T(G_3V3, "3 vs 3")
 T(G_LOG, "Log file")
 T(G_LOG_HELP, "log.txt in the data folder: what the game did, a few kilobytes a session, kept for bug reports (send it with one). Off, nothing's written. From the next start.")
+T(UPD_OUT, "Version {v} is out")   // the main page's line, a newer release out (src/host/update_check.h): {v} its version, 0.1.23-alpha
+T(UPD_GET, "Get it")   // (its value: Enter opens the release's page in the browser)
+T(UPD_OUT_HELP, "Opens its page on GitHub in your browser, where you download it. The game only checks, once a day; it never downloads or installs anything.")
+T(UPD_TOAST, "Version {v} is out. Get it from the menu.")   // (a note once, over the game, at the start)
+T(G_UPDATES, "Check for updates")   // Game > Check for updates: On / Off
+T(G_UPDATES_HELP, "Once a day at the start, asks GitHub whether a newer version is out and says so in the menu. It never downloads or installs anything. Off: no request at all.")
 
 // ---- Arcade settings (the arcade's own test menu's) ----
 T(P_ARCADE, "Arcade settings: a change restarts the game when the menu closes")   // (the page's name: one line over its rows)

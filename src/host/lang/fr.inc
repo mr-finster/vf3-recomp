@@ -195,6 +195,12 @@ T(G_1V1, "1 contre 1")
 T(G_3V3, "3 contre 3")
 T(G_LOG, "Fichier journal")
 T(G_LOG_HELP, "log.txt dans le dossier de données\xC2\xA0: ce que le jeu a fait, quelques Ko par session, gardé pour les rapports de bug (envoie-le avec un rapport). Non\xC2\xA0: rien n'est écrit. Au prochain démarrage.")
+T(UPD_OUT, "La version {v} est sortie")
+T(UPD_GET, "L'obtenir")
+T(UPD_OUT_HELP, "Ouvre sa page GitHub dans ton navigateur, où tu la télécharges. Le jeu ne fait que vérifier, une fois par jour\xC2\xA0; il ne télécharge ni n'installe jamais rien.")
+T(UPD_TOAST, "La version {v} est sortie. Récupère-la depuis le menu.")
+T(G_UPDATES, "Vérifier les mises à jour")
+T(G_UPDATES_HELP, "Une fois par jour au démarrage, demande à GitHub si une version plus récente est sortie et l'indique dans le menu. Ne télécharge ni n'installe jamais rien. Non\xC2\xA0: aucune requête.")
 
 // ---- Arcade settings ----
 T(P_ARCADE, "Réglages arcade\xC2\xA0: un changement relance le jeu à la fermeture du menu")

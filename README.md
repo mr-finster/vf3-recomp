@@ -197,7 +197,7 @@ game's own camera), with the game's plain colour above and below it.
   `fullscreen_exclusive = 1` in settings.ini. A Mac (its green button too), Linux and the Steam Deck keep the system's
   own fullscreen (`fullscreen_window = 1` gives them the borderless window).
 - **Sound:** volume, and the music's and the effects' own volumes.
-- **Game:** play style (PC: no boot screen, always free play; Arcade: the boot, coins and credits, its coin settings kept for it), reset, and **Version**: Virtua Fighter 3 or Team Battle (it asks first: the game restarts), or **Add Team Battle** while it has only one.
+- **Game:** play style (PC: no boot screen, always free play; Arcade: the boot, coins and credits, its coin settings kept for it), reset, and **Version**: Virtua Fighter 3 or Team Battle (it asks first: the game restarts), or **Add Team Battle** while it has only one, and **Check for updates** (On by default: once a day at the start the game asks GitHub whether a newer release is out; if one is, the menu says "Version X is out" with **Get it**, which opens its release page in your browser. It only checks and tells, never downloads or installs anything; Off makes no request at all).
 - **Arcade settings:** difficulty, rounds to win, energy, stage select between two players, demo sound, country, and
   the arcade's own service menu (its other settings, sound test, bookkeeping). A change restarts the game. Online
   matches are always first to 3, whatever the rounds to win (vs player) here.
