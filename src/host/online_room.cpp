@@ -202,7 +202,7 @@ void Online::room2_state(const Value &st)
 	m.match_holder = mt.kind == Value::object ? online_menu::clean_name(mt["holder"].str()) : "";
 	m.side = you["side"].str();
 	m.misses = num(you["misses"], 0, 9);
-	const bool was_ready = m.me_ready;
+	const bool was_ready = m.me_ready && m.have_state;   // (the first state, entering or back after a crash: AWAY as it was, not set by the lobby now)
 	m.me_ready = !(you["ready"].kind == Value::boolean && !you["ready"].b);
 	const Value &seat = you["seat"];
 	m.seated = seat.kind == Value::object && !seat["token"].str().empty();
