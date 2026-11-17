@@ -361,9 +361,10 @@ void Online::room2_poll()
 			std::swap(room, m.link);
 			const OnlineSettings &w = started_with;
 			std::string extra = ",\"caps\":[]";
-			if (m.creating)
+			if (m.creating) {
 				extra += std::string(",\"listed\":") + (w.room_who >= 1 ? "true" : "false") + (w.room_name.empty() ? "" : ",\"room\":" + quote(w.room_name));
-			else {
+				if (!release.empty()) extra += ",\"build\":" + quote(release);   // (an older build given this room's code is told "The host has <it>")
+			} else {
 				extra += ",\"code\":" + quote(m.code);
 				// (a membership from before, this room's: a crash or a restart, its place taken back if it's still there)
 				if (!r2_file.empty())

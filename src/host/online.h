@@ -82,6 +82,8 @@ public:
 	~Online();
 	vf3net::Adapter adapter;      // (its run, settle and program_changed set by main)
 	vfnet::Identity identity;     // the game, build and ROM hash (main's); the name from the settings
+	std::string release;          // this build's own version (the release's tag, a beta's v1.9.0-beta1): told the lobby with a Rooms 2 room it
+	                              // creates, so an older build given that room's code is told which version it needs (main's)
 	// This side's own settings for a match (main's, with identity): Dural on the select, the stage select, Team Battle;
 	// what it tells the lobby besides its own version (vf3_netplay.h's HOST_TERMS_FLAG): the pool, and the flags it
 	// can play another's way. A match plays the lobby's terms (use_terms), by address its own.

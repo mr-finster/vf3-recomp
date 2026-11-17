@@ -4403,6 +4403,7 @@ int main(int argc, char **argv)
 		const bool dural = cfg.dural && board.profile->dural;
 		const bool one = board.profile == &m3::VF3_TB && cfg.tb_one;
 		const bool stage = cfg.online.stage_select;
+		online.release = VF3_VERSION;
 		online.identity = { board.profile->set, vf3net::online_version(VF3_VERSION) + (dural ? vf3net::DURAL_FLAG : "") + (one ? "+1v1" : "") + (stage ? "+stage" : ""), vf3net::content_hash(board), "" };   // (the online version, not the release's)
 		online.own_dural = online.adapter.dural = dural;
 		online.own_stage = online.adapter.stage_select_on = stage;
