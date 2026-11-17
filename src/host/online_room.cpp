@@ -43,6 +43,27 @@ double wall_ms() { return double(std::chrono::duration_cast<std::chrono::millise
 
 } // namespace
 
+// The room page's line: the rows shown of a line of n, this player at pos (1.., else none), at most rows of them: each
+// an index into the line, or -k for a row that says "... k more". All of a line that fits; past that the first ones
+// and this player's own row, "... k more" between and after (a row that would only say 1 more: that one shown instead)
+std::vector<int> room2_line_rows(int n, int pos, int rows)
+{
+	std::vector<int> v;
+	if (n <= rows) { for (int i = 0; i < n; i++) v.push_back(i); return v; }
+	if (pos <= 0 || pos <= rows - 1) {   // (this player among the first: those, then the rest as a count)
+		for (int i = 0; i < rows - 1; i++) v.push_back(i);
+		v.push_back(-(n - (rows - 1)));
+		return v;
+	}
+	const int after = n - pos, top = rows - 2 - (after > 0 ? 1 : 0);   // (after this player's row: the last one, or a count)
+	for (int i = 0; i < top; i++) v.push_back(i);
+	v.push_back(-(pos - 1 - top));
+	v.push_back(pos - 1);
+	if (after == 1) v.push_back(n - 1);
+	else if (after > 1) v.push_back(-after);
+	return v;
+}
+
 std::string room2_streak_text(int n)
 {
 	if (n <= 0) return "";
@@ -630,6 +651,13 @@ int Online::room2_banner(std::string &name) const
 	return r2->banner;
 }
 
+// The room's next match come on screen (watched: its versus screen): "YOU LOST: NEXT IS ..." said over the match lost
+// and back in the line, not left over the next one
+void Online::room2_next_on()
+{
+	if (r2 && r2->banner == 1) r2->banner = 0;
+}
+
 // The streak shown over the match on screen: the one its match began with (table.match), taken while the table's two are
 // the two on screen; a watcher still on the last match (the lobby on to the next pair) keeps that match's
 void Online::room2_shown()
@@ -718,5 +746,12 @@ void Online::set_room2_test(const std::string &state_json, const std::string &c)
 	r2->mid = "test";
 	r2->want_watch = false;
 	r2->owner_key = v["room"]["owner"].kind == Value::boolean && v["room"]["owner"].b ? std::string(32, '0') : "";
+	if (v["entering"].kind == Value::boolean && v["entering"].b) {   // (the lobby not answered yet: Entering the room...)
+		r2->mid.clear();
+		r2->have_state = false;
+		r2->room_name = v["room"]["name"].str();
+		r2->version++;
+		return;
+	}
 	room2_state(v);
 }

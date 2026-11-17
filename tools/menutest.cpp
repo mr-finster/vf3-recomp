@@ -459,6 +459,12 @@ int main(int argc, char **argv)
 	int fails = 0;
 	auto check = [&](bool ok, const char *what) { if (!ok) { fprintf(stderr, "menutest: FAIL %s\n", what); fails++; } else printf("ok   %s\n", what); };
 	auto top = [&] { return gm.top_name(); };
+	// (a picture's words not drawn over each other: the page's, the note's, a banner's, the versus screen's)
+	auto room2_clear = [&](const char *name) {
+		const std::vector<std::string> c = gm.clashes();
+		for (const std::string &x : c) check(false, (std::string(name) + ": " + x).c_str());
+		if (c.empty()) printf("ok   %s: no words over others\n", name);
+	};
 	auto poll_for = [&](double ms, std::function<bool()> until) {   // (the Online's work, in real time)
 		const uint64_t t0 = SDL_GetTicks();
 		while (SDL_GetTicks() - t0 < ms && !until()) { o.poll(double(SDL_GetTicks())); SDL_Delay(10); }
@@ -1328,6 +1334,32 @@ int main(int argc, char **argv)
 	for (int i = 0; i < 20; i++) { shot("", w, h); SDL_Delay(20); }
 	shot("versus_long.png", w, h);
 	for (int i = 0; i < 20; i++) { shot("", w, h); SDL_Delay(200); }   // (gone after its 3.5 s)
+	{   // a note as a match starts (a Rooms 2 room's "This match: ...", the room's banner HERE COMES A NEW CHALLENGER): held
+		// back while the versus screen is up, its words not over "Connected directly / Both press Start"; then over the game
+		gm.show_versus({ tr::VS_PLAYER_1_HOST, "MRFINSTER", tr::VS_PLAYER_2, "AKIRAFAN", tr::fill(tr::VS_DIRECT_MS, { { "ms", "19" } }), tr::VS_BOTH_PRESS_START, false, "AU", "JP" });
+		gm.set_banner(tr::ROOM2_NEW_CHALLENGER, "AKIRAFAN");
+		gm.toast(tr::line(tr::THIS_MATCH, { { "terms", tr::line(tr::TERMS_2, { { "a", tr::line(tr::TERM_STAGE_ON) }, { "b", tr::line(tr::TERM_DURAL_OLD_BOTH) } }) } }).str(), 6);
+		for (int i = 0; i < 20; i++) { shot("", w, h); SDL_Delay(20); }
+		shot("versus_note.png", w, h);
+		room2_clear("versus_note.png");
+		check(gm.toast_showing(), "a note while the versus screen is up: held, not gone");
+		for (int i = 0; i < 20 && gm.versus_showing(); i++) { shot("", w, h); SDL_Delay(200); }
+		gm.set_banner("");
+		for (int i = 0; i < 3; i++) { shot("", w, h); SDL_Delay(20); }
+		shot("versus_note_after.png", w, h);
+		room2_clear("versus_note_after.png");
+		check(gm.toast_showing() && !gm.versus_showing(), "the note after the versus screen: over the game, its time from then");
+		// a notice's card up (Match over, a watched match between two) with a room's banner (GET READY) and a note: the
+		// banner under the card, the note held
+		gm.set_notice(tr::MATCH_OVER, tr::fill(tr::BANNER_WAITING_FOR, { { "name", "WWWWWWWWWW" } }));
+		gm.set_banner(tr::fill(tr::ROOM2_GET_READY_N, { { "n", "3" } }), tr::fill(tr::ROOM2_YOU_PLAY, { { "name", "WWWWWWWWWW" } }) + "   " + tr::fill(tr::ROOM2_NOT_NOW, { { "key", "Esc" } }));
+		for (int i = 0; i < 3; i++) { shot("", w, h); SDL_Delay(20); }
+		shot("notice_banner_note.png", w, h);
+		room2_clear("notice_banner_note.png");
+		gm.set_notice("");
+		gm.set_banner("");
+		gm.toast("");
+	}
 	gm.set_banner(tr::BANNER_PRESS, "", "OPTIONS");
 	shot("press_start.png", w, h);
 	gm.set_banner(tr::fill(tr::BANNER_WAITING_FOR, { { "name", "AKIRAFAN" } }), tr::BANNER_TO_PRESS_START);
@@ -1423,6 +1455,100 @@ int main(int argc, char **argv)
 		o.set_room2_test(R"({"code":"KXQ4M7","room":{"name":"","listed":false,"locked":false,"ready_ms":15000,"owner":true},"table":{"a":{"name":"MRFINSTER","country":"GB"},"b":null,"phase":"SOLO","streak":0,"holder":"a","n":0,"last":null},"line":[],"you":{"mid":"x","pos":0,"side":"a","misses":0},"ready":null,"watch":"KXQ4M7"})");
 		again();
 		shot("room2_alone.png", w, h);
+		room2_clear("room2_alone.png");
+		{   // the line as one long column: which rows a line shows (all that fit; past that the first ones, "... n more",
+			// this player's own row and a count after it)
+			auto rows = [](int n, int pos) { std::string t; for (int i : room2_line_rows(n, pos, ROOM2_LINE_ROWS)) t += (t.empty() ? "" : ",") + std::to_string(i < 0 ? i : i + 1); return t; };
+			check(rows(2, 1) == "1,2" && rows(15, 15) == "1,2,3,4,5,6,7,8,9,10,11,12,13,14,15", "Rooms 2's line: all of a line that fits");
+			check(rows(32, 0) == "1,2,3,4,5,6,7,8,9,10,11,12,13,14,-18", ("Rooms 2's line: 32, at the table: the first 14, 18 more (" + rows(32, 0) + ")").c_str());
+			check(rows(20, 3) == "1,2,3,4,5,6,7,8,9,10,11,12,13,14,-6", ("Rooms 2's line: 3rd of 20: the first 14 (" + rows(20, 3) + ")").c_str());
+			check(rows(20, 17) == "1,2,3,4,5,6,7,8,9,10,11,12,-4,17,-3", ("Rooms 2's line: 17th of 20: the first 12, 4 more, this player's, 3 more (" + rows(20, 17) + ")").c_str());
+			check(rows(32, 32) == "1,2,3,4,5,6,7,8,9,10,11,12,13,-18,32", ("Rooms 2's line: last of 32 (" + rows(32, 32) + ")").c_str());
+			check(rows(20, 19) == "1,2,3,4,5,6,7,8,9,10,11,12,-6,19,20", ("Rooms 2's line: 19th of 20: the last shown, not \"1 more\" (" + rows(20, 19) + ")").c_str());
+			for (int n = 1; n <= 32; n++)
+				for (int pos = 0; pos <= n; pos++) {
+					const std::vector<int> v = room2_line_rows(n, pos, ROOM2_LINE_ROWS);
+					int seen = 0;
+					bool mine = pos == 0, fits = int(v.size()) <= ROOM2_LINE_ROWS;
+					for (int i : v) { seen += i < 0 ? -i : 1; mine = mine || i == pos - 1; fits = fits && i != -1; }
+					if (seen != n || !mine || !fits) { check(false, ("Rooms 2's line: " + std::to_string(n) + ", at " + std::to_string(pos) + ": " + rows(n, pos)).c_str()); n = 99; break; }
+				}
+			check(true, "Rooms 2's line: every length to 32, every place: each one shown or counted, this player's row shown, no \"1 more\"");
+			// the pages: a long line (20, READY and AWAY mixed, this player 17th, below what fits), the longest the lobby
+			// has (32, this player at the table, the creator), a short one (1, 2), a watcher with others watching
+			const char *names[] = { "SEOULKICK", "DENVERDAN", "PAIPAI", "JACKYB", "WWWWWWWWWW", "SARAHB", "KAGEMARU", "LIONR", "WOLFH", "JEFFRY", "SHUNDI", "LAUCHAN",
+			                        "AOI", "TAKAKI", "VANESSA", "BRADBURN", "MRFINSTER", "GOH", "LEIFEI", "ELBLAZE", "JANET", "TAKAYUKI", "ROOKIE", "AKIRA2", "KUMACHAN",
+			                        "DURALFAN", "SIBA", "KAGE2", "PAI2", "LAU2", "OHSUMI", "LASTONE" };
+			const char *countries[] = { "KR", "US", "HK", "FR", "AU", "GB", "JP", "DE", "CA", "", "CN", "TW", "JP", "JP", "BR", "US", "GB", "JP", "CN", "ES", "US", "JP",
+			                            "IT", "PL", "JP", "RU", "TR", "JP", "HK", "CN", "JP", "NZ" };
+			auto line = [&](int n, int me, const std::string &you) {
+				std::string l = "\"line\":[";
+				for (int i = 0; i < n; i++) {
+					const std::string nm = i + 1 == me ? "MRFINSTER" : names[i] == std::string("MRFINSTER") ? "TEKKEN" : names[i];
+					l += std::string(i ? "," : "") + "{\"name\":\"" + nm + "\",\"country\":\"" + countries[i] + "\",\"ready\":" + ((i + 1 == me ? you.find("\"ready\":false") != std::string::npos : i % 4 == 1 || i % 7 == 5) ? "false" : "true") + "}";
+				}
+				return l + "]," + you;
+			};
+			const std::string room = R"({"code":"KXQ4M7","room":{"name":"FRIDAY FIGHTS","listed":true,"locked":false,"ready_ms":15000,"owner":false},)";
+			o.set_room2_test(room + table + "," + line(20, 17, R"("you":{"mid":"x","pos":17,"ready":true},"watchers":4,"ready":null,"watch":"KXQ4M7"})"));
+			again();
+			check(o.room2()->line.size() == 20 && o.room2()->pos == 17, "Rooms 2: a long line, this player 17th of 20");
+			settle_check("room2_line_long.png", w, h);
+			shot("room2_line_long.png", w, h);
+			room2_clear("room2_line_long.png");
+			o.set_room2_test(R"({"code":"KXQ4M7","room":{"name":"WWWWWWWWWWWWWWWW","listed":true,"locked":false,"ready_ms":15000,"owner":true},"table":{"a":{"name":"MRFINSTER","country":"GB"},"b":{"name":"WWWWWWWWWW","country":"AU"},"phase":"PLAYING","streak":12,"holder":"b","n":40,"last":null},)" +
+			                 line(32, 0, R"("you":{"mid":"x","pos":0,"side":"a","ready":true},"watchers":2,"ready":null,"watch":"KXQ4M7"})"));
+			again();
+			settle_check("room2_line_32.png", w, h);
+			shot("room2_line_32.png", w, h);
+			room2_clear("room2_line_32.png");
+			o.set_room2_test(room + table + "," + line(24, 3, R"("you":{"mid":"x","pos":3,"ready":false},"watchers":0,"ready":null,"watch":"KXQ4M7"})"));
+			again();
+			shot("room2_line_top.png", w, h);
+			room2_clear("room2_line_top.png");
+			o.set_room2_test(room + table + "," + line(1, 1, R"("you":{"mid":"x","pos":1,"ready":true},"watchers":0,"ready":null,"watch":"KXQ4M7"})"));
+			again();
+			shot("room2_line_short1.png", w, h);
+			room2_clear("room2_line_short1.png");
+			o.set_room2_test(room + table + "," + line(2, 2, R"("you":{"mid":"x","pos":2,"ready":true},"watchers":1,"ready":{"pos":1,"deadline_ms":3000,"you":false},"watch":"KXQ4M7"})"));
+			again();
+			shot("room2_line_short2.png", w, h);
+			room2_clear("room2_line_short2.png");
+			o.set_room2_test(room + table + "," + line(6, 0, R"("you":{"mid":"x","pos":-1,"watcher":true},"watchers":4,"ready":null,"watch":"KXQ4M7"})"));
+			again();
+			shot("room2_line_watcher.png", w, h);
+			room2_clear("room2_line_watcher.png");
+			// GET READY (this player next, its 3 s) with the longest status chip
+			o.set_room2_test(room + table + "," + line(9, 1, R"("you":{"mid":"x","pos":1,"ready":true},"watchers":0,"ready":{"pos":1,"deadline_ms":3000,"you":true},"watch":"KXQ4M7"})"));
+			again();
+			shot("room2_line_turn.png", w, h);
+			room2_clear("room2_line_turn.png");
+			// a note with the page open: in the line's column where its help is, not over the page; the longest note
+			o.set_room2_test(room + table + "," + line(20, 17, R"("you":{"mid":"x","pos":17,"ready":true},"watchers":4,"ready":null,"watch":"KXQ4M7"})"));
+			again();
+			gm.toast(tr::line(tr::THIS_MATCH, { { "terms", tr::line(tr::TERMS_2, { { "a", tr::line(tr::TERM_STAGE_ON) }, { "b", tr::line(tr::TERM_DURAL_OLD_BOTH) } }) } }).str(), 6);
+			for (int i = 0; i < 6; i++) { shot("", w, h); SDL_Delay(40); }
+			shot("room2_line_note.png", w, h);
+			room2_clear("room2_line_note.png");
+			gm.toast(tr::line(tr::ROOM2_AWAY_SAID).str(), 6);
+			shot("room2_line_note2.png", w, h);
+			room2_clear("room2_line_note2.png");
+			gm.toast("");
+			// a notice's card (Starting the match: a watcher catching up) with the page open: its words in the same place, not
+			// a card over the page
+			gm.set_notice(tr::NOTICE_STARTING, tr::fill(tr::WATCH_CATCHING_UP, { { "pct", "54" } }));
+			for (int i = 0; i < 3; i++) { shot("", w, h); SDL_Delay(20); }
+			shot("room2_line_notice.png", w, h);
+			room2_clear("room2_line_notice.png");
+			gm.set_notice("");
+			// entering (the lobby not answered yet)
+			o.set_room2_test(R"({"code":"KXQ4M7","room":{"name":"FRIDAY FIGHTS","listed":true,"locked":false,"ready_ms":15000,"owner":false},"entering":true})");
+			again();
+			shot("room2_entering.png", w, h);
+			room2_clear("room2_entering.png");
+		}
+		o.set_room2_test(R"({"code":"KXQ4M7","room":{"name":"","listed":false,"locked":false,"ready_ms":15000,"owner":true},"table":{"a":{"name":"MRFINSTER","country":"GB"},"b":null,"phase":"SOLO","streak":0,"holder":"a","n":0,"last":null},"line":[],"you":{"mid":"x","pos":0,"side":"a","misses":0},"ready":null,"watch":"KXQ4M7"})");
+		again();
 		const int settings_row = int(gm.selected()) + 2;   // (READY, COPY CODE, then ROOM SETTINGS)
 		gm.select_row(settings_row);
 		key(SDL_SCANCODE_RETURN);

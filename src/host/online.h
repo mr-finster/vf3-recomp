@@ -204,6 +204,7 @@ public:
 	// A moment's word over the game: 1 you lost (name: who's next), 2 a new challenger (name: theirs), 3 you're next,
 	// 4 you won and stay on, 5 the other left: a forfeit (name: theirs); 0 none
 	int room2_banner(std::string &name) const;
+	void room2_next_on();   // (the room's next match on screen, its versus screen: the loser's YOU LOST taken down, said already)
 	int room2_streak(int p) const;  // (player p's run of wins at the room's table, the HUD's; 0 none)
 	int room2_version() const { return r2 ? r2->version * 4 + (watching() ? 2 : 0) + 1 : 0; }   // (the room's page made again when it changes)
 	bool room2_settings(const std::string &name, bool listed, int ready_ms, tr::line &error);   // (the creator's)
@@ -489,6 +490,9 @@ struct Online::Fetch
 
 // A Rooms 2 table's run of wins in words: "1 WIN", "3 WINS IN A ROW" (none: "")
 std::string room2_streak_text(int n);
+// The room page's line, rows of it at most (the page's height at 720 dp): online_room.cpp
+constexpr int ROOM2_LINE_ROWS = 15;
+std::vector<int> room2_line_rows(int n, int pos, int rows);
 
 namespace online_menu {
 

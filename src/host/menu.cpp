@@ -183,8 +183,45 @@ void game_menu::toast(const std::string &text, double seconds)
 {
 	if (!m->overlay) return;
 	if (Rml::Element *e = m->overlay->GetElementById("toast")) e->SetInnerRML(text.empty() ? "" : "<span>" + escape(text) + "</span>");
+	m_toast_text = text;
 	m_toast_until = 0;
 	m_toast_wait = text.empty() ? 0 : seconds;   // (counted from when it can be seen: render)
+	place_note(true);
+}
+
+// Where the note goes, so it's never drawn over other words: over the game at the bottom right as ever; on a page that
+// has a place for it (menu_page::own_note: Rooms 2's room page), there, in place of the page's own help; held back
+// (not shown, its time not counted) while the versus screen or a notice's card is up, whose words it would cover (and
+// such a page's notice card not over it either: its title and line in the page's place, after a note). A
+// banner with a notice's card up goes under the card (#banner.low), not over it; with the versus screen up, between its
+// names and its bar (#banner.vs), whatever the window's height.
+void game_menu::place_note(bool force)
+{
+	if (!m->overlay) return;
+	const bool owns = page_owns_note(), notice = m_notice != "\n\n", hold = m_vs_until || notice, low = notice;
+	const bool over = !m_toast_text.empty() && !owns && !hold;
+	const std::string key = std::string(owns ? "o" : "-") + (over ? "v" : "-") + (low ? "l" : "-") + (m_vs_until ? "s" : "-") + m_toast_text + "\n" + m_notice;
+	if (!force && key == m_note_was) return;
+	m_note_was = key;
+	if (Rml::Element *e = m->overlay->GetElementById("toast")) e->SetProperty("visibility", over ? "visible" : "hidden");
+	if (Rml::Element *e = m->overlay->GetElementById("banner")) { e->SetClass("low", low); e->SetClass("vs", m_vs_until && !low); }
+	// (a notice's card with such a page open: not over it either; its words in the page's place, after a note)
+	if (Rml::Element *e = m->overlay->GetElementById("notice")) e->SetProperty("visibility", notice && !owns ? "visible" : "hidden");
+	if (owns && m->screen) {
+		std::string said = m_toast_text;
+		const bool quiet = said.empty() && notice;
+		if (quiet) {
+			const size_t a = m_notice.find('\n'), b = m_notice.find('\n', a + 1);
+			said = m_notice.substr(0, a);
+			if (const std::string sub = m_notice.substr(a + 1, b - a - 1); !sub.empty()) said += ": " + sub;
+		}
+		if (Rml::Element *e = m->screen->GetElementById("pagenote")) {
+			e->SetInnerRML(said.empty() ? "" : "<span>" + escape(said) + "</span>");
+			e->SetClass("on", !said.empty());
+			e->SetClass("notice", quiet);
+		}
+		if (Rml::Element *e = m->screen->GetElementById("pagehelp")) e->SetProperty("display", said.empty() ? "block" : "none");
+	}
 }
 
 void game_menu::set_notice(const std::string &title, const std::string &sub, const std::string &small)
@@ -198,6 +235,7 @@ void game_menu::set_notice(const std::string &title, const std::string &sub, con
 		               (small.empty() ? "" : "<div class=\"small\">" + escape(small) + "</div>") + "</div>");
 		e->SetProperty("visibility", title.empty() ? "hidden" : "visible");
 	}
+	place_note(true);
 }
 
 void game_menu::set_banner(const std::string &title, const std::string &sub, const std::string &button)
@@ -373,6 +411,66 @@ std::vector<std::string> game_menu::overflow()
 		for (int i = 0; i < e->GetNumChildren(); i++) walk(e->GetChild(i));
 	};
 	for (Rml::ElementDocument *d : docs) if (d && d->IsVisible()) walk(d);
+	return out;
+}
+
+// Lines of text drawn over each other (tests): every line of words on screen, the page's and what's over it (the note,
+// a banner, a notice, the versus screen), as a box from its top to its baseline; two from different elements that
+// cross by more than a couple of pixels each way are said, the first's words over the second's
+std::vector<std::string> game_menu::clashes()
+{
+	std::vector<std::string> out;
+	if (!m->ctx) return out;
+	m->ctx->Update();
+	struct Box { float x0, y0, x1, y1; std::string text; Rml::Element *e; };
+	std::vector<Box> boxes;
+	std::vector<Rml::ElementDocument *> docs;
+	if (m_open) docs.push_back(on_screen() && m->screen ? m->screen : m->doc);
+	if (m->overlay) docs.push_back(m->overlay);
+	std::function<void(Rml::Element *)> walk = [&](Rml::Element *e) {
+		if (!e->IsVisible()) return;
+		if (auto *t = dynamic_cast<Rml::ElementText *>(e)) {
+			const Rml::Vector2f at = t->GetAbsoluteOffset(Rml::BoxArea::Border);
+			for (const auto &ln : t->GetLines()) {
+				if (ln.text.find_first_not_of(" \t\n") == std::string::npos || ln.width <= 0) continue;
+				const float x0 = at.x + ln.position.x, y1 = at.y + ln.position.y, y0 = y1 - t->GetLineHeight() * 0.7f;
+				size_t cut = std::min<size_t>(ln.text.size(), 40);
+				while (cut < ln.text.size() && (uint8_t(ln.text[cut]) & 0xC0) == 0x80) cut--;
+				boxes.push_back({ x0, y0, x0 + float(ln.width), y1, ln.text.substr(0, cut), e });
+			}
+		}
+		for (int i = 0; i < e->GetNumChildren(); i++) walk(e->GetChild(i));
+	};
+	// (and what's drawn under words of its own, a box with a colour or a gradient (the note, a banner, a notice's card),
+	// over another's words: all but a backdrop the size of the window)
+	struct Card { float x0, y0, x1, y1; Rml::Element *e; };
+	std::vector<Card> cards;
+	const Rml::Vector2i win = m->ctx->GetDimensions();
+	std::function<void(Rml::Element *)> filled = [&](Rml::Element *e) {
+		if (!e->IsVisible()) return;
+		const auto &cv = e->GetComputedValues();
+		const Rml::Vector2f p = e->GetAbsoluteOffset(Rml::BoxArea::Border), sz = e->GetBox().GetSize(Rml::BoxArea::Border);
+		if ((cv.has_decorator() || cv.background_color().alpha > 0) && sz.x > 4 && sz.y > 4 && !(sz.x > win.x * 0.9f && sz.y > win.y * 0.9f))
+			cards.push_back({ p.x, p.y, p.x + sz.x, p.y + sz.y, e });
+		for (int i = 0; i < e->GetNumChildren(); i++) filled(e->GetChild(i));
+	};
+	for (Rml::ElementDocument *d : docs) if (d && d->IsVisible()) { walk(d); filled(d); }
+	for (size_t i = 0; i < boxes.size(); i++)
+		for (size_t j = i + 1; j < boxes.size(); j++) {
+			const Box &a = boxes[i], &b = boxes[j];
+			if (a.e == b.e) continue;
+			const float w = std::min(a.x1, b.x1) - std::max(a.x0, b.x0), h = std::min(a.y1, b.y1) - std::max(a.y0, b.y0);
+			if (w > 2 && h > 2) out.push_back("\"" + b.text + "\" over \"" + a.text + "\"");
+		}
+	for (const Card &c : cards)
+		for (const Box &b : boxes) {
+			bool own = false;   // (its own words, or words in a box of its own over it: a key in a banner)
+			for (Rml::Element *a = b.e; a && !own; a = a->GetParentNode()) own = a == c.e;
+			for (Rml::Element *a = c.e->GetParentNode(); a && !own; a = a->GetParentNode()) own = a == b.e->GetParentNode();
+			if (own) continue;
+			const float w = std::min(c.x1, b.x1) - std::max(c.x0, b.x0), h = std::min(c.y1, b.y1) - std::max(c.y0, b.y0);
+			if (w > 2 && h > 2) out.push_back("#" + c.e->GetId() + "." + c.e->GetClassNames() + " over \"" + b.text + "\"");
+		}
 	return out;
 }
 
@@ -591,6 +689,7 @@ void game_menu::build()
 				if (!p.items[i].info && shown(i)) pick = i;
 			if (pick >= 0 && pick != m_sel) { m_sel = pick; root->SetInnerRML(p.screen(m_sel, m_pad)); }
 		}
+		place_note(true);   // (the page made again: its note in its place)
 		return;
 	}
 	std::string crumb;
@@ -618,6 +717,7 @@ void game_menu::build()
 	m_pointer_moved = false;
 	scroll_to_selected();
 	show_help();
+	place_note();
 }
 
 // Every page fits whole (menu.rcss: menutest fails one that doesn't); were one longer, it would scroll inside #rows,
@@ -907,12 +1007,17 @@ bool game_menu::handle_event(const SDL_Event &e)
 void game_menu::render(bool fps)
 {
 	if (!m->ctx) return;   // (no menu: its files weren't found)
-	if (m_toast_wait > 0 && !m_open) { m_toast_until = SDL_GetTicks() + uint64_t(m_toast_wait * 1000); m_toast_wait = 0; }
-	if (m_toast_until && SDL_GetTicks() >= m_toast_until) toast("");
 	if (m_vs_until && SDL_GetTicks() >= m_vs_until) {
 		m_vs_until = 0;
 		if (Rml::Element *e = m->overlay ? m->overlay->GetElementById("vs") : nullptr) e->SetProperty("visibility", "hidden");
 	}
+	// (the note's time: counted while it can be seen, over the game or in a page's own place for it; held back while
+	// the versus screen or a notice's card is up: place_note)
+	const bool held = m_vs_until || m_notice != "\n\n";
+	if (held && m_toast_until) { const uint64_t now = SDL_GetTicks(); m_toast_wait = m_toast_until > now ? double(m_toast_until - now) / 1000.0 : 0.01; m_toast_until = 0; }
+	if (m_toast_wait > 0 && (!m_open || page_owns_note()) && !held) { m_toast_until = SDL_GetTicks() + uint64_t(m_toast_wait * 1000); m_toast_wait = 0; }
+	if (m_toast_until && SDL_GetTicks() >= m_toast_until) toast("");
+	place_note();
 	if (!m_open && (m_fps.empty() || !fps) && m_net.empty() && !m_toast_until && m_notice == "\n\n" && !m_vs_until && m_banner == "\n\n") return;   // (nothing over the game)
 	if (Rml::Element *e = m->overlay ? m->overlay->GetElementById("fps") : nullptr)
 		e->SetProperty("visibility", fps && !m_open && !m_fps.empty() ? "visible" : "hidden");
@@ -930,7 +1035,7 @@ void game_menu::render(bool fps)
 	m->gfx->BeginOverlay();
 	m->ctx->Render();
 	m->gfx->EndFrame();
-	if (m_notice != "\n\n") draw_spinner();
+	if (m_notice != "\n\n" && !page_owns_note()) draw_spinner();
 	SDL_SetRenderLogicalPresentation(m->ren, lw, lh, mode);
 }
 

@@ -131,6 +131,8 @@
 		}
 		/* what the players are waited for (Press Start), at the bottom in the middle */
 		#banner { position: absolute; left: 0; right: 0; bottom: 200dp; text-align: center; }   /* (above the title screen's own Press Start Button) */
+		#banner.vs { top: 436dp; bottom: auto; }   /* (the versus screen up: under its names, over its bar (top 563dp) at any height) */
+		#banner.low { top: auto; bottom: 58dp; z-index: 2; }   /* (a notice's card up: under it, over the connection line and the card's dimming, not over its words) */
 		#banner .in {
 			display: inline-block;
 			padding: 12dp 36dp 14dp 36dp;

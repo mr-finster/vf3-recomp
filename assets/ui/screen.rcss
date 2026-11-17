@@ -344,21 +344,54 @@ div { display: block; }
 .flag.s.hb { margin: 0 8dp 0 8dp; }
 .note.quiet { margin-top: 20dp; font-size: 19dp; line-height: 24dp; }   /* (a line beside the point: Quick match can be watched) */
 
-/* a Rooms 2 room's page: the table's streak, the line in order (this player's place marked) */
-.r2streak { margin-top: 4dp; font-size: 22dp; font-weight: 700; font-style: italic; color: #f2d14b; }
-.r2l { font-size: 23dp; line-height: 29dp; color: #d8ddf5; white-space: nowrap; }
-.r2l .r2n { display: inline-block; width: 30dp; color: #8f9ac8; }
-.r2l.me { color: #f2d14b; font-weight: 700; }
-.r2l.me .r2n { color: #f2d14b; }
-.pq.r2more { margin-left: 30dp; color: #8f9ac8; }
-.pq.r2pos { margin-top: 8dp; color: #f2d14b; }
-/* Rooms 2's page: the status chip under the code (in line and READY or AWAY, watching only, your turn, at the table), a
-   name's READY / AWAY tag in the line */
-.r2chip { margin: 12dp auto 0dp auto; padding: 5dp 18dp; border-radius: 8dp; font-size: 23dp; font-weight: 700; font-style: italic; color: #0b1026; background-color: #f2d14b; display: inline-block; }
+/* A Rooms 2 room's page, two columns (1168dp at most across, 594dp tall, in the middle of the space over the hints): at
+   the left the room's name and code, this player's status chip, the table (its two one over the other, the streak by
+   its holder) and the buttons one under another; at the right the line from top to bottom, a row each (online.cpp's
+   ROOM2_LINE_ROWS of them at most: the page's height), its help or a note under it (#pagehelp, #pagenote) */
+.r2room { position: absolute; left: 56dp; right: 56dp; top: 30dp; bottom: 88dp; display: flex; flex-direction: column; justify-content: center; }
+.r2cols { display: flex; gap: 36dp; height: 602dp; max-width: 1168dp; width: 100%; margin: 0 auto; }
+.r2left { width: 450dp; flex: none; }
+.r2right { position: relative; flex: 1; }
+.r2title.long { font-size: 38dp; }
+.r2title { font-size: 46dp; line-height: 52dp; font-weight: 700; font-style: italic; color: #f2d14b; white-space: nowrap; }
+.r2code { font-size: 22dp; line-height: 28dp; font-weight: 500; color: #8f9ac8; }
+.r2status { margin-top: 24dp; font-size: 26dp; color: #ffffff; }
+.r2chip { margin: 10dp 0 0 0; padding: 4dp 16dp; border-radius: 8dp; font-size: 22dp; line-height: 28dp; font-weight: 700; font-style: italic; color: #0b1026; background-color: #f2d14b; display: inline-block; }
 .r2chip.ready { background-color: #8fd18f; }
 .r2chip.away, .r2chip.watch { background-color: #9aa6d8; }
 .r2chip.turn { background-color: #f2a33b; }
-.r2tag { margin-left: 10dp; font-size: 15dp; font-weight: 700; font-style: normal; color: #8fd18f; }
-.r2tag.away { color: #8f9ac8; }
-.btns.r2five { gap: 14dp; }   /* (a Rooms 2 page's five buttons: narrower, the page's width) */
-.btns.r2five .btn { width: 214dp; font-size: 26dp; }
+.r2card { margin-top: 14dp; padding: 10dp 20dp 12dp 20dp; border-radius: 14dp; border: 2dp #2a3466; background-color: #141b3d; }
+.r2card .ph { margin: 2dp 0 4dp 0; }
+.r2seat { display: flex; align-items: center; height: 38dp; }
+.r2sn { flex: 1; font-size: 30dp; line-height: 38dp; font-weight: 700; font-style: italic; color: #ffffff; white-space: nowrap; }
+.r2st { margin: -4dp 0 2dp 46dp; font-size: 19dp; line-height: 22dp; font-weight: 700; font-style: italic; color: #f2d14b; white-space: nowrap; }
+.r2vs { font-size: 17dp; line-height: 18dp; font-weight: 700; font-style: italic; color: #f2d14b; margin-left: 2dp; }
+.r2wait { margin-top: 4dp; font-size: 20dp; line-height: 26dp; color: #8f9ac8; }
+.flag.r2f { width: 32dp; height: 24dp; margin: 0 12dp 0 0; flex: none; }
+.r2btns { margin-top: 14dp; display: flex; flex-direction: column; gap: 8dp; }
+.r2btns .btn { box-sizing: border-box; width: 450dp; height: 48dp; line-height: 42dp; font-size: 25dp; }
+.r2lh { display: flex; align-items: baseline; gap: 14dp; height: 34dp; padding: 0 10dp; font-size: 19dp; letter-spacing: 2dp; color: #8f9ac8; border-bottom: 2dp #2a3466; }
+.r2lh .r2lc { color: #d8ddf5; letter-spacing: 1dp; }
+.r2list { margin-top: 6dp; }
+.r2row { display: flex; align-items: center; box-sizing: border-box; height: 28dp; padding: 0 10dp; border-radius: 6dp; font-size: 21dp; line-height: 26dp; color: #d8ddf5; }
+.r2row .r2n { flex: none; width: 30dp; margin-right: 12dp; text-align: right; color: #8f9ac8; }
+.r2row .flag.r2f { width: 26dp; height: 19dp; margin: 0 10dp 0 0; }
+.r2row .r2nm { flex: 1; white-space: nowrap; }
+.r2t { flex: none; margin-left: 8dp; padding: 0 7dp; height: 19dp; line-height: 19dp; border-radius: 4dp; font-size: 14dp; font-weight: 700; letter-spacing: 1dp; color: #8fd18f; }
+.r2t.away { color: #6b76a8; }
+.r2t.next { color: #0b1026; background-color: #f2d14b; }
+.r2t.you { color: #0b1026; background-color: #ffffff; }
+.r2row.away { color: #6b76a8; }
+.r2row.away .r2n { color: #4a5488; }
+.r2row.away .flag { opacity: 0.45; }
+.r2row.me { border: 2dp #f2d14b; background-color: #2b2a1e; color: #f2d14b; font-weight: 700; }
+.r2row.me .r2n { color: #f2d14b; }
+.r2row.r2more, .r2row.r2empty { display: block; line-height: 28dp; padding-left: 52dp; font-style: italic; color: #8f9ac8; }
+.r2row.r2empty { padding-left: 10dp; font-style: normal; }
+.r2row .r2nf { flex: none; width: 28dp; height: 19dp; margin: 0 10dp 0 0; }   /* (no flag: its place kept, the names in line) */
+.r2watch { margin-top: 6dp; padding: 0 10dp; height: 26dp; font-size: 20dp; line-height: 26dp; color: #8f9ac8; border-top: 2dp #2a3466; padding-top: 4dp; }
+.r2foot { position: absolute; left: 0; right: 0; bottom: 0; }
+.r2help { padding: 0 10dp; font-size: 19dp; line-height: 24dp; font-weight: 500; color: #8f9ac8; }
+.r2help.good { color: #8fe08a; }
+.r2note span { display: block; padding: 6dp 14dp; border-radius: 8dp; font-size: 20dp; line-height: 25dp; font-weight: 700; font-style: italic; color: #0b1430; decorator: horizontal-gradient(#ffd23f #ff8f1f); }
+.r2note.notice span { decorator: none; background-color: #141b3d; border: 2dp #2a3466; font-style: normal; font-weight: 600; color: #d8ddf5; }   /* (a notice's words: Starting the match, catching up) */

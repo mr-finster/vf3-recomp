@@ -36,6 +36,8 @@ struct menu_page
 	std::function<std::string(int sel, bool pad)> screen;
 	std::function<bool(const SDL_Event &)> on_event;   // (a screen's) the input first: true if it used it (typing)
 	bool text = false;                    // (a screen's) typed into: the keyboard's text on while it's shown
+	bool own_note = false;                // (a screen's) a note (toast) shown in the page's own place for it, its element
+	                                      // #pagenote (#pagehelp hidden meanwhile), not over the page; its time counted there
 };
 
 // A screen's selectable element: its class (row, and selected) and id, with more classes
@@ -55,6 +57,7 @@ public:
 	// (tests: each line of text drawn past the box it's in, as laid out now: the menu's page or screen and the overlay)
 	std::vector<std::string> overflow();
 	std::vector<std::string> misaligned();   // (rows whose labels don't start where the others' do: for tests)
+	std::vector<std::string> clashes();      // (lines of text drawn over each other, the page's and what's over it: for tests)
 	// (tests: the page of rows shown, if it doesn't fit whole: its rows past their space, where they'd scroll, or the
 	// panel past the window's bottom, or the help under them wider than the panel; empty if it fits, or a screen is shown)
 	std::string page_fit();
@@ -124,6 +127,10 @@ private:
 	uint64_t m_vs_from = 0, m_vs_until = 0;   // the versus screen's (SDL_GetTicks)
 	void draw_versus(int w, int h);       // its two sides, under its names
 	void draw_spinner();                  // a notice's spinner, over its card
+	std::string m_toast_text;             // (the note up, or waiting)
+	bool page_owns_note() const { return m_open && on_screen() && m_stack.back().own_note; }
+	void place_note(bool force = false);  // (the note: over the game, in the page's own place, or held back)
+	std::string m_note_was;               // (place_note's last: not set again each picture)
 	std::vector<menu_page> m_stack;
 	std::vector<int> m_sel_stack;
 	int m_sel = 0;

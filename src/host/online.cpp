@@ -3097,15 +3097,18 @@ menu_page room2_page(Online &o, OnlineSettings &s, game_menu &menu, std::functio
 	p.items.push_back({ tr::BUTTON_LEAVE_ROOM, "", {}, {}, [&o, redo] { o.room2_leave(false); redo(); } });
 	p.start = ready >= 0 ? ready : join >= 0 ? join : leave;
 	p.on_event = [&menu](const SDL_Event &e) { return closes(menu, e); };
+	p.own_note = true;   // (a note while it's open: in the line's column, where its help is, not over the page)
 	p.screen = [&o, ready, join, watch, leave_line, copy, settings, leave, copied](int sel, bool pad) {
 		const RoomMember *m = o.room2();
 		if (!m) return std::string("<div class=\"scr\"></div>");
 		const std::string c = o.room_code(), title = !m->room_name.empty() ? m->room_name : c.empty() ? std::string(tr::ROOM_OPEN) : c;
-		std::string r = "<div class=\"scr\"><div class=\"col\"><div class=\"title\">" + E(title) + "</div><div class=\"sub small\">" +
+		// two columns: at the left the room, this player's status, the table and the buttons one under another; at the
+		// right the line, as long as it is, from the top of the page to the bottom
+		std::string r = "<div class=\"scr\"><div class=\"r2room\"><div class=\"r2cols\"><div class=\"r2left\"><div class=\"r2title" + std::string(title.size() > 12 ? " long" : "") + "\">" + E(title) + "</div><div class=\"r2code\">" +
 		                (c.empty() ? std::string("&nbsp;") : E(tr::fill(tr::ROOM2_CODE, { { "code", c } }))) + "</div>";
-		if (!o.room2_member()) {
-			r += "<div class=\"status\">" + E(tr::ROOM2_ENTERING) + "</div>";
-		} else {
+		const bool in = o.room2_member();
+		if (!in) r += "<div class=\"r2status\">" + E(tr::ROOM2_ENTERING) + "</div>";
+		else {
 			// the status chip: what this player is, in a word or two
 			const int left = o.room2_ready_left();
 			if (left >= 0) r += "<div class=\"r2chip turn\">" + E(std::string(tr::ROOM2_CHIP_YOUR_TURN) + "  \xC2\xB7  " + tr::fill(tr::ROOM2_GET_READY_N, { { "n", std::to_string(left) } })) + "</div>";
@@ -3113,41 +3116,59 @@ menu_page room2_page(Online &o, OnlineSettings &s, game_menu &menu, std::functio
 			else if (m->watcher) r += "<div class=\"r2chip watch\">" + E(tr::ROOM2_CHIP_WATCHING) + "</div>";
 			else if (m->pos > 0) r += "<div class=\"r2chip " + std::string(m->me_ready ? "ready" : "away") + "\">" +
 			                         E(tr::fill(m->me_ready ? tr::ROOM2_CHIP_LINE_READY : tr::ROOM2_CHIP_LINE_AWAY, { { "n", std::to_string(m->pos) } })) + "</div>";
-			// the table: the two (side a first, the session's host), the streak by its holder's name
-			r += "<div class=\"panes\"><div class=\"pane\"><div class=\"ph\">" + E(tr::ROOM2_TABLE) + "</div><div class=\"pvs\">";
-			const std::string dash = "\xE2\x80\x94";
-			if (m->has_a && m->has_b)
-				r += flag(m->a.country) + E(m->a.name) + "<span class=\"psc\">VS</span>" + E(m->b.name) + flag(m->b.country, "flag r");
-			else if (m->has_a || m->has_b) r += flag(m->has_a ? m->a.country : m->b.country) + E(m->has_a ? m->a.name : m->b.name);
-			else r += E(dash);
+			// the table: the two, one over the other (side a first, the session's host), the streak by its holder's name
+			r += "<div class=\"r2card\"><div class=\"ph\">" + E(tr::ROOM2_TABLE) + "</div>";
+			auto seat = [&](const RoomMember::Who &w, bool holds) {
+				return "<div class=\"r2seat\">" + flag(w.country, "flag r2f") + "<div class=\"r2sn\">" + E(w.name) + "</div></div>" +
+				       (holds && m->streak > 0 ? "<div class=\"r2st\">" + E(room2_streak_text(m->streak)) + "</div>" : std::string());   // (under the name: a long one and a long language's streak don't fit beside it)
+			};
+			if (m->has_a) r += seat(m->a, m->holder == "a");
+			if (m->has_a && m->has_b) r += "<div class=\"r2vs\">VS</div>";
+			if (m->has_b) r += seat(m->b, m->holder == "b");
+			if (!m->has_a && !m->has_b) r += "<div class=\"r2seat\"><div class=\"r2sn\">\xE2\x80\x94</div></div>";
+			if (!(m->has_a && m->has_b)) r += "<div class=\"pq r2wait\">" + E(m->pos == 0 ? std::string(tr::ROOM2_FIRST_PLAYS) : std::string(tr::ROOM2_WAITING)) + "</div>";
 			r += "</div>";
-			const std::string holder = m->holder == "a" ? m->a.name : m->holder == "b" ? m->b.name : "";
-			if (m->streak > 0 && !holder.empty()) r += "<div class=\"r2streak\">" + E(holder) + "  " + E(room2_streak_text(m->streak)) + "</div>";
-			if (!(m->has_a && m->has_b)) r += "<div class=\"pq\">" + E(m->pos == 0 ? std::string(tr::ROOM2_FIRST_PLAYS) : std::string(tr::ROOM2_WAITING)) + "</div>";
-			// the line, in order, each READY or AWAY, this player's place marked
-			r += "</div><div class=\"pane\"><div class=\"ph\">" + E(tr::ROOM2_LINE) + "</div>";
-			if (m->line.empty()) r += "<div class=\"pq\">" + E(tr::ROOM2_LINE_EMPTY) + "</div>";
-			const int SHOWN = 5;   // (the rest as a count: the page's height)
-			const int n = int(m->line.size()), from = m->pos > SHOWN ? std::min(m->pos - SHOWN / 2 - 1, n - SHOWN) : 0;
-			for (int i = from; i < n && i < from + SHOWN; i++) {
-				const RoomMember::Who &w = m->line[size_t(i)];
-				r += "<div class=\"r2l" + std::string(i + 1 == m->pos ? " me" : "") + "\"><span class=\"r2n\">" + std::to_string(i + 1) + "</span>" + flag(w.country, "flag s") +
-				     E(w.name) + "<span class=\"r2tag" + std::string(w.ready ? "" : " away") + "\">" + E(w.ready ? tr::ROOM2_TAG_READY : tr::ROOM2_TAG_AWAY) + "</span></div>";
-			}
-			if (n > from + SHOWN) r += "<div class=\"pq r2more\">+" + std::to_string(n - from - SHOWN) + "</div>";
-			r += "</div></div>";
-			if (*copied) r += "<div class=\"status good\">" + E(tr::COPIED) + "</div>";
-			else if (ready >= 0) r += "<div class=\"note\">" + E(tr::ROOM2_READY_NOTE) + "</div>";
 		}
-		r += leave >= 4 ? "<div class=\"btns r2five\">" : "<div class=\"btns\">";   // (five: narrower)
+		r += "<div class=\"r2btns\">";
 		if (ready >= 0) r += "<div " + menu_row(ready, sel, "btn") + ">" + E(m->me_ready ? tr::BUTTON_READY_ON : tr::BUTTON_READY_OFF) + "</div>";
 		if (join >= 0) r += "<div " + menu_row(join, sel, "btn") + ">" + E(tr::BUTTON_JOIN_LINE) + "</div>";
 		if (watch >= 0) r += "<div " + menu_row(watch, sel, "btn") + ">" + E(tr::BUTTON_WATCH) + "</div>";
 		if (leave_line >= 0) r += "<div " + menu_row(leave_line, sel, "btn") + ">" + E(tr::BUTTON_LEAVE_LINE) + "</div>";
 		if (copy >= 0) r += "<div " + menu_row(copy, sel, "btn") + ">" + E(tr::BUTTON_COPY_CODE_CAPS) + "</div>";
 		if (settings >= 0) r += "<div " + menu_row(settings, sel, "btn") + ">" + E(tr::BUTTON_ROOM_SETTINGS) + "</div>";
-		r += "<div " + menu_row(leave, sel, "btn") + ">" + E(tr::BUTTON_LEAVE_ROOM) + "</div>";
-		r += "</div></div>";
+		r += "<div " + menu_row(leave, sel, "btn") + ">" + E(tr::BUTTON_LEAVE_ROOM) + "</div></div></div>";
+		// the line: its length and how many are READY; a row each in order (its place, flag, name, READY or AWAY, the next
+		// to play NEXT, this player's YOU and lit); past what fits, the first ones, "... n more", this player's own
+		r += "<div class=\"r2right\">";
+		if (in) {
+			const int n = int(m->line.size());
+			int ready_n = 0, next = -1;
+			for (int i = 0; i < n; i++) if (m->line[size_t(i)].ready) { ready_n++; if (next < 0) next = i; }
+			if (m->ready_on && m->ready_pos > 0 && m->ready_pos <= n) next = m->ready_pos - 1;   // (the one getting ready now)
+			r += "<div class=\"r2lh\"><div>" + E(tr::ROOM2_LINE) + "</div>";
+			if (n > 0) r += "<div class=\"r2lc\">" + E(std::to_string(n) + "  \xC2\xB7  " + tr::fill(tr::ROOM2_N_READY, { { "n", std::to_string(ready_n) } })) + "</div>";
+			r += "</div><div class=\"r2list\">";
+			if (n == 0) r += "<div class=\"r2row r2empty\"><div>" + E(tr::ROOM2_LINE_EMPTY) + "</div></div>";
+			for (int i : room2_line_rows(n, m->pos, ROOM2_LINE_ROWS)) {
+				if (i < 0) { r += "<div class=\"r2row r2more\"><div>" + E(tr::fill(tr::ROOM2_MORE_N, { { "n", std::to_string(-i) } })) + "</div></div>"; continue; }
+				const RoomMember::Who &w = m->line[size_t(i)];
+				const bool me = i + 1 == m->pos;
+				r += "<div class=\"r2row" + std::string(me ? " me" : "") + (w.ready ? "" : " away") + "\"><div class=\"r2n\">" + std::to_string(i + 1) + "</div>" +
+				     (flags::index_of(w.country) >= 0 ? flag(w.country, "flag r2f") : std::string("<div class=\"r2nf\"></div>")) +
+				     "<div class=\"r2nm\">" + E(w.name) + "</div>";
+				if (me) r += "<div class=\"r2t you\">" + E(tr::ROOM2_TAG_YOU) + "</div>";
+				if (i == next) r += "<div class=\"r2t next\">" + E(tr::ROOM2_TAG_NEXT) + "</div>";
+				r += "<div class=\"r2t" + std::string(w.ready ? " ready" : " away") + "\">" + E(w.ready ? tr::ROOM2_TAG_READY : tr::ROOM2_TAG_AWAY) + "</div></div>";
+			}
+			r += "</div>";
+			if (m->watchers > 0) r += "<div class=\"r2watch\">" + E(tr::fill(tr::N_WATCHING, { { "n", std::to_string(m->watchers) } })) + "</div>";
+			// under it: its help (READY and AWAY), or "Copied", or a note while one's up (game_menu::place_note)
+			r += "<div class=\"r2foot\">";
+			if (*copied) r += "<div id=\"pagehelp\" class=\"r2help good\">" + E(tr::COPIED) + "</div>";
+			else if (ready >= 0) r += "<div id=\"pagehelp\" class=\"r2help\">" + E(tr::ROOM2_READY_NOTE) + "</div>";
+			r += "<div id=\"pagenote\" class=\"r2note\"></div></div>";
+		}
+		r += "</div></div></div>";
 		return r + foot(pad, { { "A", "Enter", tr::HINT_SELECT }, { "B", "Esc", tr::HINT_CLOSE_MENU } }) + "</div>";
 	};
 	return p;

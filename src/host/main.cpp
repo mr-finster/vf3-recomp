@@ -4816,6 +4816,7 @@ int main(int argc, char **argv)
 				// who's playing who, over the title screen for a moment (the host is player 1)
 				const std::string host = online.player_name(0), guest = online.player_name(1);
 				const int ms = online.ping();
+				if (watching && online.in_room2()) online.room2_next_on();   // (the loser's banner not over the next match)
 				if (watching)
 					menu.show_versus({ tr::VS_PLAYER_1, host, tr::VS_PLAYER_2, guest, tr::WATCHING_BEHIND, tr::WATCHING_HOW_TO_STOP, false, online.player_country(0), online.player_country(1) });
 				else
