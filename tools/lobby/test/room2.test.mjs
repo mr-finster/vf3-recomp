@@ -10,6 +10,7 @@ import { lobby, settle } from './standin.mjs';
 const { worker, env } = await lobby(process.argv[2]);
 const PRINT = process.argv.includes('--print');
 env.SWITCH_ROOMS2 = 'on';
+env.ROOMS2_MSG_BURST = '100000';   // (a member's calls' rate: test/room2-review.test.mjs has it; here each member's calls come all at once)
 const real_now = Date.now;
 let skew = 0;
 Date.now = () => real_now() + skew;   // (time moved on by advance(): a ready check's 15 s, an empty room's minute)
@@ -68,6 +69,9 @@ async function enter(code, name, extra = {}, sock = true, ip) {
 }
 const act = (m, op, extra = {}) => call('POST', '/v2/room/' + op, { code: m.code, mid: m.mid, mkey: m.mkey, ...extra }, m.ip);
 const alarm = async (code) => { if (obj(code)) await obj(code).alarm(); await settle(); };
+// (the online count told of a room's last change now (told at most every 10 s, the last always, by its alarm): its last
+// telling taken as long ago, its alarm run, the clock not moved)
+const told = async (...codes) => { for (const c of codes) { if (obj(c)) obj(c).told2 = 0; await alarm(c); } };
 // (the room as the lobby holds it, in a line: "PHASE A/B [line] sN", an AWAY member with a *, and while one's getting
 // ready " r:NAME")
 function show(code) {
@@ -180,7 +184,8 @@ const EVENTS = {
 		const listed = ((await call('GET', '/v1/online')).body.rooms || []).some((y) => y.v === 2 && y.room2 && y.room2.code === x.code);
 		env.SWITCH_ROOMS2 = 'on';
 		const back = await act(actor(x), 'poll');
-		return said(p) + ',' + said(e) + ',' + (listed ? 'listed' : 'unlisted') + ',' + said(back);
+		const told = Object.values(x.members).some((m) => m.said && m.said.some((d) => d.closed === true));   // (its members told it's closed)
+		return said(p) + ',' + said(e) + ',' + (listed ? 'listed' : 'unlisted') + ',' + said(back) + (told ? ',told' : '');
 	},
 	'old /v1/join': async (x) => {
 		const j = await call('POST', '/v1/join', old_game('OLD', { code: x.code }), '198.51.98.1');
@@ -209,6 +214,7 @@ const EVENTS = {
 		return (r.body.mid === m.mid && r.body.mkey === m.mkey && r.body.back ? 'back' : 'new') + ' pos' + r.body.state.you.pos;
 	},
 	'/v1/online listing': async (x) => {
+		await told(x.code);
 		const d = (await call('GET', '/v1/online')).body;
 		const row = (d.rooms || []).find((y) => y.v === 2 && y.room2 && y.room2.code === x.code);
 		if (!row) return 'unlisted';
@@ -232,8 +238,8 @@ async function connect_fail(x, newcomer_started) {   // (a new pair's 30 s up; t
 // entering; an empty seat taken at once by the first READY member in line (entering a waiting table: seated straight
 // away); after a match the first READY one gets ready (GET READY, 3 s; Start: now) and is seated by itself, AWAY ones
 // passed over in their places, nobody READY: the two play on; AWAY while getting ready, or seated before the session
-// started, back to the front of the line; a new pair's 30 s without started: the one that didn't (neither: the
-// newcomer) back to the front, AWAY, never let go for it; a leave, a poll timeout, the owner's leave mid-match is a
+// started, back to the front of the line; a new pair's 30 s without started: the newcomer back to the front, AWAY (one
+// side's started alone proves nothing: the holder isn't unseated on a challenger's word), never let go for it; a leave, a poll timeout, the owner's leave mid-match is a
 // forfeit (the one who stays keeps the streak if it was theirs, not raised); results agreeing go to the winner (the
 // streak +1); disagreeing, void, both to the back, the streak gone; a draw, the holder stays; a desync or a disconnect
 // with both alive, the two seated again cold; one report and the other's socket dead, that one loses; an older build's
@@ -405,7 +411,7 @@ const T = {
 		["EMPTY -/- [] s0","not connecting"],
 		["SOLO A/- [] s0","not connecting"],
 		["SOLO A/- [D*,C*,B*] s0","not connecting"],
-		["CONNECTING C/B [A*,D] s0","A away"],
+		["CONNECTING A/C [B*,D] s0","B away"],
 		["PLAYING A/B [C,D] s0","not connecting"],
 		["DECIDED A/B [C,D] s0","not connecting"],
 		["READY A/B [C,D] s1 r:C","not connecting"],
@@ -420,31 +426,31 @@ const T = {
 		["CONNECTING C/B [D] s0","ok"],
 	],
 	'settings': [
-		["EMPTY -/- [] s0","403 not_owner,ok:NEW NAME/20000"],
-		["SOLO A/- [] s0","403 not_owner,ok:NEW NAME/20000"],
-		["SOLO A/- [D*,C*,B*] s0","403 not_owner,ok:NEW NAME/20000"],
-		["CONNECTING A/B [C,D] s0","403 not_owner,ok:NEW NAME/20000"],
-		["PLAYING A/B [C,D] s0","403 not_owner,ok:NEW NAME/20000"],
-		["DECIDED A/B [C,D] s0","403 not_owner,ok:NEW NAME/20000"],
-		["READY A/B [C,D] s1 r:C","403 not_owner,ok:NEW NAME/20000"],
+		["EMPTY -/- [] s0","404 no_room,ok:NEW NAME/20000"],
+		["SOLO A/- [] s0","404 no_room,ok:NEW NAME/20000"],
+		["SOLO A/- [D*,C*,B*] s0","404 no_room,ok:NEW NAME/20000"],
+		["CONNECTING A/B [C,D] s0","404 no_room,ok:NEW NAME/20000"],
+		["PLAYING A/B [C,D] s0","404 no_room,ok:NEW NAME/20000"],
+		["DECIDED A/B [C,D] s0","404 no_room,ok:NEW NAME/20000"],
+		["READY A/B [C,D] s1 r:C","404 no_room,ok:NEW NAME/20000"],
 	],
 	'close': [
-		["GONE","403 not_owner,ok,404 no_room"],
-		["GONE","403 not_owner,ok,404 no_room,told"],
-		["GONE","403 not_owner,ok,404 no_room,told"],
-		["GONE","403 not_owner,ok,404 no_room,told"],
-		["GONE","403 not_owner,ok,404 no_room,told"],
-		["GONE","403 not_owner,ok,404 no_room,told"],
-		["GONE","403 not_owner,ok,404 no_room,told"],
+		["GONE","404 no_room,ok,404 no_room"],
+		["GONE","404 no_room,ok,404 no_room,told"],
+		["GONE","404 no_room,ok,404 no_room,told"],
+		["GONE","404 no_room,ok,404 no_room,told"],
+		["GONE","404 no_room,ok,404 no_room,told"],
+		["GONE","404 no_room,ok,404 no_room,told"],
+		["GONE","404 no_room,ok,404 no_room,told"],
 	],
 	'switch off': [
-		["EMPTY -/- [] s0","404 off,404 off,unlisted,410 removed"],
-		["SOLO A/- [] s0","404 off,404 off,unlisted,ok"],
-		["SOLO A/- [D*,C*,B*] s0","404 off,404 off,unlisted,ok"],
-		["CONNECTING A/B [C,D] s0","404 off,404 off,unlisted,ok"],
-		["PLAYING A/B [C,D] s0","404 off,404 off,unlisted,ok"],
-		["DECIDED A/B [C,D] s0","404 off,404 off,unlisted,ok"],
-		["READY A/B [C,D] s1 r:C","404 off,404 off,unlisted,ok"],
+		["GONE","404 no_room,404 off,unlisted,404 no_room"],
+		["GONE","404 no_room,404 off,unlisted,404 no_room,told"],
+		["GONE","404 no_room,404 off,unlisted,404 no_room,told"],
+		["GONE","404 no_room,404 off,unlisted,404 no_room,told"],
+		["GONE","404 no_room,404 off,unlisted,404 no_room,told"],
+		["GONE","404 no_room,404 off,unlisted,404 no_room,told"],
+		["GONE","404 no_room,404 off,unlisted,404 no_room,told"],
 	],
 	'old /v1/join': [
 		["EMPTY -/- [] s0","412 version,412 version,412 version,host:other code"],
@@ -479,7 +485,7 @@ const T = {
 		["SOLO A/- [D*,C*,B*] s0","back pos3"],
 		["CONNECTING A/B [C,D] s0","back pos0"],
 		["CONNECTING A/B [C,D] s0","back pos0"],
-		["CONNECTING A/B [C,D] s0","back pos0"],
+		["READY A/B [C,D] s1 r:C","back pos0"],
 		["READY A/B [C,D] s1 r:C","back pos0"],
 	],
 	'/v1/online listing': [
@@ -783,7 +789,7 @@ function start_bytes(match) {
 	check('limits: a name cut to 10', rec(R.code).members[long.mid].who.name, 'ABCDEFGHIJ');
 	const forged = await call('POST', '/v2/room/ready', { code: R.code, mid: named.mid, mkey: long.mkey }, long.ip);
 	const leave_other = await call('POST', '/v2/room/leave', { code: R.code, mid: named.mid }, long.ip);
-	check('limits: no member acts for another (another\'s id, one\'s own key; no key)', [said(forged), said(leave_other), !!rec(R.code).members[named.mid]], ['404 not_member', '404 not_member', true]);
+	check('limits: no member acts for another (another\'s id, one\'s own key; no key): as a code with no room', [said(forged), said(leave_other), !!rec(R.code).members[named.mid]], ['404 no_room', '404 no_room', true]);
 	const not_owner = await call('POST', '/v2/room/close', { code: R.code, mid: R.mid, mkey: R.mkey });
 	check('limits: close without the owner key refused, even the owner\'s member key', [said(not_owner), show(R.code) !== 'GONE'], ['403 not_owner', true]);
 	const game = await call('POST', '/v2/room/enter', { ...me('G', { game: 'vf2' }), code: R.code }, '198.51.95.2');
@@ -813,6 +819,7 @@ function start_bytes(match) {
 	const A = await create('LIST', { listed: true, room: 'two rooms' }), B = await enter(A.code, 'MATE');
 	await act(B, 'ready');
 	const L = await create('LOCKED', { listed: true, locked: true });
+	await told(A.code, L.code);
 	const d = (await call('GET', '/v1/online')).body;
 	const row = d.rooms.find((y) => y.v === 2 && y.room2 && y.room2.code === A.code), lrow = d.rooms.find((y) => y.v === 2 && y.table[0] && y.table[0].name === 'LOCKED');
 	check('list: a Rooms 2 row: v 2, its name, the table\'s two, the streak, the line, its code and watch id under room2', [row.v, row.name, row.table, row.streak, row.line, row.state, row.room2.code],

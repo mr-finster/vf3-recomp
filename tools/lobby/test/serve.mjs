@@ -1,7 +1,7 @@
 // The lobby on this computer, without wrangler or Cloudflare: its Worker and stand-ins for its Durable Objects (in
 // memory), for the games and tools/watchsim to talk to over HTTP.
 //   node test/serve.mjs src/index.js [port] [NAME=value ...]   (the Worker's variables, e.g. SWITCH_WATCH=off; also
-//   POST /__vars?SWITCH_WATCH=off&SWITCH_ROOMS= to change them while it runs, an empty value unsetting one)
+//   POST /__vars?SWITCH_WATCH=off&SWITCH_ROOMS= to change them while it runs (SWITCH_ROOMS2 too), an empty value unsetting one)
 import http from 'node:http';
 import { createHash } from 'node:crypto';
 import { lobby, sockets } from './standin.mjs';
@@ -25,7 +25,7 @@ for (const [name, ns] of Object.entries(env)) {
 }
 const server = http.createServer(async (q, res) => {
 	if (q.url.startsWith('/__vars') && q.method === 'POST') {   // (the switches flipped as the dashboard would)
-		for (const [k, v] of new URL(q.url, 'http://x').searchParams) if (/^[A-Z_]+$/.test(k) && typeof env[k] !== 'object') { if (v) env[k] = v; else delete env[k]; }
+		for (const [k, v] of new URL(q.url, 'http://x').searchParams) if (/^[A-Z][A-Z0-9_]*$/.test(k) && typeof env[k] !== 'object') { if (v) env[k] = v; else delete env[k]; }
 		res.writeHead(200, { 'content-type': 'application/json' });
 		return res.end(JSON.stringify(Object.fromEntries(Object.entries(env).filter(([k, v]) => typeof v === 'string'))));
 	}
