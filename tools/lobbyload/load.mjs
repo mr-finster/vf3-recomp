@@ -4,7 +4,12 @@
 // HTTPS POSTs), watchers on WebSockets and the fallbacks (the HTTPS stream, asking for pieces), browsers reading the
 // rooms list. It counts what the lobby answered (by route and status, the time it took) and every error.
 //   node tools/lobbyload/load.mjs --lobby URL [--rooms 50] [--quick 20] [--watchers 200] [--browsers 50]
-//        [--seconds 120] [--https 0.1] [--game vf3] [--json]
+//        [--seconds 120] [--https 0.1] [--game vf3] [--json] [--rooms2 0 --line 4 --never 0.1]
+// (--rooms2 N: N Rooms 2 rooms (/v2/room/*, the lobby's SWITCH_ROOMS2 on), each its creator and --line M members more,
+// on WebSockets or polling (--https), playing in turn as the games will: the one getting ready presses Start now and then
+// (--never: the share who go AWAY as they enter, passed over in the line), the pair says started, both report the same result a few seconds on, the
+// session's host sends its match's start with its watch key. A lobby whose ROOMS2_PER_ADDRESS is under M+1 refuses the
+// rest from this one address: test/serve.mjs ... ROOMS2_PER_ADDRESS=64)
 // (--https: the share of hosts and watchers on the fallbacks, as on networks that carry no WebSocket.) Node 22 or
 // later (its fetch and WebSocket), nothing installed. Every player is from this machine's one address: a lobby's
 // per-address limits answer 429 past them (staging's are set high for this; counted, not an error of the lobby's).
@@ -12,6 +17,7 @@ const arg = (k, d) => { const i = process.argv.indexOf('--' + k); return i > 0 &
 const LOBBY = String(arg('lobby', '')).replace(/\/+$/, '');
 if (!/^https?:\/\/[^/]+$/.test(LOBBY)) { console.log('lobbyload --lobby URL [--rooms N] [--quick N] [--watchers N] [--browsers N] [--seconds S] [--https share] [--game vf3] [--json]'); process.exit(2); }
 const ROOMS = +arg('rooms', 50), QUICK = +arg('quick', 20), WATCHERS = +arg('watchers', 200), BROWSERS = +arg('browsers', 50);
+const ROOMS2 = +arg('rooms2', 0), LINE = Math.min(Math.max(+arg('line', 4), 1), 33), NEVER = Math.min(Math.max(+arg('never', 0.1), 0), 1);
 const SECONDS = +arg('seconds', 120), HTTPS = Math.min(Math.max(+arg('https', 0.1), 0), 1), GAME = arg('game', 'vf3'), AS_JSON = process.argv.includes('--json');
 const WS_URL = LOBBY.replace(/^http/, 'ws');
 const t0 = Date.now(), end = t0 + SECONDS * 1000;
@@ -23,7 +29,7 @@ const hex = (n) => [...Array(n)].map(() => rnd(16).toString(16)).join('');
 const name = (p) => (p + (++seq).toString(36)).toUpperCase().slice(0, 10);
 
 // ---- what came back: by route and status, the time, the errors; the sockets' messages ----
-const stats = { routes: {}, errors: {}, ws: { opened: 0, refused: {}, closed_by_lobby: 0, in: 0, out: 0, bytes_in: 0 }, matches: { rooms: 0, quick: 0, sent: 0, off: 0, woken: 0 }, watchers: { ws: 0, stream: 0, poll: 0, frames: 0, told: {} } };
+const stats = { rooms2: { rooms: 0, members: 0, refused: {}, seats: 0, started: 0, decided: 0, results: 0, refusals: {}, removed: {}, starts_sent: 0, max_streak: 0, states: 0 }, routes: {}, errors: {}, ws: { opened: 0, refused: {}, closed_by_lobby: 0, in: 0, out: 0, bytes_in: 0 }, matches: { rooms: 0, quick: 0, sent: 0, off: 0, woken: 0 }, watchers: { ws: 0, stream: 0, poll: 0, frames: 0, told: {} } };
 function note(route, status, ms) {
 	const r = (stats.routes[route] = stats.routes[route] || { n: 0, status: {}, ms: [] });
 	r.n++;
@@ -206,17 +212,84 @@ async function watcher() {
 		await sleep(1000);
 	}
 }
+// ---- Rooms 2: a room's members, each a game as it will be: its socket (or polling), the ready check, the seat, the result ----
+async function member2(code, mid, mkey, https, never, first_state) {
+	const r2 = stats.rooms2, acted = new Set();
+	let state = first_state, ws = null, out = false, last_n = 0;
+	const send2 = async (op, extra = {}) => {
+		if (ws && ws.readyState === 1) { send(ws, JSON.stringify({ op, ...extra })); return; }
+		const r = await call('POST', '/v2/room/' + op, { code, mid, mkey, ...extra });
+		if (r.json && r.json.state) take(r.json.state);
+		if (r.json && r.json.ok === false) r2.refusals[op + ' ' + r.json.error] = (r2.refusals[op + ' ' + r.json.error] || 0) + 1;
+		if (r.status === 410 || r.status === 404) { out = true; const why = (r.json && (r.json.why || r.json.error)) || r.status; r2.removed[why] = (r2.removed[why] || 0) + 1; }
+	};
+	const once = (k, ms, f) => { if (acted.has(k)) return; acted.add(k); setTimeout(() => { if (live() && !out) f(); }, ms); };
+	function take(st) {
+		state = st;
+		r2.states++;
+		const t = st.table, seat = st.you.seat;
+		if (t.streak > r2.max_streak) r2.max_streak = t.streak;
+		if (never) once('away', 100 + rnd(500), () => send2('away'));
+		else if (st.ready && st.ready.you) once('ready' + t.n + '|' + st.line.length, 300 + rnd(2500), () => send2('ready'));
+		if (seat && t.phase === 'CONNECTING') once('started' + seat.n + seat.token, 200 + rnd(1500), () => {
+			r2.started++;
+			send2('started');
+			if (seat.wkey) { r2.starts_sent++; call('POST', `/v1/watch/start?w=${st.watch}&k=${seat.wkey}`, start_bytes(BigInt('0x' + hex(15)), t.a ? t.a.name : 'A', t.b ? t.b.name : 'B'), true); }
+		});
+		if (seat && t.phase === 'CONNECTING') once('seat' + seat.token, 0, () => { r2.seats++; });
+		if (seat && t.phase === 'PLAYING' && t.n !== last_n) {
+			last_n = t.n;
+			// (both sides the same result, from the session's token and the match's number: as two games that agree)
+			const x = parseInt(seat.token.slice(0, 2), 16) + t.n, winner = x % 20 === 0 ? 'draw' : x % 2 ? 'a' : 'b';
+			once('result' + t.n + seat.token, 3000 + rnd(5000), () => { r2.results++; if (seat.side === 'a') r2.decided++; send2('result', { winner, n: t.n }); });
+		}
+	}
+	if (!https) ws = await socket(`/v2/room/ws?code=${code}&mid=${mid}&mkey=${mkey}`, (d) => {
+		try {
+			const j = JSON.parse(d);
+			if (j.state) take(j.state);
+			if (j.error) { const k = 'ws ' + j.op + ' ' + j.error; r2.refusals[k] = (r2.refusals[k] || 0) + 1; }
+			if (j.removed || j.closed) { out = true; const why = j.removed || 'closed'; r2.removed[why] = (r2.removed[why] || 0) + 1; }
+		} catch (e) {}
+	});
+	if (state) take(state);
+	while (live() && !out) {
+		await sleep(ws ? 1000 : 10000);
+		if (!ws && live() && !out) await send2('poll');
+		if (ws && ws.readyState > 1 && !out) { r2.removed['socket closed'] = (r2.removed['socket closed'] || 0) + 1; out = true; }
+	}
+	if (!out) await call('POST', '/v2/room/leave', { code, mid, mkey });
+	if (ws) ws.close();
+}
+async function room2(i) {
+	await sleep(rnd(5000));
+	const c = await call('POST', '/v2/room/create', me(name('R'), { listed: true, room: 'LOAD2 ' + i, caps: ['cut1'] }));
+	if (c.status !== 200 || !c.json) { stats.rooms2.refused['create ' + c.status] = (stats.rooms2.refused['create ' + c.status] || 0) + 1; return; }
+	stats.rooms2.rooms++;
+	const { code, owner_key } = c.json;
+	const all = [member2(code, c.json.mid, c.json.mkey, Math.random() < HTTPS, false, c.json.state)];
+	for (let k = 0; k < LINE && live(); k++) {
+		await sleep(200 + rnd(1500));
+		const e = await call('POST', '/v2/room/enter', me(name('M'), { code, caps: Math.random() < 0.5 ? ['cut1'] : [] }));
+		if (e.status !== 200 || !e.json) { stats.rooms2.refused['enter ' + e.status + ' ' + ((e.json && e.json.error) || '')] = (stats.rooms2.refused['enter ' + e.status + ' ' + ((e.json && e.json.error) || '')] || 0) + 1; continue; }
+		stats.rooms2.members++;
+		all.push(member2(code, e.json.mid, e.json.mkey, Math.random() < HTTPS, Math.random() < NEVER, e.json.state));
+	}
+	await Promise.allSettled(all);
+	await call('POST', '/v2/room/close', { code, owner_key });
+}
 async function browser() {
 	await sleep(rnd(15000));
 	while (live()) { await call('GET', '/v1/online'); await sleep(15000); }
 }
 
-console.log(`lobbyload: ${ROOMS} rooms (a host and a guest each), ${QUICK} Quick match pairs, ${WATCHERS} watchers, ${BROWSERS} browsers, ${SECONDS} s, ${Math.round(HTTPS * 100)}% on the HTTPS fallbacks, against ${LOBBY}`);
+console.log(`lobbyload: ${ROOMS} rooms (a host and a guest each), ${QUICK} Quick match pairs, ${WATCHERS} watchers, ${BROWSERS} browsers, ${ROOMS2} Rooms 2 rooms (${LINE} more each), ${SECONDS} s, ${Math.round(HTTPS * 100)}% on the HTTPS fallbacks, against ${LOBBY}`);
 const all = [];
 for (let i = 0; i < ROOMS; i++) all.push(room_pair(i));
 for (let i = 0; i < QUICK; i++) all.push(quick_pair());
 for (let i = 0; i < WATCHERS; i++) all.push(watcher());
 for (let i = 0; i < BROWSERS; i++) all.push(browser());
+for (let i = 0; i < ROOMS2; i++) all.push(room2(i));
 const tick = setInterval(() => process.stdout.write(`  ${Math.round((Date.now() - t0) / 1000)} s: ${Object.values(stats.routes).reduce((a, r) => a + r.n, 0)} requests, ${stats.ws.opened} sockets, ${stats.ws.in} messages in, ${Object.values(stats.errors).reduce((a, n) => a + n, 0)} errors\n`), 10000);
 // (every player done, or 40 s past the end at most: one still waiting then is counted as hung, not waited for)
 const hung = await Promise.race([Promise.allSettled(all).then(() => 0), new Promise((ok) => setTimeout(() => ok(1), end - Date.now() + 40000))]);
@@ -226,7 +299,7 @@ clearInterval(tick);
 // ---- what came back ----
 const pct = (a, p) => { if (!a.length) return 0; const s = [...a].sort((x, y) => x - y); return s[Math.min(s.length - 1, Math.floor(p * s.length))]; };
 const routes = Object.fromEntries(Object.entries(stats.routes).sort().map(([k, r]) => [k, { n: r.n, status: r.status, p50_ms: pct(r.ms, 0.5), p95_ms: pct(r.ms, 0.95) }]));
-const out = { lobby: LOBBY, seconds: SECONDS, routes, sockets: stats.ws, matches: stats.matches, watchers: stats.watchers, errors: stats.errors };
+const out = { lobby: LOBBY, seconds: SECONDS, routes, sockets: stats.ws, matches: stats.matches, watchers: stats.watchers, rooms2: stats.rooms2, errors: stats.errors };
 if (AS_JSON) console.log(JSON.stringify(out, null, 1));
 else {
 	console.log('route                          requests  statuses                                   p50 ms  p95 ms');
@@ -234,6 +307,7 @@ else {
 	console.log(`sockets: ${stats.ws.opened} opened, refused ${JSON.stringify(stats.ws.refused)}, ${stats.ws.closed_by_lobby} closed by the lobby mid-run; ${stats.ws.in} messages in (${stats.ws.bytes_in} bytes), ${stats.ws.out} out`);
 	console.log(`matches: ${stats.matches.rooms} rooms and ${stats.matches.quick} Quick matches played; ${stats.matches.sent} uploads; told off ${stats.matches.off}; woken by a watcher ${stats.matches.woken}`);
 	console.log(`watchers: ${stats.watchers.ws} on WebSockets, ${stats.watchers.stream} on the stream, ${stats.watchers.poll} asking for pieces; ${stats.watchers.frames} replies of frames; told ${JSON.stringify(stats.watchers.told)}`);
+	if (ROOMS2) { const r2 = stats.rooms2; console.log(`rooms2: ${r2.rooms} rooms, ${r2.members} members entered, refused ${JSON.stringify(r2.refused)}; ${r2.seats} seats, ${r2.started} started, ${r2.decided} matches decided (${r2.results} reports), the longest streak ${r2.max_streak}; ${r2.starts_sent} watch starts sent; ${r2.states} states; refusals ${JSON.stringify(r2.refusals)}; let go ${JSON.stringify(r2.removed)}`); }
 	const n_err = Object.values(stats.errors).reduce((a, n) => a + n, 0);
 	console.log(n_err ? `errors (${n_err}): ${JSON.stringify(stats.errors)}` : 'errors: none');
 }

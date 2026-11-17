@@ -105,6 +105,9 @@ server.on('upgrade', async (q, sock, head) => {
 		}
 	};
 	sock.on('data', (d) => { buf = Buffer.concat([buf, d]); try { take(); } catch (e) {} });
+	// (the other end gone: its FIN (a game killed, its socket closed by the system) as a close, as Cloudflare takes it; Node
+	// says 'close' only once a write after it fails, seconds later, and the member counted as there meanwhile)
+	sock.on('end', () => { try { ws.close(1001, 'gone'); } catch (e) {} sock.end(); });
 	sock.on('close', () => { try { ws.close(1001, 'gone'); } catch (e) {} });
 	sock.on('error', () => {});
 	take();

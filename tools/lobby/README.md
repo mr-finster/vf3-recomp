@@ -64,8 +64,8 @@ and the games started with `VF_LOBBY=http://127.0.0.1:8787`. Without wrangler, t
 for its Durable Objects (in memory, no TURN): `node test/serve.mjs src/index.js 8787` (its variables after the port,
 e.g. `SWITCH_WATCH=off`, and changed while it runs with `POST /__vars?SWITCH_WATCH=off`); `npm test` (`test/all.mjs`) runs the pairing,
 the rooms and watching tests, every combination of the off switches, the pairing tests again under each switch
-(the routes the games before rooms and watching use, answered as they were), and a code review's cases
-(`test/review.test.mjs`: each failed before its fix), each file to its end, then lists every
+(the routes the games before rooms and watching use, answered as they were), a code review's cases
+(`test/review.test.mjs`: each failed before its fix), and Rooms 2's truth table (`test/room2.test.mjs`), each file to its end, then lists every
 failed check with what it got and what it wanted. No test sleeps on the lobby's background work (the online count
 told, a socket's message handled): the stand-ins keep it, and `settle()` waits for exactly that, so a slow or busy
 machine can't change a result.
@@ -91,7 +91,13 @@ off, or with an older build on either side, the watcher runs the match from its 
 snapshot is a state the host's game made, loaded by every late watcher's game, so it stays off until each game's
 state loading has been checked against states made to do harm.
 
-`/v1/online` says what's on (`features: {rooms, watch}`); an older lobby says nothing, and the games and the site read
+And another: `SWITCH_ROOMS2` is off unless it's `on` (Rooms 2, below: the lobby's own rooms). It's the other way round
+from the four on purpose: the lobby goes live with it off and it's turned on only once a game that uses it is released.
+Off (or `SWITCH_ROOMS` off), `/v2/room/*` answers 404 `{error: "off"}` (a new game makes a `/v1` room instead, as
+before) and the rooms list has none of them; nothing else changes. Rooms 2 rooms already open when it's turned off
+answer no more and close as their members go (each a minute after it's empty).
+
+`/v1/online` says what's on (`features: {rooms, watch}`, and `rooms2: true` while Rooms 2 is on); an older lobby says nothing, and the games and the site read
 that as both off. The games built before this see none of it.
 
 ## Staging
@@ -155,6 +161,93 @@ worth); a watcher on a WebSocket about 4 requests a visit, the frames sent to it
 stream, polling pieces mostly answered by Cloudflare's edge) cost a request each. A new game's join (it asks to wait in
 line, `queue`) asks its room twice the first time (whether it's in the line, then the join), once after: one more
 Durable Object request a join, $0.15 a million. Nothing's charged for the bytes.
+
+## Rooms 2 (the lobby's own rooms: winner stays on, a visible line)
+
+`docs/ROOMS2-DESIGN.md` (issues #42, #49) has the design; this is its first phase, the lobby's side, off until
+`SWITCH_ROOMS2` is `on`. A `/v1` room is its host's: the room dies with them, the line is a count each guest asks for,
+the host always stays. A Rooms 2 room is the lobby's: its members are in its line (watching or not) or at its table
+(the two playing); the winner stays on, the loser goes to the back of the line, the first in line is called with a
+ready check; the creator has only its settings and Close, and leaving doesn't close it. The endpoints are in
+`src/index.js`'s head (`/v2/room/create`, `enter`, `ws`, `poll`, `ready`, `started`, `result`, `leave`, `settings`,
+`close`); every call but create and enter carries the member's code, id and key (`mid`, `mkey`), settings and close
+the creator's `owner_key`, so no one acts for anyone else.
+
+- **The table**: EMPTY (nobody), SOLO (one, the line empty), READY (the first in line called: `ready_ms`, 15 s by
+  default, 5-60 s in the settings, to press Start), CONNECTING (a new pair: both say `started` within 30 s), PLAYING,
+  DECIDED (one result in, 10 s for the other). After a match the loser stays seated until the one called says ready
+  (then the loser goes to the back and the newcomer takes their seat); with nobody in line the two play on.
+- **Results**: both agree: the winner's streak +1 (or a new holder at 1). A draw: the streak's holder stays, the
+  challenger goes, the streak as it was. A desync (both say so): void, the two seated again, cold. Disagreeing: void,
+  both to the back, the streak gone. A disconnect, or one report and 10 s of silence: the side whose lobby socket is
+  dead loses (a forfeit); both alive, the two seated again once, then the holder stays. A late report for an earlier
+  match (its `n`) is refused as `stale`.
+- **Leaving**: a member who leaves, or is gone (a socket with no ping for 90 s; without a socket, no poll for 30 s:
+  games poll every 10 s), mid-match forfeits: the other stays, keeping the streak if it was theirs, not raised. The
+  ready check's 1st miss moves the one called down one place, the 2nd to the back, the 3rd out of the room. A new
+  pair not both started in 30 s: the newcomer back to the front of the line (called again), the 2nd time to the back.
+  Everyone gone: the room closes a minute later (its code then kept from anyone else for two hours); one with no new
+  match or member for two hours closes too.
+- **Watching without a place** (Leave line): a member can leave the line, or the table (a match on: a forfeit, as
+  leaving), and stay in the room watching (`leave_line`): `you.pos` -1, `you.watcher`, never called, still told every
+  change and counted among the room's players; `join_line` puts them at the back of the line. `watchers` in the state
+  counts them. The table's `match` is the match on and the streak it's played for (`{n, streak, holder}`, the holder by
+  name), set as each pair is seated or plays on: what a game shows over that match, not the streak as it is after it.
+- **Rejoining**: a game that crashed or was restarted enters again with its membership's `mid` and `mkey` (it keeps
+  them, in memory and in a small file in its data folder). While that member is still there (within the 30 s a member
+  is kept without a word), it's taken back with its place (`back: true`), its new addresses and caps; at the table with a
+  match on or starting, the two are seated again cold (`last` void, `why: "rejoin"`), the session it had gone with its
+  game. Later, or with a wrong key, it's a new member at the back of the line.
+- **What a member's told** (`state`, pushed on its socket at every change, or a poll's answer): the table (the two, the
+  phase, the streak, its holder's side, the match's number `n`, how the last ended), the line in order (names and
+  flags), its own place, who's called and the time left. Seated with an opponent, its `seat`: `role` (side a is the
+  session's host), the opponent's addresses, the session's token and terms (`as`, `them`, as a `/v1/join`'s), and for
+  the host `wkey`, the key to send the match to be watched with. `seamless` says whether both at the table sent the
+  `cut1` cap (phase 4's handover; nothing uses it yet). A member let go is told why (`{removed: "ready" | "left" |
+  "gone" | "version"}` on its socket, `410 {error: "removed", why}` on its next call).
+- **Watching**: a room has one watch id for its life (its code). Each new pair arms the room's `Watch` with a new key
+  for its session's host (the one at side a), as a `/v1` room that stays does after each match; the Watch takes the new
+  match's start on the same watch id, the last pair's key refused. A rematch in the same session needs no new key.
+- **Older builds**: their `/v1/join` (in line or not) and `/v1/peek` on a Rooms 2 code answer `412 {error: "version"}`
+  with `host_version` the room's creator's own version (its release's tag, `build` in its create: `v1.9.0`, a beta's
+  `v1.9.0-beta1`; a game's footer version, not the online one), so they say "The host has v1.9.0-beta1, you have …: you
+  both need the same version (the newest, from the site)." (a creator that didn't say: no `host_version`, "The host has
+  another version"); their `/v1/host` never gets the code. While Rooms 2 is in a beta (a GitHub pre-release, the live
+  lobby with it on) this is the one thing a release build's player can meet of it: only with a beta room's code given
+  them. Its rows aren't in their rooms list, and a beta build plays them in Quick match and their rooms as ever (the
+  same online version). A new build's `/v2/room/enter` on a `/v1` code answers
+  `412 {error: "room_version"}`: it joins with `/v1/join`. Both kinds of room stay, so old and new builds keep playing.
+- **The rooms list**: a listed Rooms 2 room is a row with `v: 2`, its name, `table` (the two names and flags),
+  `streak`, `line` (its length), `phase`, and its code and watch id under `room2` (none for a locked room). It has no
+  `p1`, `code` or `watch` of its own, so an older build's list (and the online page) skips it. Its members are counted
+  among the game's players (at the table in a match: in a room's match; otherwise waiting).
+- **Limits**: 34 members a room (the table's two and a line of 32, as `QUEUE_MAX`), 8 from one address (an IPv6 one by
+  its /64; `ROOMS2_PER_ADDRESS` raises it for a load test), names as everywhere (10 letters, blocked words shown as
+  PLAYER), 8 caps of 16 letters; create counts as a `/v1/host` (`HOST_LIMIT`), enter as a code tried (`JOIN_LIMIT`,
+  `CODE48_LIMIT`), the socket as a wait (`WAIT_LIMIT`), every call against `ANY_LIMIT`; bodies 4 KB, socket messages 1 KB.
+- **Where it's kept**: the same `Room` Durable Object as a `/v1` room (one object a code, so a code is never both, and
+  no new class or migration to deploy), its record marked `v: 2`; every `/v1` path leaves it alone. Same `terms()` and
+  pools as `/v1`: `NET_VERSION` is unchanged.
+
+Tests: `test/room2.test.mjs` (in `npm test`) runs the table as a truth table, every phase (EMPTY, SOLO, READY with one
+seated, CONNECTING, PLAYING, DECIDED, READY after a match) set up fresh and each event applied to it (enter, leave,
+socket close, poll timeout, ready, a ready from one not called, the ready check's 1st, 2nd and 3rd miss, results
+agreeing, disagreeing, one-sided (the other alive, and dead), draw, desync, disconnect, a connect failure's 1st and
+2nd, the owner leaving, settings, close, the switch off, an older build's join, the rooms list, a member back after a
+crash), then a six-member
+room through nine matches (the winner stays, the loser to the back, the streak, a member who never says ready
+dropping a place, to the back, then out), the seat and watching across seat changes, the socket, liveness and the
+empty room's minute, rejoining (the place kept, a match on seated again, too late or a wrong key a new member), and the limits. `node tools/lobbyload/load.mjs --lobby <address> --rooms2 20 --line 8` adds
+Rooms 2 rooms to a load test (their members on sockets or polling, playing in turn: ready, started, the same result
+from both; `--never 0.1` the share who never say ready); against `node test/serve.mjs src/index.js 8787
+SWITCH_ROOMS2=on ROOMS2_PER_ADDRESS=64`, 20 rooms of 9 members each for a minute alongside `/v1` rooms, Quick matches
+and watchers: 161 seats, 67 matches decided, no errors.
+
+**Rollout**: deploy to staging with `SWITCH_ROOMS2` set to `on` in its variables (and `ROOMS2_PER_ADDRESS` high, as
+its other per-address marks, for a load test) and run the tests and a load test
+against it; then deploy live with it off (unset: the live lobby answers `/v2/room/*` with `off` and lists none, so
+nothing changes for anyone); turn it on (Settings > Variables, `on`, live in seconds) only after a game release that
+uses it (phase 2), and off again as the instant undo.
 
 ## What stops abuse
 
