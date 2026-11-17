@@ -27,6 +27,12 @@ int main()
 		{ "v0.1.22", "v0.1.22-alpha", 1 }, { "v0.1.22-alpha", "v0.1.22-beta", -1 }, { "v0.1.22-alpha.2", "v0.1.22-alpha.10", -1 },
 		{ "v0.1.22-alpha", "v0.1.22-alpha.1", -1 }, { "v0.1.7-online-preview", "v0.1.7-alpha", 1 }, { "0.1.8", "v0.1.8", 0 },
 		{ "v0.1.8-alpha", "v0.1.7-online-preview", 1 },
+		// betas (GitHub pre-releases): below their release, above the one before, in order among themselves
+		{ "v0.1.23-alpha-beta1", "v0.1.23-alpha", -1 }, { "v0.1.23-alpha", "v0.1.23-alpha-beta1", 1 }, { "v0.1.23-alpha-beta1", "v0.1.22-alpha", 1 },
+		{ "v0.1.23-alpha-beta1", "v0.1.23-alpha-beta1", 0 }, { "v0.1.23-alpha-beta1", "v0.1.23-alpha-beta2", -1 }, { "v0.1.23-alpha-beta2", "v0.1.23-alpha-beta10", -1 },
+		{ "v0.1.23-alpha-beta3", "v0.1.23-alpha-rc1", -1 }, { "v0.1.23-alpha-rc1", "v0.1.23-alpha", -1 }, { "v0.1.24-alpha", "v0.1.23-alpha-beta1", 1 },
+		{ "v1.9.0-beta1", "v1.9.0", -1 }, { "v1.9.0-beta1", "v1.8.0", 1 }, { "v1.9.0-beta1", "v1.9.0-beta2", -1 }, { "v1.9.0-beta", "v1.9.0-beta1", -1 },
+		{ "v0.1.24-beta1", "v0.1.24", -1 }, { "v0.1.24-beta1", "v0.1.23", 1 }, { "v1.9.0-rc1", "v1.9.0-beta9", 1 }, { "v1.9.0-beta.1", "v1.9.0", -1 },
 	};
 	for (const auto &c : cmp) {
 		version a, b;
@@ -55,8 +61,37 @@ int main()
 	check(is(read_reply(200, rel("v0.1.23-alpha"), "dev"), result::what::none), "dev never");
 	check(is(read_reply(200, "[" + rel("v0.1.24-alpha", false, true) + "," + rel("v0.1.23-alpha") + "," + rel("v0.1.22-alpha") + "]", "v0.1.22-alpha"),
 	         result::what::newer, "v0.1.23-alpha"), "a list: the draft skipped");
-	check(is(read_reply(200, "[" + rel("v0.1.24-alpha", true) + "," + rel("v0.1.22-alpha") + "]", "v0.1.22-alpha"), result::what::newer, "v0.1.24-alpha"),
-	      "a pre-release for a pre-release build");
+	// betas: a pre-release on GitHub, said only to a beta's own build; a release's (VF3's -alpha ones too) never hears of one
+	for (const char *b : { "v1.9.0-beta1", "v0.1.24-beta1", "v0.1.23-alpha-beta1", "v0.1.23-alpha-beta12", "v1.9.0-rc2", "v1.9.0-beta" }) {
+		version v;
+		check(parse(b, v) && beta(v), std::string("a beta: ") + b);
+	}
+	for (const char *b : { "v1.8.0", "v0.1.23", "v0.1.22-alpha", "v0.1.7-online-preview", "v1.9.0-beta.1", "v1.9.0-betax", "v1.9.0-alphabeta1" }) {
+		version v;
+		check(parse(b, v) && !beta(v), std::string("not a beta: ") + b);
+	}
+	check(is(read_reply(200, "[" + rel("v0.1.24-alpha", true) + "," + rel("v0.1.22-alpha") + "]", "v0.1.22-alpha"), result::what::none, "v0.1.22-alpha"),
+	      "a release's -alpha build: no pre-release, even in a list");
+	for (const char *running : { "v1.8.0", "v0.1.23", "v0.1.22-alpha" }) {
+		const std::string t = std::string(running);
+		const std::string beta_tag = t == "v1.8.0" ? "v1.9.0-beta1" : t == "v0.1.23" ? "v0.1.24-beta1" : "v0.1.23-alpha-beta1";
+		check(is(read_reply(200, "[" + rel(beta_tag, true) + "," + rel(t) + "]", t), result::what::none, t), "a release's build, the list: the beta never said (" + t + ")");
+		check(is(read_reply(200, rel(t), t), result::what::none, t), "a release's build, /latest (the release): up to date (" + t + ")");
+		check(is(read_reply(200, rel(beta_tag, true), t), result::what::failed), "a release's build, a beta alone: none fit (" + t + ")");
+		check(api_url("vf1-recomp", t) == "https://api.github.com/repos/mr-finster/vf1-recomp/releases/latest", "a release's build asks /releases/latest (" + t + ")");
+		// the beta's build
+		check(api_url("vf3-recomp", beta_tag) == "https://api.github.com/repos/mr-finster/vf3-recomp/releases?per_page=10", "a beta's build asks the list (" + beta_tag + ")");
+		check(is(read_reply(200, rel(t), beta_tag), result::what::none), "a beta's build, the release before it: up to date (" + beta_tag + ")");
+		check(is(read_reply(200, "[" + rel(beta_tag, true) + "," + rel(t) + "]", beta_tag), result::what::none, beta_tag), "a beta's build, itself the newest (" + beta_tag + ")");
+		std::string beta2 = beta_tag, final_tag = beta_tag.substr(0, beta_tag.size() - 6);
+		beta2.back() = '2';
+		check(is(read_reply(200, "[" + rel(beta2, true) + "," + rel(beta_tag, true) + "," + rel(t) + "]", beta_tag), result::what::newer, beta2), "a beta's build hears of the next beta (" + beta2 + ")");
+		check(is(read_reply(200, "[" + rel(final_tag) + "," + rel(beta2, true) + "," + rel(beta_tag, true) + "," + rel(t) + "]", beta_tag), result::what::newer, final_tag),
+		      "a beta's build hears of the release (" + final_tag + ")");
+		check(is(read_reply(200, rel(final_tag), beta_tag), result::what::newer, final_tag), "a beta's build, /latest the release (" + final_tag + ")");
+		check(is(read_reply(200, "[" + rel(final_tag) + "," + rel(beta_tag, true) + "]", final_tag), result::what::none, final_tag), "the release's build, its beta left up: up to date (" + final_tag + ")");
+		check(newer(final_tag, beta_tag) && !newer(beta_tag, final_tag) && newer(beta_tag, t) && !newer(beta_tag, beta_tag), "newer: release, beta, the one before (" + beta_tag + ")");
+	}
 	check(is(read_reply(200, "[" + rel("v1.9.0-beta", true) + "," + rel("v1.8.0") + "]", "v1.8.0"), result::what::none), "no pre-release for a release");
 	check(is(read_reply(200, rel("v1.9.0-beta", true), "v1.8.0"), result::what::failed), "only a pre-release, a release build: none fit");
 	check(is(read_reply(200, rel("v0.1.23", false, false, "https://evil.example/x"), "v0.1.22"), result::what::failed), "a page elsewhere: not taken");

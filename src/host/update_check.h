@@ -10,7 +10,9 @@
 //
 // A test points it elsewhere (the game's VFn_UPDATE_URL): http(s)://... (a tiny server), or file://... or a path (a
 // JSON file read as a 200). The reply: one release (/releases/latest's object) or a list (/releases' array, the
-// newest non-draft taken; a pre-release only for a build that is one itself).
+// newest non-draft taken; a pre-release only for a beta's build). A release's build asks /releases/latest, which never
+// answers a pre-release, so a beta's never said to it; a beta's asks the list (api_url), so it hears of the next beta
+// and of the release itself.
 #pragma once
 #include <algorithm>
 #include <atomic>
@@ -53,8 +55,13 @@ constexpr const char *PAGE_PREFIX = "https://github.com/mr-finster/";   // (the 
 // ---- versions ----
 // A release's tag or this build's version: v1.8.0, v0.1.22-alpha, 0.1.7-online-preview. Numbers compared as numbers
 // (0.1.9 < 0.1.10), a missing one 0; a pre-release suffix older than none (0.1.22-alpha < 0.1.22), two suffixes by
-// semver's rules (dot-separated parts, numeric ones as numbers). Not a version: git describe's builds between releases
-// (v0.1.22-alpha-15-g8613e4c), -dirty, a bare commit, "dev", anything else.
+// semver's rules (dot-separated parts, numeric ones as numbers). A beta (a GitHub pre-release for testing before a
+// release): its tag the release's own with -betaN (or -rcN) after it, v1.9.0-beta1, v0.1.24-beta2, v0.1.23-alpha-beta1,
+// older than that release (v0.1.23-alpha-beta1 < v0.1.23-alpha, which semver alone would have the other way round)
+// and newer than the one before (v0.1.22-alpha); beta2 newer than beta1, rc newer than beta. (No dot in it: the online
+// version takes a release's name with lower-case letters, digits and - after its numbers, so a beta tagged so plays
+// everyone on the release, NET_VERSION being the same; v1.9.0-beta.1 would play only its own.) Not a version: git
+// describe's builds between releases (v0.1.22-alpha-15-g8613e4c), -dirty, a bare commit, "dev", anything else.
 struct version
 {
 	std::vector<long> num;
@@ -106,14 +113,25 @@ inline bool parse(const std::string &tag, version &v)
 	return true;
 }
 
-// <0, 0, >0 as a is older than, the same as, newer than b
-inline int compare(const version &a, const version &b)
+// A suffix's beta part: where its last "-" part (or the whole suffix) that is beta or rc with a number or none starts,
+// else npos. "alpha-beta1": 6; "beta1": 0; "alpha", "online-preview", "beta.1": npos
+inline size_t stage_at(const std::string &pre)
 {
-	for (size_t i = 0; i < std::max(a.num.size(), b.num.size()); i++) {
-		const long x = i < a.num.size() ? a.num[i] : 0, y = i < b.num.size() ? b.num[i] : 0;
-		if (x != y) return x < y ? -1 : 1;
+	const size_t dash = pre.rfind('-'), at = dash == std::string::npos ? 0 : dash + 1;
+	const std::string p = pre.substr(at);
+	for (const char *w : { "beta", "rc" }) {
+		const size_t n = strlen(w);
+		if (p.compare(0, n, w) == 0 && p.size() - n < 10 && std::all_of(p.begin() + long(n), p.end(), [](char c) { return isdigit(uint8_t(c)) != 0; })) return at;
 	}
-	if (a.pre.empty() || b.pre.empty()) return a.pre.empty() == b.pre.empty() ? 0 : a.pre.empty() ? 1 : -1;
+	return std::string::npos;
+}
+// a beta's own build (v1.9.0-beta1): it hears of later betas (GitHub's pre-releases) as well as the release
+inline bool beta(const version &v) { return stage_at(v.pre) != std::string::npos; }
+
+// two suffixes (the beta part taken off) by semver's rules: none newest
+inline int compare_pre(const std::string &a, const std::string &b)
+{
+	if (a.empty() || b.empty()) return a.empty() == b.empty() ? 0 : a.empty() ? 1 : -1;
 	auto split = [](const std::string &s) {
 		std::vector<std::string> out;
 		for (size_t p = 0;;) {
@@ -124,7 +142,7 @@ inline int compare(const version &a, const version &b)
 		}
 		return out;
 	};
-	const auto pa = split(a.pre), pb = split(b.pre);
+	const auto pa = split(a), pb = split(b);
 	auto numeric = [](const std::string &s) { return !s.empty() && s.size() < 10 && std::all_of(s.begin(), s.end(), [](char c) { return isdigit(uint8_t(c)) != 0; }); };
 	for (size_t i = 0; i < std::min(pa.size(), pb.size()); i++) {
 		const bool na = numeric(pa[i]), nb = numeric(pb[i]);
@@ -137,11 +155,39 @@ inline int compare(const version &a, const version &b)
 	return pa.size() == pb.size() ? 0 : pa.size() < pb.size() ? -1 : 1;
 }
 
+// <0, 0, >0 as a is older than, the same as, newer than b
+inline int compare(const version &a, const version &b)
+{
+	for (size_t i = 0; i < std::max(a.num.size(), b.num.size()); i++) {
+		const long x = i < a.num.size() ? a.num[i] : 0, y = i < b.num.size() ? b.num[i] : 0;
+		if (x != y) return x < y ? -1 : 1;
+	}
+	// (the suffix without its beta part first: v0.1.23-alpha-beta1 is v0.1.23-alpha's beta)
+	const size_t sa = stage_at(a.pre), sb = stage_at(b.pre);
+	const std::string ra = sa == std::string::npos ? a.pre : a.pre.substr(0, sa ? sa - 1 : 0), rb = sb == std::string::npos ? b.pre : b.pre.substr(0, sb ? sb - 1 : 0);
+	if (const int c = compare_pre(ra, rb)) return c;
+	if ((sa == std::string::npos) != (sb == std::string::npos)) return sa == std::string::npos ? 1 : -1;   // (the release newer than its beta)
+	if (sa == std::string::npos) return 0;
+	const std::string ta = a.pre.substr(sa), tb = b.pre.substr(sb);
+	const size_t wa = ta[0] == 'b' ? 4 : 2, wb = tb[0] == 'b' ? 4 : 2;   // (beta, rc)
+	if (ta.substr(0, wa) != tb.substr(0, wb)) return ta.substr(0, wa) < tb.substr(0, wb) ? -1 : 1;   // (beta before rc)
+	const long na = wa < ta.size() ? atol(ta.c_str() + wa) : 0, nb = wb < tb.size() ? atol(tb.c_str() + wb) : 0;
+	return na == nb ? 0 : na < nb ? -1 : 1;
+}
+
 // true only if both are versions and tag's strictly the newer (the same tag again, a hotfix's, is not)
 inline bool newer(const std::string &tag, const std::string &running)
 {
 	version a, b;
 	return parse(tag, a) && parse(running, b) && compare(a, b) > 0;
+}
+
+// what this build asks GitHub (repo: "vf3-recomp"): its latest release, or, a beta's build, the list (betas too)
+inline std::string api_url(const std::string &repo, const std::string &running)
+{
+	version v;
+	const bool b = parse(running, v) && beta(v);
+	return "https://api.github.com/repos/mr-finster/" + repo + (b ? "/releases?per_page=10" : "/releases/latest");
 }
 
 // "v0.1.23-alpha" as the menu shows it: "0.1.23-alpha"
@@ -187,7 +233,7 @@ inline result read_reply(int status, const std::string &body, const std::string 
 		if (x->kind != vfnet::json::Value::object) continue;
 		const auto &d = (*x)["draft"], &pre = (*x)["prerelease"];
 		if (d.kind == vfnet::json::Value::boolean && d.b) continue;
-		if (pre.kind == vfnet::json::Value::boolean && pre.b && !(proper && !mine.pre.empty())) continue;   // (pre-releases: only for one)
+		if (pre.kind == vfnet::json::Value::boolean && pre.b && !(proper && beta(mine))) continue;   // (pre-releases (betas): only for a beta, never a release's build, VF3's -alpha ones too)
 		version t;
 		if (!parse((*x)["tag_name"].str(), t) || !page_ok((*x)["html_url"].str())) continue;
 		if (!best || compare(t, best_v) > 0) { best = x; best_v = t; }
