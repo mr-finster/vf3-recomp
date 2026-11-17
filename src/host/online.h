@@ -488,10 +488,14 @@ struct Online::Fetch
 	vfnet::http::Reply reply;
 };
 
-// A Rooms 2 table's run of wins in words: "1 WIN", "3 WINS IN A ROW" (none: "")
+// A Rooms 2 table's run of wins in words: "1 WIN", "3 WINS IN A ROW" (none: ""); short, beside its holder's name on
+// the room page's table: "1 WIN", "3 WINS"
 std::string room2_streak_text(int n);
-// The room page's line, rows of it at most (the page's height at 720 dp): online_room.cpp
+std::string room2_wins_text(int n);
+// The room page's line: rows of it at most, as many as the page's height holds (15 at 720 dp, the least; a row more for
+// each row's height more: a taller window, 4:3, 16:10), and which of a line are shown in them: online_room.cpp
 constexpr int ROOM2_LINE_ROWS = 15;
+int room2_line_fit(float page_h_dp);
 std::vector<int> room2_line_rows(int n, int pos, int rows);
 
 namespace online_menu {

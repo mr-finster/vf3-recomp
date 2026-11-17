@@ -3098,7 +3098,8 @@ menu_page room2_page(Online &o, OnlineSettings &s, game_menu &menu, std::functio
 	p.start = ready >= 0 ? ready : join >= 0 ? join : leave;
 	p.on_event = [&menu](const SDL_Event &e) { return closes(menu, e); };
 	p.own_note = true;   // (a note while it's open: in the line's column, where its help is, not over the page)
-	p.screen = [&o, ready, join, watch, leave_line, copy, settings, leave, copied](int sel, bool pad) {
+	p.by_height = true;  // (the line as long as the window's height holds: made again for a taller or shorter one)
+	p.screen = [&o, &menu, ready, join, watch, leave_line, copy, settings, leave, copied](int sel, bool pad) {
 		const RoomMember *m = o.room2();
 		if (!m) return std::string("<div class=\"scr\"></div>");
 		const std::string c = o.room_code(), title = !m->room_name.empty() ? m->room_name : c.empty() ? std::string(tr::ROOM_OPEN) : c;
@@ -3116,11 +3117,12 @@ menu_page room2_page(Online &o, OnlineSettings &s, game_menu &menu, std::functio
 			else if (m->watcher) r += "<div class=\"r2chip watch\">" + E(tr::ROOM2_CHIP_WATCHING) + "</div>";
 			else if (m->pos > 0) r += "<div class=\"r2chip " + std::string(m->me_ready ? "ready" : "away") + "\">" +
 			                         E(tr::fill(m->me_ready ? tr::ROOM2_CHIP_LINE_READY : tr::ROOM2_CHIP_LINE_AWAY, { { "n", std::to_string(m->pos) } })) + "</div>";
-			// the table: the two, one over the other (side a first, the session's host), the streak by its holder's name
+			// the table: the two, one over the other (side a first, the session's host), the streak beside its holder's
+			// name, short ("3 WINS"; a name too long for both in a language cut short with "...", never under it)
 			r += "<div class=\"r2card\"><div class=\"ph\">" + E(tr::ROOM2_TABLE) + "</div>";
 			auto seat = [&](const RoomMember::Who &w, bool holds) {
-				return "<div class=\"r2seat\">" + flag(w.country, "flag r2f") + "<div class=\"r2sn\">" + E(w.name) + "</div></div>" +
-				       (holds && m->streak > 0 ? "<div class=\"r2st\">" + E(room2_streak_text(m->streak)) + "</div>" : std::string());   // (under the name: a long one and a long language's streak don't fit beside it)
+				return "<div class=\"r2seat\">" + flag(w.country, "flag r2f") + "<div class=\"r2sn\">" + E(w.name) + "</div>" +
+				       (holds && m->streak > 0 ? "<div class=\"r2st\">" + E(room2_wins_text(m->streak)) + "</div>" : std::string()) + "</div>";
 			};
 			if (m->has_a) r += seat(m->a, m->holder == "a");
 			if (m->has_a && m->has_b) r += "<div class=\"r2vs\">VS</div>";
@@ -3138,7 +3140,8 @@ menu_page room2_page(Online &o, OnlineSettings &s, game_menu &menu, std::functio
 		if (settings >= 0) r += "<div " + menu_row(settings, sel, "btn") + ">" + E(tr::BUTTON_ROOM_SETTINGS) + "</div>";
 		r += "<div " + menu_row(leave, sel, "btn") + ">" + E(tr::BUTTON_LEAVE_ROOM) + "</div></div></div>";
 		// the line: its length and how many are READY; a row each in order (its place, flag, name, READY or AWAY, the next
-		// to play NEXT, this player's YOU and lit); past what fits, the first ones, "... n more", this player's own
+		// to play NEXT, this player's YOU and lit), as many as the window's height holds (room2_line_fit); past that, the
+		// first ones, "... n more", this player's own
 		r += "<div class=\"r2right\">";
 		if (in) {
 			const int n = int(m->line.size());
@@ -3149,7 +3152,7 @@ menu_page room2_page(Online &o, OnlineSettings &s, game_menu &menu, std::functio
 			if (n > 0) r += "<div class=\"r2lc\">" + E(std::to_string(n) + "  \xC2\xB7  " + tr::fill(tr::ROOM2_N_READY, { { "n", std::to_string(ready_n) } })) + "</div>";
 			r += "</div><div class=\"r2list\">";
 			if (n == 0) r += "<div class=\"r2row r2empty\"><div>" + E(tr::ROOM2_LINE_EMPTY) + "</div></div>";
-			for (int i : room2_line_rows(n, m->pos, ROOM2_LINE_ROWS)) {
+			for (int i : room2_line_rows(n, m->pos, room2_line_fit(menu.height_dp()))) {
 				if (i < 0) { r += "<div class=\"r2row r2more\"><div>" + E(tr::fill(tr::ROOM2_MORE_N, { { "n", std::to_string(-i) } })) + "</div></div>"; continue; }
 				const RoomMember::Who &w = m->line[size_t(i)];
 				const bool me = i + 1 == m->pos;

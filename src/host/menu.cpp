@@ -258,6 +258,13 @@ void game_menu::set_banner(const std::string &title, const std::string &sub, con
 // narrower than 16:9, a Steam Deck's 16:10, 4:3: the screens laid out for 1280 x 720 fit across it whole)
 static float dp_of(int w, int h) { return std::min(float(h) / 720.0f, float(w) / 1280.0f); }
 
+float game_menu::height_dp() const
+{
+	if (!m->ctx) return 720;
+	const Rml::Vector2i d = m->ctx->GetDimensions();
+	return d.x > 0 && d.y > 0 ? float(d.y) / dp_of(d.x, d.y) : 720;
+}
+
 void game_menu::show_versus(const versus &v, double seconds)
 {
 	if (!m->overlay) return;
@@ -474,6 +481,23 @@ std::vector<std::string> game_menu::clashes()
 	return out;
 }
 
+std::vector<game_menu::box> game_menu::boxes(const std::string &cls)
+{
+	std::vector<box> out;
+	if (!m->ctx || !m_open) return out;
+	m->ctx->Update();
+	std::function<void(Rml::Element *)> walk = [&](Rml::Element *e) {
+		if (!e->IsVisible()) return;
+		if (e->IsClassSet(cls)) {
+			const Rml::Vector2f p = e->GetAbsoluteOffset(Rml::BoxArea::Border), sz = e->GetBox().GetSize(Rml::BoxArea::Border);
+			out.push_back({ p.x, p.y, p.x + sz.x, p.y + sz.y });
+		}
+		for (int i = 0; i < e->GetNumChildren(); i++) walk(e->GetChild(i));
+	};
+	if (Rml::ElementDocument *d = on_screen() && m->screen ? m->screen : m->doc) walk(d);
+	return out;
+}
+
 std::vector<std::string> game_menu::misaligned()
 {
 	// The rows' labels each start where the others do (but the selected one's, and a sub row's: indented on purpose),
@@ -675,6 +699,7 @@ void game_menu::build()
 	if (scr) {
 		Rml::Element *root = m->screen->GetElementById("screen");
 		if (!root) return;
+		m_built_h = std::lround(height_dp());
 		root->SetInnerRML(p.screen(m_sel, m_pad));
 		m_pointer_moved = false;
 		// the selected item not on the screen now (the letters, gone with the pad): the page's own first one
@@ -1030,6 +1055,7 @@ void game_menu::render(bool fps)
 	SDL_GetCurrentRenderOutputSize(m->ren, &w, &h);
 	m->ctx->SetDimensions(Rml::Vector2i(w, h));
 	m->ctx->SetDensityIndependentPixelRatio(dp_of(w, h));
+	if (m_open && !m_stack.empty() && m_stack.back().by_height && on_screen() && std::lround(height_dp()) != m_built_h) build();   // (a taller or shorter window: its page for it)
 	m->ctx->Update();
 	if (m_vs_until) draw_versus(w, h);
 	m->gfx->BeginOverlay();

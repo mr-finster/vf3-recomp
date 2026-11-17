@@ -70,6 +70,20 @@ std::string room2_streak_text(int n)
 	return n == 1 ? std::string(tr::ROOM2_STREAK_1) : tr::fill(tr::ROOM2_STREAK, { { "n", std::to_string(n) } });
 }
 
+std::string room2_wins_text(int n)
+{
+	if (n <= 0) return "";
+	return n == 1 ? std::string(tr::ROOM2_STREAK_1) : tr::fill(tr::ROOM2_WINS_N, { { "n", std::to_string(n) } });
+}
+
+// The line's rows that fit a page this tall (the window's height in dp, 720 at least: game_menu::height_dp). screen.rcss:
+// the room page from 30 dp under the top to 88 dp over the bottom (.r2room), a row 28 dp (.r2row); at 720 dp 15 rows,
+// the head, "n watching" and the help or a note under them; past that each 28 dp more a row more, the rest kept as it is
+int room2_line_fit(float page_h_dp)
+{
+	return ROOM2_LINE_ROWS + std::max(0, int((page_h_dp - 720.0f + 0.5f) / 28.0f));
+}
+
 // ---- entering ----
 
 bool Online::room2_create(const OnlineSettings &s, tr::line &error) { return room2_begin(s, "", true, error); }

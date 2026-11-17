@@ -344,12 +344,13 @@ div { display: block; }
 .flag.s.hb { margin: 0 8dp 0 8dp; }
 .note.quiet { margin-top: 20dp; font-size: 19dp; line-height: 24dp; }   /* (a line beside the point: Quick match can be watched) */
 
-/* A Rooms 2 room's page, two columns (1168dp at most across, 594dp tall, in the middle of the space over the hints): at
-   the left the room's name and code, this player's status chip, the table (its two one over the other, the streak by
-   its holder) and the buttons one under another; at the right the line from top to bottom, a row each (online.cpp's
-   ROOM2_LINE_ROWS of them at most: the page's height), its help or a note under it (#pagehelp, #pagenote) */
-.r2room { position: absolute; left: 56dp; right: 56dp; top: 30dp; bottom: 88dp; display: flex; flex-direction: column; justify-content: center; }
-.r2cols { display: flex; gap: 36dp; height: 602dp; max-width: 1168dp; width: 100%; margin: 0 auto; }
+/* A Rooms 2 room's page, two columns (1168dp at most across, all the space over the hints: 602dp tall at 720dp, more
+   in a taller window): at the left the room's name and code, this player's status chip, the table (its two one over
+   the other, the streak beside its holder's name) and the buttons one under another; at the right the line from top to
+   bottom, a row each (as many as the page's height holds: online_room.cpp's room2_line_fit, from .r2room's top and
+   bottom and .r2row's height), its help or a note under it (#pagehelp, #pagenote) */
+.r2room { position: absolute; left: 56dp; right: 56dp; top: 30dp; bottom: 88dp; }
+.r2cols { display: flex; gap: 36dp; height: 100%; max-width: 1168dp; width: 100%; margin: 0 auto; }
 .r2left { width: 450dp; flex: none; }
 .r2right { position: relative; flex: 1; }
 .r2title.long { font-size: 38dp; }
@@ -363,8 +364,8 @@ div { display: block; }
 .r2card { margin-top: 14dp; padding: 10dp 20dp 12dp 20dp; border-radius: 14dp; border: 2dp #2a3466; background-color: #141b3d; }
 .r2card .ph { margin: 2dp 0 4dp 0; }
 .r2seat { display: flex; align-items: center; height: 38dp; }
-.r2sn { flex: 1; font-size: 30dp; line-height: 38dp; font-weight: 700; font-style: italic; color: #ffffff; white-space: nowrap; }
-.r2st { margin: -4dp 0 2dp 46dp; font-size: 19dp; line-height: 22dp; font-weight: 700; font-style: italic; color: #f2d14b; white-space: nowrap; }
+.r2sn { flex: 0 1 auto; font-size: 30dp; line-height: 38dp; font-weight: 700; font-style: italic; color: #ffffff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.r2st { flex: none; margin: 5dp 0 0 14dp; font-size: 19dp; line-height: 22dp; font-weight: 700; font-style: italic; color: #f2d14b; white-space: nowrap; }   /* (beside the name, short: 3 WINS) */
 .r2vs { font-size: 17dp; line-height: 18dp; font-weight: 700; font-style: italic; color: #f2d14b; margin-left: 2dp; }
 .r2wait { margin-top: 4dp; font-size: 20dp; line-height: 26dp; color: #8f9ac8; }
 .flag.r2f { width: 32dp; height: 24dp; margin: 0 12dp 0 0; flex: none; }

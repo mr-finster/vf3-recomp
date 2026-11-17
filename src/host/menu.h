@@ -38,6 +38,8 @@ struct menu_page
 	bool text = false;                    // (a screen's) typed into: the keyboard's text on while it's shown
 	bool own_note = false;                // (a screen's) a note (toast) shown in the page's own place for it, its element
 	                                      // #pagenote (#pagehelp hidden meanwhile), not over the page; its time counted there
+	bool by_height = false;               // (a screen's) made again when the window's height in dp changes (height_dp: what
+	                                      // it shows depends on it, the room page's line)
 };
 
 // A screen's selectable element: its class (row, and selected) and id, with more classes
@@ -58,6 +60,9 @@ public:
 	std::vector<std::string> overflow();
 	std::vector<std::string> misaligned();   // (rows whose labels don't start where the others' do: for tests)
 	std::vector<std::string> clashes();      // (lines of text drawn over each other, the page's and what's over it: for tests)
+	struct box { float x0, y0, x1, y1; };
+	std::vector<box> boxes(const std::string &cls);   // (each element of this class shown, in window pixels: for tests)
+	float height_dp() const;                 // the window's height in dp (the menus' unit: 720 at least, more in a taller one)
 	// (tests: the page of rows shown, if it doesn't fit whole: its rows past their space, where they'd scroll, or the
 	// panel past the window's bottom, or the help under them wider than the panel; empty if it fits, or a screen is shown)
 	std::string page_fit();
@@ -131,6 +136,7 @@ private:
 	bool page_owns_note() const { return m_open && on_screen() && m_stack.back().own_note; }
 	void place_note(bool force = false);  // (the note: over the game, in the page's own place, or held back)
 	std::string m_note_was;               // (place_note's last: not set again each picture)
+	long m_built_h = 0;                   // (the window's height in dp the page was made for: menu_page::by_height)
 	std::vector<menu_page> m_stack;
 	std::vector<int> m_sel_stack;
 	int m_sel = 0;

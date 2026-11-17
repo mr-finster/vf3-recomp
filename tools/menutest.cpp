@@ -1465,15 +1465,43 @@ int main(int argc, char **argv)
 			check(rows(20, 17) == "1,2,3,4,5,6,7,8,9,10,11,12,-4,17,-3", ("Rooms 2's line: 17th of 20: the first 12, 4 more, this player's, 3 more (" + rows(20, 17) + ")").c_str());
 			check(rows(32, 32) == "1,2,3,4,5,6,7,8,9,10,11,12,13,-18,32", ("Rooms 2's line: last of 32 (" + rows(32, 32) + ")").c_str());
 			check(rows(20, 19) == "1,2,3,4,5,6,7,8,9,10,11,12,-6,19,20", ("Rooms 2's line: 19th of 20: the last shown, not \"1 more\" (" + rows(20, 19) + ")").c_str());
-			for (int n = 1; n <= 32; n++)
-				for (int pos = 0; pos <= n; pos++) {
-					const std::vector<int> v = room2_line_rows(n, pos, ROOM2_LINE_ROWS);
-					int seen = 0;
-					bool mine = pos == 0, fits = int(v.size()) <= ROOM2_LINE_ROWS;
-					for (int i : v) { seen += i < 0 ? -i : 1; mine = mine || i == pos - 1; fits = fits && i != -1; }
-					if (seen != n || !mine || !fits) { check(false, ("Rooms 2's line: " + std::to_string(n) + ", at " + std::to_string(pos) + ": " + rows(n, pos)).c_str()); n = 99; break; }
+			bool all_ok = true;
+			for (int fit = ROOM2_LINE_ROWS; fit <= 34 && all_ok; fit++)   // (15 rows at 720 dp to more than a 32-line in a tall window)
+				for (int n = 1; n <= 32 && all_ok; n++)
+					for (int pos = 0; pos <= n; pos++) {
+						const std::vector<int> v = room2_line_rows(n, pos, fit);
+						int seen = 0, at = -1;
+						bool mine = pos == 0, fits = int(v.size()) <= fit && (n <= fit ? int(v.size()) == n : int(v.size()) == fit), order = true;
+						for (int i : v) { seen += i < 0 ? -i : 1; mine = mine || i == pos - 1; fits = fits && i != -1; if (i >= 0) { order = order && i > at; at = i; } }
+						if (seen != n || !mine || !fits || !order) {
+							std::string t;
+							for (int i : v) t += (t.empty() ? "" : ",") + std::to_string(i < 0 ? i : i + 1);
+							check(false, ("Rooms 2's line: " + std::to_string(n) + ", at " + std::to_string(pos) + ", " + std::to_string(fit) + " rows: " + t).c_str());
+							all_ok = false;
+							break;
+						}
+					}
+			check(all_ok, "Rooms 2's line: every length to 32, every place, 15 to 34 rows: each one shown or counted, in order, this player's row shown, the rows all used, no \"1 more\"");
+			check(room2_line_fit(720) == 15 && room2_line_fit(800) == 17 && room2_line_fit(960) == 23 && room2_line_fit(1024) == 25,
+			      "Rooms 2's line: 15 rows at 720 dp tall, 17 at 800 (16:10), 23 at 960 (4:3), 25 at 1024 (5:4)");
+			// the line fills the page's height: as many rows as fit (room2_line_fit), the last one and "n watching" over the
+			// help, the help in the page; under the line no more space than the help's place and two rows' (fixed rows
+			// left a 4:3 window's bottom third empty)
+			auto fills = [&](const char *name, int n) {
+				const float dp = std::min(float(h) / 720.0f, float(w) / 1280.0f);
+				const std::vector<game_menu::box> rows = gm.boxes("r2row"), watch = gm.boxes("r2watch"), help = gm.boxes("r2help"), right = gm.boxes("r2right");
+				const int want = std::min(n, room2_line_fit(gm.height_dp()));
+				std::string why;
+				if (int(rows.size()) != want) why = std::to_string(rows.size()) + " rows, not " + std::to_string(want);
+				else if (right.size() != 1 || help.size() != 1) why = "no line's column or no help";
+				else {
+					const float bottom = watch.empty() ? rows.back().y1 : watch.back().y1;
+					if (bottom > help[0].y0 + 1) why = "the line over its help";
+					else if (n > want && help[0].y0 - bottom > 2 * 28 * dp + 60 * dp) why = "space left under the line (" + std::to_string(int((help[0].y0 - bottom) / dp)) + " dp)";
+					else if (help[0].y1 > right[0].y1 + 1) why = "the help past the page's bottom";
 				}
-			check(true, "Rooms 2's line: every length to 32, every place: each one shown or counted, this player's row shown, no \"1 more\"");
+				check(why.empty(), (std::string(name) + ": the line fills the page, " + std::to_string(rows.size()) + " rows at " + std::to_string(w) + "x" + std::to_string(h) + (why.empty() ? "" : ": " + why)).c_str());
+			};
 			// the pages: a long line (20, READY and AWAY mixed, this player 17th, below what fits), the longest the lobby
 			// has (32, this player at the table, the creator), a short one (1, 2), a watcher with others watching
 			const char *names[] = { "SEOULKICK", "DENVERDAN", "PAIPAI", "JACKYB", "WWWWWWWWWW", "SARAHB", "KAGEMARU", "LIONR", "WOLFH", "JEFFRY", "SHUNDI", "LAUCHAN",
@@ -1496,12 +1524,55 @@ int main(int argc, char **argv)
 			settle_check("room2_line_long.png", w, h);
 			shot("room2_line_long.png", w, h);
 			room2_clear("room2_line_long.png");
+			fills("room2_line_long.png", 20);
 			o.set_room2_test(R"({"code":"KXQ4M7","room":{"name":"WWWWWWWWWWWWWWWW","listed":true,"locked":false,"ready_ms":15000,"owner":true},"table":{"a":{"name":"MRFINSTER","country":"GB"},"b":{"name":"WWWWWWWWWW","country":"AU"},"phase":"PLAYING","streak":12,"holder":"b","n":40,"last":null},)" +
 			                 line(32, 0, R"("you":{"mid":"x","pos":0,"side":"a","ready":true},"watchers":2,"ready":null,"watch":"KXQ4M7"})"));
 			again();
 			settle_check("room2_line_32.png", w, h);
 			shot("room2_line_32.png", w, h);
 			room2_clear("room2_line_32.png");
+			fills("room2_line_32.png", 32);
+			{   // the streak beside its holder's name, short, the longest name: on the name's line, in the card, after the name
+				const std::vector<game_menu::box> st = gm.boxes("r2st"), sn = gm.boxes("r2sn"), card = gm.boxes("r2card");
+				bool ok = st.size() == 1 && sn.size() == 2 && card.size() == 1;
+				if (ok) ok = st[0].x0 >= sn[1].x1 - 1 && st[0].x1 <= card[0].x1 - 1 && st[0].y0 >= sn[1].y0 - 1 && st[0].y1 <= sn[1].y1 + 1;
+				check(ok, "Rooms 2's table: the streak (12) beside the longest name, on its line, inside the card");
+				// the longest streak (the lobby's 9999 at most) beside the longest name: the streak whole in the card, after the
+				// name; a language too long for both, the name cut short ("..."), never under it or over it
+				o.set_room2_test(R"({"code":"KXQ4M7","room":{"name":"FRIDAY FIGHTS","listed":true,"locked":false,"ready_ms":15000,"owner":false},"table":{"a":{"name":"MRFINSTER","country":"GB"},"b":{"name":"WWWWWWWWWW","country":"AU"},"phase":"PLAYING","streak":9999,"holder":"b","n":40,"last":null},)" +
+				                 line(3, 0, R"("you":{"mid":"x","pos":0,"side":"a","ready":true},"watchers":0,"ready":null,"watch":"KXQ4M7"})"));
+				again();
+				shot("room2_streak_long.png", w, h);
+				room2_clear("room2_streak_long.png");
+				const std::vector<game_menu::box> st2 = gm.boxes("r2st"), sn2 = gm.boxes("r2sn"), card2 = gm.boxes("r2card");
+				ok = st2.size() == 1 && sn2.size() == 2 && card2.size() == 1 && st2[0].x0 >= sn2[1].x1 - 1 && st2[0].x1 <= card2[0].x1 - 1 && st2[0].y0 >= sn2[1].y0 - 1 && st2[0].y1 <= sn2[1].y1 + 1;
+				check(ok, "Rooms 2's table: the longest streak (9999) beside the longest name, on its line, inside the card");
+			}
+			// a line of 32, this player 27th, below the fold: the first ones, "... n more", this player's row, "... n more"; at
+			// the table the longest name with its 3 WINS beside it
+			const std::string long_table = R"("table":{"a":{"name":"AKIRAFAN","country":"JP"},"b":{"name":"WWWWWWWWWW","country":"AU"},"phase":"PLAYING","streak":3,"holder":"b","n":5,"last":null})";
+			o.set_room2_test(room + long_table + "," + line(32, 27, R"("you":{"mid":"x","pos":27,"ready":true},"watchers":3,"ready":null,"watch":"KXQ4M7"})"));
+			again();
+			settle_check("room2_line_32_fold.png", w, h);
+			shot("room2_line_32_fold.png", w, h);
+			room2_clear("room2_line_32_fold.png");
+			fills("room2_line_32_fold.png", 32);
+			{
+				const std::vector<int> v = room2_line_rows(32, 27, room2_line_fit(gm.height_dp()));
+				check(room2_line_fit(gm.height_dp()) >= 32 || (std::find(v.begin(), v.end(), 26) != v.end() && v.back() == -5), "Rooms 2's line: 27th of 32 below the fold: this player's row, then 5 more");
+			}
+			if (w * 3 <= h * 4) check(true, "Rooms 2's line: (a window 4:3 or taller already: not made taller)");
+			else {   // the window made 4:3 with the page open (a corner dragged): the page made again for it, more rows
+				const int was = int(gm.boxes("r2row").size());
+				SDL_SetWindowSize(win, w, w * 3 / 4);
+				for (int i = 0; i < 4; i++) { SDL_PumpEvents(); shot("", w, w * 3 / 4); SDL_Delay(20); }
+				const int now = int(gm.boxes("r2row").size()), want = std::min(32, room2_line_fit(gm.height_dp()));
+				check(now == want && now > was, ("Rooms 2's line: the window made 4:3 with the page open: " + std::to_string(was) + " rows, then " + std::to_string(now) + " (" + std::to_string(want) + " fit)").c_str());
+				room2_clear("room2_line_32_fold (made 4:3)");
+				SDL_SetWindowSize(win, w, h);
+				for (int i = 0; i < 4; i++) { SDL_PumpEvents(); shot("", w, h); SDL_Delay(20); }
+				check(int(gm.boxes("r2row").size()) == was, "Rooms 2's line: and back: as many rows as before");
+			}
 			o.set_room2_test(room + table + "," + line(24, 3, R"("you":{"mid":"x","pos":3,"ready":false},"watchers":0,"ready":null,"watch":"KXQ4M7"})"));
 			again();
 			shot("room2_line_top.png", w, h);
