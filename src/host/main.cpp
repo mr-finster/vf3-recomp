@@ -87,6 +87,7 @@
 //                        random play (win) or nothing (lose: the other wins), and Start again as the loser (a rematch,
 //                        held back when someone's in the line); for runs with several matches in a row
 //   VF3_ROOM2_LEAVE_AT=N leaves the room (Leave room) at pass N
+//   VF3_ROOM2_REGATHER_S=s the room's link gathered again s seconds after it last was (between seats), not 5 hours
 //   VF3_ROOM2_SHOT=1     the window to build/host_room2_ready.png 1 s into the ready check (its banner)
 //   VF3_TEST_STORY=1     the window shot as a Rooms 2 room's story moves on (each change: the game, then the Online page
 //                        over it), to build/story_*.png; VF3_TEST_STORY_AT=s:open,s:key:K,s:shot:NAME,s:close,s:text:T,
@@ -734,6 +735,18 @@ struct settings
 	bool update_check = true;
 	int64_t update_checked = 0;
 	std::string update_tag, update_url, update_seen;
+	// The command line's --scale, --aspect, --fullscreen / --window: for this run only. Saved as settings.ini had them
+	// (a save for anything else, the update check's daily one too, never writes them), unless the player changes that
+	// setting in the menu meanwhile (then it's theirs, saved)
+	struct run_only { bool on = false; int file = 0, given = 0; };
+	run_only arg_scale_, arg_aspect_, arg_full_;
+	void override_for_run(int scale_arg, int aspect_arg, int full_arg)
+	{
+		if (scale_arg) { arg_scale_ = { true, scale, scale_arg }; scale = scale_arg; }
+		if (aspect_arg >= 0) { arg_aspect_ = { true, aspect, aspect_arg }; aspect = aspect_arg; }
+		if (full_arg >= 0) { arg_full_ = { true, int(fullscreen), full_arg }; fullscreen = full_arg != 0; }
+	}
+	static int saved_as(const run_only &r, int now) { return r.on && now == r.given ? r.file : now; }
 
 	void load(const std::string &path)
 	{
@@ -827,7 +840,7 @@ struct settings
 		{
 			update_check::version v;
 			auto tag = kv.find("update_tag"), url = kv.find("update_url"), seen = kv.find("update_seen");
-			if (tag != kv.end() && url != kv.end() && update_check::parse(tag->second, v) && update_check::page_ok(url->second))
+			if (tag != kv.end() && url != kv.end() && update_check::parse(tag->second, v) && update_check::page_ok(url->second, "vf3-recomp"))
 				update_tag = tag->second, update_url = url->second;
 			if (seen != kv.end() && update_check::parse(seen->second, v)) update_seen = seen->second;
 		}
@@ -888,7 +901,7 @@ struct settings
 		fprintf(f, "# Virtua Fighter 3 settings (the in-game menu writes these)\n");
 		fprintf(f, "settings_version = %d\n", VERSION);
 		fprintf(f, "scale = %d\npicture_shape = %d\nfullscreen = %d\nvolume = %d\narcade_mode = %d\nshow_fps = %d\n"
-				"smooth_motion = %d\nrenderer_3d = %d\nbackground_filter = %d\n", scale, aspect, int(fullscreen), volume, int(arcade), int(show_fps),
+				"smooth_motion = %d\nrenderer_3d = %d\nbackground_filter = %d\n", saved_as(arg_scale_, scale), saved_as(arg_aspect_, aspect), saved_as(arg_full_, int(fullscreen)), volume, int(arcade), int(show_fps),
 				int(smooth), renderer3d, int(smooth_bg));
 		if (!roms_folder.empty()) fprintf(f, "roms_folder = %s\n", roms_folder.c_str());
 		if (!game.empty()) fprintf(f, "game = %s\n", game.c_str());
@@ -1901,13 +1914,11 @@ int main(int argc, char **argv)
 			const std::string url = test_url ? test_url : update_check::api_url("vf3-recomp", VF3_VERSION);   // (a beta's build: the list, betas too)
 			cfg.update_checked = now;
 			cfg_dirty = true;
-			updates.start(url, std::string("VF3Recomp/") + VF3_VERSION + " (update check)", VF3_VERSION);
+			updates.start(url, std::string("VF3Recomp/") + VF3_VERSION + " (update check)", VF3_VERSION, "vf3-recomp");
 			fprintf(stderr, "updates: asking %s\n", test_url ? "the test's address" : "GitHub");
 		}
 	}
-	if (arg_scale) cfg.scale = arg_scale;
-	if (arg_aspect >= 0) cfg.aspect = arg_aspect;
-	if (arg_full >= 0) cfg.fullscreen = arg_full;
+	cfg.override_for_run(arg_scale, arg_aspect, arg_full);   // (--scale, --aspect, --fullscreen / --window: this run's, never saved)
 	if (arg_arcade) cfg.arcade = true;
 	if (arg_volume >= 0) cfg.volume = arg_volume;
 	if (arg_music >= 0) cfg.music = arg_music;
@@ -1965,6 +1976,7 @@ int main(int argc, char **argv)
 	static Online online(board);
 	online.set_room2_file(data + "/room2.txt");   // (a Rooms 2 room's membership: taken back after a crash, within 30 s)
 	if (const char *r = getenv("VF3_ROOM2_READY")) online.room2_test_ready = r;
+	if (const char *r = getenv("VF3_ROOM2_REGATHER_S")) online.room2_regather_ms = std::max(5.0, atof(r)) * 1000;
 	std::vector<uint8_t> own_backup;
 	uint16_t own_eeprom[64] = {};
 	bool nvram_away = false;
@@ -4429,7 +4441,7 @@ int main(int argc, char **argv)
 	auto online_row = [&] { return board.profile->settings.at ? 5 : 4; };   // (the main page's Online row: Arcade settings before it when known)
 	// a newer release out, to be said: the check on, nothing online going on (never in or around a match)
 	auto update_out = [&] {
-		return update_check::AVAILABLE && cfg.update_check && update_check::newer(cfg.update_tag, VF3_VERSION) && update_check::page_ok(cfg.update_url) &&
+		return update_check::AVAILABLE && cfg.update_check && update_check::newer(cfg.update_tag, VF3_VERSION) && update_check::page_ok(cfg.update_url, "vf3-recomp") &&
 		       online.phase() == Online::Phase::off && !online.in_room2() && !nvram_away;
 	};
 	auto main_page = [&] {

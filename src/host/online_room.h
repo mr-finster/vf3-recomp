@@ -1,4 +1,4 @@
-// Rooms 2 (docs/ROOMS2-DESIGN.md): a room the lobby owns, winner stays on, a visible line with a ready check. The game
+// Rooms 2 (docs/ROOMS2-DESIGN.md): a room the lobby owns, winner stays on, a visible line, READY or AWAY. The game
 // is a member of the room (RoomMember): in its line, watching its match or not, or at its table playing. The
 // membership sits above what Online is doing (an activity: watching, a seat's session), never torn down by it: a
 // seat's match ending, or watching stopping, leaves the player in the room; only leaving it (Leave room, Leave line,
@@ -32,6 +32,8 @@ struct RoomMember
 	// who and where
 	std::string code, mid, mkey, owner_key, wid;   // (owner_key: the creator's, for settings and close; "" others)
 	bool creating = false;          // (create, not enter: the first answer's)
+	bool rejoining = false;         // (entered with a membership from before (room2.txt): back at its table, perhaps)
+	bool play_next = false;         // (entered by Play next: a room as before's code joined in its line, not as Enter code)
 	bool back = false;              // (the lobby took back a membership from before: a rejoin)
 	// The room as the lobby last said (its state)
 	struct Who { std::string name, country; bool ready = true; };   // (ready: in the line, READY (played when it's their turn) or AWAY (passed over))
@@ -71,9 +73,17 @@ struct RoomMember
 	int misses = 0;
 	bool ready_on = false, ready_you = false;
 	int ready_pos = 0;
-	double ready_until = 0;         // (the ready check's end, on Online's clock)
-	int version = 0;                // (counted up at every state: the room page made again)
+	double ready_until = 0;         // (GET READY's end, on Online's clock)
+	int version = 0;                // (counted up when what the room page shows changes: the page made again)
+	std::string shown_key;          // (what the room page shows, as the last state had it: a state that changes none of it isn't a new page)
 	bool have_state = false;
+	// The states' order: the lobby's seq if it sends one; else when each was known (a socket's push as it came, a POST's
+	// answer as its request was sent) and the table's match number (table.n, which only grows): a state older than the
+	// last applied one is not applied (a poll's answer that took longer than an op's after it, a push since)
+	double state_at = -1e18;
+	int state_n = -1;
+	double state_seq = -1;
+	bool lobby_ready = true;        // (READY or AWAY as the lobby last said, not as this player last asked)
 
 	// What became of it ("" still a member): left, removed (ready, gone, version), closed
 	std::string ended;
@@ -84,20 +94,33 @@ struct RoomMember
 
 	// The lobby: its socket (pushed states; ping every 15 s), or polling every 10 s over HTTPS
 	std::shared_ptr<vfnet::http::Socket> ws;
-	bool ws_failed = false;
 	int ws_tries = 0;
-	double ws_at = 0, ping_at = 0, poll_at = 0, heard_at = 0;
-	std::vector<std::pair<std::string, std::string>> outbox;   // (op, its JSON: sent on the socket, or POSTed)
+	double ws_at = 0, ping_at = 0, poll_at = 0, heard_at = 0, polled_at = -1e18;
+	double ws_open_at = 0;          // (when the socket last opened: open a minute, its tries counted afresh)
+	int ws_fails = 0;               // (handshakes refused or failed in a row: polling meanwhile, the socket tried again later and later)
+	// The ops not yet seen taken (the socket gives no answer to an op, and the lobby drops a member's calls past its rate:
+	// a burst of 10, then one per 2 s; a POST's can be lost or answered busy): each sent again 3 s, 6, 12, 24 after,
+	// while the state doesn't show it (started: still CONNECTING, or a few times in PLAYING (a session started again
+	// after a lost one must say it again); result: the match still on or DECIDED; ready, away: this player's READY not as
+	// asked), given up after a few
+	struct Op { std::string op, extra; int n = -1; double at = 0; int tries = 0; bool connecting = false; };   // (connecting: started first said while CONNECTING)
+	std::vector<Op> outbox;
 
 	// The activity's bookkeeping
 	int step = 0;                   // (0 getting ready: the link's addresses; 1 asking the lobby: create or enter; 2 a member)
-	bool in_seat = false;
-	bool test = false;              // (menutest's made-up state: shown, nothing done about it)           // (a seat's session on (connecting or playing): the link is Online's room meanwhile)
+	bool in_seat = false;           // (a seat's session on (connecting or playing): the link is Online's room meanwhile)
+	bool test = false;              // (menutest's made-up state: shown, nothing done about it)
 	std::string played_token;       // (the seat's token whose session was started: one session a seat)
 	std::string retry_token;        // (a seat's session lost (cut off, out of step): the lobby playing on with the same pair and token
 	                                // (the holder kept, nobody next) has it started again, fresh)
-	std::string failed_token;       // (a seat whose session ended before it began: not tried again; the lobby moves on)
+	std::string failed_token;       // (a seat whose session ended before it began: not tried again; the lobby moves on, told
+	                                // disconnect if it's PLAYING (a rematch's restart), never left seated with no session)
+	int stuck_n = -1;               // (the match number a seat with no session was last told disconnect for)
+	std::string stuck_token;        // (and its token: the same seat stuck again told only after STUCK_AGAIN_MS)
+	double stuck_since = 0, stuck_told = 0;   // (seated, its token played, no session, the table PLAYING: since when; told when)
+	int seat_n = -1;                // (the match number the seat's session was started for: no state older unseats it)
 	bool started_said = false;      // (started sent for played_token)
+	int started_n = -1;             // (the match number started was last said for: a rematch's PLAYING said too, harmless)
 	int reported_n = -1;            // (the match number a result was sent for)
 	bool result_armed = false;      // (both in the game since the last report: the next decided match is a new one)
 	bool want_watch = true;         // (in the line: the room's match watched; Stop watching turns it off)
@@ -109,11 +132,15 @@ struct RoomMember
 	int banner = 0;                 // (0 none, 1 you lost, 2 new challenger, 3 you're next, 4 you won, 5 forfeit)
 	std::string banner_name;
 	bool ready_sent = false;
-	double ready_auto_at = 0;       // (tests: VF3_ROOM2_READY's press)
-	bool test_away_done = false;    // (tests: VF3_ROOM2_READY=away, AWAY once a member)
+	double ready_auto_at = 0;       // (tests: the game's ROOM2_READY hook's press, VF3_/VF1_/VF2_ROOM2_READY)
+	bool test_away_done = false;    // (tests: ROOM2_READY=away, AWAY once a member)
+	double regather_at = 0;         // (the link's addresses gathered again (the relay's login past its hours, or a seat that
+	                                // didn't get going): not before this)
 
 	// The first READY one in the line (the next to play), or null
 	const Who *next_ready() const { for (const Who &w : line) if (w.ready) return &w; return nullptr; }
+	// An op of this kind still waiting to be seen taken
+	bool pending(const std::string &op) const { for (const Op &o : outbox) if (o.op == op) return true; return false; }
 	// This member's place among the READY ones in the line (1: the next to play), 0 not in it or AWAY
-	int ready_place() const { if (pos <= 0 || !me_ready) return 0; int k = 0; for (int i = 0; i < pos && i < int(line.size()); i++) if (line[size_t(i)].ready) k++; return k; }
+	int ready_place() const { if (pos <= 0 || !me_ready || pos > int(line.size())) return 0; int k = 0; for (int i = 0; i < pos; i++) if (line[size_t(i)].ready) k++; return k; }
 };

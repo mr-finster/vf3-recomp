@@ -1047,8 +1047,8 @@ int main(int argc, char **argv)
 			check(top() == tr::P_YOUR_NAME.c_str() && o.watching(), "Play next with no name yet: the name asked for first, still watching");
 			text("AKIRA");
 			key(SDL_SCANCODE_RETURN);
-			check(s.name == "AKIRA" && !gm.is_open() && o.phase() == Online::Phase::joining && o.room_code() == "QX7-KMP",
-			      ("then the room joined to play next (" + o.room_code() + ")").c_str());
+			check(s.name == "AKIRA" && !gm.is_open() && (o.phase() == Online::Phase::joining || o.in_room2()) && o.room_code() == "QX7-KMP",
+			      ("then the room joined to play next (" + o.room_code() + ": a Rooms 2 room's line asked first, a room as before's joined if the lobby says so)").c_str());
 			o.stop();
 			o.forget_failure();
 			s.name = "MRFINSTER";
@@ -1447,6 +1447,71 @@ int main(int argc, char **argv)
 		again();
 		check(o.room2_ready_left() >= 11 && o.room2_ready_left() <= 12, ("Rooms 2: called: the ready check's seconds (" + std::to_string(o.room2_ready_left()) + ")").c_str());
 		shot("room2_called.png", w, h);
+		{   // called: the first button READY NOW (seated at once), NOT NOW under it (AWAY), never a READY that turns to AWAY
+			check(gm.selected() == 0, "Rooms 2: called: the first button selected");
+			key(SDL_SCANCODE_RETURN);
+			check(o.room2_ready_left() < 0 && o.room2()->me_ready && o.room2()->pending("ready") && !o.room2()->pending("away"),
+			      "Rooms 2: called: the first button is READY NOW (ready said, seated at once), not AWAY");
+			o.set_room2_test("");
+		}
+		{   // the page made again as the room changes keeps the button selected (by its id), wherever it is now; a state that
+			// changes nothing shown doesn't make the page again
+			const std::string head = R"({"code":"KXQ4M7","room":{"name":"FRIDAY FIGHTS","listed":true,"locked":false,"ready_ms":15000,"owner":false},)" + table;
+			const std::string line3 = R"(,"line":[{"name":"PAIPAI","country":"US","ready":true},{"name":"MRFINSTER","country":"GB","ready":true},{"name":"JACKYB","country":"FR","ready":true}],)";
+			o.set_room2_test(head + line3 + R"("you":{"mid":"x","pos":2,"ready":true},"ready":null,"watch":"KXQ4M7"})");
+			again();
+			key(SDL_SCANCODE_DOWN);
+			key(SDL_SCANCODE_DOWN);
+			const int was = gm.selected();
+			check(was == 2, ("Rooms 2: in the line, LEAVE LINE selected (" + std::to_string(was) + ")").c_str());
+			const int v0 = o.room2_version();
+			o.set_room2_test(head + line3 + R"("you":{"mid":"x","pos":2,"ready":true},"ready":null,"watch":"KXQ4M7"})");
+			check(o.room2_version() == v0, "Rooms 2: the same state again: the page not made again");
+			o.set_room2_test(head + R"(,"line":[{"name":"MRFINSTER","country":"GB","ready":true},{"name":"JACKYB","country":"FR","ready":true}],"you":{"mid":"x","pos":1,"ready":true},"ready":{"pos":1,"deadline_ms":3000,"you":true},"watch":"KXQ4M7"})");
+			check(o.room2_version() != v0, "Rooms 2: called: the page made again");
+			again();
+			check(gm.selected() == 3, ("Rooms 2: called, READY NOW and NOT NOW over it: LEAVE LINE still selected (" + std::to_string(gm.selected()) + ")").c_str());
+			shot("room2_called_kept.png", w, h);
+			room2_clear("room2_called_kept.png");
+			key(SDL_SCANCODE_UP);
+			key(SDL_SCANCODE_UP);
+			key(SDL_SCANCODE_UP);
+			check(gm.selected() == 0, "Rooms 2: called: READY NOW at the top");
+			o.set_room2_test(head + line3 + R"("you":{"mid":"x","pos":2,"ready":true},"ready":null,"watch":"KXQ4M7"})");
+			again();
+			check(gm.selected() == 0, "Rooms 2: the call over: READY NOW's place, READY: ON, still selected");
+			key(SDL_SCANCODE_DOWN);
+			key(SDL_SCANCODE_DOWN);
+			key(SDL_SCANCODE_DOWN);   // (LEAVE ROOM)
+			o.set_room2_test(head + line3 + R"("you":{"mid":"x","pos":3,"ready":false},"ready":null,"watch":"KXQ4M7"})");
+			again();
+			check(gm.selected() == 3, "Rooms 2: the line moved: LEAVE ROOM still selected");
+			// (a place past the line's end, as a lobby's state might say for a moment: no row past it)
+			o.set_room2_test(head + R"(,"line":[{"name":"PAIPAI","country":"US"}],"you":{"mid":"x","pos":30,"ready":true},"ready":null,"watch":"KXQ4M7"})");
+			again();
+			check(room2_line_rows(1, 30, ROOM2_LINE_ROWS) == std::vector<int>{ 0 } && room2_line_rows(20, 30, ROOM2_LINE_ROWS).back() == -6,
+			      "Rooms 2's line: a place past its end, no row past it");
+			shot("room2_pos_past.png", w, h);
+			o.set_room2_test("");
+		}
+		{   // the lobby's states in order: one older than the last applied (a poll's answer sent before it, the table's match
+			// number lower) not applied; the lobby's seq when it sends one; a state that says the room's closed ends it
+			const std::string head = R"({"code":"KXQ4M7","room":{"name":"FRIDAY FIGHTS","listed":true,"locked":false,"ready_ms":15000,"owner":false},)";
+			auto st = [&](int n, int pos, const std::string &more = "") {
+				return head + R"("table":{"a":{"name":"AKIRAFAN","country":"JP"},"b":{"name":"LAUCHAN","country":"KR"},"phase":"PLAYING","streak":1,"holder":"a","n":)" +
+				       std::to_string(n) + R"(,"last":null},"line":[{"name":"PAIPAI","country":"US"},{"name":"MRFINSTER","country":"GB"},{"name":"JACKYB","country":"FR"}],"you":{"mid":"x","pos":)" +
+				       std::to_string(pos) + R"(,"ready":true},"ready":null,"watch":"KXQ4M7")" + more + "}";
+			};
+			o.set_room2_test(st(5, 2));
+			check(o.room2_test_state(st(6, 1), 1000) && o.room2()->pos == 1, "Rooms 2's states: a newer one applied");
+			check(!o.room2_test_state(st(5, 3), 2000) && o.room2()->pos == 1, "Rooms 2's states: an older match number not applied");
+			check(!o.room2_test_state(st(6, 3), 500) && o.room2()->pos == 1, "Rooms 2's states: a poll's answer sent before the last applied not applied");
+			check(o.room2_test_state(st(6, 2), 1000) && o.room2()->pos == 2, "Rooms 2's states: the same age again applied");
+			check(o.room2_test_state(st(6, 3, R"(,"seq":10)"), 900) && o.room2()->pos == 3 && !o.room2_test_state(st(7, 1, R"(,"seq":9)"), 5000) && o.room2()->pos == 3,
+			      "Rooms 2's states: the lobby's seq, when it sends one, decides");
+			check(!o.room2_test_state(R"({"closed":true})", 6000) && !o.in_room2(), "Rooms 2's states: {closed:true} ends the membership");
+			o.set_room2_test("");
+		}
 		o.set_room2_test(R"({"code":"KXQ4M7","room":{"name":"FRIDAY FIGHTS","listed":true,"locked":false,"ready_ms":15000,"owner":false},)" + table +
 		                 R"(,"line":[{"name":"PAIPAI","country":"US"}],"you":{"mid":"x","pos":-1,"watcher":true,"misses":0},"watchers":1,"ready":null,"watch":"KXQ4M7"})");
 		again();
@@ -1620,7 +1685,7 @@ int main(int argc, char **argv)
 		}
 		o.set_room2_test(R"({"code":"KXQ4M7","room":{"name":"","listed":false,"locked":false,"ready_ms":15000,"owner":true},"table":{"a":{"name":"MRFINSTER","country":"GB"},"b":null,"phase":"SOLO","streak":0,"holder":"a","n":0,"last":null},"line":[],"you":{"mid":"x","pos":0,"side":"a","misses":0},"ready":null,"watch":"KXQ4M7"})");
 		again();
-		const int settings_row = int(gm.selected()) + 2;   // (READY, COPY CODE, then ROOM SETTINGS)
+		const int settings_row = 2;   // (READY, COPY CODE, then ROOM SETTINGS; the selection kept from the page before, by id)
 		gm.select_row(settings_row);
 		key(SDL_SCANCODE_RETURN);
 		check(top() == tr::ROOM2_SETTINGS.c_str(), "Rooms 2: the creator's Room settings");

@@ -22,6 +22,8 @@ struct menu_item
 	std::function<std::string()> below;   // a line under the row when not empty (a mistake to put right, a status)
 	std::function<bool()> good;           // (below: true, shown as good news or how it's going, not a mistake)
 	bool big = false;                     // (info: big, to be read out: a host's address)
+	std::string id;                       // (a screen's button: who it is, kept selected when the page is made again (replace with
+	                                      // no row given) though rows come and go before it; "" none)
 };
 
 struct menu_page
@@ -99,7 +101,8 @@ public:
 	void close();
 	void push(menu_page p);               // a sub-page
 	void pop();                           // back a page; closes at the top
-	void replace(menu_page p, int sel);   // the page on top made again (rows come and go), this row selected
+	void replace(menu_page p, int sel);   // the page on top made again (rows come and go), this row selected (-1: the one
+	                                      // selected before if it has an id the new page has too, else the page's start)
 	size_t depth() const { return m_stack.size(); }
 	const std::string &top_name() const { static const std::string none; return m_stack.empty() ? none : m_stack.back().name; }
 	SDL_Window *window() const;

@@ -52,6 +52,19 @@ int main()
 	for (const char *bad : { "http://github.com/mr-finster/x", "https://github.com/someone/x", "https://github.com.evil/mr-finster/",
 	                         "https://github.com/mr-finster/x y", "https://github.com/mr-finster/\"x", "javascript:alert(1)" })
 		check(!page_ok(bad), std::string("page not ok: ") + bad);
+	// (only https://github.com/mr-finster/<repo>/releases/...: a path's tricks never take it elsewhere)
+	check(page_ok("https://github.com/mr-finster/vf3-recomp/releases/tag/v0.1.23-alpha-beta1", "vf3-recomp") &&
+	      page_ok("https://github.com/mr-finster/vf3-recomp/releases/latest", "vf3-recomp"), "page_ok: this game's");
+	check(!page_ok("https://github.com/mr-finster/vf1-recomp/releases/tag/v1.8.0", "vf3-recomp"), "page not ok: another game's, asked for this one's");
+	for (const char *bad : { "https://github.com/mr-finster/vf3-recomp/releases/../../evil/x", "https://github.com/mr-finster/vf3-recomp/releases/%2e%2e/%2E%2E/x",
+	                         "https://github.com/mr-finster/vf3-recomp/releases/tag/v1%2F..", "https://github.com/mr-finster/vf3-recomp/releases//x",
+	                         "https://github.com/mr-finster/vf3-recomp/releases/tag/v1?x=1", "https://github.com/mr-finster/vf3-recomp/releases/tag/v1#x",
+	                         "https://github.com/mr-finster/vf3-recomp/releases/", "https://github.com/mr-finster/vf3-recomp/releases",
+	                         "https://github.com/mr-finster/vf3-recomp/settings/x", "https://github.com/mr-finster/vf3-recomp/releases/tag/v1@evil.example",
+	                         "https://github.com/mr-finster/./releases/x", "https://github.com/mr-finster/../releases/x", "https://github.com/mr-finster//releases/x",
+	                         "https://github.com/mr-finster/vf3-recomp/releases/tag/v1\\..\\x", "https://github.com/mr-finster/vf3-recomp/releases/./x",
+	                         "https://github.com/mr-finster/vf3-recomp/releases/tag/v1:2", "https://github.com/mr-finster/vf3-recomp/releases/tag/.." })
+		check(!page_ok(bad, "vf3-recomp") && !page_ok(bad), std::string("page not ok: ") + bad);
 	// answers
 	auto is = [](const result &r, result::what w, const std::string &tag = "") { return r.is == w && (tag.empty() || r.tag == tag); };
 	check(is(read_reply(200, rel("v0.1.23-alpha"), "v0.1.22-alpha"), result::what::newer, "v0.1.23-alpha"), "newer (an object)");
@@ -94,6 +107,17 @@ int main()
 	}
 	check(is(read_reply(200, "[" + rel("v1.9.0-beta", true) + "," + rel("v1.8.0") + "]", "v1.8.0"), result::what::none), "no pre-release for a release");
 	check(is(read_reply(200, rel("v1.9.0-beta", true), "v1.8.0"), result::what::failed), "only a pre-release, a release build: none fit");
+	// a beta's tag without GitHub's pre-release flag (left off by mistake): still a beta, only for a beta's build
+	check(is(read_reply(200, "[" + rel("v1.9.0-beta1") + "," + rel("v1.8.0") + "]", "v1.8.0"), result::what::none, "v1.8.0"), "a beta's tag, not flagged: not for a release");
+	check(is(read_reply(200, rel("v1.9.0-rc1"), "v1.8.0"), result::what::failed), "an rc's tag alone, not flagged: none fit a release");
+	check(is(read_reply(200, rel("v0.1.23-alpha-beta1"), "v0.1.22-alpha"), result::what::failed), "VF3's beta, not flagged: none fit its -alpha release");
+	check(is(read_reply(200, "[" + rel("v1.9.0-beta2") + "," + rel("v1.9.0-beta1", true) + "]", "v1.9.0-beta1"), result::what::newer, "v1.9.0-beta2"), "a beta's build: the next beta, flagged or not");
+	// the repository: a page of another's not taken
+	check(is(read_reply(200, rel("v0.1.23-alpha"), "v0.1.22-alpha", "vf3-recomp"), result::what::newer, "v0.1.23-alpha"), "this game's page");
+	check(is(read_reply(200, rel("v1.9.0", false, false, "https://github.com/mr-finster/vf1-recomp/releases/tag/v1.9.0"), "v1.8.0", "vf3-recomp"), result::what::failed),
+	      "another game's page: not taken");
+	check(is(read_reply(200, rel("v0.1.23-alpha", false, false, "https://github.com/mr-finster/vf3-recomp/releases/%2e%2e/x"), "v0.1.22-alpha"), result::what::failed),
+	      "a page with a path's trick: not taken");
 	check(is(read_reply(200, rel("v0.1.23", false, false, "https://evil.example/x"), "v0.1.22"), result::what::failed), "a page elsewhere: not taken");
 	check(is(read_reply(403, "{\"message\":\"API rate limit exceeded\"}", "v0.1.22"), result::what::failed), "403");
 	check(is(read_reply(404, "", "v0.1.22"), result::what::failed), "404");
@@ -102,6 +126,8 @@ int main()
 		check(is(read_reply(200, g, "v0.1.22"), result::what::failed), std::string("garbage: ") + g);
 	// once a day
 	check(due(0, 1000) && !due(1000, 1000 + DAY - 1) && due(1000, 1000 + DAY) && due(1000 + 3 * DAY, 1000), "due");
+	// (the clock put back: a last check after now, by any amount, is due; the same second is not)
+	check(due(1005, 1000) && due(1000 + DAY - 1, 1000) && !due(1000, 1000), "due: a last check in the future");
 	if (failed) { fprintf(stderr, "updatetest: %d failed\n", failed); return 1; }
 	printf("updatetest: all passed\n");
 	return 0;

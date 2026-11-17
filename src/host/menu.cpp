@@ -674,6 +674,12 @@ void game_menu::pop()
 void game_menu::replace(menu_page p, int sel)
 {
 	if (m_stack.empty()) return;
+	if (sel < 0) {   // (the row selected before, by its id, wherever it is now)
+		const menu_page &was = m_stack.back();
+		const std::string id = m_sel >= 0 && m_sel < int(was.items.size()) ? was.items[size_t(m_sel)].id : std::string();
+		for (size_t i = 0; !id.empty() && i < p.items.size(); i++)
+			if (p.items[i].id == id && !p.items[i].info) { sel = int(i); break; }
+	}
 	m_stack.back() = std::move(p);
 	const menu_page &q = m_stack.back();
 	m_sel = sel >= 0 && sel < int(q.items.size()) && !q.items[sel].info ? sel : first_selectable(q);

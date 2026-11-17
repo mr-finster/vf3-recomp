@@ -442,6 +442,8 @@ bool Online::try_again(const OnlineSettings &s, tr::line &error)
 	case Try::join: return join(s, error);
 	case Try::random: return find_random(s, error);
 	case Try::watch: { const std::string w = watch_tried; return watch(s, w, error); }
+	case Try::room2_create: return room2_create(s, error);   // (a Rooms 2 room's again: made, or entered by the same code)
+	case Try::room2_enter: { const std::string c = r2_tried; return room2_enter(s, c, error); }
 	default: error = tr::NOTHING_TO_TRY; return false;
 	}
 }
@@ -3063,43 +3065,33 @@ menu_page room2_page(Online &o, OnlineSettings &s, game_menu &menu, std::functio
 	const bool owner = member && !m->owner_key.empty();
 	auto redo = [&o, &s, &menu, changed] { while (menu.depth() > 1 && menu.top_name() != tr::P_ONLINE.c_str()) menu.pop(); again(o, s, menu, changed); };
 	auto copied = std::make_shared<bool>(false);
-	// the buttons: READY (or JOIN THE LINE for a watcher) first and selected; WATCH again if it was stopped (the pause
-	// menu's Stop watching); LEAVE LINE in it; the creator's COPY CODE and ROOM SETTINGS; LEAVE ROOM
-	int ready = -1, join = -1, watch = -1, leave_line = -1, copy = -1, settings = -1;
-	if (member && !watcher) {
-		ready = int(p.items.size());
-		p.items.push_back({ m->me_ready ? tr::BUTTON_READY_ON : tr::BUTTON_READY_OFF, "", {}, {}, [&o, redo] { if (o.room2()) o.room2_set_ready(!o.room2()->me_ready); redo(); } });
-	}
-	if (watcher) {
-		join = int(p.items.size());
-		p.items.push_back({ tr::BUTTON_JOIN_LINE, "", {}, {}, [&o, redo] { o.room2_line(true); redo(); } });
-	}
-	if ((in_line || watcher) && !o.watching() && m->has_a && m->has_b) {
-		watch = int(p.items.size());
-		p.items.push_back({ tr::BUTTON_WATCH, "", {}, {}, [&o, redo] { o.room2_watch(true); redo(); } });
-	}
-	if (in_line) {
-		leave_line = int(p.items.size());
-		p.items.push_back({ tr::BUTTON_LEAVE_LINE, "", {}, {}, [&o, redo] { o.room2_line(false); redo(); } });
-	}
-	if (owner && !in_line) {
-		copy = int(p.items.size());
-		p.items.push_back({ tr::BUTTON_COPY_CODE, "", {}, {}, [&o, copied] {
+	// the buttons: READY (or JOIN THE LINE for a watcher) first and selected; called (YOUR TURN, GET READY), READY NOW
+	// in its place (seated at once) and NOT NOW under it (AWAY); WATCH again if it was stopped (the pause menu's Stop
+	// watching); LEAVE LINE in it; the creator's COPY CODE and ROOM SETTINGS; LEAVE ROOM. Each with its own id: the page
+	// made again as the room changes keeps the one selected (game_menu::replace), READY NOW's selection READY's after it
+	const bool called = member && o.room2_ready_left() >= 0;
+	int ready = -1, not_now = -1, join = -1, watch = -1, leave_line = -1, copy = -1, settings = -1;
+	auto add = [&p](menu_item it, const char *id) { it.id = id; p.items.push_back(std::move(it)); return int(p.items.size()) - 1; };
+	if (called) {
+		ready = add({ tr::BUTTON_READY_NOW, "", {}, {}, [&o, redo] { o.room2_ready(); redo(); } }, "r2.ready");
+		not_now = add({ tr::BUTTON_NOT_NOW, "", {}, {}, [&o, &menu, redo] { o.room2_set_ready(false); menu.toast(tr::line(tr::ROOM2_AWAY_SAID).str(), 6); redo(); } }, "r2.notnow");
+	} else if (member && !watcher)
+		ready = add({ m->me_ready ? tr::BUTTON_READY_ON : tr::BUTTON_READY_OFF, "", {}, {}, [&o, redo] { if (o.room2()) o.room2_set_ready(!o.room2()->me_ready); redo(); } }, "r2.ready");
+	if (watcher) join = add({ tr::BUTTON_JOIN_LINE, "", {}, {}, [&o, redo] { o.room2_line(true); redo(); } }, "r2.join");
+	if ((in_line || watcher) && !o.watching() && m->has_a && m->has_b) watch = add({ tr::BUTTON_WATCH, "", {}, {}, [&o, redo] { o.room2_watch(true); redo(); } }, "r2.watch");
+	if (in_line) leave_line = add({ tr::BUTTON_LEAVE_LINE, "", {}, {}, [&o, redo] { o.room2_line(false); redo(); } }, "r2.leaveline");
+	if (owner && !in_line)
+		copy = add({ tr::BUTTON_COPY_CODE, "", {}, {}, [&o, copied] {
 			SDL_SetClipboardText(o.room_code().c_str());
 			*copied = true;
-		} });
-	}
-	if (owner) {
-		settings = int(p.items.size());
-		p.items.push_back({ tr::BUTTON_ROOM_SETTINGS, "", {}, {}, [&o, &s, &menu, changed] { menu.push(room2_settings_page(o, s, menu, changed)); } });
-	}
-	const int leave = int(p.items.size());
-	p.items.push_back({ tr::BUTTON_LEAVE_ROOM, "", {}, {}, [&o, redo] { o.room2_leave(false); redo(); } });
+		} }, "r2.copy");
+	if (owner) settings = add({ tr::BUTTON_ROOM_SETTINGS, "", {}, {}, [&o, &s, &menu, changed] { menu.push(room2_settings_page(o, s, menu, changed)); } }, "r2.settings");
+	const int leave = add({ tr::BUTTON_LEAVE_ROOM, "", {}, {}, [&o, redo] { o.room2_leave(false); redo(); } }, "r2.leave");
 	p.start = ready >= 0 ? ready : join >= 0 ? join : leave;
 	p.on_event = [&menu](const SDL_Event &e) { return closes(menu, e); };
 	p.own_note = true;   // (a note while it's open: in the line's column, where its help is, not over the page)
 	p.by_height = true;  // (the line as long as the window's height holds: made again for a taller or shorter one)
-	p.screen = [&o, &menu, ready, join, watch, leave_line, copy, settings, leave, copied](int sel, bool pad) {
+	p.screen = [&o, &menu, called, ready, not_now, join, watch, leave_line, copy, settings, leave, copied](int sel, bool pad) {
 		const RoomMember *m = o.room2();
 		if (!m) return std::string("<div class=\"scr\"></div>");
 		const std::string c = o.room_code(), title = !m->room_name.empty() ? m->room_name : c.empty() ? std::string(tr::ROOM_OPEN) : c;
@@ -3132,7 +3124,8 @@ menu_page room2_page(Online &o, OnlineSettings &s, game_menu &menu, std::functio
 			r += "</div>";
 		}
 		r += "<div class=\"r2btns\">";
-		if (ready >= 0) r += "<div " + menu_row(ready, sel, "btn") + ">" + E(m->me_ready ? tr::BUTTON_READY_ON : tr::BUTTON_READY_OFF) + "</div>";
+		if (ready >= 0) r += "<div " + menu_row(ready, sel, "btn") + ">" + E(called ? tr::BUTTON_READY_NOW : m->me_ready ? tr::BUTTON_READY_ON : tr::BUTTON_READY_OFF) + "</div>";
+		if (not_now >= 0) r += "<div " + menu_row(not_now, sel, "btn") + ">" + E(tr::BUTTON_NOT_NOW) + "</div>";
 		if (join >= 0) r += "<div " + menu_row(join, sel, "btn") + ">" + E(tr::BUTTON_JOIN_LINE) + "</div>";
 		if (watch >= 0) r += "<div " + menu_row(watch, sel, "btn") + ">" + E(tr::BUTTON_WATCH) + "</div>";
 		if (leave_line >= 0) r += "<div " + menu_row(leave_line, sel, "btn") + ">" + E(tr::BUTTON_LEAVE_LINE) + "</div>";
@@ -3154,6 +3147,7 @@ menu_page room2_page(Online &o, OnlineSettings &s, game_menu &menu, std::functio
 			if (n == 0) r += "<div class=\"r2row r2empty\"><div>" + E(tr::ROOM2_LINE_EMPTY) + "</div></div>";
 			for (int i : room2_line_rows(n, m->pos, room2_line_fit(menu.height_dp()))) {
 				if (i < 0) { r += "<div class=\"r2row r2more\"><div>" + E(tr::fill(tr::ROOM2_MORE_N, { { "n", std::to_string(-i) } })) + "</div></div>"; continue; }
+				if (i >= n) continue;   // (never a row past the line's end, whatever place the state says)
 				const RoomMember::Who &w = m->line[size_t(i)];
 				const bool me = i + 1 == m->pos;
 				r += "<div class=\"r2row" + std::string(me ? " me" : "") + (w.ready ? "" : " away") + "\"><div class=\"r2n\">" + std::to_string(i + 1) + "</div>" +
@@ -3724,12 +3718,13 @@ menu_page page(Online &o, OnlineSettings &s, game_menu &menu, std::function<void
 				sub = tr::FINDING_RANDOM;
 				const bool found = f == Online::Step::connecting || f == Online::Step::waiting;
 				v = { { tr::STEP_SEARCH, found ? done : bad }, { tr::STEP_FOUND, found ? done : todo }, { tr::STEP_CONNECT, f == Online::Step::connecting ? bad : todo }, { tr::STEP_FIGHT, todo } };
-			} else if (t == Online::Try::join_room) {
-				const std::string who = o.peer();
-				sub = who.empty() ? tr::fill(tr::TO_ROOM, { { "code", o.room_code() } }) : tr::fill(tr::TO_NAMES_ROOM, { { "name", who }, { "code", o.room_code() } });
+			} else if (t == Online::Try::join_room || t == Online::Try::room2_enter) {
+				const std::string who = o.peer(), tc = o.room2_tried_code();
+				const std::string c = t == Online::Try::room2_enter && tc.size() == 6 ? tc.substr(0, 3) + "-" + tc.substr(3) : o.room_code();   // (a Rooms 2 room's: the code it was tried with)
+				sub = who.empty() ? tr::fill(tr::TO_ROOM, { { "code", c } }) : tr::fill(tr::TO_NAMES_ROOM, { { "name", who }, { "code", c } });
 				const bool found = f == Online::Step::connecting;
 				v = { { tr::STEP_CODE, done }, { tr::STEP_ROOM_FOUND, found ? done : bad }, { tr::STEP_CONNECT, found ? bad : todo }, { tr::STEP_FIGHT, todo } };
-			} else if (t == Online::Try::host_room) {
+			} else if (t == Online::Try::host_room || t == Online::Try::room2_create) {
 				sub = tr::COULDNT_OPEN_ROOM;
 				const bool open = f == Online::Step::waiting || f == Online::Step::connecting;
 				v = { { tr::STEP_ROOM_OPEN, open ? done : bad }, { tr::STEP_OPPONENT, f == Online::Step::connecting ? done : open ? bad : todo },
@@ -3844,6 +3839,7 @@ void match_rows(Online &o, OnlineSettings &s, game_menu &menu, std::function<voi
 			rows.push_back({ tr::STOP_WATCHING, "", {}, {}, [&o, &menu] { o.room2_watch(false); menu.close(); } });
 			return;
 		}
+		if (o.phase() != Online::Phase::playing) return;   // (in its line, or at its table with no match on: its page only, no match's rows)
 	}
 	if (o.watching()) {   // (a match watched: stop, or play the winner next: a room's match, not a Quick match's, which has no room)
 		rows.push_back({ tr::STOP_WATCHING, tr::STOP_WATCHING_HELP, {}, {}, [&o, &menu] { o.stop(); menu.close(); } });
@@ -3852,8 +3848,9 @@ void match_rows(Online &o, OnlineSettings &s, game_menu &menu, std::function<voi
 				const std::string c = o.watch_code();
 				named(s, menu, changed, [&o, &s, &menu, c] {   // (a name first if there's none, as every join: the host and the watchers see it)
 					tr::line err;
-					// (a Rooms 2 room's match: into its line, Enter code's way; a room as before: joined, in its line)
-					if (!(o.watching_room2(c) ? o.room2_enter(s, c, err) : o.join_room(s, c, err))) o.tell_failure(err);   // (the watch stopped: why, on the Online page it goes back to)
+					// (into the room's line: a Rooms 2 room's (its watch code is its code), a room as before's joined in its line, the
+					// lobby saying which (a code not in the list, an unlisted room's, asked as a Rooms 2 room's first))
+					if (!o.room2_enter(s, c, err, true)) o.tell_failure(err);   // (the watch stopped: why, on the Online page it goes back to)
 					menu.close();
 				});
 			} });

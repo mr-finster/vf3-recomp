@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -193,12 +194,26 @@ inline std::string api_url(const std::string &repo, const std::string &running)
 // "v0.1.23-alpha" as the menu shows it: "0.1.23-alpha"
 inline std::string shown(const std::string &tag) { return !tag.empty() && (tag[0] == 'v' || tag[0] == 'V') ? tag.substr(1) : tag; }
 
-// a release's page fit to open: on GitHub under mr-finster, nothing odd in it
-inline bool page_ok(const std::string &url)
+// a release's page fit to open: https://github.com/mr-finster/<repo>/releases/..., the repository this game's (repo; ""
+// any of mr-finster's), each part of its path a plain name: letters, digits, - _ . + only, never "." or ".." (a page
+// elsewhere by a path's tricks), no %-escapes (%2e is a dot), no query, no fragment, no // nor \ nor anything else
+inline bool page_ok(const std::string &url, const std::string &repo = "")
 {
-	if (url.size() > 300 || url.compare(0, strlen(PAGE_PREFIX), PAGE_PREFIX) != 0) return false;
-	for (char c : url)
-		if (uint8_t(c) <= ' ' || uint8_t(c) >= 0x7f || c == '"' || c == '\'' || c == '<' || c == '>' || c == '\\') return false;
+	const size_t pre = strlen(PAGE_PREFIX);
+	if (url.size() > 300 || url.compare(0, pre, PAGE_PREFIX) != 0) return false;
+	std::vector<std::string> parts;
+	for (size_t a = pre;;) {
+		const size_t b = url.find('/', a);
+		parts.push_back(url.substr(a, b == std::string::npos ? std::string::npos : b - a));
+		if (b == std::string::npos) break;
+		a = b + 1;
+	}
+	if (parts.size() < 3 || (!repo.empty() && parts[0] != repo) || parts[1] != "releases") return false;
+	for (const std::string &p : parts) {
+		if (p.empty() || p == "." || p == ".." || p.size() > 100) return false;
+		for (char c : p)
+			if (!isalnum(uint8_t(c)) && c != '-' && c != '_' && c != '.' && c != '+') return false;
+	}
 	return true;
 }
 
@@ -210,7 +225,7 @@ struct result
 	std::string why;        // (for the log: what was found, or why nothing was)
 };
 
-inline result read_reply(int status, const std::string &body, const std::string &running)
+inline result read_reply(int status, const std::string &body, const std::string &running, const std::string &repo = "")
 {
 	result r;
 	if (status != 200) {
@@ -235,7 +250,8 @@ inline result read_reply(int status, const std::string &body, const std::string 
 		if (d.kind == vfnet::json::Value::boolean && d.b) continue;
 		if (pre.kind == vfnet::json::Value::boolean && pre.b && !(proper && beta(mine))) continue;   // (pre-releases (betas): only for a beta, never a release's build, VF3's -alpha ones too)
 		version t;
-		if (!parse((*x)["tag_name"].str(), t) || !page_ok((*x)["html_url"].str())) continue;
+		if (!parse((*x)["tag_name"].str(), t) || !page_ok((*x)["html_url"].str(), repo)) continue;
+		if (beta(t) && !(proper && beta(mine))) continue;   // (a beta's tag, -betaN or -rcN, whatever GitHub's flag says (left off by mistake): only for a beta)
 		if (!best || compare(t, best_v) > 0) { best = x; best_v = t; }
 	}
 	if (!best) {
@@ -257,13 +273,15 @@ inline result read_reply(int status, const std::string &body, const std::string 
 	return r;
 }
 
-// due: never checked, a day since the last, or a clock put back (a check "from the future")
-inline bool due(int64_t last, int64_t now) { return last <= 0 || now - last >= DAY || last - now > DAY; }
+// due: never checked, a day since the last, or a clock put back (the last check's time after now: "from the future")
+inline bool due(int64_t last, int64_t now) { return last <= 0 || last > now || now - last >= DAY; }
 
 // ---- the request ----
 struct reply { int status = 0; std::string body, error; };
 constexpr size_t MOST = 1u << 20;   // (/releases/latest is some 10 KB; a list of 10 with their notes about 110 KB)
-inline std::atomic<bool> quitting{ false };
+// (the check's own: whether the game is quitting. Each request has its own, in the state it shares with the game
+// (checker), so a thread left to end on its own after the game's gone never touches anything of the game's)
+using stop_flag = std::atomic<bool>;
 
 inline reply read_file(const std::string &path)
 {
@@ -288,7 +306,7 @@ inline std::wstring wide(const std::string &s)
 	return w;
 }
 
-inline reply get(const std::string &url, const std::string &agent, int timeout_ms)
+inline reply get(const std::string &url, const std::string &agent, int timeout_ms, const stop_flag &quitting)
 {
 	if (url.rfind("file://", 0) == 0) return read_file(url.substr(7));
 	if (url.rfind("http://", 0) != 0 && url.rfind("https://", 0) != 0) return read_file(url);
@@ -337,7 +355,10 @@ inline reply get(const std::string &url, const std::string &agent, int timeout_m
 	return r;
 }
 #else
-// libcurl, as src/net/http.cpp loads it (the same libraries, the same ABI numbers)
+// libcurl, as src/net/http.cpp loads it (the same libraries, the same ABI numbers). Loaded and curl_global_init called
+// on the game's main thread (checker::start, before its thread): libcurl's global init isn't safe to race with a thread
+// using curl (older ones), and curl_easy_init would do it itself on the check's thread otherwise. src/net's own init,
+// later, only counts it again
 struct curl_fns
 {
 	void *(*easy_init)() = nullptr;
@@ -348,11 +369,12 @@ struct curl_fns
 	const char *(*easy_strerror)(int) = nullptr;
 	void *(*slist_append)(void *, const char *) = nullptr;
 	void (*slist_free_all)(void *) = nullptr;
+	int (*global_init)(long) = nullptr;
 	bool ok = false;
 	enum {
 		URL = 10002, HTTPHEADER = 10023, WRITEFUNCTION = 20011, WRITEDATA = 10001, TIMEOUT_MS = 155, CONNECTTIMEOUT_MS = 156,
-		NOSIGNAL = 99, USERAGENT = 10018, HTTPGET = 80, NOPROGRESS = 43, XFERINFOFUNCTION = 20219, FOLLOWLOCATION = 52,
-		MAXREDIRS = 68, RESPONSE_CODE = 0x200002,
+		NOSIGNAL = 99, USERAGENT = 10018, HTTPGET = 80, NOPROGRESS = 43, XFERINFOFUNCTION = 20219, XFERINFODATA = 10057,
+		FOLLOWLOCATION = 52, MAXREDIRS = 68, RESPONSE_CODE = 0x200002, GLOBAL_ALL = 3,
 	};
 };
 
@@ -374,8 +396,8 @@ inline curl_fns &curl()
 		auto sym = [&](auto &f, const char *n) { f = reinterpret_cast<std::remove_reference_t<decltype(f)>>(dlsym(lib, n)); return f != nullptr; };
 		c.ok = sym(c.easy_init, "curl_easy_init") && sym(c.easy_setopt, "curl_easy_setopt") && sym(c.easy_perform, "curl_easy_perform") &&
 		       sym(c.easy_cleanup, "curl_easy_cleanup") && sym(c.easy_getinfo, "curl_easy_getinfo") && sym(c.easy_strerror, "curl_easy_strerror") &&
-		       sym(c.slist_append, "curl_slist_append") && sym(c.slist_free_all, "curl_slist_free_all");
-		// (curl_global_init: src/net's, when the lobby's used; curl_easy_init does it itself otherwise)
+		       sym(c.slist_append, "curl_slist_append") && sym(c.slist_free_all, "curl_slist_free_all") && sym(c.global_init, "curl_global_init");
+		if (c.ok) c.global_init(curl_fns::GLOBAL_ALL);
 	});
 	return c;
 }
@@ -387,9 +409,9 @@ inline size_t curl_body(char *p, size_t size, size_t n, void *user)
 	b.append(p, size * n);
 	return size * n;
 }
-inline int curl_progress(void *, int64_t, int64_t, int64_t, int64_t) { return quitting ? 1 : 0; }   // (the game quitting: given up)
+inline int curl_progress(void *stop, int64_t, int64_t, int64_t, int64_t) { return static_cast<const stop_flag *>(stop)->load() ? 1 : 0; }   // (the game quitting: given up)
 
-inline reply get(const std::string &url, const std::string &agent, int timeout_ms)
+inline reply get(const std::string &url, const std::string &agent, int timeout_ms, const stop_flag &quitting)
 {
 	if (url.rfind("file://", 0) == 0) return read_file(url.substr(7));
 	if (url.rfind("http://", 0) != 0 && url.rfind("https://", 0) != 0) return read_file(url);
@@ -411,6 +433,7 @@ inline reply get(const std::string &url, const std::string &agent, int timeout_m
 	c.easy_setopt(h, curl_fns::WRITEDATA, &r.body);
 	c.easy_setopt(h, curl_fns::NOPROGRESS, 0L);
 	c.easy_setopt(h, curl_fns::XFERINFOFUNCTION, &curl_progress);
+	c.easy_setopt(h, curl_fns::XFERINFODATA, const_cast<stop_flag *>(&quitting));
 	c.easy_setopt(h, curl_fns::HTTPGET, 1L);
 	const int rc = c.easy_perform(h);
 	if (rc != 0) r.error = std::string("couldn't connect (") + c.easy_strerror(rc) + ")";
@@ -426,19 +449,24 @@ inline reply get(const std::string &url, const std::string &agent, int timeout_m
 #endif
 
 // ---- the check, on a thread of its own ----
-// start() once; the game's loop asks take() each pass (cheap) until it gives the result. Let go as the game quits:
-// a request still on is given up (curl), or left to end on its own (Windows: the process ends under it).
+// start() once, on the game's main thread; the game's loop asks take() each pass (cheap) until it gives the result.
+// Let go as the game quits: a request still on is told to stop (curl gives up at once; WinHTTP between reads) and
+// waited for a moment; one still going after that is left to end on its own, touching only its own state (shared
+// with it here: never the game's, nor anything static), the process ending under it.
 class checker
 {
 public:
-	void start(const std::string &url, const std::string &agent, const std::string &running)
+	void start(const std::string &url, const std::string &agent, const std::string &running, const std::string &repo = "")
 	{
+#ifndef _WIN32
+		if (url.rfind("http://", 0) == 0 || url.rfind("https://", 0) == 0) curl();   // (loaded and its global init done here, on this thread)
+#endif
 		auto s = st;
-		t = std::thread([s, url, agent, running] {
-			const reply rp = get(url, agent, 8000);
+		t = std::thread([s, url, agent, running, repo] {
+			const reply rp = get(url, agent, 8000, s->quit);
 			result r;
 			if (!rp.error.empty()) r.why = rp.error;
-			else r = read_reply(rp.status, rp.body, running);
+			else r = read_reply(rp.status, rp.body, running, repo);
 			std::lock_guard<std::mutex> lock(s->m);
 			s->r = r;
 			s->done = true;
@@ -454,15 +482,14 @@ public:
 	}
 	~checker()
 	{
-		quitting = true;
+		st->quit = true;
 		if (!t.joinable()) return;
-#ifdef _WIN32
-		if (!st->done) { t.detach(); return; }
-#endif
-		t.join();
+		for (int i = 0; i < 150 && !st->done; i++) std::this_thread::sleep_for(std::chrono::milliseconds(10));   // (1.5 s at most)
+		if (st->done) t.join();
+		else t.detach();
 	}
 private:
-	struct state { std::mutex m; std::atomic<bool> done{ false }; result r; };
+	struct state { std::mutex m; std::atomic<bool> done{ false }; stop_flag quit{ false }; result r; };
 	std::shared_ptr<state> st = std::make_shared<state>();
 	std::thread t;
 	bool taken = false;

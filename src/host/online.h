@@ -76,7 +76,7 @@ public:
 		std::string watch;            // (its watch code: watched again)
 	};
 	// What was tried last (for Try again): hosting or joining, with a code or by address
-	enum class Try { none, host_room, join_room, host, join, random, watch };
+	enum class Try { none, host_room, join_room, host, join, random, watch, room2_create, room2_enter };   // (room2_*: a Rooms 2 room's, made or entered)
 
 	explicit Online(m3::Model3 &board) : adapter(board), board(board) {}
 	~Online();
@@ -191,7 +191,7 @@ public:
 	// Create room: a Rooms 2 room (a lobby without them, an older one or one with them off: a /v1 room, host_room).
 	// Enter code: into the room's line (a /v1 room's code: as enter_code). False, and why, if it couldn't start
 	bool room2_create(const OnlineSettings &s, tr::line &error);
-	bool room2_enter(const OnlineSettings &s, const std::string &code, tr::line &error);
+	bool room2_enter(const OnlineSettings &s, const std::string &code, tr::line &error, bool next = false);   // (next: Play next, a room as before's code joined in its line)
 	bool in_room2() const { return r2 != nullptr; }   // (a member, or becoming one: whatever it's doing, watching, in line, playing)
 	const RoomMember *room2() const { return r2.get(); }
 	bool room2_member() const { return r2 && !r2->mid.empty() && r2->have_state; }
@@ -213,7 +213,12 @@ public:
 	void room2_close();   // (the creator's: the room closed for everyone)
 	void set_room2_file(const std::string &path) { r2_file = path; }   // (the data folder's room2.txt: a rejoin after a crash)
 	void set_room2_test(const std::string &state_json, const std::string &code = "KXQ4M7");   // (menutest: a member in a made-up state)
-	std::string room2_test_ready;   // (tests, VF3_ROOM2_READY: "now" Start 1 s into getting ready, "esc" Esc then (AWAY), "away" AWAY once in)
+	bool room2_test_state(const std::string &state_json, double known_at);   // (menutest: a state as the lobby's, in order or not: true if applied)
+	std::string room2_test_ready;   // (tests, the game's ROOM2_READY hook: "now" Start 1 s into getting ready, "esc" Esc then (AWAY), "away" AWAY once in)
+	const std::string &room2_tried_code() const { return r2_tried; }   // (a Rooms 2 room entered that didn't get going: its code, Try again's)
+	// (the room's link gathered again this long after it last was, between seats: the relay's login lasts the lobby's TURN
+	// TTL, 6 h; tests set it short by the game's ROOM2_REGATHER_S hook)
+	double room2_regather_ms = 5 * 3600e3;
 
 	// ---- watching (src/net/watch.h): a match's watchers, and watching one ----
 	// Watch a match by its room's code (the browser's, Enter code's or a link's): the game starts from the match's start
@@ -454,13 +459,23 @@ private:
 	std::string r2_file;
 	std::shared_ptr<Job> r2_gather;
 	std::shared_ptr<Fetch> r2_join;   // (create or enter)
-	std::vector<std::pair<std::string, std::shared_ptr<Fetch>>> r2_asks;   // (each op POSTed, its answer: a state)
+	double r2_join_sent = 0, r2_rejoin_sent = 0;
+	struct R2Ask { std::string op; std::shared_ptr<Fetch> f; double sent = 0; };
+	std::vector<R2Ask> r2_asks;       // (each op POSTed, its answer: a state; sent: when, the state's age)
+	std::string r2_tried;             // (the code a Rooms 2 enter was tried with: Try again's)
+	std::unique_ptr<vfnet::RoomLink> r2_fresh;   // (the link gathered again, at a seat's boundary: the lobby told its addresses, then it's the room's)
+	std::shared_ptr<Fetch> r2_rejoin;            // (that telling: enter again with this membership's id and key)
+	bool r2_fresh_told = false;                  // (the lobby has its addresses: the room's link from the next seat)
+	void room2_regather();
+	void room2_ops();                            // (the ops not seen taken: sent again, or given up)
+	void room2_refused(const std::string &op, const std::string &error);   // (the lobby's no to an op: busy later, else not again)
+	bool room2_apply(const vfnet::json::Value &st, double known_at);   // (a state, if it isn't older than the last: true if applied)
 	bool room2_begin(const OnlineSettings &s, const std::string &code, bool create, tr::line &error);
 	void room2_poll();
 	void room2_joined(const vfnet::http::Reply &r);
 	void room2_state(const vfnet::json::Value &st);
 	void room2_react();
-	void room2_send(const std::string &op, const std::string &extra = "");
+	void room2_send(const std::string &op, const std::string &extra = "", bool keep = false, int n = -1);   // (keep: sent again till it's seen taken)
 	void room2_seat();
 	void room2_unseat(bool lost);
 	void room2_session_ended(const vfnet::Session::Event &e);
