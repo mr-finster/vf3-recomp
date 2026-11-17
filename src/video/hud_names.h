@@ -23,8 +23,16 @@ struct HudFlag { int w = 0, h = 0; std::vector<uint32_t> px; };
 // above: the layers above the 3D as TileGen::aligned gives them (W x H). False if the HUD wasn't there. flag_at: each
 // player's flag's place, its left and the letters' top (the flag in the middle of their rows), in above's pixels; -1
 // for none drawn
-// tags: a line under each name ("" none; a Rooms 2 room's run of wins, "3 WINS"), in the same letters, out from the middle
 bool hud_names(const m3::Model3 &board, std::vector<uint32_t> &above, const std::string names[2], const HudFlag *flags[2] = nullptr,
-               int flag_at[2][2] = nullptr, const std::string *tags = nullptr);
+               int flag_at[2][2] = nullptr);
+
+// A Rooms 2 room's match (played or watched): the room's run of wins ("3 WINS", "1 WIN"; "" none) over its holder's
+// energy bar, where the game writes its own CHAMPION n WIN(S), in the game's own letters (its font in the tile
+// patterns, two tiles tall: map rows 1 and 2), hard to the bar's outer end: player 1's from column 2, player 2's to
+// column 59. The game's own CHAMPION n WIN(S) (its count only of this session's matches) and the CHALLENGER over the
+// other bar aren't shown, nor anything else of that line (PRESS START BUTTON) on the holder's side: only their
+// letters' pixels taken out of above.
+// The picture only, as hud_names: nothing written to the board. False if the HUD wasn't there
+bool hud_streak(const m3::Model3 &board, std::vector<uint32_t> &above, const std::string tags[2]);
 
 } // namespace video

@@ -171,7 +171,7 @@ void draw_flag(std::vector<uint32_t> &above, const HudFlag &fl, int fx, int text
 
 } // namespace
 
-bool hud_names(const m3::Model3 &board, std::vector<uint32_t> &above, const std::string names[2], const HudFlag *flags[2], int flag_at[2][2], const std::string *tags)
+bool hud_names(const m3::Model3 &board, std::vector<uint32_t> &above, const std::string names[2], const HudFlag *flags[2], int flag_at[2][2])
 {
 	if (flag_at) for (int p = 0; p < 2; p++) flag_at[p][0] = flag_at[p][1] = -1;
 	if (board.tile_ram.size() < 0x100000 || above.size() < size_t(W) * H) return false;
@@ -226,7 +226,6 @@ bool hud_names(const m3::Model3 &board, std::vector<uint32_t> &above, const std:
 				for (int X = from; X < to; X++) above[size_t(y) * W + X] = 0;
 			if (fl) draw_flag(above, *fl, p ? x + tw + gap : x, TEXT_Y, p, flag_at);
 			draw(above, p ? x : x + (fl ? fl->w + gap : 0), TEXT_Y, names[p]);
-			if (tags && !tags[p].empty()) draw(above, p ? P2_RIGHT - text_width(tags[p]) : P1_X, TEXT_Y + LINE * (TEAM_LINES + 1), tags[p]);   // (under the team)
 			continue;
 		}
 		const int tw = text_width(names[p]);
@@ -244,7 +243,91 @@ bool hud_names(const m3::Model3 &board, std::vector<uint32_t> &above, const std:
 			for (int X = from; X < to; X++) above[size_t(y) * W + X] = 0;
 		if (fl) draw_flag(above, *fl, p ? x + tw + gap : x, TEXT_Y, p, flag_at);
 		draw(above, p ? x : x + (fl ? fl->w + gap : 0), TEXT_Y, names[p]);
-		if (tags && !tags[p].empty()) draw(above, p ? P2_RIGHT - text_width(tags[p]) : P1_X, TEXT_Y + LINE, tags[p]);   // (the line under the name)
+	}
+	return true;
+}
+
+bool hud_streak(const m3::Model3 &board, std::vector<uint32_t> &above, const std::string tags[2])
+{
+	if (board.tile_ram.size() < 0x100000 + 0x8000 * 4 || above.size() < size_t(W) * H) return false;
+	const uint32_t reg = board.tile_regs[0x60 / 4];
+	if (!(reg & 0x80000000u) || (reg & 0x3FF) || ((reg >> 16) & 0x1FF)) return false;   // (layer A on and unscrolled)
+	const uint32_t *vram = reinterpret_cast<const uint32_t *>(board.tile_ram.data());
+	const uint32_t *pal = vram + 0x40000, *map = vram + 0xF8000 / 4;
+	int p1_first = 0, p2_last = 0;
+	if (!fight_hud(map, p1_first, p2_last)) return false;
+	const bool four = (board.tile_regs[0x20 / 4] >> 12) & 1;
+	// The game's font, as its CHAMPION n WIN and PRESS START BUTTON over the bars have it: a character c (' ' to '_') two
+	// tiles tall, its top tile 0x1C0 + (c / 16 - 2) * 0x20 + c % 16, its bottom 0x10 on; the letters in the colours of
+	// their own patterns' place (0x200 on), the digits and the space in 0x4100's, as the game's entries for them
+	auto entry = [](char c) -> uint32_t {
+		const uint32_t code = 0x1C0 + uint32_t((c >> 4) - 2) * 0x20 + uint32_t(c & 15);
+		return (c >= 'A' && c <= '_') ? code : (0x4000 | code);
+	};
+	auto glyph = [](uint32_t t) { return t >= 0x1C1 && t < 0x260 && (t & 0x10) == 0; };   // (a character's top tile, not the space)
+	auto texel = [&](uint32_t e, int fy, int fx) -> uint32_t {   // (bit 15: transparent)
+		if (four) {
+			const uint32_t pat = (((e & 0x3FFF) << 1) | (e >> 15)) * 8;
+			return pal[((e & 0x7FF0) | ((vram[(pat + fy) & 0x3FFFF] >> ((7 - fx) * 4)) & 0xF)) & 0x7FFF];
+		}
+		const uint32_t pat = (e & 0x3FFF) * 16;
+		return pal[((e & 0x7F00) | ((vram[(pat + fy * 2 + (fx >> 2)) & 0x3FFFF] >> ((3 - (fx & 3)) * 8)) & 0xFF)) & 0x7FFF];
+	};
+	const uint32_t off = board.tile_regs[0x40 / 4];   // (layer A's colour offsets, as the game's own letters get them)
+	auto colour = [&](uint32_t v) {
+		auto ch = [&](int c, int sh) { return uint32_t(std::clamp(int((v >> sh) & 31) * 255 / 31 + int(int8_t(off >> (8 * c))) * 2, 0, 255)); };
+		return 0xFF000000u | ch(2, 10) << 16 | ch(1, 5) << 8 | ch(0, 0);
+	};
+	constexpr int S = 2;   // (TileGen::aligned's picture: 2 pixels up and left)
+	// (each side's part of rows 1 and 2: either side of the timer's box, columns 27-34)
+	const int from[2] = { 0, 35 }, to[2] = { 26, 63 };
+	for (int p = 0; p < 2; p++) {
+		std::string line;
+		for (int c = from[p]; c <= to[p]; c++) {
+			const uint32_t t = tile_at(map, 1, c);
+			line += glyph(t) && tile_at(map, 2, c) == t + 0x10 ? char(0x20 + ((t - 0x1C0) / 0x20) * 16 + (t & 15)) : ' ';
+		}
+		const std::string &tag = tags ? tags[p] : std::string();
+		if (line.find("CHAMPION") == std::string::npos && line.find("CHALLENGER") == std::string::npos && tag.empty()) continue;
+		// the game's line taken out: its letters' own pixels (what's under them, the 3D, then shows)
+		for (int c = from[p]; c <= to[p]; c++) {
+			if (line[size_t(c - from[p])] == ' ') continue;
+			for (int row = 1; row <= 2; row++) {
+				const uint32_t e = [&] { const uint32_t w = map[row * 32 + c / 2]; return ((c & 1) ? w : (w >> 16)) & 0xFFFF; }();
+				for (int fy = 0; fy < 8; fy++)
+					for (int fx = 0; fx < 8; fx++) {
+						const int X = c * 8 + fx - S, Y = row * 8 + fy - S;
+						if (X >= 0 && X < W && Y >= 0 && Y < H && !(texel(e, fy, fx) & 0x8000)) above[size_t(Y) * W + X] = 0;
+					}
+			}
+		}
+		if (tag.empty()) continue;
+		const int n = int(tag.size()), c0 = p ? 60 - n : 2;
+		bool font = true;   // (the font's patterns there, as in every fight; else this project's letters, in their place)
+		for (char ch : tag) {
+			if (ch < ' ' || ch > '_') { font = false; break; }
+			if (ch == ' ') continue;
+			bool any = false;
+			for (int fy = 0; fy < 8 && !any; fy++)
+				for (int fx = 0; fx < 8 && !any; fx++) any = !(texel(entry(ch), fy, fx) & 0x8000) || !(texel(entry(ch) + 0x10, fy, fx) & 0x8000);
+			if (!any) { font = false; break; }
+		}
+		if (!font) {
+			draw(above, p ? 60 * 8 - S - 3 - text_width(tag) : 2 * 8 - S + 3, 8 - S + 3, tag);
+			continue;
+		}
+		for (int i = 0; i < n; i++) {
+			if (tag[size_t(i)] == ' ') continue;
+			for (int half = 0; half < 2; half++) {
+				const uint32_t e = entry(tag[size_t(i)]) + uint32_t(half) * 0x10;
+				for (int fy = 0; fy < 8; fy++)
+					for (int fx = 0; fx < 8; fx++) {
+						const int X = (c0 + i) * 8 + fx - S, Y = (1 + half) * 8 + fy - S;
+						const uint32_t v = texel(e, fy, fx);
+						if (X >= 0 && X < W && Y >= 0 && Y < H && !(v & 0x8000)) above[size_t(Y) * W + X] = colour(v);
+					}
+			}
+		}
 	}
 	return true;
 }

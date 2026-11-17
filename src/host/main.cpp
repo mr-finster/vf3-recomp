@@ -1455,7 +1455,8 @@ struct Game
 	}
 	std::function<void(std::vector<uint8_t> &)> take_midi;   // (a netplay match's: the adapter's)
 	std::string hud_names[2];   // (a netplay match's: the players' names under the energy bars)
-	std::string hud_tags[2];    // (and a line under them: a Rooms 2 room's run of wins, "3 WINS")
+	std::string hud_tags[2];    // (a Rooms 2 room's run of wins, "3 WINS", over its holder's bar: video::hud_streak)
+	std::atomic<bool> hud_room2{ false };   // (a Rooms 2 room's match, played or watched: the game's CHAMPION line not shown, the room's streak in its place)
 	video::HudFlag hud_flags[2];   // (and their countries' flags, beside them: none if not known)
 	std::atomic<int> hud_in{ 3 };   // (who's in the game, as the score holds it: each name shown only while they are; the host's)
 	int hud_flag_at[2][2] = { { -1, -1 }, { -1, -1 } };   // (where hud_names left each flag's place: the host draws it)
@@ -1528,11 +1529,14 @@ struct Game
 			const std::string shown[2] = { in & 1 ? hud_names[0] : std::string(), in & 2 ? hud_names[1] : std::string() };
 			if (!shown[0].empty() || !shown[1].empty()) {   // (a netplay match's)
 				const video::HudFlag *fl[2] = { &hud_flags[0], &hud_flags[1] };
-				const std::string tags[2] = { in & 1 ? hud_tags[0] : std::string(), in & 2 ? hud_tags[1] : std::string() };
-				if (!video::hud_names(board, above, shown, fl, hud_flag_at, tags))
+				if (!video::hud_names(board, above, shown, fl, hud_flag_at))
 					for (auto &a : hud_flag_at) a[0] = a[1] = -1;
 			} else
 				for (auto &a : hud_flag_at) a[0] = a[1] = -1;
+			if (hud_room2.load(std::memory_order_relaxed)) {   // (a Rooms 2 room's run of wins over its holder's bar, in the game's letters)
+				const std::string tags[2] = { in & 1 ? hud_tags[0] : std::string(), in & 2 ? hud_tags[1] : std::string() };
+				video::hud_streak(board, above, tags);
+			}
 			dural_wide.on = false;
 			if (dural_players.load(std::memory_order_relaxed)) video::dural_cell(board, tiles, above, dural_pic, &dural_wide);   // (her spot's picture)
 			tiles.aligned_tall(below_wide);
@@ -4842,10 +4846,13 @@ int main(int argc, char **argv)
 			fprintf(stderr, "online: %s\n", Online::log_masked(n.text.en()).c_str());
 		}
 		game.hud_in = match_on ? online.players_in_game() : 3;   // (each player's name and flag on the HUD only while they're in the game)
-		for (int p = 0; p < 2; p++) {   // (a Rooms 2 room's run of wins, under its holder's name: the HUD's own letters, as the game's text, never translated)
+		for (int p = 0; p < 2; p++) {   // (a Rooms 2 room's run of wins, over its holder's bar where the game's CHAMPION is, in the game's letters: never translated)
 			const int k = match_on ? online.room2_streak(p) : 0;
 			game.hud_tags[p] = k > 0 ? std::to_string(k) + (k == 1 ? " WIN" : " WINS") : std::string();
 		}
+		// (and the game's own CHAMPION n WIN(S) over the bars not shown in a room's match, played or watched: two counts of
+		// wins would disagree, the game's only of this session's; the room's is drawn there. The picture only: the board's state is the same)
+		game.hud_room2 = match_on && online.in_room2();
 		if (online.in_room2()) { if (match_on && !online.playing()) end_seat(); }   // (a room's seat or watched match over: still in the room)
 		else if ((match_on && !online.playing()) || (nvram_away && !online.playing() && !online.starting())) end_match();   // (ended, left, or never got going)
 		// (quiet a second is often only both games restarting their boards at the match's start: said after two, and
