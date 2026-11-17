@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <thread>
+#include <utility>
 
 namespace online_detail {   // (online.cpp's helpers)
 std::string mask_list(const std::vector<std::string> &v);
@@ -35,7 +36,8 @@ constexpr double POLL_MS = 10000;        // (no socket: the lobby asked every 10
 constexpr double POLL_NEAR_MS = 4000;    // (the same, this player at the table, next or called, or an op not seen taken: GET READY seen in time)
 constexpr double PING_MS = 15000;        // (the socket pinged: the lobby closes one quiet for 90 s)
 constexpr double BANNER_MS = 4000;       // (a moment's banner over the game)
-constexpr double REJOIN_MS = 30000;      // (a membership kept in room2.txt this long: the lobby's 30 s)
+constexpr double REJOIN_MS = 12 * 3600e3; // (a membership kept in room2.txt asked back this long after it was written (when it was made):
+                                         // the lobby takes it back only if it still has it (its 30 s), else it's a new member)
 constexpr double WS_AGAIN_MS = 2000;     // (the socket closed after it was open: again in a moment, 5 times)
 constexpr double WS_LATER_MS = 15000;    // (refused or failed: polling meanwhile, the socket tried again after 15 s, 30, 60 ... 5 min)
 constexpr double WS_STEADY_MS = 60000;   // (open this long: its tries counted afresh)
@@ -172,13 +174,17 @@ std::string Online::room2_body(const std::string &extra) const
 	return "{\"code\":" + quote(r2->code) + ",\"mid\":" + quote(r2->mid) + ",\"mkey\":" + quote(r2->mkey) + extra + "}";
 }
 
-// room2.txt: "code mid mkey owner_key wall-ms", the last room's, for a game that comes back within the lobby's 30 s
+// room2.txt: "code mid mkey owner_key wall-ms", the last room's, for a game that comes back within the lobby's 30 s.
+// Written when what it says changes (entering, a membership taken anew), never every few seconds, so never mid-match
 void Online::room2_keep()
 {
 	if (r2_file.empty() || !r2) return;
+	const std::string k = r2->code + " " + r2->mid + " " + r2->mkey + " " + (r2->owner_key.empty() ? "-" : r2->owner_key);
+	if (k == r2->kept) return;
 	if (FILE *f = fopen(r2_file.c_str(), "w")) {
-		fprintf(f, "%s %s %s %s %.0f\n", r2->code.c_str(), r2->mid.c_str(), r2->mkey.c_str(), r2->owner_key.empty() ? "-" : r2->owner_key.c_str(), wall_ms());
+		fprintf(f, "%s %.0f\n", k.c_str(), wall_ms());
 		fclose(f);
+		r2->kept = k;
 	}
 }
 
@@ -249,14 +255,17 @@ bool Online::room2_apply(const Value &st, double known_at)
 	RoomMember &m = *r2;
 	if (truthy(st["closed"])) { room2_end("closed"); return false; }
 	const int n = st["table"].kind == Value::object ? num(st["table"]["n"], 0, 1 << 30, -1) : -1;
+	// (a table whose match number grew is newer whatever else says: a lobby's seq or a clock never freezes this player on
+	// an old view)
+	const bool grew = n >= 0 && n > m.state_n;
 	if (st["seq"].kind == Value::number) {
-		if (st["seq"].n < m.state_seq) { log("Rooms 2: a state older than the last (seq " + std::to_string(int64_t(st["seq"].n)) + "): not applied"); return false; }
+		if (st["seq"].n < m.state_seq && !grew) { log("Rooms 2: a state older than the last (seq " + std::to_string(int64_t(st["seq"].n)) + "): not applied"); return false; }
 		m.state_seq = st["seq"].n;
-	} else if (known_at < m.state_at || (n >= 0 && n < m.state_n)) {
+	} else if (!grew && (known_at < m.state_at || (n >= 0 && n < m.state_n))) {
 		log("Rooms 2: a state older than the last (match " + std::to_string(n) + ", " + std::to_string(int(m.state_at - known_at)) + " ms): not applied");
 		return false;
 	}
-	m.state_at = std::max(m.state_at, known_at);
+	m.state_at = grew ? known_at : std::max(m.state_at, known_at);
 	m.state_n = std::max(m.state_n, n);
 	room2_state(st);
 	return true;
@@ -316,6 +325,7 @@ void Online::room2_state(const Value &st)
 		m.seat.relay = seat["peer"]["relay"].str();
 		m.seat.n = num(seat["n"], 0, 1 << 30);
 	}
+	if (m.settling && (!m.seated || m.seat.token != m.failed_token)) m.settling = false;   // (the failed seat over: back in the line, or another)
 	const bool was_on = m.ready_on && m.ready_you;
 	m.ready_on = rd.kind == Value::object;
 	m.ready_you = m.ready_on && truthy(rd["you"]);
@@ -435,7 +445,7 @@ void Online::room2_ops()
 			                     // or a rematch): 3 times, nothing in the state says it was taken)
 			done = done || !m.in_seat || m.n != o.n || (m.phase != "CONNECTING" && m.phase != "PLAYING") || (m.phase == "PLAYING" && (o.connecting || o.tries >= 3));
 		else if (o.op == "result") done = done || m.n != o.n || (m.phase != "PLAYING" && m.phase != "DECIDED");   // (decided: the table's moved on)
-		else if (o.op == "ready") done = done || m.watcher || (m.lobby_ready && !m.ready_you);   // (READY, and not still being called: seated)
+		else if (o.op == "ready") done = done || m.watcher || (o.now ? !m.ready_you : m.lobby_ready);   // (READY NOW: till seated, the call over; READY: ON: till READY)
 		else if (o.op == "away") done = done || m.watcher || !m.lobby_ready;
 		else if (o.op == "join_line") done = done || !m.watcher;
 		else if (o.op == "leave_line") done = done || m.watcher;
@@ -519,7 +529,7 @@ void Online::room2_poll()
 							extra += ",\"mid\":" + quote(mid) + ",\"mkey\":" + quote(mkey);
 							m.rejoining = true;
 							if (online_detail::lobby_key(ok, 32)) m.owner_key = ok;
-							log("Rooms 2: a membership of this room from " + std::to_string(int((wall_ms() - at) / 1000)) + " s ago: asking for it back");
+							log("Rooms 2: a membership of this room from before (made " + std::to_string(int((wall_ms() - at) / 60000)) + " min ago): asking for it back");
 						}
 						fclose(f);
 					}
@@ -539,13 +549,13 @@ void Online::room2_poll()
 		room2_joined(r);
 		return;
 	}
-	// a member: room2.txt's time kept fresh (a crash's restart takes the place back only within the lobby's 30 s)
-	if (now - m.kept_at >= 5000) { m.kept_at = now; room2_keep(); }
 	// the socket, else polling: a socket closed after it was open tried again in a moment (5 times; open a minute, counted
 	// afresh), one refused or failed again after 15 s, 30, 60 ... 5 min, polling meanwhile (never polling for good)
 	using vfnet::http::Socket;
-	if (!m.ws && now >= m.ws_at)
+	if (!m.ws && now >= m.ws_at) {
 		m.ws = std::make_shared<Socket>(lobby_url("/v2/room/ws?code=" + m.code + "&mid=" + m.mid + "&mkey=" + m.mkey));
+		m.ws_first = true;
+	}
 	if (m.ws) {
 		Socket::Message msg;
 		while (r2 && m.ws && m.ws->take(msg)) {
@@ -553,7 +563,10 @@ void Online::room2_poll()
 			Value v;
 			if (!vfnet::json::parse(msg.data, v)) continue;
 			m.heard_at = now;
-			if (v["state"].kind == Value::object) room2_apply(v["state"], now);
+			if (v["state"].kind == Value::object) {
+				if (std::exchange(m.ws_first, false)) { m.state_seq = -1; m.state_at = -1e18; }   // (a new socket's first state: the lobby's view now, whatever came before)
+				room2_apply(v["state"], now);
+			}
 			else if (v["removed"].kind == Value::string) { room2_end(v["removed"].str()); return; }
 			else if (truthy(v["closed"])) { room2_end("closed"); return; }
 			else if (v["error"].kind == Value::string) {
@@ -657,7 +670,12 @@ void Online::room2_poll()
 void Online::room2_regather()
 {
 	RoomMember &m = *r2;
-	const bool between = !m.in_seat && m.pos != 0 && (m.pos > 0 || m.watcher) && !m.ready_you && m.ready_place() != 1 && m.have_state && !m.test;
+	// (not between seats: READY or AWAY just asked and not seen taken (the lobby may seat this player any moment), READY in
+	// the line with a seat free at the table (taken at once), or a start that failed and the lobby's word since not come)
+	const bool asked = m.pending("ready") || m.pending("away") || m.me_ready != m.lobby_ready;
+	const bool may_sit = !m.watcher && (m.me_ready || m.lobby_ready) && !(m.has_a && m.has_b);
+	const bool between = !m.in_seat && m.pos != 0 && (m.pos > 0 || m.watcher) && !m.ready_you && m.ready_place() != 1 && !asked && !may_sit &&
+	                     !m.settling && m.have_state && !m.test;
 	if (!r2_fresh) {
 		if (!between || now - m.gathered_at < room2_regather_ms || now < m.regather_at || r2_gather) return;
 		m.regather_at = now + 60000;   // (once a minute at most, whatever comes of it)
@@ -716,7 +734,23 @@ void Online::room2_regather()
 	const bool parsed = vfnet::json::parse(r.body, v);
 	if (r.status == 410 && parsed) { room2_end(v["why"].str()); return; }
 	if (r.status == 404 && parsed && (v["error"].str() == "no_room" || v["error"].str() == "off")) { room2_end("closed"); return; }
-	if (r.status != 200 || !parsed || v["mid"].str() != m.mid) { give_up(r.status ? "the lobby said " + std::to_string(r.status) : r.error); return; }
+	if (r.status != 200 || !parsed || !online_detail::lobby_key(v["mid"].str(), 0) || !online_detail::lobby_key(v["mkey"].str(), 32)) {
+		give_up(r.status ? "the lobby said " + std::to_string(r.status) : r.error);
+		return;
+	}
+	if (v["mid"].str() != m.mid) {   // (this membership already gone at the lobby: the one its enter made taken as this player's, no ghost left in the line)
+		log("Rooms 2: this membership was gone at the lobby: the new one (member " + v["mid"].str() + ", at the line's back) taken");
+		m.mid = v["mid"].str();
+		m.mkey = v["mkey"].str();
+		m.outbox.clear();
+		m.state_seq = -1;
+		m.state_at = -1e18;
+		if (m.ws) std::thread([w = std::move(m.ws)] {}).detach();
+		m.ws.reset();
+		m.ws_open_at = 0;
+		m.ws_at = now;
+		room2_keep();
+	}
 	m.heard_at = now;
 	r2_fresh_told = true;
 	log("Rooms 2: the room's link gathered again: " + online_detail::mask_list(r2_fresh->candidates()) + ", relay " + (r2_fresh->relay_address().empty() ? "none" : "yes") + "; the lobby told");
@@ -773,6 +807,7 @@ void Online::room2_react()
 		const std::string mine = m.seat.side;
 		room2_unseat(!m.watcher && (((m.last_result == "a" || m.last_result == "b") && m.last_result != mine) || (m.last_result == "forfeit" && m.last_winner != mine)));
 	}
+	if (m.pos != 0 && !m.in_seat) m.seen_peer.clear();   // (in the line or watching: the next seat isn't one stayed at)
 	if (m.in_seat && (m.banner == 1 || m.banner == 4) && !m.next_ready()) m.banner = 0;   // (nobody READY next after all: the two play on)
 	if (!r2) return;
 	// (a match there to watch: two at the table; a lone one waiting for the first in line has none yet)
@@ -797,8 +832,10 @@ void Online::room2_react()
 void Online::room2_seat()
 {
 	RoomMember &m = *r2;
-	const bool stayed = m.in_seat;   // (at the table already: a new challenger)
+	// (at the table already: a new challenger. The opponent before still known (seen_peer, cleared only back in the line)
+	// counts too: the loser's quit for the line moving can end this side's session before the lobby's word seats the next)
 	const std::string was_peer = m.seen_peer;
+	const bool stayed = m.in_seat || !was_peer.empty();
 	if (m.in_seat) {
 		if (ph == Phase::playing) ended(tr::line(tr::ROOM2_WON_STAYS));
 		stop_activity(true, QUIT_NEXT_IN_LINE);
@@ -883,7 +920,11 @@ void Online::room2_session_ended(const vfnet::Session::Event &e)
 		}
 		log("Rooms 2: the session with " + who + " ended: " + e.text + (res ? std::string(": result ") + res : moved ? ": the room's line moved on" : ""));
 		if (res) m.retry_token = m.played_token;
-		ended(moved ? tr::line(tr::OPPONENT_LEFT, { { "name", who } })
+		// (the line moved: the opponent made way, which is no "left the match": this side won and stays on, or lost and goes)
+		const bool won = (score.players() >> local_player()) & 1;
+		const tr::line moved_why = won ? tr::line(tr::ROOM2_WON_STAYS)
+		                               : tr::line(tr::ROOM2_LOST_NEXT, { { "name", m.next_ready() ? m.next_ready()->name : std::string() } });
+		ended(moved ? moved_why
 		      : why == vfnet::Session::End::opponent_quit ? tr::line(tr::OPPONENT_LEFT, { { "name", who } })
 		      : why == vfnet::Session::End::disconnected ? tr::line(tr::OPPONENT_STOPPED, { { "name", who } })
 		      : why == vfnet::Session::End::desync ? tr::line(tr::MATCH_OUT_OF_STEP) : tr::line(e.text),
@@ -891,6 +932,7 @@ void Online::room2_session_ended(const vfnet::Session::Event &e)
 	} else {
 		m.failed_token = m.played_token;
 		m.gathered_at = std::min(m.gathered_at, now - room2_regather_ms);   // (perhaps this side's network changed: its addresses gathered again, between seats)
+		m.settling = true;   // (not before the lobby's word on this seat: still seated, or back in the line)
 		log("Rooms 2: the session with " + online_menu::clean_name(peer_name) + " didn't get going (" + e.text + "): " + (room ? room->report([](const std::string &a) { return online_detail::mask_list({ a }); }) : std::string()) + "; the lobby moves on");
 	}
 	stop_activity(true);
@@ -926,6 +968,7 @@ bool Online::room2_ready()
 	r2->ready_sent = true;
 	r2->version++;   // (the room page's READY NOW gone: seated in a moment)
 	room2_send("ready", "", true);
+	if (r2 && !r2->outbox.empty() && r2->outbox.back().op == "ready") r2->outbox.back().now = true;   // (its own op: sent again only while still called)
 	log("Rooms 2: ready (Start pressed, " + std::to_string(left) + " s left)");
 	return true;
 }

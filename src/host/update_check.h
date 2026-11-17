@@ -335,6 +335,8 @@ inline reply get(const std::string &url, const std::string &agent, int timeout_m
 	H req{ WinHttpOpenRequest(conn.h, L"GET", target.c_str(), nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES,
 	                          u.nScheme == INTERNET_SCHEME_HTTPS ? WINHTTP_FLAG_SECURE : 0) };
 	if (!req.h) { r.error = "couldn't connect"; return r; }
+	DWORD policy = WINHTTP_OPTION_REDIRECT_POLICY_DISALLOW_HTTPS_TO_HTTP;   // (a redirect never from https to http: WinHTTP's default, said)
+	WinHttpSetOption(req.h, WINHTTP_OPTION_REDIRECT_POLICY, &policy, sizeof policy);
 	if (!WinHttpSendRequest(req.h, L"Accept: application/vnd.github+json\r\n", DWORD(-1), WINHTTP_NO_REQUEST_DATA, 0, 0, 0) ||
 	    !WinHttpReceiveResponse(req.h, nullptr)) {
 		r.error = "couldn't connect (error " + std::to_string(GetLastError()) + ")";
@@ -375,6 +377,7 @@ struct curl_fns
 		URL = 10002, HTTPHEADER = 10023, WRITEFUNCTION = 20011, WRITEDATA = 10001, TIMEOUT_MS = 155, CONNECTTIMEOUT_MS = 156,
 		NOSIGNAL = 99, USERAGENT = 10018, HTTPGET = 80, NOPROGRESS = 43, XFERINFOFUNCTION = 20219, XFERINFODATA = 10057,
 		FOLLOWLOCATION = 52, MAXREDIRS = 68, RESPONSE_CODE = 0x200002, GLOBAL_ALL = 3,
+		REDIR_PROTOCOLS = 182, REDIR_PROTOCOLS_STR = 10319, PROTO_HTTPS = 2,
 	};
 };
 
@@ -429,6 +432,9 @@ inline reply get(const std::string &url, const std::string &agent, int timeout_m
 	c.easy_setopt(h, curl_fns::HTTPHEADER, headers);
 	c.easy_setopt(h, curl_fns::FOLLOWLOCATION, 1L);   // (a repository renamed: GitHub's API moves it with a redirect)
 	c.easy_setopt(h, curl_fns::MAXREDIRS, 3L);
+	// (a redirect followed only to https: never to http or anything else. The name's way first (libcurl 7.85 on), the
+	// number's for an older one)
+	if (c.easy_setopt(h, curl_fns::REDIR_PROTOCOLS_STR, "https") != 0) c.easy_setopt(h, curl_fns::REDIR_PROTOCOLS, long(curl_fns::PROTO_HTTPS));
 	c.easy_setopt(h, curl_fns::WRITEFUNCTION, &curl_body);
 	c.easy_setopt(h, curl_fns::WRITEDATA, &r.body);
 	c.easy_setopt(h, curl_fns::NOPROGRESS, 0L);

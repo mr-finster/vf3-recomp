@@ -1507,9 +1507,19 @@ int main(int argc, char **argv)
 			check(!o.room2_test_state(st(5, 3), 2000) && o.room2()->pos == 1, "Rooms 2's states: an older match number not applied");
 			check(!o.room2_test_state(st(6, 3), 500) && o.room2()->pos == 1, "Rooms 2's states: a poll's answer sent before the last applied not applied");
 			check(o.room2_test_state(st(6, 2), 1000) && o.room2()->pos == 2, "Rooms 2's states: the same age again applied");
-			check(o.room2_test_state(st(6, 3, R"(,"seq":10)"), 900) && o.room2()->pos == 3 && !o.room2_test_state(st(7, 1, R"(,"seq":9)"), 5000) && o.room2()->pos == 3,
+			check(o.room2_test_state(st(7, 1), 100) && o.room2()->pos == 1, "Rooms 2's states: a higher match number wins over an older time");
+			check(o.room2_test_state(st(7, 3, R"(,"seq":10)"), 900) && o.room2()->pos == 3 && !o.room2_test_state(st(7, 1, R"(,"seq":9)"), 5000) && o.room2()->pos == 3,
 			      "Rooms 2's states: the lobby's seq, when it sends one, decides");
+			check(o.room2_test_state(st(8, 2, R"(,"seq":4)"), 5000) && o.room2()->pos == 2 && o.room2_test_state(st(8, 1, R"(,"seq":5)"), 5000) && o.room2()->pos == 1,
+			      "Rooms 2's states: a lower seq with a higher match number applied (a lobby's seq that went back: never frozen on an old view)");
 			check(!o.room2_test_state(R"({"closed":true})", 6000) && !o.in_room2(), "Rooms 2's states: {closed:true} ends the membership");
+			o.set_room2_test("");
+			// (this player's own place among the READY ones by its READY as asked, not the line's as the lobby last had it)
+			o.set_room2_test(head + R"("table":{"a":{"name":"AKIRAFAN","country":"JP"},"b":{"name":"LAUCHAN","country":"KR"},"phase":"PLAYING","streak":1,"holder":"a","n":3,"last":null},)"
+			                 R"("line":[{"name":"PAIPAI","country":"US","ready":false},{"name":"MRFINSTER","country":"GB","ready":false}],"you":{"mid":"x","pos":2,"ready":false},"ready":null,"watch":"KXQ4M7"})");
+			check(o.room2()->ready_place() == 0, "Rooms 2: AWAY: no place among the READY ones");
+			o.room2_set_ready(true);
+			check(o.room2()->me_ready && o.room2()->ready_place() == 1, "Rooms 2: READY asked, the one before AWAY: next to play by its own READY");
 			o.set_room2_test("");
 		}
 		o.set_room2_test(R"({"code":"KXQ4M7","room":{"name":"FRIDAY FIGHTS","listed":true,"locked":false,"ready_ms":15000,"owner":false},)" + table +

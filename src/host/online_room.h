@@ -90,20 +90,23 @@ struct RoomMember
 
 	// The membership's own link (STUN and TURN gathered once), handed to each seat's session and back
 	std::unique_ptr<vfnet::RoomLink> link;
-	double gathered_at = 0, kept_at = 0;   // (kept_at: room2.txt last written, its time the membership's last sign of life)
+	double gathered_at = 0;
+	std::string kept;               // (what room2.txt last said: written again only when it changes)
 
 	// The lobby: its socket (pushed states; ping every 15 s), or polling every 10 s over HTTPS
 	std::shared_ptr<vfnet::http::Socket> ws;
 	int ws_tries = 0;
 	double ws_at = 0, ping_at = 0, poll_at = 0, heard_at = 0, polled_at = -1e18;
 	double ws_open_at = 0;          // (when the socket last opened: open a minute, its tries counted afresh)
+	bool ws_first = false;          // (the socket's first state not come yet: the order's marks start again from it)
 	int ws_fails = 0;               // (handshakes refused or failed in a row: polling meanwhile, the socket tried again later and later)
 	// The ops not yet seen taken (the socket gives no answer to an op, and the lobby drops a member's calls past its rate:
 	// a burst of 10, then one per 2 s; a POST's can be lost or answered busy): each sent again 3 s, 6, 12, 24 after,
 	// while the state doesn't show it (started: still CONNECTING, or a few times in PLAYING (a session started again
 	// after a lost one must say it again); result: the match still on or DECIDED; ready, away: this player's READY not as
 	// asked), given up after a few
-	struct Op { std::string op, extra; int n = -1; double at = 0; int tries = 0; bool connecting = false; };   // (connecting: started first said while CONNECTING)
+	struct Op { std::string op, extra; int n = -1; double at = 0; int tries = 0; bool connecting = false, now = false; };   // (connecting: started first said while
+	                                // CONNECTING; now: ready as READY NOW, seated at once while called, not READY: ON)
 	std::vector<Op> outbox;
 
 	// The activity's bookkeeping
@@ -119,6 +122,7 @@ struct RoomMember
 	std::string stuck_token;        // (and its token: the same seat stuck again told only after STUCK_AGAIN_MS)
 	double stuck_since = 0, stuck_told = 0;   // (seated, its token played, no session, the table PLAYING: since when; told when)
 	int seat_n = -1;                // (the match number the seat's session was started for: no state older unseats it)
+	bool settling = false;          // (a seat's start failed: not between seats till the lobby's word on it (re-gathering waits))
 	bool started_said = false;      // (started sent for played_token)
 	int started_n = -1;             // (the match number started was last said for: a rematch's PLAYING said too, harmless)
 	int reported_n = -1;            // (the match number a result was sent for)
@@ -142,5 +146,6 @@ struct RoomMember
 	// An op of this kind still waiting to be seen taken
 	bool pending(const std::string &op) const { for (const Op &o : outbox) if (o.op == op) return true; return false; }
 	// This member's place among the READY ones in the line (1: the next to play), 0 not in it or AWAY
-	int ready_place() const { if (pos <= 0 || !me_ready || pos > int(line.size())) return 0; int k = 0; for (int i = 0; i < pos; i++) if (line[size_t(i)].ready) k++; return k; }
+	// (this player's own place counted by its READY as asked, not the line's as the lobby last had it)
+	int ready_place() const { if (pos <= 0 || !me_ready || pos > int(line.size())) return 0; int k = 0; for (int i = 0; i < pos; i++) if (i == pos - 1 || line[size_t(i)].ready) k++; return k; }
 };
