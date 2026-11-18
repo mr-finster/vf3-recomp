@@ -30,9 +30,12 @@ bool hud_names(const m3::Model3 &board, std::vector<uint32_t> &above, const std:
 // energy bar, where the game writes its own CHAMPION n WIN(S), in the game's own letters (its font in the tile
 // patterns, two tiles tall: map rows 1 and 2), hard to the bar's outer end: player 1's from column 2, player 2's to
 // column 59. The game's own CHAMPION n WIN(S) (its count only of this session's matches) and the CHALLENGER over the
-// other bar aren't shown, nor anything else of that line (PRESS START BUTTON) on the holder's side: only their
-// letters' pixels taken out of above.
+// other bar aren't shown, nor what the game has in the streak's own place; the rest of the line (PRESS START BUTTON)
+// is: only those letters' pixels taken out of above.
 // The picture only, as hud_names: nothing written to the board. False if the HUD wasn't there
 bool hud_streak(const m3::Model3 &board, std::vector<uint32_t> &above, const std::string tags[2]);
+
+// A line of the game's letters over a bar (' ' where none): the places of its CHAMPION n WIN(S) and CHALLENGER (hud_streak's)
+std::vector<bool> hud_words(const std::string &line);
 
 } // namespace video

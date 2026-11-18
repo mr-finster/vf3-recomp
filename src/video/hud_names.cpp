@@ -247,6 +247,27 @@ bool hud_names(const m3::Model3 &board, std::vector<uint32_t> &above, const std:
 	return true;
 }
 
+std::vector<bool> hud_words(const std::string &line)
+{
+	std::vector<bool> out(line.size(), false);
+	auto mark = [&](size_t a, size_t b) { for (size_t i = a; i < b && i < out.size(); i++) out[i] = true; };
+	for (size_t at = line.find("CHALLENGER"); at != std::string::npos; at = line.find("CHALLENGER", at + 1)) mark(at, at + 10);
+	for (size_t at = line.find("CHAMPION"); at != std::string::npos; at = line.find("CHAMPION", at + 1)) {
+		size_t end = at + 8, k = end;   // (its count and WIN or WINS after it, spaces between)
+		while (k < line.size() && line[k] == ' ') k++;
+		size_t d = k;
+		while (d < line.size() && line[d] >= '0' && line[d] <= '9') d++;
+		if (d > k) {
+			end = d;
+			size_t w = d;
+			while (w < line.size() && line[w] == ' ') w++;
+			if (line.compare(w, 3, "WIN") == 0) end = w + 3 + (w + 3 < line.size() && line[w + 3] == 'S' ? 1 : 0);
+		}
+		mark(at, end);
+	}
+	return out;
+}
+
 bool hud_streak(const m3::Model3 &board, std::vector<uint32_t> &above, const std::string tags[2])
 {
 	if (board.tile_ram.size() < 0x100000 + 0x8000 * 4 || above.size() < size_t(W) * H) return false;
@@ -288,10 +309,14 @@ bool hud_streak(const m3::Model3 &board, std::vector<uint32_t> &above, const std
 			line += glyph(t) && tile_at(map, 2, c) == t + 0x10 ? char(0x20 + ((t - 0x1C0) / 0x20) * 16 + (t & 15)) : ' ';
 		}
 		const std::string &tag = tags ? tags[p] : std::string();
-		if (line.find("CHAMPION") == std::string::npos && line.find("CHALLENGER") == std::string::npos && tag.empty()) continue;
-		// the game's line taken out: its letters' own pixels (what's under them, the 3D, then shows)
+		const int n = int(tag.size()), c0 = p ? 60 - n : 2;
+		// the game's CHAMPION n WIN(S) and CHALLENGER taken out, and whatever's in the streak's own place: their letters' own
+		// pixels (what's under them, the 3D, then shows). The rest of the line (PRESS START BUTTON) left as the game draws it
+		std::vector<bool> out = hud_words(line);
+		for (int c = c0; c < c0 + n; c++)
+			if (c >= from[p] && c <= to[p]) out[size_t(c - from[p])] = true;
 		for (int c = from[p]; c <= to[p]; c++) {
-			if (line[size_t(c - from[p])] == ' ') continue;
+			if (line[size_t(c - from[p])] == ' ' || !out[size_t(c - from[p])]) continue;
 			for (int row = 1; row <= 2; row++) {
 				const uint32_t e = [&] { const uint32_t w = map[row * 32 + c / 2]; return ((c & 1) ? w : (w >> 16)) & 0xFFFF; }();
 				for (int fy = 0; fy < 8; fy++)
@@ -302,7 +327,6 @@ bool hud_streak(const m3::Model3 &board, std::vector<uint32_t> &above, const std
 			}
 		}
 		if (tag.empty()) continue;
-		const int n = int(tag.size()), c0 = p ? 60 - n : 2;
 		bool font = true;   // (the font's patterns there, as in every fight; else this project's letters, in their place)
 		for (char ch : tag) {
 			if (ch < ' ' || ch > '_') { font = false; break; }

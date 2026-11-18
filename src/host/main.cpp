@@ -85,7 +85,8 @@
 //                        AWAY), or AWAY as soon as in the room (away); unset: seated by itself when GET READY's 3 s are up
 //   VF3_ROOM2_FIGHT=win|lose  this player's input in a Rooms 2 room's matches: Start when the match wants it, then
 //                        random play (win) or nothing (lose: the other wins), and Start again as the loser (a rematch,
-//                        held back when someone's in the line); for runs with several matches in a row
+//                        held back while the line moves on); for runs with several matches in a row
+//   VF3_ROOM2_REMATCH_AFTER=s  with VF3_ROOM2_FIGHT: the loser's Start for a rematch only s seconds after they're out
 //   VF3_ROOM2_LEAVE_AT=N leaves the room (Leave room) at pass N
 //   VF3_ROOM2_REGATHER_S=s the room's link gathered again s seconds after it last was (between seats), not 5 hours
 //   VF3_ROOM2_SHOT=1     the window to build/host_room2_ready.png 1 s into the ready check (its banner)
@@ -1455,7 +1456,15 @@ struct Game
 	}
 	std::function<void(std::vector<uint8_t> &)> take_midi;   // (a netplay match's: the adapter's)
 	std::string hud_names[2];   // (a netplay match's: the players' names under the energy bars)
-	std::string hud_tags[2];    // (a Rooms 2 room's run of wins, "3 WINS", over its holder's bar: video::hud_streak)
+	std::string hud_tags[2];    // (a Rooms 2 room's run of wins, "3 WINS", over its holder's bar: video::hud_streak; under hud_tags_m,
+	                            // read by the tile worker while a frame's drawn: set_hud_tags)
+	std::mutex hud_tags_m;
+	void set_hud_tags(const std::string &t0, const std::string &t1)
+	{
+		std::lock_guard<std::mutex> lk(hud_tags_m);
+		if (hud_tags[0] != t0) hud_tags[0] = t0;   // (as it was mostly: nothing done)
+		if (hud_tags[1] != t1) hud_tags[1] = t1;
+	}
 	std::atomic<bool> hud_room2{ false };   // (a Rooms 2 room's match, played or watched: the game's CHAMPION line not shown, the room's streak in its place)
 	video::HudFlag hud_flags[2];   // (and their countries' flags, beside them: none if not known)
 	std::atomic<int> hud_in{ 3 };   // (who's in the game, as the score holds it: each name shown only while they are; the host's)
@@ -1534,7 +1543,12 @@ struct Game
 			} else
 				for (auto &a : hud_flag_at) a[0] = a[1] = -1;
 			if (hud_room2.load(std::memory_order_relaxed)) {   // (a Rooms 2 room's run of wins over its holder's bar, in the game's letters)
-				const std::string tags[2] = { in & 1 ? hud_tags[0] : std::string(), in & 2 ? hud_tags[1] : std::string() };
+				std::string tags[2];
+				{
+					std::lock_guard<std::mutex> lk(hud_tags_m);
+					if (in & 1) tags[0] = hud_tags[0];
+					if (in & 2) tags[1] = hud_tags[1];
+				}
 				video::hud_streak(board, above, tags);
 			}
 			dural_wide.on = false;
@@ -4726,7 +4740,8 @@ int main(int argc, char **argv)
 		if (match_on) fprintf(stderr, "online: Rooms 2: the room's match over for this player at frame %llu; still in the room\n", (unsigned long long)game_frame);
 		match_on = false;
 		game.take_midi = nullptr;
-		for (int p = 0; p < 2; p++) { game.hud_names[p].clear(); game.hud_tags[p].clear(); hud_country[p].clear(); game.hud_flags[p] = {}; }
+		for (int p = 0; p < 2; p++) { game.hud_names[p].clear(); hud_country[p].clear(); game.hud_flags[p] = {}; }
+		game.set_hud_tags("", "");
 		game.tiles_on = true;
 		menu.set_notice("");
 		menu.hide_versus();
@@ -4745,8 +4760,7 @@ int main(int argc, char **argv)
 		hud_country[0].clear();
 		hud_country[1].clear();
 		game.hud_names[1].clear();
-		game.hud_tags[0].clear();
-		game.hud_tags[1].clear();
+		game.set_hud_tags("", "");
 		game.tiles_on = true;
 		menu.set_notice("");
 		menu.set_banner("");
@@ -4846,9 +4860,14 @@ int main(int argc, char **argv)
 			fprintf(stderr, "online: %s\n", Online::log_masked(n.text.en()).c_str());
 		}
 		game.hud_in = match_on ? online.players_in_game() : 3;   // (each player's name and flag on the HUD only while they're in the game)
-		for (int p = 0; p < 2; p++) {   // (a Rooms 2 room's run of wins, over its holder's bar where the game's CHAMPION is, in the game's letters: never translated)
-			const int k = match_on ? online.room2_streak(p) : 0;
-			game.hud_tags[p] = k > 0 ? std::to_string(k) + (k == 1 ? " WIN" : " WINS") : std::string();
+		{   // (a Rooms 2 room's run of wins, over its holder's bar where the game's CHAMPION is, in the game's letters: never translated;
+			// handed to the tile worker under its lock)
+			std::string tag[2];
+			for (int p = 0; p < 2; p++) {
+				const int k = match_on ? online.room2_streak(p) : 0;
+				if (k > 0) tag[p] = std::to_string(k) + (k == 1 ? " WIN" : " WINS");
+			}
+			game.set_hud_tags(tag[0], tag[1]);
 		}
 		// (and the game's own CHAMPION n WIN(S) over the bars not shown in a room's match, played or watched: two counts of
 		// wins would disagree, the game's only of this session's; the room's is drawn there. The picture only: the board's state is the same)
@@ -5564,7 +5583,11 @@ int main(int argc, char **argv)
 					static uint16_t held = 0;
 					const int w = online.start_wait();
 					bits = 0;
-					if ((w == 1 || w == 3) && ++tap % 40 < 6) bits |= vf3net::START_BUTTON;
+					static const double rematch_after = getenv("VF3_ROOM2_REMATCH_AFTER") ? atof(getenv("VF3_ROOM2_REMATCH_AFTER")) * 1000 : 0;
+					static uint64_t out_since = 0;
+					if (w != 3) out_since = 0;
+					else if (!out_since) out_since = SDL_GetTicks();
+					if ((w == 1 || (w == 3 && double(SDL_GetTicks() - out_since) >= rematch_after)) && ++tap % 40 < 6) bits |= vf3net::START_BUTTON;
 					if (strcmp(rf, "win") == 0 && w != 1) {
 						if (hold-- <= 0) {
 							rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17;

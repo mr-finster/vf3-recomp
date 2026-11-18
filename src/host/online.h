@@ -485,6 +485,8 @@ private:
 	void room2_keep();                         // (its code, id and key to room2.txt)
 	std::string room2_body(const std::string &extra = "") const;
 	bool room2_in_seat() const { return r2 && r2->in_seat; }
+	bool room2_moving_on() const;   // (this seat's decided match: the lobby calling the next in line, or about to: the rematch held)
+	bool rematch_coming() const;    // (a decided match's out player back in, or their Start pressed since: a rematch on its way)
 	void stop_activity(bool said = false, uint8_t quit_reason = 0);   // (stop as it was: whatever's on, a room's membership kept)
 	void watch_begin(const std::string &w);   // (watching w from here: what's on stopped first, a room's membership kept)
 	bool persist = false;               // (the room's own: kept through its match, opened again after it)

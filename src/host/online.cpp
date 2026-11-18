@@ -506,6 +506,18 @@ int Online::start_wait() const
 	return out[me] ? 3 : out[me ^ 1] ? 4 : 0;
 }
 
+// After a match decided: a player out of the game back in (as the RAM has it this frame) or their Start pressed since
+// they went out (start_wait's reading): a rematch on its way
+bool Online::rematch_coming() const
+{
+	if (!session || ph != Phase::playing || !both_in) return false;
+	(void)start_wait();   // (the presses since each went out looked through)
+	const int in = score.players(), now_in = score.players_now();
+	for (int p = 0; p < 2; p++)
+		if (!(in >> p & 1) && ((now_in >> p & 1) || out_pressed[p])) return true;
+	return false;
+}
+
 int Online::players_online(const OnlineSettings &s)
 {
 	using namespace std::chrono;
@@ -1088,6 +1100,7 @@ bool Online::watch_start(const vfnet::watch::Start &st, tr::line &why)
 	if (st.meta.content != hex64(identity.content)) { why = tr::WATCH_OTHER_ROM; return false; }
 	if (!use_terms(st.meta.terms)) { why = tr::line(tr::WATCH_OTHER_VERSION, { { "version", online_menu::clean_name(st.meta.build) } }); return false; }
 	watch_meta = st.meta;
+	if (r2) { r2->watch_epoch = r2->epoch; r2->watch_started_at = now; }   // (a Rooms 2 room's: the seat it came in, its streak shown over it)
 	score = {};
 	adapter.mute = true;   // (catching up unseen: its sound dropped)
 	if (adapter.settle) adapter.settle();
@@ -2408,11 +2421,13 @@ bool Online::step(uint16_t input)
 			         " (frame " + std::to_string(f) + ", " + std::to_string(session->confirmed()) + " confirmed)");
 		}
 	}
-	// A Rooms 2 seat, the match decided and someone in the room's line: the player out of the game gets no rematch,
-	// their Start taken out of their input here, before it's sent (so both sides run the same: the next in line comes on)
-	if (room2_in_seat() && ph == Phase::playing && session && r2->next_ready() && both_in && score.players() != 3 &&
-	    !(score.players() >> local_player() & 1) && (input & vf3net::START_BUTTON)) {
-		if (start_edge) log_line("Rooms 2: Start for a rematch held back: " + online_menu::clean_name(r2->next_ready()->name) + " is next in the room's line");
+	// A Rooms 2 seat, the match decided and the lobby moving on to the next in the room's line (calling them, or about to:
+	// room2_moving_on): the player out of the game gets no rematch, their Start taken out of their input here, before
+	// it's sent (so both sides run the same: the next in line comes on). The two playing on (nobody READY when it was
+	// decided), it's a rematch as ever
+	if (room2_in_seat() && ph == Phase::playing && session && both_in && score.players() != 3 &&
+	    !(score.players() >> local_player() & 1) && (input & vf3net::START_BUTTON) && room2_moving_on()) {
+		if (start_edge) log_line("Rooms 2: Start for a rematch held back: " + online_menu::clean_name(r2->next_name()) + " is next in the room's line");
 		input = uint16_t(input & ~vf3net::START_BUTTON);
 	}
 	if (session) snapper.before_step(*session);   // (a snapshot's copy the step could save over: stopped first, tried again)

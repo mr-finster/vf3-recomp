@@ -61,12 +61,23 @@ struct RoomMember
 	bool watcher = false;           // (in the room watching, no place in the line: Leave line; Join the line puts them back)
 	int watchers = 0;               // (the room's members watching without a place)
 	// The match on and the streak it's played for (the lobby's table.match), and what's shown over the match on screen:
-	// the streak its pair's match began with, taken when the table's pair is the one on screen (a watcher behind the
-	// lobby keeps the last match's while it's still on screen)
+	// the streak its match began with and its holder's side ("a": player 1, the session's host; "b": player 2), taken
+	// while the table's match is the one on screen: at the table, this seat's (or a rematch's after it); watching, the
+	// seat the watched match's start came in (a watcher behind the lobby keeps the last seat's while it's still on
+	// screen). By the lobby's sides, never by names (a name the lobby blocks is "PLAYER" there; two can be the same):
+	// names are only shown
 	int match_n = -1, match_streak = 0;
-	std::string match_holder;
-	std::string shown_pair, shown_holder;
-	int shown_n = -1, shown_streak = 0;
+	std::string match_holder;       // (its holder's name, as the lobby has it: only to find its side if the table's moved on)
+	std::string match_side;         // (its holder's side, "" none or not known)
+	int match_side_n = -1;          // (the match number match_side was taken for)
+	int shown_n = -1, shown_streak = 0, shown_epoch = -1;
+	std::string shown_side;
+	// The seats as the lobby's states show them, counted (epoch): a new pair, or the same two seated again cold (each a
+	// session of its own, a watched match's start of its own), by the table's CONNECTING and its two (the lobby's names
+	// compared only with its own); the seat a watched match's start came in (watch_epoch)
+	int epoch = 0, epoch_n = -1, watch_epoch = -1;
+	std::string epoch_pair;
+	double watch_started_at = -1e18, applied_at = -1e18;   // (a watched match's start; the last state's applying)
 	std::string side;               // ("a" or "b" at the table)
 	bool seated = false;            // (a seat: an opponent, a token)
 	Seat seat;
@@ -96,7 +107,8 @@ struct RoomMember
 	// The lobby: its socket (pushed states; ping every 15 s), or polling every 10 s over HTTPS
 	std::shared_ptr<vfnet::http::Socket> ws;
 	int ws_tries = 0;
-	double ws_at = 0, ping_at = 0, poll_at = 0, heard_at = 0, polled_at = -1e18;
+	double ws_at = 0, ping_at = 0, poll_at = 0, polled_at = -1e18;
+	double ws_heard_at = 0, ws_polled_at = 0;   // (the socket's last word, any; its last poll sent: a socket quiet too long is dead)
 	double ws_open_at = 0;          // (when the socket last opened: open a minute, its tries counted afresh)
 	bool ws_first = false;          // (the socket's first state not come yet: the order's marks start again from it)
 	int ws_fails = 0;               // (handshakes refused or failed in a row: polling meanwhile, the socket tried again later and later)
@@ -130,6 +142,8 @@ struct RoomMember
 	bool want_watch = true;         // (in the line: the room's match watched; Stop watching turns it off)
 	double watch_retry_at = 0;
 	std::string seen_peer;          // (the opponent at the table last time: a new one is a new challenger)
+	std::string seen_token;         // (and that seat's token: a new seat but the same two seated again cold (a desync, a cut, a
+	                                // rejoin) is no new challenger)
 	int last_pos = -1;
 	bool was_called = false;
 	double banner_until = 0;        // (a moment's banner: you lost, a new challenger, you're next)
@@ -143,6 +157,12 @@ struct RoomMember
 
 	// The first READY one in the line (the next to play), or null
 	const Who *next_ready() const { for (const Who &w : line) if (w.ready) return &w; return nullptr; }
+	// Who's next to play: the one being called (GET READY), else the first READY one in the line; "" none
+	std::string next_name() const
+	{
+		if (ready_on && ready_pos >= 1 && ready_pos <= int(line.size())) return line[size_t(ready_pos - 1)].name;
+		return next_ready() ? next_ready()->name : std::string();
+	}
 	// An op of this kind still waiting to be seen taken
 	bool pending(const std::string &op) const { for (const Op &o : outbox) if (o.op == op) return true; return false; }
 	// This member's place among the READY ones in the line (1: the next to play), 0 not in it or AWAY
