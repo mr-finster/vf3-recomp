@@ -506,15 +506,18 @@ int Online::start_wait() const
 	return out[me] ? 3 : out[me ^ 1] ? 4 : 0;
 }
 
-// After a match decided: a player out of the game back in (as the RAM has it this frame) or their Start pressed since
-// they went out (start_wait's reading): a rematch on its way
+// After a match decided: the player out at the decision (decided_in) has pressed Start since they went out (start_wait's
+// reading: the only way back in), while its winner is still in: a rematch on its way. The winner beaten by the computer
+// since and going on (its Start) is no rematch, nor anything once the winner's out; a draw (both out): either one's.
+// (Not the RAM's reading this frame: VF1's has the computer's side in at moments of a fight against it)
 bool Online::rematch_coming() const
 {
-	if (!session || ph != Phase::playing || !both_in) return false;
+	if (!session || ph != Phase::playing || !both_in || decided_in == 3) return false;
 	(void)start_wait();   // (the presses since each went out looked through)
-	const int in = score.players(), now_in = score.players_now();
+	const int in = score.players(), winner = decided_in;
+	if ((in & winner) != winner) return false;   // (the winner out since: beaten by the computer)
 	for (int p = 0; p < 2; p++)
-		if (!(in >> p & 1) && ((now_in >> p & 1) || out_pressed[p])) return true;
+		if (!(winner >> p & 1) && !(in >> p & 1) && out_pressed[p]) return true;
 	return false;
 }
 
@@ -2175,6 +2178,8 @@ void Online::begin_match(const std::string &who)
 	out_pressed[0] = out_pressed[1] = false;
 	out_from[0] = out_from[1] = SIZE_MAX;
 	in_before = 0;
+	decided_in = 3;
+	held_before = 0;
 	select_off_from = UINT32_MAX;
 	select_was = -1;
 	start_scan[0] = start_scan[1] = 0;
@@ -2444,6 +2449,8 @@ bool Online::step(uint16_t input)
 		feed.set_info(i);
 	}
 	if (score.players() == 3) both_in = true;
+	if (held_before == 3 && score.players() != 3) decided_in = uint8_t(score.players());   // (the match decided: who's in, the winner)
+	held_before = uint8_t(score.players());
 	const uint8_t in_now = score.players_now();
 	for (int p = 0; p < 2; p++)
 		if ((in_before >> p & 1) && !(in_now >> p & 1)) out_from[p] = session->inputs(local_player()).size() - 1;   // (this frame's)

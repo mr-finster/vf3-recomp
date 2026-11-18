@@ -689,6 +689,8 @@ void Online::room2_poll()
 	const bool begun = !m.started_said || !(both_in && score.players() != 3) || rematch_coming();
 	if (m.in_seat && ph == Phase::playing && session && m.started_n != m.n && begun) {
 		if (!m.started_said) log("Rooms 2: connected with " + opponent() + ": started");
+		else log("Rooms 2: match " + std::to_string(m.n) + " begun (" + (score.players() == 3 ? std::string("both in") : "the out player's Start") +
+		         ", in " + std::to_string(int(score.players())) + "): started");
 		m.started_said = true;
 		m.started_n = m.n;
 		room2_send("started", ",\"n\":" + std::to_string(m.n), true, m.n);
@@ -884,9 +886,12 @@ void Online::room2_seat()
 	// counts too: the loser's quit for the line moving can end this side's session before the lobby's word seats the next)
 	const std::string was_peer = m.seen_peer, was_token = m.seen_token;
 	const bool stayed = m.in_seat || !was_peer.empty();
-	// (the same two seated again cold, a new token: the match before void for a desync, a cut or a rejoin. Else a new seat
-	// while staying on is a new challenger, whatever the names: two can be the same, or both the lobby's PLAYER)
-	const bool again = m.last_result == "void" && (m.last_why == "desync" || m.last_why == "disconnect" || m.last_why == "rejoin") && m.last_n + 1 == m.seat.n;
+	// (the same two seated again cold, a new token: the match before void for a desync, a cut or a rejoin, and the same
+	// opponent. Else a new seat while staying on is a new challenger: another name always (a lost session held, then
+	// another seated, leaves the same void), the same name too when it's no such reseat (two can be the same, or both
+	// the lobby's PLAYER))
+	const bool again = m.last_result == "void" && (m.last_why == "desync" || m.last_why == "disconnect" || m.last_why == "rejoin") && m.last_n + 1 == m.seat.n &&
+	                   was_peer == m.seat.peer.name;
 	const bool challenger = stayed && !was_token.empty() && was_token != m.seat.token && !again;
 	if (m.in_seat) {
 		if (ph == Phase::playing) ended(tr::line(tr::ROOM2_WON_STAYS));

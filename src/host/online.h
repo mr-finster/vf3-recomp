@@ -307,6 +307,9 @@ private:
 	size_t out_from[2] = { SIZE_MAX, SIZE_MAX };
 	mutable size_t out_held_at[2] = {};   // (and the frame the held reading had them out: the log's)
 	uint8_t in_before = 0;
+	// (who was in, as the held reading has it, when the match was last decided (from both in to one or none): its winner's
+	// side, 0 a draw; 3 none decided this session. rematch_coming's: only the one out then coming back is a rematch)
+	uint8_t decided_in = 3, held_before = 0;
 	uint32_t select_off_from = UINT32_MAX;   // (the frame the select's byte went off: lockstep kept SELECT_LINGER frames past it)
 	int select_was = -1;   // (the select's byte last seen: its changes in the log)
 	static constexpr uint32_t SELECT_LINGER = 120;

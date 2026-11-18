@@ -87,6 +87,8 @@
 //                        random play (win) or nothing (lose: the other wins), and Start again as the loser (a rematch,
 //                        held back while the line moves on); for runs with several matches in a row
 //   VF3_ROOM2_REMATCH_AFTER=s  with VF3_ROOM2_FIGHT: the loser's Start for a rematch only s seconds after they're out
+//   VF3_ROOM2_WINNER_IDLE=1  with VF3_ROOM2_FIGHT=win: no input once the match is decided (the other out): the computer
+//                        beats this player, who then presses Start to go on (the play-on's winner out and back)
 //   VF3_ROOM2_LEAVE_AT=N leaves the room (Leave room) at pass N
 //   VF3_ROOM2_REGATHER_S=s the room's link gathered again s seconds after it last was (between seats), not 5 hours
 //   VF3_ROOM2_SHOT=1     the window to build/host_room2_ready.png 1 s into the ready check (its banner)
@@ -5588,7 +5590,8 @@ int main(int argc, char **argv)
 					if (w != 3) out_since = 0;
 					else if (!out_since) out_since = SDL_GetTicks();
 					if ((w == 1 || (w == 3 && double(SDL_GetTicks() - out_since) >= rematch_after)) && ++tap % 40 < 6) bits |= vf3net::START_BUTTON;
-					if (strcmp(rf, "win") == 0 && w != 1) {
+					static const bool winner_idle = getenv("VF3_ROOM2_WINNER_IDLE") != nullptr;
+					if (strcmp(rf, "win") == 0 && w != 1 && !(winner_idle && w == 4)) {
 						if (hold-- <= 0) {
 							rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17;
 							m3::Controls rc{};
