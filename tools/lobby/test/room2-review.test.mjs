@@ -597,6 +597,15 @@ env.WATCHES.get = (id) => { const w = watch_get(id); return { fetch: async (u, i
 const hold_arm = (on) => { arm_held = on; };
 const release = () => { arm_held = false; for (const f of arm_waiting.splice(0)) f(); };
 const turns = async (n = 50) => { for (let i = 0; i < n; i++) await new Promise((ok) => setImmediate(ok)); };
+// (what a test waits for, as it is, not a number of turns: a call through the Worker hashes its sender (crypto.subtle, the
+// thread pool's), so how many turns it takes to reach its room depends on the machine and how busy it is)
+async function until(cond, what) {
+	const t0 = real_now();
+	while (!cond()) {
+		if (real_now() - t0 > 10000) throw new Error('until: never ' + what);
+		await new Promise((ok) => setImmediate(ok));
+	}
+}
 const side_of = (code, m) => (rec(code).t.a === m.mid ? 'a' : rec(code).t.b === m.mid ? 'b' : null);
 {   // R1: a game crashing mid-match, its close waking a hibernated object: no restart's grace, it isn't alive for a result
 	const A = await create('HLD'), B = await enter(A.code, 'CHL'), Cm = await enter(A.code, 'NXT');
@@ -744,7 +753,7 @@ const raw_act = (m, op, extra = {}) => raw('POST', '/v2/room/' + op, { code: m.c
 	advance(5000);   // (B's game back after a crash: not its link gathered again)
 	hold_arm(true);
 	const back = raw('POST', '/v2/room/enter', { ...me('BBB'), code: A.code, mid: B.mid, mkey: B.mkey }, B.ip);
-	await turns();
+	await until(() => arm_waiting.length > 0, 'the re-entry\'s arming');   // (the enter taken by the room, the two seated again: the leave after it)
 	const left = await raw_act(B, 'leave');
 	release();
 	const r = await back;
