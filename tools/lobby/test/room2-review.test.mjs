@@ -11,6 +11,15 @@
 //     started and result (the games will say them again till heard) harmless
 //   9 the design's "the 2nd time to the back" for a newcomer that doesn't start; a holder blaming every challenger
 //  11 Rooms 2 rows pushing an older build's rows off the list (ROOMS_MAX), and one address's Rooms 2 rooms its /v1 rows
+// and the last review before the public beta (R1-R9, R0):
+//   R1 a game's close waking a hibernated object taken for a restart: the crashed side alive for a result (its grace)
+//   R2 a holder who never reports, or says disconnect whenever it loses: never unseated ("the holder stays")
+//   R4 SWITCH_WEBSOCKETS off left Rooms 2 sockets open; R5 messages that aren't one escaped the member's rate
+//   R6 a re-entry waiting on the Watch's arming, the member leaving meanwhile: 500
+//   R7 a new seat told under the last seq while the Watch was armed (no timeout on arming)
+//   R8 the other side's report 10 s late voided an honest result; R9 a play-on nobody started, someone READY then: the
+//      table stuck 15 minutes (its games hold the loser's Start for the next in line)
+//   R0 a member's first call after a restart taken for after its socket's close in the same ms: not alive, a forfeit
 //   cd tools/lobby && node test/room2-review.test.mjs src/index.js   (in npm test)
 import { lobby, settle } from './standin.mjs';
 const { worker, env } = await lobby(process.argv[2]);
@@ -403,8 +412,8 @@ const last = (code) => JSON.stringify(rec(code).t.last);
 	const A = await create('AAA'), B = await enter(A.code, 'BBB');
 	await act(A, 'started'); await act(B, 'started');
 	await act(A, 'result', { winner: 'a', n: 1 }); await act(B, 'result', { winner: 'a', n: 1 });
+	await act(A, 'started', { n: 2 }); await act(B, 'started', { n: 2 });   // (they play on: its match begun)
 	const G = await enter(A.code, 'GRF');
-	await act(A, 'started'); await act(B, 'started');
 	await act(A, 'result', { winner: 'a', n: 2 }); await act(B, 'result', { winner: 'a', n: 2 });
 	advance(3100); await alarm(A.code);
 	const seated = show(A.code);
@@ -495,20 +504,20 @@ thaw();
 	await act(A, 'started'); await act(B, 'started');
 	await act(A, 'result', { winner: 'b', n: 1 });
 	B.ws.close(1000); await settle();
-	advance(10500); await alarm(A.code);
+	advance(25500); await alarm(A.code);
 	check('F4 A says B won, B\'s game gone: B\'s win', last(A.code), '{"result":"b","n":1}');
 	const A2 = await create('AAA'), B2 = await enter(A2.code, 'BBB');
 	await act(A2, 'started'); await act(B2, 'started');
 	await act(A2, 'result', { winner: 'b', n: 1 });
 	advance(2000); remake(A2.code, [A2, B2], true);
-	advance(8500); await alarm(A2.code);
+	advance(23500); await alarm(A2.code);
 	check('F4 A says B won, then a restart: B\'s win', last(A2.code), '{"result":"b","n":1}');
 	const A3 = await create('AAA'), B3 = await enter(A3.code, 'BBB');
 	await act(A3, 'started'); await act(B3, 'started');
-	await act(A3, 'result', { winner: 'a', n: 1 });
+	await act(A3, 'result', { winner: 'disconnect', n: 1 });
 	advance(2000); remake(A3.code, [A3, B3], true);
-	advance(8500); await alarm(A3.code);
-	check('F4 A says A won, then a restart: B within its 30 s to come back is alive (seated again, not a forfeit)', [rec(A3.code).t.phase, rec(A3.code).t.last.why], ['CONNECTING', 'disconnect']);
+	advance(3000); await act(B3, 'result', { winner: 'disconnect', n: 1 });   // (B back after the restart, polling: says it too, its first call since)
+	check('F4 A says disconnect, a restart, then B: A within its 30 s to come back is alive (seated again, not a forfeit)', [rec(A3.code).t.phase, rec(A3.code).t.last.why], ['CONNECTING', 'disconnect']);
 }
 freeze();
 {   // F5: a socket's messages over the rate: each answered busy
@@ -576,6 +585,181 @@ thaw();
 	const C = await create('CCC');
 	check('seq: a new room\'s own, from its start', C.state.seq >= 1 && C.state.seq <= 3, true);
 }
+
+// ---- The last review before the public beta (17 Nov), R1-R9, each failing on the code before its fix ----
+// (the Watch's arming held up till released: hold_arm(true) holds the next ones, release() lets them go)
+const watch_get = env.WATCHES.get.bind(env.WATCHES);
+let arm_held = false, arm_waiting = [];
+env.WATCHES.get = (id) => { const w = watch_get(id); return { fetch: async (u, i) => { if (arm_held && String(u).includes('/arm')) await new Promise((ok) => arm_waiting.push(ok)); return w.fetch(u, i); } }; };
+const hold_arm = (on) => { arm_held = on; };
+const release = () => { arm_held = false; for (const f of arm_waiting.splice(0)) f(); };
+const turns = async (n = 50) => { for (let i = 0; i < n; i++) await new Promise((ok) => setImmediate(ok)); };
+const side_of = (code, m) => (rec(code).t.a === m.mid ? 'a' : rec(code).t.b === m.mid ? 'b' : null);
+{   // R1: a game crashing mid-match, its close waking a hibernated object: no restart's grace, it isn't alive for a result
+	const A = await create('HLD'), B = await enter(A.code, 'CHL'), Cm = await enter(A.code, 'NXT');
+	await act(A, 'started'); await act(B, 'started');
+	await act(A, 'result', { winner: 'disconnect', n: 1 });   // (its connection lost; then its game crashes)
+	advance(5000);
+	remake(A.code, [A, B, Cm], false);   // (hibernated: its sockets still there)
+	A.ws.close(1001); await settle();
+	const alive = obj(A.code).v2_alive(rec(A.code), A.mid, Date.now());
+	await act(B, 'result', { winner: 'disconnect', n: 1 });
+	check('R1 a crash\'s close waking a hibernated object: not alive; both saying disconnect, the crashed side forfeits', [alive, last(A.code), show(A.code)],
+		[false, JSON.stringify({ result: 'forfeit', winner: side_of(A.code, B), n: 1 }), 'READY HLD/CHL [NXT] s0 r:NXT']);
+	const X = await create('HLD'), Y = await enter(X.code, 'CHL');
+	await act(X, 'started'); await act(Y, 'started');
+	advance(20000);
+	remake(X.code, [X, Y], false);
+	X.ws.close(1001); await settle();
+	check('R1 ... its seen kept (30 s to come back), not its grace', [!!rec(X.code).members[X.mid], rec(X.code).members[X.mid].grace], [true, 0]);
+}
+{   // R2: one report, the other side alive but silent past the window: the report taken, never "the holder stays"
+	const A = await create('HLD'), B = await enter(A.code, 'CHL'), Cm = await enter(A.code, 'THD');
+	await act(A, 'started'); await act(B, 'started');
+	await act(B, 'result', { winner: side_of(A.code, B), n: 1 });   // (the challenger's win; the holder never says)
+	advance(25500); await alarm(A.code);
+	check('R2 a holder that never reports: the challenger\'s win (its streak 1)', [last(A.code), rec(A.code).t.holder === B.mid, rec(A.code).t.streak], [JSON.stringify({ result: side_of(A.code, B), n: 1 }), true, 1]);
+	const D = await create('HLD'), E = await enter(D.code, 'CHL'), F = await enter(D.code, 'THD');
+	await act(D, 'started'); await act(E, 'started');
+	await act(E, 'result', { winner: side_of(D.code, E), n: 1 });
+	await act(D, 'result', { winner: 'disconnect', n: 1 });   // (the holder says disconnect whenever it loses)
+	check('R2 the holder says disconnect, the challenger (alive) says it won: the challenger\'s win', [last(D.code), rec(D.code).t.holder === E.mid], [JSON.stringify({ result: side_of(D.code, E), n: 1 }), true]);
+	const G = await create('HLD'), H = await enter(G.code, 'CHL'), I = await enter(G.code, 'THD');
+	await act(G, 'started'); await act(H, 'started');
+	await act(H, 'result', { winner: 'disconnect', n: 1 });   // (the challenger's connection lost; the holder's game silent, its socket open)
+	advance(25500); await alarm(G.code);
+	check('R2 one side says disconnect, the other alive and silent: the silent side forfeits', [last(G.code), rec(G.code).t.holder === H.mid, rec(G.code).t.streak], [JSON.stringify({ result: 'forfeit', winner: side_of(G.code, H), n: 1 }), true, 0]);
+	const J = await create('HLD'), K = await enter(J.code, 'CHL'), L = await enter(J.code, 'THD');
+	await act(J, 'started'); await act(K, 'started');
+	await act(J, 'result', { winner: 'disconnect', n: 1 });
+	K.ws.close(1000); await settle();   // (the challenger's game truly gone: no socket, no poll)
+	advance(25500); await alarm(J.code);
+	check('R2 an honest disconnect (the other side dead): still the live side\'s forfeit win', [last(J.code), rec(J.code).t.holder === J.mid], [JSON.stringify({ result: 'forfeit', winner: side_of(J.code, J), n: 1 }), true]);
+	const M = await create('HLD'), N = await enter(M.code, 'CHL'), O = await enter(M.code, 'THD');
+	await act(M, 'started'); await act(N, 'started');
+	await act(N, 'result', { winner: side_of(M.code, N), n: 1 });
+	N.ws.close(1000); await settle();   // (the challenger says it won, then its game's gone)
+	await act(M, 'result', { winner: 'disconnect', n: 1 });
+	check('R2 the holder says disconnect against a challenger gone after saying it won: the holder stays (the live side)', [last(M.code), rec(M.code).t.holder === M.mid], [JSON.stringify({ result: 'forfeit', winner: side_of(M.code, M), n: 1 }), true]);
+}
+{   // R4: SWITCH_WEBSOCKETS off: a Rooms 2 room's sockets closed at its next alarm or message; its members poll on, alive meanwhile
+	const A = await create('AAA'), B = await enter(A.code, 'BBB');
+	await act(A, 'started'); await act(B, 'started');
+	A.ws.send(JSON.stringify({ op: 'result', winner: 'disconnect', n: 1 })); await settle();
+	env.SWITCH_WEBSOCKETS = 'off';
+	advance(1000); await alarm(A.code);
+	const closed = [A.closed, B.closed];
+	const ws_again = await socket_for({ ...A });
+	await act(B, 'result', { winner: 'disconnect', n: 1 });   // (B over HTTPS now; A not heard from since: alive, the lobby closed its socket)
+	check('R4 off: both sockets closed (1012) at the alarm, a new one refused; A alive meanwhile (seated again, not a forfeit)', [closed, ws_again, rec(A.code).t.phase, rec(A.code).t.last.why], [[1012, 1012], 503, 'CONNECTING', 'disconnect']);
+	advance(20000); await alarm(A.code);
+	check('R4 off: its members still there, polling', [said(await act(A, 'poll')), Object.keys(rec(A.code).members).length], ['ok', 2]);
+	delete env.SWITCH_WEBSOCKETS;
+	const C = await create('CCC'), D = await enter(C.code, 'DDD');
+	env.SWITCH_WEBSOCKETS = 'off';
+	C.ws.send(JSON.stringify({ op: 'poll' })); await settle();
+	check('R4 off: closed at a member\'s message too', [C.closed, D.closed], [1012, 1012]);
+	delete env.SWITCH_WEBSOCKETS;
+}
+{   // R5: messages that aren't one (over 1 KB, binary, not JSON, an op it doesn't know) count against the member's rate
+	const A = await create('CCC');
+	let answers = 0;
+	A.ws.addEventListener('message', () => answers++);
+	for (let i = 0; i < 20; i++) A.ws.send('{"op":"nope"}');
+	for (let i = 0; i < 20; i++) A.ws.send('x');
+	for (let i = 0; i < 20; i++) A.ws.send('{"op":"poll","pad":"' + 'x'.repeat(1100) + '"}');
+	for (let i = 0; i < 20; i++) if (A.ws.open) A.ws.send(new Uint8Array(8));
+	await settle();
+	check('R5 80 messages that aren\'t one: none answered, the socket closed as a flood (1008)', [answers, A.closed], [0, 1008]);
+	const B = await create('DDD');
+	for (let i = 0; i < 5; i++) B.ws.send('x');
+	B.ws.send(JSON.stringify({ op: 'poll' })); await settle();
+	check('R5 a few: nothing more (the next message answered)', [B.closed, B.said.filter((d) => d.state).length >= 2], [null, true]);
+}
+{   // R6: a re-entry that seats the two again, its Watch's arming waited for, the same member leaving meanwhile: no 500
+	const A = await create('AAA'), B = await enter(A.code, 'BBB');
+	await act(A, 'started'); await act(B, 'started');
+	B.ws.close(1000); await settle();
+	advance(5000);   // (B's game back after a crash: not its link gathered again)
+	hold_arm(true);
+	const back = call('POST', '/v2/room/enter', { ...me('BBB'), code: A.code, mid: B.mid, mkey: B.mkey }, B.ip).catch((e) => ({ status: 'threw ' + e.message }));
+	await turns();
+	const left = await act(B, 'leave');
+	release();
+	const r = await back;
+	check('R6 re-entered, then left while its seat\'s Watch was armed: the enter answered (410 left), not a 500', [said(left), r.status, r.body && r.body.why], ['ok', 410, 'left']);
+}
+{   // R7: a new seat told at once with its own seq (never under the last one's), the Watch armed after it, not waited on for ever
+	const A = await create('AAA'), Cm = await enter(A.code, 'CCC'), Bm = await enter(A.code, 'BBB');
+	await act(A, 'started');
+	const before = Bm.state.seq;
+	hold_arm(true);
+	advance(31000);
+	const al = obj(A.code).alarm();
+	await turns();
+	const poll = await act(Bm, 'poll');
+	const st = poll.body.state;
+	check('R7 a poll while the Watch is armed: the new seat under a new seq, the same as its socket was told', [show(A.code), st.seq > before, st.you.pos, !!st.you.seat, Bm.state.seq === st.seq, Bm.state.you.pos], ['CONNECTING AAA/BBB [CCC*] s0', true, 0, true, true, 0]);
+	release();
+	await al; await settle();
+	check('R7 armed: told again, the host its watch key', [rec(A.code).t.armed, A.state.seq > st.seq, !!(A.state.you.seat && A.state.you.seat.wkey)], [true, true, true]);
+	const X = await create('XXX'), Y = await enter(X.code, 'YYY'), Z = await enter(X.code, 'ZZZ');
+	await act(X, 'started');
+	hold_arm(true);
+	advance(31000);
+	const t0 = real_now();
+	await obj(X.code).alarm(); await settle();
+	const took = real_now() - t0;
+	release();
+	check('R7 a Watch that never answers its arming: given up after 5 s, the match unwatchable, the seat as it is', [show(X.code), rec(X.code).t.armed, took >= 4500 && took < 9000], ['CONNECTING XXX/ZZZ [YYY*] s0', false, true]);
+}
+{   // R8: the other side's report late (its game says it again 3 s, 9, 21 s after): still the match's
+	const A = await create('AAA'), B = await enter(A.code, 'BBB');
+	await act(A, 'started'); await act(B, 'started');
+	await act(A, 'result', { winner: 'a', n: 1 });
+	advance(21500); await alarm(A.code);
+	const waiting = show(A.code);
+	await act(B, 'result', { winner: 'a', n: 1 });
+	check('R8 the second report 21 s after the first: still waited for, the two agreeing (A\'s win, not void)', [waiting, last(A.code), show(A.code)], ['DECIDED AAA/BBB [] s0', JSON.stringify({ result: 'a', n: 1 }), 'PLAYING AAA/BBB [] s1']);
+}
+{   // R9: a play-on (nobody READY in line) neither has started, someone READY then: the line moves at once, not after 15 min
+	const A = await create('AAA'), B = await enter(A.code, 'BBB');
+	await act(A, 'started'); await act(B, 'started');
+	for (const m of [A, B]) await act(m, 'result', { winner: 'a', n: 1 });
+	const playon = show(A.code);
+	const Cm = await enter(A.code, 'CCC');
+	check('R9 a play-on, then a newcomer: the last result stands, the newcomer got ready at once', [playon, show(A.code), Cm.state.ready && Cm.state.ready.you], ['PLAYING AAA/BBB [] s1', 'READY AAA/BBB [CCC] s1 r:CCC', true]);
+	advance(3100); await alarm(A.code);
+	check('R9 ... and seated 3 s later', show(A.code), 'CONNECTING AAA/CCC [BBB] s1');
+	const D = await create('DDD'), E = await enter(D.code, 'EEE'), F = await enter(D.code, 'FFF');
+	await act(F, 'away');
+	await act(D, 'started'); await act(E, 'started');
+	for (const m of [D, E]) await act(m, 'result', { winner: 'a', n: 1 });
+	await act(F, 'ready');
+	check('R9 a play-on, then READY: ON in line: the same', show(D.code), 'READY DDD/EEE [FFF] s1 r:FFF');
+	await act(F, 'away');
+	check('R9 ... the one called AWAY after all: the two play on again', show(D.code), 'PLAYING DDD/EEE [FFF*] s1');
+	const G = await create('GGG'), H = await enter(G.code, 'HHH'), I = await enter(G.code, 'III');
+	await act(I, 'leave_line');
+	await act(G, 'started'); await act(H, 'started');
+	for (const m of [G, H]) await act(m, 'result', { winner: 'a', n: 1 });
+	for (const m of [G, H]) await act(m, 'started', { n: 2 });   // (the play-on's match begun)
+	await act(I, 'join_line');
+	check('R9 a play-on begun (both said started), then a newcomer: it waits for that match', show(G.code), 'PLAYING GGG/HHH [III] s1');
+	for (const m of [G, H]) await act(m, 'result', { winner: 'a', n: 2 });
+	check('R9 ... then it\'s next', show(G.code), 'READY GGG/HHH [III] s2 r:III');
+}
+{   // (a member's first call after a restart, in the same moment as the close the restart's wake took for its socket's: polling, alive)
+	const A = await create('AAA'), B = await enter(A.code, 'BBB');
+	await act(A, 'started'); await act(B, 'started');
+	await act(A, 'result', { winner: 'disconnect', n: 1 });
+	remake(A.code, [A, B], true);
+	freeze();
+	await act(B, 'result', { winner: 'disconnect', n: 1 });
+	thaw();
+	check('R0 a restart, then the other\'s report its first call: both alive, seated again (no forfeit)', [rec(A.code).t.phase, rec(A.code).t.last], ['CONNECTING', { result: 'void', why: 'disconnect', n: 1 }]);
+}
+env.WATCHES.get = watch_get;
 
 console.log(`\nroom2-review: ${checks - fails} of ${checks} checks passed`);
 Date.now = real_now;

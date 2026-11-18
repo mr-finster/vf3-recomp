@@ -148,13 +148,13 @@ const EVENTS = {
 	},
 	'result agree': (x) => results(x, 'a', 'a'),
 	'result disagree': (x) => results(x, 'a', 'b'),
-	'result one-sided': async (x) => {   // (A's report, B's never: 10 s on, B still there on its socket)
+	'result one-sided': async (x) => {   // (A's report (A won), B's never: the window up, B still there on its socket: A's word taken)
 		const r = rec(x.code), ph = r ? r.t.phase : '';
 		let out = ph === 'PLAYING' ? said(await act(x.members.A, 'result', { winner: 'a' })) : ph === 'DECIDED' ? 'in' : said(await act(actor(x), 'result', { winner: 'a' }));
 		if (rec(x.code) && rec(x.code).t.phase === 'DECIDED') { rec(x.code).t.deadline = Date.now() - 1; await alarm(x.code); }
 		return out;
 	},
-	'result one-sided, other dead': async (x) => {   // (the same, B's socket closed and B not polling: B loses)
+	'result one-sided, other dead': async (x) => {   // (the same, B's socket closed and B not polling: A's word taken as well)
 		const r = rec(x.code), ph = r ? r.t.phase : '', B = x.members.B;
 		if (B && B.ws) { B.ws.close(1000); await settle(); }
 		let out = ph === 'PLAYING' ? said(await act(x.members.A, 'result', { winner: 'a' })) : ph === 'DECIDED' ? 'in' : said(await act(x.members.A, 'result', { winner: 'a' }));
@@ -358,8 +358,8 @@ const T = {
 		["SOLO A/- [] s0","not_now"],
 		["SOLO A/- [D*,C*,B*] s0","not_now"],
 		["CONNECTING A/B [C,D] s0","not_now"],
-		["CONNECTING A/B [C,D] s0","ok"],
-		["CONNECTING A/B [C,D] s0","in"],
+		["READY A/B [C,D] s1 r:C","ok"],
+		["READY A/B [C,D] s1 r:C","in"],
 		["READY A/B [C,D] s1 r:C","not_now"],
 	],
 	'result one-sided, other dead': [
@@ -367,8 +367,8 @@ const T = {
 		["SOLO A/- [] s0","not_now"],
 		["SOLO A/- [D*,C*,B*] s0","not_now"],
 		["CONNECTING A/B [C,D] s0","not_now"],
-		["READY A/B [C,D] s0 r:C","ok"],
-		["READY A/B [C,D] s0 r:C","in"],
+		["READY A/B [C,D] s1 r:C","ok"],
+		["READY A/B [C,D] s1 r:C","in"],
 		["READY A/B [C,D] s1 r:C","not_now"],
 	],
 	'result draw': [
@@ -576,27 +576,34 @@ if (PRINT) for (const [ev, rows] of Object.entries(got)) { console.log(`\t'${ev}
 	check('rotation: what each member sees: the table, the line in order with READY, their own place', [M.E.state.table.a.name, M.E.state.table.b.name, M.E.state.table.streak, M.E.state.line.map((p) => p.name + (p.ready ? '' : '*')), M.E.state.you.pos, M.E.state.you.ready],
 		['D', 'C', 3, ['E*', 'F*', 'B*', 'A*'], 1, false], false);
 	check('rotation: the matches counted (n)', rec(code).t.n, 11, false);
+	for (const m of [M.D, M.C]) await act(m, 'started', { n: 11 });   // (the play-on's match begun: both games say so)
 	await act(M.A, 'leave');
 	await act(M.E, 'ready');
 	await match('a');
 	check('rotation: E READY again: it plays next', show(code), 'READY D/C* [E,F*,B*] s4 r:E', false);
 }
 
-// ---- one-sided reports twice in a row (both alive): the two seated again once, then the holder stays ----
+// ---- both saying disconnect twice in a row (both alive): the two seated again once, then the holder stays; one-sided
+// (the other alive and silent): its word taken ----
 {
 	const A = await create('A'), B = await enter(A.code, 'B'), C = await enter(A.code, 'C');
 	await act(B, 'ready');
 	for (const m of [A, B]) await act(m, 'started');
-	await act(B, 'result', { winner: 'b' });   // (B wins; A never reports)
-	rec(A.code).t.deadline = Date.now() - 1;
-	await alarm(A.code);
-	check('one-sided once: the two seated again, cold (a new token)', [show(A.code), rec(A.code).t.last], ['CONNECTING A/B [C] s0', { result: 'void', why: 'disconnect', n: 1 }]);
+	for (const m of [A, B]) await act(m, 'result', { winner: 'disconnect' });
+	check('disconnect once: the two seated again, cold (a new token)', [show(A.code), rec(A.code).t.last], ['CONNECTING A/B [C] s0', { result: 'void', why: 'disconnect', n: 1 }]);
 	for (const m of [A, B]) await act(m, 'started');
-	await act(B, 'result', { winner: 'b' });
+	for (const m of [A, B]) await act(m, 'result', { winner: 'disconnect' });
+	check('disconnect twice: the holder (A) stays, B out when C says ready', [show(A.code), rec(A.code).t.last.result], ['READY A/B [C] s0 r:C', 'void']);
+	rec(A.code).ready.deadline = Date.now() - 1;
+	await alarm(A.code);
+	for (const m of [A, C]) await act(m, 'started');
+	await act(C, 'result', { winner: 'b' });   // (C wins; A, the holder, never reports)
 	rec(A.code).t.deadline = Date.now() - 1;
 	await alarm(A.code);
-	check('one-sided twice: the holder (A) stays, B out when C says ready', [show(A.code), rec(A.code).t.last.result], ['READY A/B [C] s0 r:C', 'void']);
-	const stale = await act(A, 'result', { winner: 'a', n: 1 });
+	check('one-sided (the holder silent, alive): the challenger\'s win taken', [show(A.code), rec(A.code).t.last], ['READY A/C [B] s1 r:B', { result: 'b', n: 3 }]);
+	rec(A.code).ready.deadline = Date.now() - 1;
+	await alarm(A.code);
+	const stale = await act(C, 'result', { winner: 'b', n: 3 });   // (C, seated again with B: its last match's report again)
 	{   // (a desync seen by one side, the other's game cut off: a desync, void, the two seated again cold, not a disconnect)
 		const X = await create('X'), Y = await enter(X.code, 'Y');
 		await act(Y, 'ready');

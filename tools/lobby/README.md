@@ -82,7 +82,7 @@ off. (`ROOMS` and `WATCHES` are the Durable Objects' bindings, hence the `SWITCH
 | `SWITCH_ROOMS` | no rooms list, nothing listed, no room that stays: Create room makes a code-only room, as before. The games' browser says "Rooms aren't available right now. Quick match and Enter code still work." |
 | `SWITCH_LISTING` | rooms work (a room that stays, its line) but none is listed, nor any Quick match to watch: the same line in the browser |
 | `SWITCH_WATCH` | no match is sent or watched: a host is told `off` (its game stops sending, as at the month's ceiling), watchers on a socket are told and let go, a new one is told "Watching isn't available right now."; the rooms list keeps only the open rooms |
-| `SWITCH_WEBSOCKETS` | no WebSocket is taken (a host's room, its feed, a watcher's frames): each falls back to HTTPS as on a network that carries none; open ones are closed as they're next used (a room's within a minute) |
+| `SWITCH_WEBSOCKETS` | no WebSocket is taken (a host's room, its feed, a watcher's frames): each falls back to HTTPS as on a network that carries none; open ones are closed as they're next used (a room's within a minute; a Rooms 2 room's members' at its next alarm, within 30 s, or call or message, each then polling, taken as alive for a result meanwhile) |
 
 One the other way round: `SWITCH_SNAP` is off unless it's `on`. On, a watcher come late (the match more than ~35 s in)
 gets the host's latest snapshot (its game's state at a confirmed frame, a few MB, asked of the host when none is fresh:
@@ -178,16 +178,24 @@ one acts for anyone else.
 - **READY / AWAY**: every member is READY from entering. AWAY members keep their places and are passed over; READY
   again puts them back in turn. An empty seat is taken at once by the first READY member in line (no countdown).
 - **The table**: EMPTY (nobody), SOLO (one, nobody READY in line), CONNECTING (a new pair: both say `started` within
-  30 s), PLAYING, DECIDED (one result in, 10 s for the other), READY (after a match, both still seated, the next READY
+  30 s), PLAYING, DECIDED (one result in, 25 s for the other: a game says its own again 3 s, 9 and 21 s after the first
+  time till it's taken), READY (after a match, both still seated, the next READY
   member getting ready: GET READY, 3 s, `ready: {pos, deadline_ms, you}`; then seated by itself, or at once with
   `ready`; `away` there passes them over, their place kept). Nobody READY in line: the two play on (a rematch in the
-  same session). `ready_ms` is still kept and answered (older test builds read it); nothing waits on it.
+  same session); someone READY in line (entering, READY again, joining the line) before either of the two has said
+  `started` for that match (a play-on's match is begun when its games say so; they hold the loser's Start for the next
+  in line), the last result stands and the table moves on at once (the next GET READY), not after 15 minutes.
+  `ready_ms` is still kept and answered (older test builds read it); nothing waits on it.
 - **Results**: both agree: the winner's streak +1 (or a new holder at 1). A draw: the streak's holder stays, the
   challenger goes, the streak as it was. A desync (both say so, or one says desync and the other disconnect): void,
-  the two seated again, cold. Disagreeing: void, both to the back, the streak gone. A disconnect, or one report and
-  10 s of silence: the side whose lobby socket is dead loses (a forfeit; within a restart's 30 s, below, it's taken as
-  alive); both alive, the two seated again once, then the holder stays (held). One report conceding (the other side
-  won, by its own player's word) is taken as it is, whatever the other side's game is doing. A late report for an earlier match (its `n`) is refused as `stale`; the same `started` or
+  the two seated again, cold. Disagreeing: void, both to the back, the streak gone. Both saying disconnect: the side
+  whose lobby socket is dead loses (a forfeit; within a restart's 30 s, below, it's taken as alive); both alive, the
+  two seated again once, then the holder stays (held). But the holder saying disconnect while the challenger, its lobby
+  socket alive, says it won: the challenger's win (a holder can't keep the table by saying disconnect whenever it
+  loses). One report and 25 s of silence from the other side, whether its game's alive or not: the report is taken as
+  it is (a win, a loss or a draw as it says; its disconnect or desync: the silent side's forfeit), so silence never
+  keeps a table (a holder that never reports loses its matches); an honest disconnect (the other side truly gone) is
+  still a forfeit to the live side. A late report for an earlier match (its `n`) is refused as `stale`; the same `started` or
   `result` said again (a game says it till it's heard) changes nothing, and `started` may carry `n` too.
 - **No table held forever**: a match with no result in 15 minutes (a VF match is minutes) is void, the holder stays and
   the table moves on (the next READY member got ready, or the two play on). After a held disconnect their session is
@@ -209,7 +217,9 @@ one acts for anyone else.
   close. The room gives each member that was on a socket 30 s from then to come back (its game reconnects at once, or
   polls), once, as a `/v1` room gives its host; a member's place and the table are kept, and a member inside those 30 s
   counts as alive for a result. Members polling get the same once when the object wakes with no socket at all (their
-  seen is written only every 10 s). An object that only hibernated (its sockets still there) is unaffected.
+  seen is written only every 10 s). An object that only hibernated (its sockets still there) is unaffected, and a
+  member's socket close that wakes it (its game closed or crashed) is no restart: that member has the 30 s to come
+  back but isn't alive for a result till it's heard from.
 - **Watching without a place** (Leave line): a member can leave the line, or the table (a match on: a forfeit, as
   leaving), and stay in the room watching (`leave_line`): `you.pos` -1, `you.watcher`, never called, still told every
   change and counted among the room's players; `join_line` puts them at the back of the line. `watchers` in the state
@@ -240,7 +250,9 @@ one acts for anyone else.
   "left" | "gone" | "version"}` on its socket, `410 {error: "removed", why}` on its next call by its own key).
 - **Watching**: a room has one watch id for its life (its code). Each new pair arms the room's `Watch` with a new key
   for its session's host (the one at side a), as a `/v1` room that stays does after each match; the Watch takes the new
-  match's start on the same watch id, the last pair's key refused. One arming at a time, each with the key of the pair
+  match's start on the same watch id, the last pair's key refused. The new seat is told at once (its own `seq`), the Watch
+  armed after it and the host told its `wkey` again once it's armed; an arming not answered in 5 s is given up (that
+  match isn't watchable). One arming at a time, each with the key of the pair
   seated when it runs (two pairs seated within one arming's round trip: the Watch ends on the newer's). A rematch in the same session needs no new key.
 - **Older builds**: their `/v1/join` (in line or not) and `/v1/peek` on a Rooms 2 code answer `412 {error: "version"}`
   with `host_version` the room's creator's own version (its release's tag, `build` in its create: `v1.9.0`, a beta's
@@ -269,7 +281,8 @@ one acts for anyone else.
   sends a few a match; one saying something again till it's heard should wait 2 s or more between); past that a
   socket's message is dropped and answered `{error: "busy", op}` (its game says it again later) and an HTTPS call
   answered `429 busy`, and a socket that sends 50 too many in a row is closed (the member stays: its game comes back on
-  a new one or polls). `ROOMS2_MSG_BURST` raises the 10 for a load test. A room's record is written at each change, and while only its members' liveness moves, every 10 s.
+  a new one or polls); a message that isn't one (over 1 KB, binary, not JSON, an op it doesn't know) counts the same,
+  never answered. `ROOMS2_MSG_BURST` raises the 10 for a load test. A room's record is written at each change, and while only its members' liveness moves, every 10 s.
 - **Codes aren't found by a member's calls**: on a code with no room, or with a `mid` and `mkey` that aren't a member's,
   every member call (and the socket) answers `404 {error: "no_room"}` alike, and settings or close with a wrong
   `owner_key` too (only a member, by its own `mid` and `mkey`, is told `403 not_owner`); so a code can be found only by
@@ -293,15 +306,29 @@ by member calls, a version that can't be seated again, entering against one who 
 table stuck in PLAYING, the newcomer to the back the 2nd time, a holder who blames every challenger, and the list's
 cap; and the final review's (F1-F8): a challenger's lone `started`, a loser coming back to void its match, the count's
 load and rooms a day, a concession and a restart's grace for a result, busy said, the Watch's arming race, polling
-members over a restart, the holder's count started again after an interruption. `node tools/lobbyload/load.mjs --lobby <address> --rooms2 20 --line 8` adds Rooms 2 rooms to a load test (their
+members over a restart, the holder's count started again after an interruption; and the last review's before the
+public beta (R1-R9, R0): a crash's close waking a hibernated object, a holder that never reports or always says
+disconnect, SWITCH_WEBSOCKETS off, messages that aren't one, a re-entry left during the Watch's arming, the seq while
+it's armed, a late second report, a play-on nobody started with someone READY, a member's first call after a restart.
+`node tools/lobbyload/load.mjs --lobby <address> --rooms2 20 --line 8` adds Rooms 2 rooms to a load test (their
 members on sockets or polling, playing in turn: ready, started, the same result from both; `--never 0.1` the share
 AWAY as they enter); against `node test/serve.mjs src/index.js 8787 SWITCH_ROOMS2=on ROOMS2_PER_ADDRESS=64
 ROOMS2_MSG_BURST=1000`, 20 rooms of 9 members each for a minute alongside `/v1` rooms, Quick matches and watchers.
 
+**Accepted as designed** (reviewed before the public beta, left as they are):
+- The per-address marks count an IPv6 address by its /64 (8 members a room; creates and codes tried as above): one
+  household's devices are one address, and one with many /64s isn't stopped by that mark alone (the others still count).
+- A holder whose new pairs fail to start 3 seats in a row (neither saying `started` counts against the holder) is
+  unseated: three challengers in a row that never start (one player's three members, say) can unseat a good holder, the
+  price of a holder who truly can't connect never keeping the table.
+- A sore loser can wipe the streak by reporting a result that disagrees with the winner's (void, the streak gone), at
+  the cost of its own place: both go to the back of the line.
+
 **Rollout**: staging first. Deploy to staging (`npm run deploy:staging`) with `SWITCH_ROOMS2` set to `on` in its
 variables (and `ROOMS2_PER_ADDRESS` and `ROOMS2_MSG_BURST` high, as its other per-address marks, for a load test), run
-the tests and a load test against it and a beta build's rooms; then deploy live (`npm run deploy`). Turn it on
-(Settings > Variables, `SWITCH_ROOMS2` `on`, live in seconds) only with a game release (or a beta) that uses it.
+the tests and a load test against it and a beta build's rooms; then note the live Worker's current version id (`npx
+wrangler deployments list`: The undo's step 2, below) and deploy live (`npm run deploy`). Turn it on (Settings >
+Variables, `SWITCH_ROOMS2` `on`, live in seconds) only with a game release (or a beta) that uses it.
 
 **The undo**, in two steps:
 1. `SWITCH_ROOMS2` off (or unset): instant, no deploy. Create and enter answer `off` (a new game makes a `/v1` room, as
@@ -310,8 +337,15 @@ the tests and a load test against it and a beta build's rooms; then deploy live 
    true}` (their games say the room's closed), its row and count gone from the online count, its record deleted (only
    the two-hour marker that keeps its code from a `/v1` host, the same one a `/v1` room leaves). A member's call meanwhile
    answers `no_room`. `/v1` rooms, Quick match and watching don't change at all.
-2. The whole code back: Cloudflare's dashboard, the Worker, Deployments, the deployment before, Rollback (or `npx wrangler
-   rollback`). **Do step 1 first and wait a minute** (every Rooms 2 room closed, no `v: 2` record left). The code from
+2. The whole code back, to exactly the version from before. **Before the first live deploy of this code**, note the live
+   Worker's current version id (`npx wrangler deployments list`: the newest deployment's version id; or the dashboard's
+   Worker, Deployments). To undo: **step 1 first, then wait about a minute** (every Rooms 2 room closed, no `v: 2` record
+   left), then roll back to exactly that version id: the dashboard's Worker, Deployments, that version's row, Rollback;
+   or `npx wrangler rollback <version-id>`. **Never `npx wrangler rollback` without an id**: switching `SWITCH_ROOMS2`
+   off is itself a deployment (a variable changed makes one), now the latest, so a rollback without an id goes to the
+   one before it: this code with the switch on. Afterwards check the Worker's variables (Settings > Variables): a
+   rollback may bring back that version's own variables, so see that every `SWITCH_*` is as wanted (`SWITCH_ROOMS2` off
+   or unset, the others as they were before). The code from
    before Rooms 2 (the live lobby's before it, release-next's) doesn't know a Rooms 2 record: checked with it given
    objects holding them (test/standin.mjs, the old classes on the same storage), a `/v1/join` or `/v1/peek` on such a
    room's code throws (an error page, 500, where an older build expects JSON), its alarm runs every 31 s for the room's

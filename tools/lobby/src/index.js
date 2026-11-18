@@ -580,13 +580,19 @@ function room(env, code) {
 function watches(env, wid) {
 	return env.WATCHES.get(env.WATCHES.idFromName('w|' + wid));
 }
-async function arm(env, wid, b) {   // (a Watch armed for a room's matches: true; its object not reached or refusing: false)
+const ARM_MS = 5000;   // (a Watch's arming not answered in this long: taken as not armed, the match only unwatchable)
+async function arm(env, wid, b) {   // (a Watch armed for a room's matches: true; its object not reached, refusing or too slow: false)
+	let timer = null;
 	try {
-		const a = await watches(env, wid).fetch('https://watch/arm', { method: 'POST', body: JSON.stringify(b) });
+		const late = new Promise((ok) => { timer = setTimeout(() => ok(null), ARM_MS); });
+		const a = await Promise.race([watches(env, wid).fetch('https://watch/arm', { method: 'POST', body: JSON.stringify(b) }), late]);
+		if (!a) return false;
 		await a.body?.cancel();
 		return a.status === 200;
 	} catch (e) {
 		return false;
+	} finally {
+		clearTimeout(timer);
 	}
 }
 
@@ -943,14 +949,16 @@ export class Room {
 // the same 'r', every /v1 path of the object leaving it alone (load() returns it as it is, but for a restart's lost
 // sockets, v2_woke; /v1/join and /v1/peek answer 412 version). The table: EMPTY (nobody), SOLO (one, nobody READY in
 // line), READY (after a match, both still seated: the next READY member getting ready, GET READY's 3 s), CONNECTING (a
-// new pair: both say started within 30 s), PLAYING (a result within 15 minutes), DECIDED (one result in, 10 s for the
+// new pair: both say started within 30 s), PLAYING (a result within 15 minutes), DECIDED (one result in, 25 s for the
 // other). The state machine is plain functions on the record (r2_*), the object's methods (v2*) do the rest:
 // the members' sockets, storage, the alarm, the Watch, the online count.
 const R2 = {
 	MEMBERS_MAX: 34,          // (the table's two and a line of QUEUE_MAX)
 	PER_ADDRESS: 8,           // (members of one room from one address, an IPv6 one by its /64: a LAN party's, not a script's line)
 	CONNECT_MS: 30000,        // (a new pair's both "started" within this)
-	DECIDE_MS: 10000,         // (the other result within this of the first)
+	DECIDE_MS: 25000,         // (the other result within this of the first: a game says its own again 3 s, 9 and 21 s after the first time
+	                          // till it's taken, so one lost on the way still counts; under GONE_MS, so a decided match is settled by its
+	                          // report before a game that closed as it was decided is let go)
 	READY_MS: 15000, READY_MIN_MS: 5000, READY_MAX_MS: 60000,   // (ready_ms: kept and answered for older test builds; nothing waits on it now)
 	GET_READY_MS: 3000,       // (GET READY: the next to play, after a match, seated this long after it's said; AWAY first to stay out)
 	GONE_MS: 30000,           // (a member with no socket not heard from this long has gone; its game polls every 10 s)
@@ -985,10 +993,10 @@ function r2_side(r, mid) {
 	return mid && r.t.a === mid ? 'a' : mid && r.t.b === mid ? 'b' : null;
 }
 function r2_table() {
-	return { a: null, b: null, phase: 'EMPTY', streak: 0, holder: null, n: 0, last: null, match: null, token: '', as: '', started: {}, reports: {}, deadline: 0, reseated: false, wkey: '', armed: false, arm: false, lost: false, restart: false, hf: null };
+	return { a: null, b: null, phase: 'EMPTY', streak: 0, holder: null, n: 0, last: null, match: null, token: '', as: '', started: {}, reports: {}, deadline: 0, reseated: false, wkey: '', armed: false, arm: false, lost: false, restart: false, playon: false, hf: null };
 }
 function r2_clear_match(t) {
-	t.token = ''; t.as = ''; t.started = {}; t.reports = {}; t.deadline = 0; t.reseated = false; t.wkey = ''; t.armed = false; t.arm = false; t.lost = false; t.restart = false;
+	t.token = ''; t.as = ''; t.started = {}; t.reports = {}; t.deadline = 0; t.reseated = false; t.wkey = ''; t.armed = false; t.arm = false; t.lost = false; t.restart = false; t.playon = false;
 }
 // (the two seated, a new session between them, cold: its token and terms, a new watch key for side a's game; false: they
 // can't play each other)
@@ -998,7 +1006,7 @@ function r2_seat(r, now, reseat = false) {
 	if (as === null) return false;
 	t.token = random_hex(8); t.as = as; t.n++;
 	t.match = { n: t.n, streak: t.streak, holder: t.holder };   // (the streak this match is played for: what's shown over it)
-	t.phase = 'CONNECTING'; t.deadline = now + R2.CONNECT_MS; t.started = {}; t.reports = {}; t.reseated = reseat; t.lost = false; t.restart = false;
+	t.phase = 'CONNECTING'; t.deadline = now + R2.CONNECT_MS; t.started = {}; t.reports = {}; t.reseated = reseat; t.lost = false; t.restart = false; t.playon = false;
 	t.wkey = random_hex(16); t.armed = false; t.arm = true;   // (armed by the object: v2_commit)
 	r.active = now;
 	return true;
@@ -1012,10 +1020,12 @@ function r2_reseat(r, now, reseat) {
 }
 // (the line empty, or nobody in it READY: the two play on in their session, as a room's match always has. Their session
 // lost (held: a disconnect seated again once already): the same token, the two start it again, both to say started within
-// CONNECT_MS as a new pair, else void as one (r2_connect_failed). Any match: a result within PLAYING_MAX_MS, else void)
+// CONNECT_MS as a new pair, else void as one (r2_connect_failed). Any match: a result within PLAYING_MAX_MS, else void.
+// t.playon: a play-on whose match neither has said started for yet: someone READY in line meanwhile (its games then hold
+// the loser's Start), the table moves on at once instead (r2_advance))
 function r2_rematch(r, now) {
 	const t = r.t, restart = !!t.lost;
-	t.n++; t.phase = 'PLAYING'; t.reports = {}; t.started = {}; t.lost = false; t.restart = restart;
+	t.n++; t.phase = 'PLAYING'; t.reports = {}; t.started = {}; t.lost = false; t.restart = restart; t.playon = true;
 	t.deadline = now + (restart ? R2.CONNECT_MS : R2.PLAYING_MAX_MS);
 	t.match = { n: t.n, streak: t.streak, holder: t.holder };
 	r.ready = null;
@@ -1035,7 +1045,14 @@ const r2_sig = (r) => JSON.stringify([r.t, r.line, r.ready, Object.entries(r.mem
 // next READY member seated at once, or SOLO; none: the first READY member in line takes the table, or EMPTY
 function r2_advance(r, now) {
 	const t = r.t;
-	if (t.a && t.b && R2_MATCH.has(t.phase)) return;
+	if (t.a && t.b && R2_MATCH.has(t.phase)) {
+		// (a play-on (r2_rematch) neither of the two has said started for, and a READY member in line now (entered, READY
+		// again, joined the line): its match never began (its games hold the loser's Start for the next in line), so the
+		// last match's result stands and the next is got ready at once, not after PLAYING_MAX_MS. Their session as it was:
+		// lost, if it was, for a play-on after all)
+		if (!(t.phase === 'PLAYING' && t.playon && !t.started.a && !t.started.b && r2_next(r))) return;
+		t.lost = t.restart; t.restart = false; t.playon = false; t.reports = {}; t.started = {}; t.deadline = 0;
+	}
 	const next = r2_next(r);
 	if (t.a && t.b) {   // (READY: the match decided, its loser still seated till the next is)
 		t.phase = 'READY';
@@ -1176,7 +1193,7 @@ function r2_connect_failed(r, now) {
 // (both said started: the match on, a result within PLAYING_MAX_MS; their failures to start forgotten)
 function r2_on(r, now) {
 	const t = r.t;
-	t.phase = 'PLAYING'; t.restart = false; t.deadline = now + R2.PLAYING_MAX_MS; t.hf = null;
+	t.phase = 'PLAYING'; t.restart = false; t.playon = false; t.deadline = now + R2.PLAYING_MAX_MS; t.hf = null;
 	for (const x of [t.a, t.b]) if (r.members[x]) r.members[x].connect_fails = 0;
 	r.active = now;
 }
@@ -1191,6 +1208,7 @@ function r2_started(r, mid, now, n) {
 		if (t.started.a && t.started.b) r2_on(r, now);
 		return null;
 	}
+	if (t.phase === 'PLAYING' && t.playon) { t.started[side] = true; return null; }   // (a play-on's match begun: kept on for a READY one in line)
 	if (t.phase !== 'CONNECTING') return R2_MATCH.has(t.phase) ? null : 'not_now';
 	t.started[side] = true;
 	if (t.started.a && t.started.b) r2_on(r, now);
@@ -1212,20 +1230,23 @@ function r2_result(r, mid, winner, n, now, alive) {
 	t.reports[side] = winner;
 	return r2_resolve(r, now, alive);
 }
-// The match's result, from the two reports (or one, the other's 10 s up): agreed, applied; a draw, the streak's holder
-// stays; a desync, void and the two seated again, cold; disagreeing, void, both to the back, the streak gone; a
-// disconnect (or a report missing), the side whose lobby socket is dead loses, both alive the two seated again once,
-// then the holder stays. alive(mid): its socket open, or its game polling
+// The match's result, from the two reports (or one, the other's DECIDE_MS up): agreed, applied; a draw, the streak's
+// holder stays; a desync, void and the two seated again, cold; disagreeing, void, both to the back, the streak gone; both
+// saying disconnect, the side whose lobby socket is dead loses, both alive the two seated again once, then the holder
+// stays. One report and the other side silent: its word taken (a win, a loss or a draw as it says; its disconnect or
+// desync, the silent side's forfeit), the silent side's game alive or not: silence never keeps a table (a holder who never
+// reports, or says disconnect whenever it loses, can't stay on). The holder saying disconnect while the challenger, its
+// lobby socket alive, says it won: the challenger's win. alive(mid): its socket open, or its game polling
 function r2_resolve(r, now, alive) {
-	const t = r.t, ra = t.reports.a, rb = t.reports.b;
+	const t = r.t, ra = t.reports.a, rb = t.reports.b, hs = r2_side(r, t.holder);
 	let kind;
 	// (one side out of step, the other only cut off: a desync ends the session on the side that sees it, and the other
 	// side's game sees only the connection lost)
 	if (ra && rb) kind = ra === rb ? ra : (ra === 'desync' && rb === 'disconnect') || (ra === 'disconnect' && rb === 'desync') ? 'desync'
+		: hs && t.reports[hs] === 'disconnect' && t.reports[r2_other(hs)] === r2_other(hs) && alive(t[r2_other(hs)]) ? r2_other(hs)
 		: ra === 'disconnect' || rb === 'disconnect' ? 'disconnect' : 'disagree';
-	// (one report: a concession (the other side won, by its own word) taken as it is; else the silent side alive or not)
-	else if ((ra || rb) === (ra ? 'b' : 'a')) kind = ra || rb;
-	else kind = alive(t[ra ? 'b' : 'a']) ? 'disconnect' : 'lost_' + (ra ? 'b' : 'a');
+	// (one report: a win, a loss or a draw taken as it is; a disconnect or a desync, the silent side's forfeit)
+	else { const said = ra || rb; kind = said === 'disconnect' || said === 'desync' ? 'lost_' + (ra ? 'b' : 'a') : said; }
 	if (kind === 'disconnect') {
 		const da = !alive(t.a), db = !alive(t.b);
 		kind = da && db ? 'disagree' : da ? 'lost_a' : db ? 'lost_b' : t.reseated ? 'held' : 'reseat';
@@ -1452,17 +1473,14 @@ Object.assign(Room.prototype, {
 	// Kept (at every change; otherwise, only its members' liveness moved, every SAVE_MS), the Watch armed for a new pair,
 	// every member's socket told, the online count told (at most every TELL_GAP_MS), the next alarm set (the soonest
 	// deadline)
+	// A new pair's seat (t.arm) is told at once, with the change's seq, as any change; the Watch armed after it (its round
+	// trip never between a change and its seq: a poll meanwhile would get the new seat under the old seq), and told again
+	// once armed (side a's wkey)
 	async v2_commit(changed, save = false) {
-		let r = this.r;
+		const r = this.r;
 		if (!r) return;
-		const t = r.t;
-		if (t.arm) {   // (one arming at a time, each with the pair's key as it is when it runs: never the Watch left on an older pair's)
-			t.arm = false;
-			await (this.arming = (this.arming || Promise.resolve()).then(() => this.v2_arm(), () => this.v2_arm()));
-			r = this.r;
-			if (!r) return;
-			changed = true;
-		}
+		const t = r.t, arm = t.arm;
+		if (arm) { t.arm = false; changed = true; }
 		const now = Date.now();
 		if (changed) r.seq = (r.seq || 0) + 1;   // (a change: the states told from now on carry the next seq, kept with the record)
 		// (dirty2: a member's socket gone, kept at once: else a hibernation's wake would take it for a restart's, v2_woke)
@@ -1491,6 +1509,10 @@ Object.assign(Room.prototype, {
 		// (a deadline already passed, after the sweep: never meant to be (r2_due moves every one on); a second, not 100 ms)
 		const at = Math.max(next, now + (next <= now ? 1000 : 100));
 		if (write || !this.alarm2 || this.alarm2 <= now || at < this.alarm2) { await this.ctx.storage.setAlarm(at); this.alarm2 = at; }
+		if (arm) {   // (one arming at a time, each with the pair's key as it is when it runs: never the Watch left on an older pair's)
+			await (this.arming = (this.arming || Promise.resolve()).then(() => this.v2_arm(), () => this.v2_arm()));
+			if (this.r && this.r.t.armed && this.r.t.wkey) await this.v2_commit(true);   // (armed: side a told its wkey, a change)
+		}
 	},
 	// The room's Watch armed with the pair seated now's key (t.wkey), again while it's changed meanwhile; armed: the Watch
 	// took it (t.armed_key, the key it has)
@@ -1529,10 +1551,29 @@ Object.assign(Room.prototype, {
 		this.told2_said = said;
 		tell(this, ev);
 	},
+	// SWITCH_WEBSOCKETS off: its members' sockets closed (at the next alarm or message, as a /v1 host's are), each member
+	// then polling (its game's socket refused, 503 off): given GONE_MS from now to be heard from, and taken as alive for a
+	// result meanwhile (the lobby closed it, not its game); true if any was
+	v2_sockets_off(r, now) {
+		if (sockets_on(this.env)) return false;
+		let any = false;
+		for (const ws of this.ctx.getWebSockets ? this.ctx.getWebSockets('m') : []) {
+			if (this.quiet.has(ws) || (this.closed2 && this.closed2.has(ws))) continue;
+			const att = ws.deserializeAttachment() || {}, m = r.members[att.mid];
+			this.quiet.add(ws);
+			try { ws.close(1012, 'off'); } catch (e) {}
+			any = true;
+			if (!m || this.v2_socket(att.mid)) continue;
+			m.ws = false; m.ws_closed = now; m.seen = Math.max(m.seen || 0, now); m.grace = now + R2.GONE_MS;
+		}
+		if (any) this.dirty2 = true;
+		return any;
+	},
 	async v2_alarm() {
 		this.alarm2 = 0;
 		if (await this.v2_off()) { if (this.gone) await this.ctx.storage.setAlarm(this.gone.until + 1000); return; }
 		const r = this.r, now = Date.now();
+		this.v2_sockets_off(r, now);
 		const changed = await this.v2_sweep(r, now);
 		if (!this.r) { if (this.gone) await this.ctx.storage.setAlarm(this.gone.until + 1000); return; }
 		this.v2_tell(false);
@@ -1657,6 +1698,7 @@ Object.assign(Room.prototype, {
 		const r = await this.load();
 		if (!r) return json({ error: 'no_room' }, 404);
 		if (r.v !== 2) return op === 'enter' ? json({ error: 'room_version', room_version: 1 }, 412) : json({ error: 'no_room' }, 404);
+		this.v2_sockets_off(r, now);   // (SWITCH_WEBSOCKETS off: its members' sockets closed now, as at its alarm)
 		// (a member's calls over MSG_BURST at once, then one every MSG_EVERY_MS: busy, nothing done)
 		if (op !== 'enter' && op !== 'settings' && op !== 'close' && this.v2_member(r, b) && this.v2_over(b.mid, now)) return json({ error: 'busy' }, 429);
 		const swept = await this.v2_sweep(r, now);
@@ -1684,10 +1726,14 @@ Object.assign(Room.prototype, {
 					was.who = me;
 					was.caps = r2_caps(b.caps);
 					this.v2_heard(was, now);
-					was.polled = now;
+					was.polled = Math.max(now, (was.ws_closed || 0) + 1);
 				} else this.v2_reclaim(r, was, b, now);
 				await this.v2_commit(true);
-				return json({ code: r.code, mid: was.mid, mkey: was.mkey, wid: watch_on ? r.wid : '', back: true, state: r2_view(r, was.mid, now, watch_on) });
+				// (the Watch's arming waited for (a re-seat): the room closed, or this member gone (it left, by its other link)
+				// meanwhile: said as any call of its would be)
+				if (!this.r) return json({ error: 'no_room' }, 404);
+				if (!this.r.members[was.mid]) return this.v2_gone_why(this.r, b);
+				return json({ code: r.code, mid: was.mid, mkey: was.mkey, wid: watch_on ? r.wid : '', back: true, state: r2_view(this.r, was.mid, Date.now(), watch_on) });
 			}
 			const members = Object.values(r.members);
 			if (members.length >= R2.MEMBERS_MAX || members.filter((x) => x.pid && x.pid === clean(b.pid, 16)).length >= (+this.env.ROOMS2_PER_ADDRESS || R2.PER_ADDRESS)) {
@@ -1697,11 +1743,12 @@ Object.assign(Room.prototype, {
 			const m = this.v2_new_member(r, b, now);
 			r2_enter(r, m, now);
 			await this.v2_commit(true);
+			if (!this.r) return json({ error: 'no_room' }, 404);   // (closed while its seat's Watch was armed)
 			if (!r.members[m.mid]) {   // (seated at once against one it can't play (another build than the room's creator's): let go, r2_take)
 				const x = r.members[r.t.a || r.t.b];
 				return json({ error: 'version', ...(x ? { host_version: x.who.version } : {}) }, 412);
 			}
-			return json({ code: r.code, mid: m.mid, mkey: m.mkey, wid: watch_on ? r.wid : '', state: r2_view(r, m.mid, now, watch_on) });
+			return json({ code: r.code, mid: m.mid, mkey: m.mkey, wid: watch_on ? r.wid : '', state: r2_view(r, m.mid, Date.now(), watch_on) });
 		}
 		if (op === 'settings' || op === 'close') {   // (the creator's: by its key, whether it's still in the room or not)
 			if (typeof b.owner_key !== 'string' || b.owner_key.length !== 32 || b.owner_key !== r.owner_key) {
@@ -1720,7 +1767,7 @@ Object.assign(Room.prototype, {
 		const m = this.v2_member(r, b);
 		if (!m) { if (swept) await this.v2_commit(true); return this.v2_gone_why(r, b); }
 		const graced = this.v2_heard(m, now);
-		m.polled = now;
+		m.polled = Math.max(now, (m.ws_closed || 0) + 1);   // (a call: polling since any close known (one a restart's wake took for its socket's, made by this call, v2_woke, in the same ms))
 		const sig = r2_sig(r);
 		const e = this.v2_act(r, m, op, b, now);
 		const changed = swept || r2_sig(r) !== sig;
@@ -1732,14 +1779,21 @@ Object.assign(Room.prototype, {
 	},
 	async v2_message(ws, att, msg) {
 		if (msg === 'ping') { try { ws.serializeAttachment({ ...att, at: Date.now() }); ws.send('pong'); } catch (e) {} return; }
-		if (typeof msg !== 'string' || msg.length > 1024) return;
 		let b = null;
 		if (msg === 'ready' || msg === 'away') b = { op: msg };
-		else try { b = JSON.parse(msg); } catch (e) {}
-		if (!b || typeof b !== 'object' || !['poll', 'ready', 'away', 'started', 'result', 'leave', 'leave_line', 'join_line'].includes(b.op)) return;
+		else if (typeof msg === 'string' && msg.length <= 1024) try { b = JSON.parse(msg); } catch (e) {}
+		if (!b || typeof b !== 'object' || !['poll', 'ready', 'away', 'started', 'result', 'leave', 'leave_line', 'join_line'].includes(b.op)) {
+			// (one that isn't a message (over 1 KB, binary, not JSON, no op it knows): nothing done, nothing answered, but
+			// counted against the member's rate as any (else a flood of them cost the object without end): MSG_CLOSE of them
+			// past it in a row, its socket closed)
+			if (this.v2_over(att.mid, Date.now()) && this.rates2.get(att.mid).dropped >= R2.MSG_CLOSE) try { ws.close(1008, 'busy'); } catch (e) {}
+			return;
+		}
 		const r = await this.load(), now = Date.now();
 		if (await this.v2_off()) { try { ws.close(1000, 'gone'); } catch (e) {} return; }
 		if (!r || r.v !== 2) { try { ws.close(1000, 'gone'); } catch (e) {} return; }
+		// (SWITCH_WEBSOCKETS off: every member's socket closed, this one's message not taken: its game says it again over HTTPS)
+		if (this.v2_sockets_off(r, now)) { const changed = await this.v2_sweep(r, now); if (this.r) await this.v2_commit(changed); return; }
 		// (a member's messages over its rate: dropped; MSG_CLOSE of them in a row, its socket closed (its game comes back on
 		// a new one, or polls: still a member, 30 s to do so))
 		if (r.members[att.mid] && this.v2_over(att.mid, now)) {   // (each said so: {error: "busy", op}, its game to say it again later)
@@ -1760,12 +1814,19 @@ Object.assign(Room.prototype, {
 		if (b.op === 'leave') try { ws.close(1000, 'left'); } catch (x) {}
 		else if (b.op === 'poll' && this.r && this.r.members[att.mid]) try { ws.send(JSON.stringify({ state: r2_view(this.r, att.mid, Date.now(), switch_on(this.env, 'SWITCH_WATCH')) })); } catch (x) {}
 	},
-	async v2_closed(att, quiet) {   // (a member's socket closed: 30 s to come back, on a socket or polling; one closed for silence, not)
+	// (a member's socket closed: 30 s to come back, on a socket or polling; one closed for silence, not. A close delivered is
+	// no restart: a hibernated object woken by it (v2_woke gave the member a restart's grace, its socket closed by now) takes
+	// it as it is, the member not alive for a result till it's heard from again (a game crashed mid-match forfeits it). One
+	// the lobby closed itself (quiet: for silence, or SWITCH_WEBSOCKETS off) keeps what it was given then)
+	async v2_closed(att, quiet) {
 		const r = await this.load();
 		if (!r || r.v !== 2) return;
 		if (await this.v2_off()) return;
 		const m = r.members[att.mid];
-		if (m && !this.v2_socket(att.mid)) { m.ws_closed = Date.now(); m.ws = false; this.dirty2 = true; if (!quiet) m.seen = Math.max(m.seen, Date.now()); }
+		if (m && !this.v2_socket(att.mid)) {
+			m.ws_closed = Date.now(); m.ws = false; this.dirty2 = true;
+			if (!quiet) { m.seen = Math.max(m.seen, Date.now()); m.grace = 0; m.graced = false; }
+		}
 		const changed = await this.v2_sweep(r, Date.now());
 		if (this.r) await this.v2_commit(changed);
 	},
