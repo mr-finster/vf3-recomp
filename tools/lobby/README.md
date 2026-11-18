@@ -188,14 +188,18 @@ one acts for anyone else.
   `ready_ms` is still kept and answered (older test builds read it); nothing waits on it.
 - **Results**: both agree: the winner's streak +1 (or a new holder at 1). A draw: the streak's holder stays, the
   challenger goes, the streak as it was. A desync (both say so, or one says desync and the other disconnect): void,
-  the two seated again, cold. Disagreeing: void, both to the back, the streak gone. Both saying disconnect: the side
-  whose lobby socket is dead loses (a forfeit; within a restart's 30 s, below, it's taken as alive); both alive, the
-  two seated again once, then the holder stays (held). But the holder saying disconnect while the challenger, its lobby
-  socket alive, says it won: the challenger's win (a holder can't keep the table by saying disconnect whenever it
-  loses). One report and 25 s of silence from the other side, whether its game's alive or not: the report is taken as
-  it is (a win, a loss or a draw as it says; its disconnect or desync: the silent side's forfeit), so silence never
-  keeps a table (a holder that never reports loses its matches); an honest disconnect (the other side truly gone) is
-  still a forfeit to the live side. A late report for an earlier match (its `n`) is refused as `stale`; the same `started` or
+  the two seated again, cold. Disagreeing: void, both to the back, the streak gone. A disconnect (both saying it, or one
+  saying it and the other claiming the win): the side whose lobby socket is dead loses (a forfeit; within a restart's
+  30 s, below, it's taken as alive); both alive, the two seated again once, then the holder stays (held), its streak
+  not raised, the challenger to the back: a holder saying disconnect whenever it loses keeps the table but never grows
+  its streak, a challenger cutting the link while losing and claiming the win gains nothing. One report alone: after
+  25 s it's settled only if it concedes (the other side won, by its own player's word) or the other side's game is gone
+  (no lobby socket, not polling, past a restart's 30 s); while the other side's alive, the match is waited out to its
+  own end (15 minutes from its start), so a win reported early (forged) is contradicted by the honest side's report
+  when its match ends (disagreeing: void). Settled, a lone report is taken as it says (a win, a loss, a draw), a lone
+  desync is void (nobody's fault: the two seated again) and a lone disconnect is the silent side's forfeit; so a side
+  that never reports can't keep a table past the match's end, and an honest disconnect (the other side truly gone) is
+  a forfeit to the live side at 25 s. A late report for an earlier match (its `n`) is refused as `stale`; the same `started` or
   `result` said again (a game says it till it's heard) changes nothing, and `started` may carry `n` too.
 - **No table held forever**: a match with no result in 15 minutes (a VF match is minutes) is void, the holder stays and
   the table moves on (the next READY member got ready, or the two play on). After a held disconnect their session is
@@ -250,9 +254,11 @@ one acts for anyone else.
   "left" | "gone" | "version"}` on its socket, `410 {error: "removed", why}` on its next call by its own key).
 - **Watching**: a room has one watch id for its life (its code). Each new pair arms the room's `Watch` with a new key
   for its session's host (the one at side a), as a `/v1` room that stays does after each match; the Watch takes the new
-  match's start on the same watch id, the last pair's key refused. The new seat is told at once (its own `seq`), the Watch
-  armed after it and the host told its `wkey` again once it's armed; an arming not answered in 5 s is given up (that
-  match isn't watchable). One arming at a time, each with the key of the pair
+  match's start on the same watch id, the last pair's key refused. The new seat is told at once (its own `seq`) and the call
+  answered, the Watch armed after it in the background and the host told its `wkey` once it's armed; an arming not
+  answered in 5 s is given up (that match isn't watchable). Every arming (a `/v1` room's too) carries a rising number
+  (`an`) and a Watch refuses one older than the one it has, so one given up that lands late never puts back an older
+  pair's key (an arming with no number, an older lobby's, is taken as before). One arming at a time, each with the key of the pair
   seated when it runs (two pairs seated within one arming's round trip: the Watch ends on the newer's). A rematch in the same session needs no new key.
 - **Older builds**: their `/v1/join` (in line or not) and `/v1/peek` on a Rooms 2 code answer `412 {error: "version"}`
   with `host_version` the room's creator's own version (its release's tag, `build` in its create: `v1.9.0`, a beta's
@@ -307,9 +313,10 @@ table stuck in PLAYING, the newcomer to the back the 2nd time, a holder who blam
 cap; and the final review's (F1-F8): a challenger's lone `started`, a loser coming back to void its match, the count's
 load and rooms a day, a concession and a restart's grace for a result, busy said, the Watch's arming race, polling
 members over a restart, the holder's count started again after an interruption; and the last review's before the
-public beta (R1-R9, R0): a crash's close waking a hibernated object, a holder that never reports or always says
-disconnect, SWITCH_WEBSOCKETS off, messages that aren't one, a re-entry left during the Watch's arming, the seq while
-it's armed, a late second report, a play-on nobody started with someone READY, a member's first call after a restart.
+public beta (R0-R9, R4b): a crash's close waking a hibernated object, a forged early win against a live opponent, a
+holder that never reports, a disconnect against a claimed win, a lone desync, SWITCH_WEBSOCKETS off, messages that
+aren't one, a re-entry answered without waiting for the Watch, the seq while it's armed, a late arming refused, a late
+second report, a play-on nobody started with someone READY, a member's first call after a restart.
 `node tools/lobbyload/load.mjs --lobby <address> --rooms2 20 --line 8` adds Rooms 2 rooms to a load test (their
 members on sockets or polling, playing in turn: ready, started, the same result from both; `--never 0.1` the share
 AWAY as they enter); against `node test/serve.mjs src/index.js 8787 SWITCH_ROOMS2=on ROOMS2_PER_ADDRESS=64

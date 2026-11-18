@@ -13,10 +13,13 @@
 //  11 Rooms 2 rows pushing an older build's rows off the list (ROOMS_MAX), and one address's Rooms 2 rooms its /v1 rows
 // and the last review before the public beta (R1-R9, R0):
 //   R1 a game's close waking a hibernated object taken for a restart: the crashed side alive for a result (its grace)
-//   R2 a holder who never reports, or says disconnect whenever it loses: never unseated ("the holder stays")
+//   R2 a holder who never reports: never unseated ("the holder stays"); then (the review of the fix) a forged early win
+//      taken at 25 s from a live opponent mid-match, and a challenger's claimed win against the holder's disconnect
+//   R3 a lone desync forfeited the silent side
 //   R4 SWITCH_WEBSOCKETS off left Rooms 2 sockets open; R5 messages that aren't one escaped the member's rate
-//   R6 a re-entry waiting on the Watch's arming, the member leaving meanwhile: 500
-//   R7 a new seat told under the last seq while the Watch was armed (no timeout on arming)
+//   R6 a re-entry waiting on the Watch's arming, the member leaving meanwhile: 500 (now: no answer waits on arming)
+//   R7 a new seat told under the last seq while the Watch was armed (no timeout on arming); R4b an arming given up
+//      landing late, after a newer pair's, put the older key back on the Watch
 //   R8 the other side's report 10 s late voided an honest result; R9 a play-on nobody started, someone READY then: the
 //      table stuck 15 minutes (its games hold the loser's Start for the next in line)
 //   R0 a member's first call after a restart taken for after its socket's close in the same ms: not alive, a forfeit
@@ -613,34 +616,85 @@ const side_of = (code, m) => (rec(code).t.a === m.mid ? 'a' : rec(code).t.b === 
 	X.ws.close(1001); await settle();
 	check('R1 ... its seen kept (30 s to come back), not its grace', [!!rec(X.code).members[X.mid], rec(X.code).members[X.mid].grace], [true, 0]);
 }
-{   // R2: one report, the other side alive but silent past the window: the report taken, never "the holder stays"
-	const A = await create('HLD'), B = await enter(A.code, 'CHL'), Cm = await enter(A.code, 'THD');
-	await act(A, 'started'); await act(B, 'started');
-	await act(B, 'result', { winner: side_of(A.code, B), n: 1 });   // (the challenger's win; the holder never says)
-	advance(25500); await alarm(A.code);
-	check('R2 a holder that never reports: the challenger\'s win (its streak 1)', [last(A.code), rec(A.code).t.holder === B.mid, rec(A.code).t.streak], [JSON.stringify({ result: side_of(A.code, B), n: 1 }), true, 1]);
-	const D = await create('HLD'), E = await enter(D.code, 'CHL'), F = await enter(D.code, 'THD');
-	await act(D, 'started'); await act(E, 'started');
-	await act(E, 'result', { winner: side_of(D.code, E), n: 1 });
-	await act(D, 'result', { winner: 'disconnect', n: 1 });   // (the holder says disconnect whenever it loses)
-	check('R2 the holder says disconnect, the challenger (alive) says it won: the challenger\'s win', [last(D.code), rec(D.code).t.holder === E.mid], [JSON.stringify({ result: side_of(D.code, E), n: 1 }), true]);
-	const G = await create('HLD'), H = await enter(G.code, 'CHL'), I = await enter(G.code, 'THD');
-	await act(G, 'started'); await act(H, 'started');
-	await act(H, 'result', { winner: 'disconnect', n: 1 });   // (the challenger's connection lost; the holder's game silent, its socket open)
-	advance(25500); await alarm(G.code);
-	check('R2 one side says disconnect, the other alive and silent: the silent side forfeits', [last(G.code), rec(G.code).t.holder === H.mid, rec(G.code).t.streak], [JSON.stringify({ result: 'forfeit', winner: side_of(G.code, H), n: 1 }), true, 0]);
-	const J = await create('HLD'), K = await enter(J.code, 'CHL'), L = await enter(J.code, 'THD');
-	await act(J, 'started'); await act(K, 'started');
-	await act(J, 'result', { winner: 'disconnect', n: 1 });
-	K.ws.close(1000); await settle();   // (the challenger's game truly gone: no socket, no poll)
-	advance(25500); await alarm(J.code);
-	check('R2 an honest disconnect (the other side dead): still the live side\'s forfeit win', [last(J.code), rec(J.code).t.holder === J.mid], [JSON.stringify({ result: 'forfeit', winner: side_of(J.code, J), n: 1 }), true]);
-	const M = await create('HLD'), N = await enter(M.code, 'CHL'), O = await enter(M.code, 'THD');
-	await act(M, 'started'); await act(N, 'started');
-	await act(N, 'result', { winner: side_of(M.code, N), n: 1 });
-	N.ws.close(1000); await settle();   // (the challenger says it won, then its game's gone)
-	await act(M, 'result', { winner: 'disconnect', n: 1 });
-	check('R2 the holder says disconnect against a challenger gone after saying it won: the holder stays (the live side)', [last(M.code), rec(M.code).t.holder === M.mid], [JSON.stringify({ result: 'forfeit', winner: side_of(M.code, M), n: 1 }), true]);
+{   // R2: one report, the other side silent: a forged early win isn't taken while the other's alive (its match waited out);
+	// taken when the other's gone, or at the match's own end; a holder's disconnect against a claimed win, neutral
+	const lone = async (claim) => {   // (a pair seated and started, side b's report alone; a third waiting in line)
+		const A = await create('HLD'), B = await enter(A.code, 'CHL'), Cm = await enter(A.code, 'THD');
+		await act(A, 'started'); await act(B, 'started');
+		await act(B, 'result', { winner: claim(side_of(A.code, B)), n: 1 });
+		return [A, B, Cm];
+	};
+	{
+		const [A, B] = await lone((s) => s);   // (B claims its win at once: forged, a VF match is minutes)
+		advance(25500); await act(A, 'poll'); await alarm(A.code);
+		const waiting = show(A.code);
+		advance(60000); await act(A, 'poll'); await alarm(A.code);
+		await act(A, 'result', { winner: side_of(A.code, A), n: 1 });   // (A's honest report at its match's end: they disagree)
+		check('R2 a forged early win, the other alive: still waited for at 25 s and a minute on; the honest report then: void, both to the back',
+			[waiting, show(A.code).startsWith('DECIDED'), JSON.stringify(rec(A.code).t.last), rec(A.code).t.streak], ['DECIDED HLD/CHL [THD] s0', false, JSON.stringify({ result: 'void', why: 'disagree', n: 1 }), 0]);
+	}
+	{
+		const [A, B] = await lone((s) => s);
+		advance(25500); await act(A, 'poll'); await alarm(A.code);
+		rec(A.code).t.deadline = Date.now() - 1; await alarm(A.code);   // (the match's own end (PLAYING_MAX_MS) reached, A never saying)
+		check('R2 a holder that never reports, alive: the challenger\'s word stands at the match\'s end', [last(A.code), rec(A.code).t.holder === B.mid, rec(A.code).t.streak], [JSON.stringify({ result: side_of(A.code, B), n: 1 }), true, 1]);
+	}
+	{
+		const [A, B] = await lone((s) => s);
+		A.ws.close(1000); await settle();   // (the holder's game truly gone: no socket, no poll)
+		advance(25500); await alarm(A.code);
+		check('R2 one report, the other\'s game gone: taken at 25 s', [last(A.code), rec(A.code).t.holder === B.mid], [JSON.stringify({ result: side_of(A.code, B), n: 1 }), true]);
+	}
+	{
+		const [A, B] = await lone(() => 'disconnect');
+		advance(25500); await act(A, 'poll'); await alarm(A.code);
+		const waiting = show(A.code);
+		rec(A.code).t.deadline = Date.now() - 1; await alarm(A.code);
+		check('R2 a lone disconnect, the other alive and silent: waited for; at the match\'s end, the silent side\'s forfeit', [waiting, last(A.code), rec(A.code).t.holder === B.mid, rec(A.code).t.streak],
+			['DECIDED HLD/CHL [THD] s0', JSON.stringify({ result: 'forfeit', winner: side_of(A.code, B), n: 1 }), true, 0]);
+	}
+	{
+		const [A, B] = await lone(() => 'desync');
+		A.ws.close(1000); await settle();
+		advance(25500); await alarm(A.code);
+		const gone = [last(A.code), rec(A.code).t.phase];
+		const [D, E] = await lone(() => 'desync');
+		advance(25500); await act(D, 'poll'); await alarm(D.code);
+		rec(D.code).t.deadline = Date.now() - 1; await alarm(D.code);
+		check('R3 a lone desync: void (nobody\'s fault), the two seated again, never a forfeit (the other gone, or alive to the match\'s end)', [gone, [last(D.code), rec(D.code).t.phase, rec(D.code).t.holder === D.mid]],
+			[[JSON.stringify({ result: 'void', why: 'desync', n: 1 }), 'CONNECTING'], [JSON.stringify({ result: 'void', why: 'desync', n: 1 }), 'CONNECTING', true]]);
+	}
+	{
+		const A = await create('HLD'), B = await enter(A.code, 'CHL'), Cm = await enter(A.code, 'THD');
+		await act(A, 'started'); await act(B, 'started');
+		for (const m of [A, B]) await act(m, 'result', { winner: 'a', n: 1 });   // (A holds, streak 1; C seated against it)
+		advance(3100); await alarm(A.code);
+		const st = async () => { await act(A, 'started'); await act(Cm, 'started'); };
+		await st();
+		await act(A, 'result', { winner: 'disconnect', n: 2 });
+		await act(Cm, 'result', { winner: side_of(A.code, Cm), n: 2 });   // (C, losing, cut the link and claims the win)
+		const once = [last(A.code), show(A.code)];
+		await st();
+		await act(A, 'result', { winner: 'disconnect', n: 3 });
+		await act(Cm, 'result', { winner: side_of(A.code, Cm), n: 3 });
+		check('R2 the holder\'s disconnect against a claimed win: void, seated again once; again: the holder stays, its streak not raised, the challenger to the back',
+			[once, last(A.code), show(A.code)], [[JSON.stringify({ result: 'void', why: 'disconnect', n: 2 }), 'CONNECTING AAA/THD [CHL] s1'.replace('AAA', 'HLD')], JSON.stringify({ result: 'void', why: 'disconnect', n: 3 }), 'READY HLD/THD [CHL] s1 r:CHL']);
+	}
+	{
+		const J = await create('HLD'), K = await enter(J.code, 'CHL'), L = await enter(J.code, 'THD');
+		await act(J, 'started'); await act(K, 'started');
+		await act(J, 'result', { winner: 'disconnect', n: 1 });
+		K.ws.close(1000); await settle();   // (the challenger's game truly gone: no socket, no poll)
+		advance(25500); await alarm(J.code);
+		check('R2 an honest disconnect (the other side dead): the live side\'s forfeit win at 25 s', [last(J.code), rec(J.code).t.holder === J.mid], [JSON.stringify({ result: 'forfeit', winner: side_of(J.code, J), n: 1 }), true]);
+	}
+	{
+		const M = await create('HLD'), N = await enter(M.code, 'CHL'), O = await enter(M.code, 'THD');
+		await act(M, 'started'); await act(N, 'started');
+		await act(M, 'result', { winner: side_of(M.code, N), n: 1 });   // (a concession: the other won, by this player's own word)
+		advance(25500); await act(N, 'poll'); await alarm(M.code);
+		check('R2 a lone concession, the other alive: taken at 25 s', [last(M.code), rec(M.code).t.holder === N.mid], [JSON.stringify({ result: side_of(M.code, N), n: 1 }), true]);
+	}
 }
 {   // R4: SWITCH_WEBSOCKETS off: a Rooms 2 room's sockets closed at its next alarm or message; its members poll on, alive meanwhile
 	const A = await create('AAA'), B = await enter(A.code, 'BBB');
@@ -676,42 +730,67 @@ const side_of = (code, m) => (rec(code).t.a === m.mid ? 'a' : rec(code).t.b === 
 	B.ws.send(JSON.stringify({ op: 'poll' })); await settle();
 	check('R5 a few: nothing more (the next message answered)', [B.closed, B.said.filter((d) => d.state).length >= 2], [null, true]);
 }
-{   // R6: a re-entry that seats the two again, its Watch's arming waited for, the same member leaving meanwhile: no 500
+// (a call answered without waiting for the objects' work after it (settle() would wait for an arming held up))
+async function raw(method, path, body, from) {
+	const req = new Request('http://lobby' + path, { method, headers: { 'cf-connecting-ip': from, 'x-test-country': 'KR' }, body: JSON.stringify(body) });
+	Object.defineProperty(req, 'cf', { value: { latitude: '37.5', longitude: '127.0', continent: 'AS' } });
+	try { const r = await worker.fetch(req, env); const t = await r.text(); let j = null; try { j = JSON.parse(t); } catch (e) {} return { status: r.status, body: j }; } catch (e) { return { status: 'threw ' + e.message }; }
+}
+const raw_act = (m, op, extra = {}) => raw('POST', '/v2/room/' + op, { code: m.code, mid: m.mid, mkey: m.mkey, ...extra }, m.ip);
+{   // R6: a re-entry that seats the two again answered at once (not after the Watch's arming), the member leaving after it: no 500
 	const A = await create('AAA'), B = await enter(A.code, 'BBB');
 	await act(A, 'started'); await act(B, 'started');
 	B.ws.close(1000); await settle();
 	advance(5000);   // (B's game back after a crash: not its link gathered again)
 	hold_arm(true);
-	const back = call('POST', '/v2/room/enter', { ...me('BBB'), code: A.code, mid: B.mid, mkey: B.mkey }, B.ip).catch((e) => ({ status: 'threw ' + e.message }));
+	const back = raw('POST', '/v2/room/enter', { ...me('BBB'), code: A.code, mid: B.mid, mkey: B.mkey }, B.ip);
 	await turns();
-	const left = await act(B, 'leave');
+	const left = await raw_act(B, 'leave');
 	release();
 	const r = await back;
-	check('R6 re-entered, then left while its seat\'s Watch was armed: the enter answered (410 left), not a 500', [said(left), r.status, r.body && r.body.why], ['ok', 410, 'left']);
+	await settle();
+	check('R6 re-entered (its arming held up), then left: the enter answered, back, not a 500; the leave taken', [r.status, r.body && r.body.back, said(left), !!rec(A.code).members[B.mid]], [200, true, 'ok', false]);
 }
-{   // R7: a new seat told at once with its own seq (never under the last one's), the Watch armed after it, not waited on for ever
+{   // R7: a new seat told at once with its own seq (never under the last one's), the Watch armed after it in the background
 	const A = await create('AAA'), Cm = await enter(A.code, 'CCC'), Bm = await enter(A.code, 'BBB');
 	await act(A, 'started');
 	const before = Bm.state.seq;
 	hold_arm(true);
 	advance(31000);
-	const al = obj(A.code).alarm();
+	const t0 = real_now();
+	await obj(A.code).alarm();
+	const took = real_now() - t0;
 	await turns();
-	const poll = await act(Bm, 'poll');
+	const poll = await raw_act(Bm, 'poll');
 	const st = poll.body.state;
 	check('R7 a poll while the Watch is armed: the new seat under a new seq, the same as its socket was told', [show(A.code), st.seq > before, st.you.pos, !!st.you.seat, Bm.state.seq === st.seq, Bm.state.you.pos], ['CONNECTING AAA/BBB [CCC*] s0', true, 0, true, true, 0]);
+	check('R7 the alarm (and any call) not waiting for the arming', took < 1000, true);
 	release();
-	await al; await settle();
+	await settle();
 	check('R7 armed: told again, the host its watch key', [rec(A.code).t.armed, A.state.seq > st.seq, !!(A.state.you.seat && A.state.you.seat.wkey)], [true, true, true]);
+}
+{   // R7/R4b: an arming that never answers given up after 5 s (the match unwatchable); landing late, after a newer pair's
+	// arming, refused by the Watch: its key stays the newer pair's
 	const X = await create('XXX'), Y = await enter(X.code, 'YYY'), Z = await enter(X.code, 'ZZZ');
 	await act(X, 'started');
 	hold_arm(true);
 	advance(31000);
-	const t0 = real_now();
-	await obj(X.code).alarm(); await settle();
-	const took = real_now() - t0;
-	release();
-	check('R7 a Watch that never answers its arming: given up after 5 s, the match unwatchable, the seat as it is', [show(X.code), rec(X.code).t.armed, took >= 4500 && took < 9000], ['CONNECTING XXX/ZZZ [YYY*] s0', false, true]);
+	await obj(X.code).alarm();
+	hold_arm(false);   // (only that one held)
+	await new Promise((ok) => setTimeout(ok, 5500)); await settle();
+	const given_up = [show(X.code), rec(X.code).t.armed];
+	const W = await enter(X.code, 'WWW');
+	await act(Z, 'away');   // (Z, not started: unseated; W seated, its arming answered at once)
+	await settle();
+	const armed2 = [show(X.code), rec(X.code).t.armed];
+	release(); await new Promise((ok) => setTimeout(ok, 20)); await settle();   // (the first, late, reaches the Watch now)
+	const w = env.WATCHES.objs.get('w|' + X.code);
+	check('R7 a Watch that never answers: given up after 5 s, the seat as it is; R4b the newer pair armed; the late one refused, the Watch on the newer key',
+		[given_up, armed2, w.arm.wkey === rec(X.code).t.wkey, rec(X.code).t.armed], [['CONNECTING XXX/ZZZ [YYY*] s0', false], ['CONNECTING XXX/WWW [ZZZ*,YYY*] s0', true], true, true]);
+	const wt = env.WATCHES.get(env.WATCHES.idFromName('w|ARMNUM'));
+	const arm_at = (an, wkey) => wt.fetch('https://watch/arm', { method: 'POST', body: JSON.stringify({ wid: 'ARMNUM', wkey, game: 'vf3', version: V, an }) }).then((r) => r.status);
+	check('R4b the Watch: a newer arming taken, an older refused (409), one with no number (an older lobby\'s) taken',
+		[await arm_at(2000, 'k2'), await arm_at(1000, 'k1'), env.WATCHES.objs.get('w|ARMNUM').arm.wkey, await arm_at(undefined, 'k0'), env.WATCHES.objs.get('w|ARMNUM').arm.wkey], [200, 409, 'k2', 200, 'k0']);
 }
 {   // R8: the other side's report late (its game says it again 3 s, 9, 21 s after): still the match's
 	const A = await create('AAA'), B = await enter(A.code, 'BBB');
