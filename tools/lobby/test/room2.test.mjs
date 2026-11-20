@@ -260,7 +260,7 @@ const T = {
 		["SOLO A/- [D*,C*] s0","ok"],
 		["CONNECTING A/C [D] s0","ok"],
 		["CONNECTING A/C [D] s0","ok"],
-		["CONNECTING A/C [D] s0","ok"],
+		["CONNECTING A/C [D] s1","ok"],   // (beta2: B, who conceded A's win, off the table: the win counted)
 		["CONNECTING A/C [D] s1","ok"],
 	],
 	'socket close': [
@@ -278,7 +278,7 @@ const T = {
 		["SOLO A/- [D*,C*] s0","410 removed"],
 		["CONNECTING A/C [D] s0","410 removed"],
 		["CONNECTING A/C [D] s0","410 removed"],
-		["CONNECTING A/C [D] s0","410 removed"],
+		["CONNECTING A/C [D] s1","410 removed"],   // (beta2: B, who conceded A's win, off the table: the win counted)
 		["CONNECTING A/C [D] s1","410 removed"],
 	],
 	'ready': [
@@ -467,7 +467,7 @@ const T = {
 		["SOLO A/- [D*,C*] s0","ok pos-1 watcher w1"],
 		["CONNECTING A/C [D] s0","ok pos-1 watcher w1"],
 		["CONNECTING A/C [D] s0","ok pos-1 watcher w1"],
-		["CONNECTING A/C [D] s0","ok pos-1 watcher w1"],
+		["CONNECTING A/C [D] s1","ok pos-1 watcher w1"],   // (beta2: B, who conceded A's win, off the table: the win counted)
 		["CONNECTING A/C [D] s1","ok pos-1 watcher w1"],
 	],
 	'join line': [
@@ -476,7 +476,7 @@ const T = {
 		["SOLO A/- [D*,C*,B*] s0","not_now,ok pos3"],
 		["CONNECTING A/C [D,B] s0","not_now,ok pos2"],
 		["CONNECTING A/C [D,B] s0","not_now,ok pos2"],
-		["CONNECTING A/C [D,B] s0","not_now,ok pos2"],
+		["CONNECTING A/C [D,B] s1","not_now,ok pos2"],   // (beta2: B, who conceded A's win, off the table: the win counted)
 		["CONNECTING A/C [D,B] s1","not_now,ok pos2"],
 	],
 	'rejoin': [

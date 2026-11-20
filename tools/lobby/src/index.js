@@ -1095,6 +1095,22 @@ function r2_enter(r, m, now) {
 	r.active = now;
 	r2_advance(r, now);
 }
+// (a seated member off the table, its seat empty: a match on forfeited; a match DECIDED by a report that the other side won
+// (the one left reported it, or the one leaving conceded it) counted as that win, the streak raised: a loser who quits just
+// after the decision, its Start pressed, left the winner's win uncounted, the streak not raised)
+function r2_vacate(r, side, mid) {
+	const t = r.t, other = r2_other(side), stays = t[other];
+	const won = t.phase === 'DECIDED' && stays && Object.values(t.reports).includes(other);
+	t[side] = null;
+	if (won) {
+		if (t.holder === stays) t.streak++; else { t.holder = stays; t.streak = 1; }
+		t.last = { result: other, n: t.n };
+	} else {
+		if (R2_MATCH.has(t.phase)) t.last = { result: 'forfeit', n: t.n, winner: stays ? other : null };
+		if (t.holder === mid) t.holder = null;
+	}
+	t.phase = 'SOLO';   // (no match without two: r2_advance says what it is)
+}
 // A member gone (left, quiet, can't play): out of the line, off the table (a match on: forfeited, the other stays, the
 // streak kept, not raised), the next seated
 function r2_remove(r, mid, why, now) {
@@ -1104,12 +1120,7 @@ function r2_remove(r, mid, why, now) {
 	r.line = r.line.filter((x) => x !== mid);
 	if (r.ready && r.ready.mid === mid) r.ready = null;
 	r.removed = [...(r.removed || []).filter((x) => x.mid !== mid), { mid, mkey: m.mkey, why }].slice(-R2.REMOVED_KEPT);
-	if (side) {
-		t[side] = null;
-		if (R2_MATCH.has(t.phase)) t.last = { result: 'forfeit', n: t.n, winner: t[r2_other(side)] ? r2_other(side) : null };
-		if (t.holder === mid) t.holder = null;
-		t.phase = 'SOLO';   // (no match without two: r2_advance says what it is)
-	}
+	if (side) r2_vacate(r, side, mid);
 	if (!Object.keys(r.members).length) r.empty_since = now;
 	r2_advance(r, now);
 }
@@ -1121,12 +1132,7 @@ function r2_leave_line(r, mid, now) {
 	m.watcher = true;
 	r.line = r.line.filter((x) => x !== mid);
 	if (r.ready && r.ready.mid === mid) r.ready = null;
-	if (side) {
-		t[side] = null;
-		if (R2_MATCH.has(t.phase)) t.last = { result: 'forfeit', n: t.n, winner: t[r2_other(side)] ? r2_other(side) : null };
-		if (t.holder === mid) t.holder = null;
-		t.phase = 'SOLO';
-	}
+	if (side) r2_vacate(r, side, mid);
 	r2_advance(r, now);
 	return null;
 }

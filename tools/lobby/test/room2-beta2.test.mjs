@@ -126,6 +126,24 @@ for (const side of [false, true]) {
 	const name = (mid) => r.members[mid].who.name;
 	check('side ' + side + ': after B (b) won, C seated; sides', [name(r.t.a), name(r.t.b)], side ? ['B', 'C'] : ['C', 'B']);
 }
+// a loser who leaves just after the decision (one report in, the winner's): the win counted, the streak raised, the next seated
+{
+	const A = await create('A', { listed: true, room: 'QUIT' });
+	const B = await enter(A.code, 'B');
+	const C = await enter(A.code, 'C');
+	await act(A, 'started'); await act(B, 'started');
+	await act(A, 'result', { winner: 'a' });
+	check('decided, one report', rec(A.code).t.phase, 'DECIDED');
+	await act(B, 'leave');
+	const r = rec(A.code);
+	check('the loser left: A\'s win counted', [r.t.last.result, r.t.streak, r.members[r.t.holder].who.name], ['a', 1, 'A']);
+	check('the next seated', [r.t.phase, r.members[r.t.b] && r.members[r.t.b].who.name], ['CONNECTING', 'C']);
+	// and a forfeit mid-match as before: not counted
+	await act(A, 'started'); await act(C, 'started');
+	await act(C, 'leave');
+	const r2 = rec(A.code);
+	check('a forfeit mid-match: kept, not raised', [r2.t.last.result, r2.t.streak], ['forfeit', 1]);
+}
 // the name filter's HEADS: insults made with a word before, innocent names kept
 check('names blocked', ['DICKMASTER', 'MASTERCOCK', 'BIGDICK', 'SUCKMYDICK'].map(name_ok), [false, false, false, false]);
 check('names kept', ['HANCOCK', 'PEACOCK', 'SHERLOCK', 'DICKENS', 'COCKPIT', 'MASTER', 'BIGBOSS', 'KINGKONG'].map(name_ok), [true, true, true, true, true, true, true, true]);
