@@ -287,7 +287,7 @@ void game_menu::show_versus(const versus &v, double seconds)
 	               "<div class=\"sub\">" + escape(v.sub) + "</div></div>";
 	// (shown already: its time made longer and its words as they are now, never faded out and in again: one versus screen
 	// from a room's seat, or its catching up, to the match itself; the same words not laid out again)
-	const bool on = versus_showing() && SDL_GetTicks() - m_vs_from >= 250;
+	const bool on = versus_showing();   // (its fade-in from when it first came: shown again every pass, it never got past it)
 	const auto longer = [&] { m_vs_until = std::max(m_vs_until, SDL_GetTicks() + uint64_t(seconds * 1000)); };
 	if (on && rml == m_vs_rml) { longer(); return; }
 	m_vs_rml = rml;

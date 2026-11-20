@@ -4938,8 +4938,11 @@ int main(int argc, char **argv)
 		const bool r2_next_vs = r2m && online.in_room2() && r2m->has_a && r2m->has_b && (r2m->phase == "CONNECTING" || r2m->phase == "PLAYING") &&
 		                        !interrupted && (online.starting() || (online.waiting() && r2m->in_seat) || online.watch_between() ||
 		                                         (online.watching() && !online.watch_showing()));
+		static uint64_t r2_vs_since = 0;   // (its line says how it's going only after a moment: a quick start never shows "catching up")
+		if (!r2_next_vs) r2_vs_since = 0;
+		else if (!r2_vs_since) r2_vs_since = SDL_GetTicks();
 		if (r2_next_vs) {
-			const std::string how = online.watching() ? online.watch_status() : online.status();
+			const std::string how = SDL_GetTicks() - r2_vs_since < 3000 ? std::string() : online.watching() ? online.watch_status() : online.status();
 			menu.show_versus({ tr::VS_PLAYER_1, r2m->a.name, tr::VS_PLAYER_2, r2m->b.name, how, online.watching() ? std::string(tr::WATCHING_HOW_TO_STOP) : std::string(),
 			                   false, r2m->a.country, r2m->b.country }, 1.0);
 		}
