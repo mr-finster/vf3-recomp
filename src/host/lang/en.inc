@@ -255,6 +255,11 @@ T(DURAL_STAGE_WAIT, "Dural's stage: Start held for you, picked in {n} s (the sec
 T(DURAL_STAGE_NONE, "Dural's stage: the arcade's stage screen never gives this stage's Dural version.")
 T(DURAL_STAGE_NOT_NOW, "Dural's stage: not this time online (the game allows it only at certain seconds, and none is left for this pick).")
 T(DURAL_STAGE_TB_CAVE, "Dural's stage: Team Battle's VF3 version of the cave, which looks like its Dural version (Start held for you).")
+T(C_DURAL_STAGE_START, "Start + any button")
+T(C_DURAL_STAGE_START_GP, "Start + Guard / Punch")
+T(C_DURAL_STAGE_OFF_HELP, "On the stage screen (Stage select: Challenger), the arcade's own: hold Start and confirm for VF3's stage, now and then the Dural version by luck. Choose a way to get the Dural version every time (online too, your inputs only).")
+T(C_DURAL_STAGE_BUTTON_HELP, "On the stage screen (Stage select: Challenger), confirm with {button} for the Dural version, picked at the second the game allows (up to 12 s). Start and the other buttons stay the arcade's (hold Start and confirm: VF3's stage). Online too (your inputs only), though not always there.")
+T(C_DURAL_STAGE_GP_HELP, "On the stage screen (Stage select: Challenger), a button alone gives the stage. Hold Start and press Guard: the Dural version, picked at the second the game allows (up to 12 s); Start and Punch: VF3's stage, every time. Start with Kick or Escape, or till the time runs out, stays the arcade's. Online too (your inputs only).")
 
 // ---- Controls ----
 T(CTL_UP, "Up")                            // (the game's controls: rows in Controls, and the steps of Set up buttons)

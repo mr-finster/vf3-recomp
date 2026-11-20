@@ -5,10 +5,10 @@
 // boards must have been in its state at every checkpoint. Reports the rollbacks and what a frame cost each side
 // (the wall time of a session's step: its rollback, its save and its frame).
 //   vf3net <vf3.zip> --script FILE [--frames N] [--latency MS] [--jitter MS] [--loss PERCENT] [--delay D] [--interp]
-//          [--set vf3tb] [--stage] [--dural] [--dural-stage host|guest|both] [--vs-rounds N] [--hashes FILE] [--blob-out FILE] [--blob-in FILE]
+//          [--set vf3tb] [--stage] [--dural] [--dural-stage host|guest|both[:WAY]] [--vs-rounds N] [--hashes FILE] [--blob-out FILE] [--blob-in FILE]
 // --set: another program (the zip must hold it); --stage: the match's stage select on (the adapter's stage_select_on,
 // Online > Settings); --dural: Dural on the select (the adapter's dural, Cheats); --dural-stage: Cheats > Dural's stage
-// (Start held and a button: issue #50) on that side's own input word, as the game does it online (src/host/dural_stage.h: inputs only, the delay its lead). The script's p1 is the host's, p2 the guest's.
+// (host:N: the way N, dural_stage::Method; none, 1: Start held and a button, issue #50) on that side's own input word, as the game does it online (src/host/dural_stage.h: inputs only, the delay its lead). The script's p1 is the host's, p2 the guest's.
 // --vs-rounds N: the host's own Rounds to win (vs player), set in its backup RAM before the match, as the Arcade settings
 // menu does (the match plays the blob's); --hashes FILE: the straight board's state hash every 30 frames ("frame hash",
 // hex); --blob-out FILE: the host's start blob written to FILE; --blob-in FILE: the match started from FILE's blob instead
@@ -18,6 +18,8 @@
 // the pool's (VERSION's base with +host1: as --host-terms; "+host1+dural3": Dural on; "+host1+dural2", Team Battle's
 // "+host1+dural": Dural on with v0.1.16-alpha's patches, as an older build plays it)
 // VF3NET_WATCH=addr,... (hex): those RAM bytes on the straight run, printed as they change ("bytes FRAME v...").
+// VF3NET_SHOTS=dir and VF3NET_SHOT_AT=frame,...: the straight run's picture after those frames (the match's own frames,
+// both players' inputs as the sessions had them), dir/shot_FRAME.png (the 3D and the tile layers, as vf3run's --shots).
 // --watchers N: N more boards watching the match (src/net/watch.h), as the game's watchers do: the host's uploads once a
 // second to a stand-in for the lobby (--watch-ms each way), each watcher asking it for the frames and running them a few
 // seconds behind; the first from the start, the others joining at --watch-late F (catching up from the start, unseen).
@@ -37,6 +39,9 @@
 #include "../src/net/watch.h"
 #include "watch_pace.h"
 #include "../src/rec/ppc_rec.h"
+#include "../src/host/png.h"
+#include "../src/video/tilegen.h"
+#include "../src/video/r3d_raster.h"
 #include <algorithm>
 #include <chrono>
 #include <functional>
@@ -210,7 +215,7 @@ int main(int argc, char **argv)
 	dural_stage::Picker pick_a, pick_b;   // (--dural-stage: each side's own)
 	const m3::Profile *profile = nullptr;
 	const bool slow = getenv("VF3NET_SLOW") != nullptr;   // (each step over 40 ms, the host's)
-	const char *usage = "usage: vf3net <vf3.zip> --script FILE [--frames N] [--latency MS] [--jitter MS] [--loss PERCENT] [--delay D] [--interp] [--soft] [--set vf3tb] [--stage] [--dural] [--dural-stage host|guest|both] [--vs-rounds N] [--hashes FILE] [--blob-out FILE] [--blob-in FILE] [--host-terms] [--guest-stage 0|1] [--guest-dural 0|1] [--team 1v1|3v3] [--terms VERSION]\n";
+	const char *usage = "usage: vf3net <vf3.zip> --script FILE [--frames N] [--latency MS] [--jitter MS] [--loss PERCENT] [--delay D] [--interp] [--soft] [--set vf3tb] [--stage] [--dural] [--dural-stage host|guest|both[:WAY]] [--vs-rounds N] [--hashes FILE] [--blob-out FILE] [--blob-in FILE] [--host-terms] [--guest-stage 0|1] [--guest-dural 0|1] [--team 1v1|3v3] [--terms VERSION]\n";
 	int vs_rounds = 0, watchers = 0;
 	long watch_late = 1500;
 	double watch_ms = 60;
@@ -232,10 +237,11 @@ int main(int argc, char **argv)
 		else if (a == "--guest-stage" && i + 1 < argc) guest_stage = atoi(argv[++i]);
 		else if (a == "--guest-dural" && i + 1 < argc) guest_dural = atoi(argv[++i]);
 		else if (a == "--team" && i + 1 < argc) team = std::string(argv[++i]) == "1v1" ? 1 : 0;
-		else if (a == "--dural-stage" && i + 1 < argc) {
-			const std::string w = argv[++i];
-			pick_a.trigger = w == "host" || w == "both";
-			pick_b.trigger = w == "guest" || w == "both";
+		else if (a == "--dural-stage" && i + 1 < argc) {   // ("host|guest|both", ":N" after it the way, dural_stage::Method: 1 if none)
+			const std::string arg = argv[++i], w = arg.substr(0, arg.find(':'));
+			const int m = arg.find(':') == std::string::npos ? dural_stage::START_BUTTON : dural_stage::method_of(atoi(arg.c_str() + arg.find(':') + 1));
+			pick_a.trigger = w == "host" || w == "both" ? m : 0;
+			pick_b.trigger = w == "guest" || w == "both" ? m : 0;
 		}
 		else if (a == "--vs-rounds" && i + 1 < argc) vs_rounds = atoi(argv[++i]);
 		else if (a == "--hashes" && i + 1 < argc) hashes_path = argv[++i];
@@ -536,10 +542,34 @@ int main(int argc, char **argv)
 		if (const char *w = getenv("VF3NET_WATCH"))   // tests: "addr,addr,..." (hex, the game's RAM addresses)
 			for (const char *q = w; *q;) { char *e; watch.push_back(uint32_t(strtoul(q, &e, 16))); q = *e ? e + 1 : e; }
 		int won[2] = {}, by[2] = {};   // (each versus match as it ends: its rounds)
+		// (VF3NET_SHOTS: the straight run's pictures at VF3NET_SHOT_AT's frames)
+		const char *shots_dir = getenv("VF3NET_SHOTS");
+		std::vector<uint32_t> shot_at;
+		if (const char *sa_ = getenv("VF3NET_SHOT_AT"))
+			for (const char *q = sa_; *q;) { char *e; shot_at.push_back(uint32_t(strtoul(q, &e, 10))); q = *e ? e + 1 : e; }
+		static video::TileGen shot_tiles;
+		static video::SceneBuilder shot_builder;
+		static video::Scene shot_scene;
+		static video::Raster shot_raster;
+		if (shots_dir) {
+			shot_raster.resize(video::W, video::H);
+			C.m.on_line = [&C](unsigned y) { if (y == 0) shot_tiles.clear(); shot_tiles.line(C.m, y); };
+		}
 		for (uint32_t f = 0; f < n; f++) {
 			const uint16_t in[2] = { sa.inputs(0)[f], sa.inputs(1)[f] };
 			if (in[0] != sb.inputs(0)[f] || in[1] != sb.inputs(1)[f]) { printf("the two sides' inputs differ at frame %u\n", f); failed = true; break; }
 			C.adapter.advance(in, false);
+			if (shots_dir && std::find(shot_at.begin(), shot_at.end(), f + 1) != shot_at.end()) {
+				shot_builder.build(C.m, shot_scene);
+				shot_raster.render(shot_scene, C.m.tex_ram.data());
+				static std::vector<uint32_t> below, above, picture(video::W * video::H);
+				shot_tiles.aligned(below, above);
+				for (int i = 0; i < video::W * video::H; i++) picture[i] = (below[i] >> 24) ? below[i] : 0xFF000000u;
+				shot_raster.compose(picture.data(), picture.data());
+				for (int i = 0; i < video::W * video::H; i++) if (above[i] >> 24) picture[i] = above[i];
+				const std::string path = std::string(shots_dir) + "/shot_" + std::to_string(f + 1) + ".png";
+				write_png(path.c_str(), picture.data(), video::W, video::H);
+			}
 			score_c.frame(C.m);
 			if (score_c.matches[0] + score_c.matches[1] != won[0] + won[1]) {
 				printf("a versus match over at frame %u: player %d won it, rounds %d-%d\n", f, score_c.matches[0] != won[0] ? 1 : 2,

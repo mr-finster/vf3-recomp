@@ -250,6 +250,11 @@ T(DURAL_STAGE_WAIT, "Stage di Dural: Start tenuto per te, scelta tra {n} s (nel 
 T(DURAL_STAGE_NONE, "Stage di Dural: la schermata degli stage del cabinato non dà mai la versione Dural di questo stage.")
 T(DURAL_STAGE_NOT_NOW, "Stage di Dural: non stavolta online (il gioco lo permette solo in certi secondi, e per questa scelta non ne resta nessuno).")
 T(DURAL_STAGE_TB_CAVE, "Stage di Dural: la versione VF3 della grotta di Team Battle, che sembra la sua versione Dural (Start tenuto per te).")
+T(C_DURAL_STAGE_START, "Start + un pulsante qualsiasi")
+T(C_DURAL_STAGE_START_GP, "Start + Parata / Pugno")
+T(C_DURAL_STAGE_OFF_HELP, "Nella schermata degli stage (Scelta: Sfidante), come al cabinato: tieni Start e conferma per lo stage di VF3, ogni tanto per fortuna la versione Dural. Scegli un modo per avere la versione Dural ogni volta (anche online, solo i tuoi comandi).")
+T(C_DURAL_STAGE_BUTTON_HELP, "Nella schermata degli stage (Scelta: Sfidante), conferma con {button} per la versione Dural, scelta nel secondo che il gioco permette (fino a 12 s). Start e gli altri pulsanti restano come al cabinato (Start e conferma: lo stage di VF3). Anche online (solo i tuoi comandi), ma non sempre.")
+T(C_DURAL_STAGE_GP_HELP, "Nella schermata degli stage (Scelta: Sfidante), un pulsante da solo dà lo stage. Tieni Start e premi Parata: la versione Dural, scelta nel secondo che il gioco permette (fino a 12 s); Start e Pugno: lo stage di VF3, ogni volta. Start con Calcio o Schivata, o finché il tempo scade, resta come al cabinato. Anche online (solo i tuoi comandi).")
 
 // ---- Controls ----
 T(CTL_UP, "Su")

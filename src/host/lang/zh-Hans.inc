@@ -250,6 +250,11 @@ T(DURAL_STAGE_WAIT, "Dural 的场地：已替你按住开始键，{n} 秒后选�
 T(DURAL_STAGE_NONE, "Dural 的场地：街机的场地画面从不给出这个场地的 Dural 版本。")
 T(DURAL_STAGE_NOT_NOW, "Dural 的场地：这次联机不行（游戏只在特定的秒允许，这次选择已经没有了）。")
 T(DURAL_STAGE_TB_CAVE, "Dural 的场地：Team Battle 中这个场地为 VF3 版本（画面与 Dural 版本相同），已替你按住开始键。")
+T(C_DURAL_STAGE_START, "开始键 + 任一按钮")
+T(C_DURAL_STAGE_START_GP, "开始键 + 防御 / 拳")
+T(C_DURAL_STAGE_OFF_HELP, "场地画面（场地选择：乱入方）与街机相同：按住开始键再确认为 VF3 版本，有时为 Dural 版本。选择一种方式，每次都能得到 Dural 版本（联机也可用，仅你的输入）。")
+T(C_DURAL_STAGE_BUTTON_HELP, "在场地画面（场地选择：乱入方）用{button}确认即为 Dural 版本，在游戏允许的那一秒选定（最多 12 秒）。开始键和其他按钮与街机相同（按住开始键再确认为 VF3 版本）。联机也可用（仅你的输入），但有时无法。")
+T(C_DURAL_STAGE_GP_HELP, "在场地画面（场地选择：乱入方）只按按钮为普通场地。按住开始键再按防御为 Dural 版本，在游戏允许的那一秒选定（最多 12 秒）；按住开始键再按拳每次都为 VF3 版本。开始键加脚、闪避或直到时间结束与街机相同。联机也可用（仅你的输入）。")
 
 // ---- Controls ----
 T(CTL_UP, "上")

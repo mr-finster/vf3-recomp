@@ -250,6 +250,11 @@ T(DURAL_STAGE_WAIT, "Arena Dural: Start trzymany za ciebie, wybór za {n} s (w s
 T(DURAL_STAGE_NONE, "Arena Dural: ekran aren automatu nigdy nie daje wersji Dural tej areny.")
 T(DURAL_STAGE_NOT_NOW, "Arena Dural: tym razem nie online (gra pozwala tylko w określonych sekundach, a na ten wybór żadna nie została).")
 T(DURAL_STAGE_TB_CAVE, "Arena Dural: wersja VF3 jaskini z Team Battle, wygląda jak jej wersja Dural (Start trzymany za ciebie).")
+T(C_DURAL_STAGE_START, "Start + dowolny przycisk")
+T(C_DURAL_STAGE_START_GP, "Start + Blok / Cios")
+T(C_DURAL_STAGE_OFF_HELP, "Na ekranie aren (Wybór areny: Challenger) jak na automacie: trzymaj Start i zatwierdź, by dostać arenę z VF3, czasem przy odrobinie szczęścia wersję Dural. Wybierz sposób na wersję Dural za każdym razem (online też, tylko twoje wejścia).")
+T(C_DURAL_STAGE_BUTTON_HELP, "Na ekranie aren (Wybór areny: Challenger) zatwierdź przyciskiem {button}: wersja Dural, wybrana w sekundzie, na którą gra pozwala (do 12 s). Start i inne przyciski działają jak na automacie (Start i zatwierdzenie: arena z VF3). Online też (tylko twoje wejścia), choć nie zawsze.")
+T(C_DURAL_STAGE_GP_HELP, "Na ekranie aren (Wybór areny: Challenger) sam przycisk daje arenę. Trzymaj Start i naciśnij Blok: wersja Dural, wybrana w sekundzie, na którą gra pozwala (do 12 s); Start i Cios: arena z VF3, za każdym razem. Start z Kopnięciem lub Unikiem albo do końca czasu działa jak na automacie. Online też (tylko twoje wejścia).")
 
 // ---- Controls ----
 T(CTL_UP, "Góra")

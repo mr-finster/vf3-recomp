@@ -1,6 +1,6 @@
 // Cheats > Dural's stage (issue #22): on the stage screen between two players (Arcade settings > Stage select:
-// Challenger; online, Online > Settings > Stage select), the picking player confirms a stage with Guard and the match
-// is on that stage's Dural version. Done through that player's inputs only, so online it's what the other side plays
+// Challenger; online, Online > Settings > Stage select), the picking player confirms a stage the way chosen (below)
+// and the match is on that stage's Dural version. Done through that player's inputs only, so online it's what the other side plays
 // too (the input word is what netplay sends) and the other player needs no cheat.
 //
 // The game's own rule (the stage screen's routine, Revision D 0x2E220, Team Battle 0x32698; the same RAM in both,
@@ -24,21 +24,34 @@
 // +16 and +32 versions (20 and 36 the same picture, 21 and 37 too). So the cave's Dural look in Team Battle is its VF3
 // version, which Start held gives whatever the byte: the cheat holds Start and picks at once there (online too).
 //
-// With the cheat on (issue #50, as the issue asked: Team Battle's own way, Start held, made to work every time), the
-// picker holding Start and pressing Punch, Kick, Guard or Escape (seen new) asks for the Dural version: Start is held
-// for them from then till the screen ends, the rest of their stick and buttons held back, and Guard pressed for them in
-// the middle of that second (now, or up to about 12 s later: the toast says). Offline, a pick no second can make
-// Dural's has the byte set so the second now does (a write to the game's RAM: never online, where both sides must
-// play the same game; there the press then does what the game does, and the toast says why). Start held till the
-// timer runs out asks for the stage as VF3 had it (Team Battle's +32, Revision D's plain one): where the timer's end
-// would make it Dural's (the byte a multiple of 17 already, as at power-on), Guard is pressed for them in the middle of
-// the last second but one, which can't. A button without Start is the game's own: the plain stage (before, Guard alone
-// was the cheat's, and players who confirm with Guard out of habit got Dural's stage by accident). Which stage is
-// picked is the one the game will see when the press reaches it: the stick's presses still on their way (online, the
-// input delay's) moved first. Aoi's river (both programs) and Revision D's cave it leaves to the game (Start and the
-// button go through: Team Battle's VF3 version, Revision D's plain one), and the toast says the stage screen never
-// gives their Dural version (issue #36). All of it is this player's input word only: online the other side gets the
-// words and needs no rule of its own, whichever version it runs.
+// The cheat's ways (Cheats > Dural's stage; settings.ini's cheat_dural_stage, issues #22, #36, #50; reno: every way
+// asked for an option), each only the picker's own input word, so online the other side gets the words and needs no
+// rule of its own, whichever version it runs:
+// - Off (0): the arcade's own.
+// - Start + button (1; v0.1.22's, issue #50 as asked: Team Battle's own way, Start held, made to work every time): the
+//   picker holding Start and pressing Punch, Kick, Guard or Escape (seen new) asks for the Dural version. Start held
+//   till the timer runs out asks for the stage as VF3 had it (Team Battle's +32, Revision D's plain one): where the
+//   timer's end would make it Dural's (the byte a multiple of 17 already, as at power-on), Guard is pressed for them in
+//   the middle of the last second but one, which can't. A button without Start is the game's own: the plain stage.
+// - A button (3 Guard, 4 Punch, 5 Kick, 6 Escape; v0.1.16-v0.1.21's Guard, the button chosen as ac-gamers asked in
+//   #50): that button pressed (Start held or not) asks for the Dural version. The other buttons and Start held till the
+//   timer's end are the game's own (Start and one of them: Team Battle's VF3 version, or Dural's by the arcade's luck).
+// - Start + Guard / Punch (7; matrix199x's in #36): a button alone the game's own (the plain stage); Start held and
+//   Guard asks for the Dural version; Start held and Punch for the VF3 version every time: the press held back (Start
+//   held for them, the rest of their stick and buttons too) till a second of the timer that can't make it Dural's (the
+//   arcade's luck taken out; at most about a second); Start with Kick or Escape, or held till the timer's end, the
+//   game's own. (The stages the screen never offers, the 1 vs 1 opening's daytime Great Wall among them, are no use
+//   for Kick or Escape: that one is the Great Wall's VF3 version, 44 (OBANRI), which Start and Punch give; the rest,
+//   TEST0, SUBWAY2 and TEST1 (0, 3, 10, and their +16, +32), only a write to the game's RAM can give, never inputs.)
+// Asked for the Dural version: Start is held for them from then till the screen ends, the rest of their stick and
+// buttons held back, and Guard pressed for them in the middle of that second (now, or up to about 12 s later: the
+// toast says). Offline, a pick no second can make Dural's has the byte set so the second now does (a write to the
+// game's RAM: never online, where both sides must play the same game; there the press then does what the game does,
+// and the toast says why). Which stage is picked is the one the game will see when the press reaches it: the stick's
+// presses still on their way (online, the input delay's) moved first. Aoi's river (both programs) and Revision D's
+// cave it leaves to the game (the press goes through: with Start, Team Battle's VF3 version, Revision D's plain one),
+// and the toast says the stage screen never gives their Dural version (issue #36); Team Battle's cave gets its VF3
+// version, its Dural look, at once.
 #pragma once
 #include "../machine/model3.h"
 #include <algorithm>
@@ -54,6 +67,22 @@ constexpr uint8_t STAGES[2][7] = { { 14, 9, 12, 4, 1, 5 }, { 2, 7, 11, 8, 6, 15,
 constexpr int CAVE = 4, AOIS = 6;
 // The input word's bits (vf3net::pack's)
 enum : uint16_t { PUNCH = 16, KICK = 32, GUARD = 64, ESCAPE = 128, START = 256, COIN = 512 };
+constexpr uint16_t BUTTONS = PUNCH | KICK | GUARD | ESCAPE;
+
+// The cheat's ways (settings.ini's numbers; 2, v0.1.15's Start, is read as 1)
+enum Method { OFF = 0, START_BUTTON = 1, BUTTON_GUARD = 3, BUTTON_PUNCH = 4, BUTTON_KICK = 5, BUTTON_ESCAPE = 6, START_GUARD_PUNCH = 7 };
+constexpr int METHODS[] = { OFF, START_BUTTON, BUTTON_GUARD, BUTTON_PUNCH, BUTTON_KICK, BUTTON_ESCAPE, START_GUARD_PUNCH };   // (the menu's order)
+inline int method_of(int v)
+{
+	if (v == 2) return START_BUTTON;
+	for (int m : METHODS) if (m == v) return v;
+	return OFF;
+}
+// A button way's button (none for the others)
+inline uint16_t method_button(int m)
+{
+	return m == BUTTON_GUARD ? GUARD : m == BUTTON_PUNCH ? PUNCH : m == BUTTON_KICK ? KICK : m == BUTTON_ESCAPE ? ESCAPE : 0;
+}
 
 // A player's switches as that word, and back (test and service untouched)
 inline uint16_t word(const m3::Controls &c, int p)
@@ -69,7 +98,7 @@ inline void set(m3::Controls &c, int p, uint16_t b)
 
 struct Picker
 {
-	int trigger = 0;   // 0 off, else on: Start held and a button pressed (issue #50; it was Guard alone, before that Start)
+	int trigger = 0;   // the way (Method; 0 off)
 	enum Said { nothing, waiting, no_version, not_this_time, vf3_version };
 
 	// The input word the game gets for player p (0, 1) this frame, from the player's own: `lead` frames before it
@@ -88,50 +117,68 @@ private:
 	{
 		said = nothing;
 		wait_s = 0;
-		constexpr uint16_t BUTTONS = PUNCH | KICK | GUARD | ESCAPE;
-		const bool fresh = (bits & START) && (bits & BUTTONS & ~was[p]);   // (Start held, a button pressed now)
+		const int method = method_of(trigger);
+		const uint16_t pressed = bits & BUTTONS & ~was[p];   // (the buttons pressed now)
 		was[p] = bits & BUTTONS;
 		auto byte = [&](uint32_t a) { return board.ram.size() > a ? board.ram[a ^ 3] : 0; };
-		const bool screen = trigger && board.profile->mode == MODE && byte(MODE) == 5 && (byte(SCREEN) == 19 || byte(SCREEN) == 20) &&
+		const bool screen = method && board.profile->mode == MODE && byte(MODE) == 5 && (byte(SCREEN) == 19 || byte(SCREEN) == 20) &&
 		                    (byte(PICKER) == 1) == (p == 1);   // (1 player 2, else player 1: the routine's test)
-		if (!screen) { armed[p] = now[p] = false; return bits; }
+		if (!screen) { armed[p] = now[p] = vf3[p] = false; return bits; }
 		if (byte(PICKED) != 0xFF) return armed[p] ? uint16_t(START) : bits;   // (picked: Start held till the screen ends)
 		const int timer = (byte(TIMER) << 24 | byte(TIMER + 1) << 16 | byte(TIMER + 2) << 8 | byte(TIMER + 3)) - lead;
 		auto second = [&] { return (17 - byte(COUNTER) % 17) % 17; };   // (the timer's second that makes it Dural's)
+		const bool start_held = byte(HELD + 3) & (0x10 << p);   // (the game has the picker's Start held)
 		if (!armed[p]) {
-			if (!fresh) {
-				// (Start held alone, the timer's end would make it Dural's: picked in the last second but one instead, or
-				// the one before it if the byte, 255, would wrap to 0 there)
+			// What this press asks for, by the way chosen
+			const bool start = bits & START;
+			const bool dural = method == START_BUTTON ? start && pressed : method == START_GUARD_PUNCH ? start && (pressed & GUARD) : (pressed & method_button(method)) != 0;
+			const bool vf3_asked = !dural && method == START_GUARD_PUNCH && start && (pressed & PUNCH);
+			if (!dural && !vf3_asked) {
+				// (Start + button's: Start held alone, the timer's end would make it Dural's: picked in the last second
+				// but one instead, or the one before it if the byte, 255, would wrap to 0 there)
 				const int s = (byte(COUNTER) + 1) % 256 % 17 ? 1 : 2;
-				if ((bits & START) && !(bits & BUTTONS) && !second() && byte(SCREEN) == 20 && timer > s * 64 && timer <= s * 64 + 32 &&
-				    (byte(HELD + 3) & (0x10 << p))) {
+				if (method == START_BUTTON && start && !(bits & BUTTONS) && !second() && byte(SCREEN) == 20 && timer > s * 64 && timer <= s * 64 + 32 &&
+				    start_held) {
 					const int c = picked(board, p, bits, lead);
 					if (c != CAVE && c != AOIS) return uint16_t(bits | GUARD);
 				}
 				return bits;
 			}
 			const int c = picked(board, p, bits, lead);
-			if (c == CAVE && board.profile == &m3::VF3_TB) {   // (its VF3 version: Start held is enough)
-				armed[p] = now[p] = true;
-				said = vf3_version;
-				return START;
+			if (vf3_asked) {   // (Start and Punch: the VF3 version, the press kept from the second that would be Dural's)
+				armed[p] = vf3[p] = true;
+				any_second[p] = c == CAVE || c == AOIS;   // (never Dural's: any second will do)
+			} else {
+				if (c == CAVE && board.profile == &m3::VF3_TB) {   // (its VF3 version: Start held is enough)
+					armed[p] = now[p] = true;
+					said = vf3_version;
+					return START;
+				}
+				if (c == CAVE || c == AOIS) { said = no_version; return bits; }
+				if (second() && timer - 6 < second() * 64) {   // (that second's past, or none is: 11-16; the last, 0, the timer's end makes too)
+					if (!may_write) { said = not_this_time; return bits; }
+					const int s = timer >= 72 ? (timer - 8) >> 6 : 0;   // (a second the timer's in for a while yet)
+					int n = byte(COUNTER) + (17 - (byte(COUNTER) + s) % 17) % 17;
+					if (n > 255) n -= 17;
+					board.ram[COUNTER ^ 3] = uint8_t(n);
+				}
+				armed[p] = true;
+				said = waiting;
+				wait_s = std::max(0, timer - (second() * 64 + 32)) / 58;
 			}
-			if (c == CAVE || c == AOIS) { said = no_version; return bits; }
-			if (second() && timer - 6 < second() * 64) {   // (that second's past, or none is: 11-16; the last, 0, the timer's end makes too)
-				if (!may_write) { said = not_this_time; return bits; }
-				const int s = timer >= 72 ? (timer - 8) >> 6 : 0;   // (a second the timer's in for a while yet)
-				int n = byte(COUNTER) + (17 - (byte(COUNTER) + s) % 17) % 17;
-				if (n > 255) n -= 17;
-				board.ram[COUNTER ^ 3] = uint8_t(n);
-			}
-			armed[p] = true;
-			said = waiting;
-			wait_s = std::max(0, timer - (second() * 64 + 32)) / 58;
+		}
+		uint16_t out = START;
+		if (byte(SCREEN) != 20 || !start_held) return out;
+		if (vf3[p]) {
+			// Start held, and once the game has it, Punch pressed well inside a second that isn't the Dural one (the
+			// last second, 0, if it is: none after it can be other, the timer's end the same)
+			const int s = timer >> 6, in = timer & 63;
+			if (any_second[p] || timer < 64 || (s != second() && in >= 4 && in <= 59)) out |= PUNCH;
+			return out;
 		}
 		// Start held, and once the game has it, Guard pressed in the middle of the second (or as near it as it gets)
 		// (Team Battle's cave: at once)
-		uint16_t out = START;
-		if (byte(SCREEN) == 20 && (now[p] || timer <= second() * 64 + 32) && (byte(HELD + 3) & (0x10 << p))) out |= GUARD;
+		if (now[p] || timer <= second() * 64 + 32) out |= GUARD;
 		return out;
 	}
 
@@ -163,6 +210,7 @@ private:
 	uint16_t sent[2][HISTORY] = {};   // (each player's last words, as sent: at[p] the next's place)
 	int at[2] = {};
 	bool armed[2] = {}, now[2] = {};
+	bool vf3[2] = {}, any_second[2] = {};   // (Start and Punch's VF3 version asked; the stage never Dural's)
 	uint16_t was[2] = {};   // (each player's buttons last frame)
 };
 

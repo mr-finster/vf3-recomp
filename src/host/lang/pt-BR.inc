@@ -250,6 +250,11 @@ T(DURAL_STAGE_WAIT, "Cenário da Dural: Start segurado por você, escolha em {n}
 T(DURAL_STAGE_NONE, "Cenário da Dural: a tela de cenários do fliperama nunca dá a versão Dural deste cenário.")
 T(DURAL_STAGE_NOT_NOW, "Cenário da Dural: não desta vez online (o jogo só permite em certos segundos, e não sobrou nenhum para esta escolha).")
 T(DURAL_STAGE_TB_CAVE, "Cenário da Dural: a versão VF3 da caverna do Team Battle, que parece a versão Dural (Start segurado por você).")
+T(C_DURAL_STAGE_START, "Start + qualquer botão")
+T(C_DURAL_STAGE_START_GP, "Start + Defesa / Soco")
+T(C_DURAL_STAGE_OFF_HELP, "Na tela de cenários (Seleção: Desafiante), como no fliperama: segure Start e confirme para o cenário do VF3, e às vezes, por sorte, a versão Dural. Escolha um jeito de ter a versão Dural sempre (online também, só seus comandos).")
+T(C_DURAL_STAGE_BUTTON_HELP, "Na tela de cenários (Seleção: Desafiante), confirme com {button} para a versão Dural, escolhida no segundo que o jogo permite (até 12 s). Start e os outros botões continuam como no fliperama (Start e confirmar: o cenário do VF3). Online também (só seus comandos), mas nem sempre.")
+T(C_DURAL_STAGE_GP_HELP, "Na tela de cenários (Seleção: Desafiante), um botão sozinho dá o cenário. Segure Start e aperte Defesa: a versão Dural, escolhida no segundo que o jogo permite (até 12 s); Start e Soco: o cenário do VF3, sempre. Start com Chute ou Esquiva, ou até o tempo acabar, continua como no fliperama. Online também (só seus comandos).")
 
 // ---- Controls ----
 T(CTL_UP, "Cima")

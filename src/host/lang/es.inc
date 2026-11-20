@@ -250,6 +250,11 @@ T(DURAL_STAGE_WAIT, "Escenario de Dural: Start mantenido por ti, se elige en {n}
 T(DURAL_STAGE_NONE, "Escenario de Dural: la pantalla de escenarios de la recreativa nunca da la versión Dural de este escenario.")
 T(DURAL_STAGE_NOT_NOW, "Escenario de Dural: esta vez no online (el juego solo lo permite en ciertos segundos y no queda ninguno para esta elección).")
 T(DURAL_STAGE_TB_CAVE, "Escenario de Dural: la versión VF3 de la cueva de Team Battle, que se ve como su versión Dural (Start mantenido por ti).")
+T(C_DURAL_STAGE_START, "Start + cualquier botón")
+T(C_DURAL_STAGE_START_GP, "Start + Defensa / Puñetazo")
+T(C_DURAL_STAGE_OFF_HELP, "En la pantalla de escenarios (Selección: Retador), lo de la recreativa: mantén Start y confirma para el escenario de VF3, y a veces, por suerte, la versión Dural. Elige una forma de tener la versión Dural siempre (también online, solo tus controles).")
+T(C_DURAL_STAGE_BUTTON_HELP, "En la pantalla de escenarios (Selección: Retador), confirma con {button} para la versión Dural, elegida en el segundo que el juego permite (hasta 12 s). Start y los demás botones siguen como en la recreativa (Start y confirmar: el escenario de VF3). También online (solo tus controles), aunque no siempre.")
+T(C_DURAL_STAGE_GP_HELP, "En la pantalla de escenarios (Selección: Retador), un botón solo da el escenario. Mantén Start y pulsa Defensa: la versión Dural, elegida en el segundo que el juego permite (hasta 12 s); Start y Puñetazo: el escenario de VF3, siempre. Start con Patada o Esquivar, o hasta que acabe el tiempo, sigue como en la recreativa. También online (solo tus controles).")
 
 // ---- Controls ----
 T(CTL_UP, "Arriba")

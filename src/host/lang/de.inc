@@ -250,6 +250,11 @@ T(DURAL_STAGE_WAIT, "Durals Stage: Start für dich gehalten, Wahl in {n}\xC2\xA0
 T(DURAL_STAGE_NONE, "Durals Stage: der Stage-Bildschirm des Automaten gibt nie die Dural-Version dieser Stage.")
 T(DURAL_STAGE_NOT_NOW, "Durals Stage: online diesmal nicht (das Spiel erlaubt es nur zu bestimmten Sekunden, und für diese Wahl ist keine übrig).")
 T(DURAL_STAGE_TB_CAVE, "Durals Stage: die VF3-Version der Höhle aus Team Battle, die wie ihre Dural-Version aussieht (Start für dich gehalten).")
+T(C_DURAL_STAGE_START, "Start + beliebiger Knopf")
+T(C_DURAL_STAGE_START_GP, "Start + Block / Schlag")
+T(C_DURAL_STAGE_OFF_HELP, "Auf dem Stage-Bildschirm (Stage-Wahl: Challenger) wie am Automaten: Start halten und bestätigen gibt die Stage aus VF3, ab und zu mit Glück die Dural-Version. Wähle einen Weg zur Dural-Version, jedes Mal (auch online, nur deine Eingaben).")
+T(C_DURAL_STAGE_BUTTON_HELP, "Auf dem Stage-Bildschirm (Stage-Wahl: Challenger) mit {button} bestätigen: die Dural-Version, gewählt, sobald das Spiel es erlaubt (bis 12\xC2\xA0s). Start und die anderen Knöpfe bleiben wie am Automaten (Start halten und bestätigen: die Stage aus VF3). Auch online (nur deine Eingaben), dort nicht immer.")
+T(C_DURAL_STAGE_GP_HELP, "Auf dem Stage-Bildschirm (Stage-Wahl: Challenger) gibt ein Knopf allein die Stage. Start halten und Block: die Dural-Version, gewählt, sobald das Spiel es erlaubt (bis 12\xC2\xA0s); Start und Schlag: die Stage aus VF3, jedes Mal. Start mit Tritt oder Ausweichen oder bis zum Zeitende bleibt wie am Automaten. Auch online (nur deine Eingaben).")
 
 // ---- Controls ----
 T(CTL_UP, "Oben")

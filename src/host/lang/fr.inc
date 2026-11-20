@@ -250,6 +250,11 @@ T(DURAL_STAGE_WAIT, "Stage de Dural\xC2\xA0: Start maintenu pour toi, choix dans
 T(DURAL_STAGE_NONE, "Stage de Dural\xC2\xA0: l'écran des stages de la borne ne donne jamais la version Dural de ce stage.")
 T(DURAL_STAGE_NOT_NOW, "Stage de Dural\xC2\xA0: pas cette fois en ligne (le jeu ne le permet qu'à certaines secondes, et il n'en reste aucune pour ce choix).")
 T(DURAL_STAGE_TB_CAVE, "Stage de Dural\xC2\xA0: la version VF3 de la grotte de Team Battle, qui ressemble à sa version Dural (Start maintenu pour toi).")
+T(C_DURAL_STAGE_START, "Start + n'importe quel bouton")
+T(C_DURAL_STAGE_START_GP, "Start + Garde / Poing")
+T(C_DURAL_STAGE_OFF_HELP, "Sur l'écran des stages (Choix du stage\xC2\xA0: Challenger), comme sur la borne\xC2\xA0: maintiens Start et valide pour le stage de VF3, de temps en temps la version Dural par chance. Choisis une façon d'avoir la version Dural à chaque fois (en ligne aussi, tes commandes seulement).")
+T(C_DURAL_STAGE_BUTTON_HELP, "Sur l'écran des stages (Choix du stage\xC2\xA0: Challenger), valide avec {button} pour la version Dural, choisie à la seconde que le jeu permet (jusqu'à 12\xC2\xA0s). Start et les autres boutons restent ceux de la borne (Start et valider\xC2\xA0: le stage de VF3). En ligne aussi (tes commandes seulement), mais pas toujours.")
+T(C_DURAL_STAGE_GP_HELP, "Sur l'écran des stages (Choix du stage\xC2\xA0: Challenger), un bouton seul donne le stage. Maintiens Start et appuie sur Garde\xC2\xA0: la version Dural, choisie à la seconde que le jeu permet (jusqu'à 12\xC2\xA0s)\xC2\xA0; Start et Poing\xC2\xA0: le stage de VF3, à chaque fois. Start avec Pied ou Esquive, ou jusqu'à la fin du temps, reste comme sur la borne. En ligne aussi (tes commandes seulement).")
 
 // ---- Controls ----
 T(CTL_UP, "Haut")

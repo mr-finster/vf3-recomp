@@ -695,7 +695,7 @@ struct settings
 	int arcade_coin = -2;   // the arcade way's coin setting, while the PC way's FREE PLAY replaces it (-1 none to give back, -2 none kept yet)
 	std::string roms_folder;
 	int dural = 0;      // Dural on the select (a cheat): 0 off, else on (1-3, from when it was per player)
-	int dural_stage = 0;   // Dural's stage (a cheat, issue #22): 1 on (Start held and a button: issue #50; it was Guard, before that Start), 0 off
+	int dural_stage = 0;   // Dural's stage (a cheat, issues #22, #36, #50): the way, dural_stage::Method (0 off; 1 Start + any button, v0.1.22's On)
 	bool random_order = false;   // Revision D's CPU opponents in a random order (issue #30; offline only)
 	bool debug_mode = false;     // Arcade settings > Debug mode, the arcade's own (Model3::debug_mode; offline only, issue #37)
 	std::string language = "auto";   // Game > Language: auto (the system's), or a language's code (tr::choice_key)
@@ -778,8 +778,8 @@ struct settings
 		if (auto it = kv.find("roms_folder"); it != kv.end()) roms_folder = it->second;
 		if (auto it = kv.find("game"); it != kv.end() && m3::find_profile(it->second.c_str())) game = it->second;
 		num("cheat_dural", dural, 0, 3);
-		num("cheat_dural_stage", dural_stage, 0, 2);
-		if (dural_stage == 2) dural_stage = 1;   // (Start as the trigger took the game's own Start + button away: issue #36; Guard now)
+		num("cheat_dural_stage", dural_stage, 0, 7);
+		dural_stage = dural_stage::method_of(dural_stage);   // (2, v0.1.15's Start, is 1: Start + any button)
 		flag("arcade_random_order", random_order);
 		flag("cheat_debug_mode", debug_mode);
 		if (auto it = kv.find("online_name"); it != kv.end()) online.name = online_menu::clean_name(it->second);
@@ -3874,6 +3874,7 @@ int main(int argc, char **argv)
 	bool online_ready = false;   // (the identity for the handshake made: again after a cheat changes it)
 	// Cheats (the main page's): Dural on the select (issue #12). With it on, the online version is the build's with "+dural":
 	// such matches meet only each other (both sides then play her patches), and everyone else is unaffected
+	std::function<menu_page()> cheats_page_again;   // (the page made again by its own rows)
 	auto cheats_page = [&] {
 		menu_page p{ tr::P_CHEATS, "", {} };
 		p.items.push_back({ tr::C_DURAL, tr::C_DURAL_HELP,
@@ -3885,13 +3886,33 @@ int main(int argc, char **argv)
 				online_ready = false;   // (the online version with it, or without)
 				reset_game();
 			} });
-		// (inputs only, src/host/dural_stage.h: online it's what the other side plays too, so no version of its own)
-		p.items.push_back({ tr::C_DURAL_STAGE, tr::C_DURAL_STAGE_HELP,
-			[&] { return std::string(cfg.dural_stage ? tr::ON : tr::OFF); },
-			[&](int) { cfg.dural_stage = cfg.dural_stage ? 0 : 1; cfg_dirty = true; } });
+		// (inputs only, src/host/dural_stage.h: online it's what the other side plays too, so no version of its own). Its
+		// ways (issues #22, #36, #50; reno: every way asked for an option), the help the way's own: the page made again
+		const int ds = dural_stage::method_of(cfg.dural_stage);
+		const uint16_t ds_button = dural_stage::method_button(ds);
+		auto button_name = [](uint16_t b) -> std::string {
+			return b == dural_stage::GUARD ? tr::CTL_GUARD : b == dural_stage::PUNCH ? tr::CTL_PUNCH : b == dural_stage::KICK ? tr::CTL_KICK : tr::CTL_ESCAPE;
+		};
+		p.items.push_back({ tr::C_DURAL_STAGE,
+			ds == dural_stage::OFF ? std::string(tr::C_DURAL_STAGE_OFF_HELP) : ds == dural_stage::START_BUTTON ? std::string(tr::C_DURAL_STAGE_HELP) :
+			ds == dural_stage::START_GUARD_PUNCH ? std::string(tr::C_DURAL_STAGE_GP_HELP) : tr::fill(tr::C_DURAL_STAGE_BUTTON_HELP, { { "button", button_name(ds_button) } }),
+			[&, button_name] {
+				const int m = dural_stage::method_of(cfg.dural_stage);
+				return m == dural_stage::OFF ? std::string(tr::OFF) : m == dural_stage::START_BUTTON ? std::string(tr::C_DURAL_STAGE_START) :
+				       m == dural_stage::START_GUARD_PUNCH ? std::string(tr::C_DURAL_STAGE_START_GP) : button_name(dural_stage::method_button(m));
+			},
+			[&](int d) {
+				constexpr int n = int(std::size(dural_stage::METHODS));
+				int i = 0;
+				while (i < n && dural_stage::METHODS[i] != dural_stage::method_of(cfg.dural_stage)) i++;
+				cfg.dural_stage = dural_stage::METHODS[((i % n) + (d < 0 ? n - 1 : 1)) % n];
+				cfg_dirty = true;
+				menu.replace(cheats_page_again(), 1);   // (its help, the way's)
+			} });
 		p.items.push_back(back_item());
 		return p;
 	};
+	cheats_page_again = cheats_page;
 	// Game > Team Battle mode: online it's part of the version (1 vs 1 "+1v1"; 3 vs 3 the plain one, as v0.1.12's, which
 	// starts 3 vs 3), so Random meets only the same mode and a room tells the other apart; not in an online match
 	// The game's own byte (the profile's team_mode) kept as the player chose: written at once (a host's start blob,

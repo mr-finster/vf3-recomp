@@ -251,6 +251,11 @@ T(DURAL_STAGE_WAIT, "Dural'ın sahnesi: Start senin için basılı, {n} sn için
 T(DURAL_STAGE_NONE, "Dural'ın sahnesi: salon makinesinin sahne ekranı bu sahnenin Dural sürümünü hiç vermez.")
 T(DURAL_STAGE_NOT_NOW, "Dural'ın sahnesi: çevrimiçide bu sefer olmaz (oyun buna yalnızca belli saniyelerde izin verir ve bu seçim için hiç kalmadı).")
 T(DURAL_STAGE_TB_CAVE, "Dural'ın sahnesi: mağaranın Team Battle'daki VF3 sürümü, Dural sürümü gibi görünür (Start senin için basılı).")
+T(C_DURAL_STAGE_START, "Start + herhangi bir düğme")
+T(C_DURAL_STAGE_START_GP, "Start + Guard / Punch")
+T(C_DURAL_STAGE_OFF_HELP, "Sahne ekranında (Sahne seçimi: Challenger) salon makinesindeki gibi: Start'ı tutup onaylarsan VF3'ün sahnesi, ara sıra şansla Dural sürümü. Dural sürümünü her seferinde almak için bir yol seç (çevrimiçide de, yalnızca senin girişlerin).")
+T(C_DURAL_STAGE_BUTTON_HELP, "Sahne ekranında (Sahne seçimi: Challenger) {button} ile onayla: Dural sürümü, oyunun izin verdiği saniyede seçilir (en fazla 12 sn). Start ve diğer düğmeler salon makinesindeki gibi kalır (Start'ı tutup onayla: VF3'ün sahnesi). Çevrimiçide de (yalnızca senin girişlerin), ama her zaman değil.")
+T(C_DURAL_STAGE_GP_HELP, "Sahne ekranında (Sahne seçimi: Challenger) tek başına bir düğme sahneyi verir. Start'ı tutup Guard'a bas: Dural sürümü, oyunun izin verdiği saniyede seçilir (en fazla 12 sn); Start ve Punch: VF3'ün sahnesi, her seferinde. Start ile Kick veya Kaçış ya da süre bitene kadar Start salon makinesindeki gibi kalır. Çevrimiçide de (yalnızca senin girişlerin).")
 
 // ---- Controls ----
 T(CTL_UP, "Yukarı")

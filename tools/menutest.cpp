@@ -329,7 +329,11 @@ void pages(game_menu &gm, int w, int h)
 		{ A_DIFFICULTY, A_DIFFICULTY_HELP, A_EASY }, { A_DIFFICULTY, A_DIFFICULTY_HELP, A_NORMAL }, { A_DIFFICULTY, A_DIFFICULTY_HELP, A_HARD },
 		{ A_STAGE_SELECT, A_STAGE_SELECT_HELP, A_VARIABLE }, { A_STAGE_SELECT, A_STAGE_SELECT_HELP, A_FULL }, { A_CPU_ORDER, A_CPU_ORDER_HELP, A_RANDOM },
 		{ A_COUNTRY, A_COUNTRY_HELP, A_JAPAN }, { A_COUNTRY, A_COUNTRY_HELP, A_USA }, { A_COUNTRY, A_COUNTRY_HELP, A_ASIA } });
-	page_shots(gm, w, h, "pages_cheats.png", P_CHEATS, { { C_DURAL, C_DURAL_HELP, on }, { C_DURAL_STAGE, C_DURAL_STAGE_HELP, CTL_GUARD } });
+	page_shots(gm, w, h, "pages_cheats.png", P_CHEATS, { { C_DURAL, C_DURAL_HELP, on }, { C_DURAL_STAGE, C_DURAL_STAGE_HELP, C_DURAL_STAGE_START } });
+	page_shots(gm, w, h, "pages_cheats_ways.png", P_CHEATS, {   // (Dural's stage: each way's value and help)
+		{ C_DURAL_STAGE, C_DURAL_STAGE_OFF_HELP, off }, { C_DURAL_STAGE, F(C_DURAL_STAGE_BUTTON_HELP, { { "button", std::string(CTL_GUARD) } }), CTL_GUARD },
+		{ C_DURAL_STAGE, F(C_DURAL_STAGE_BUTTON_HELP, { { "button", std::string(CTL_ESCAPE) } }), CTL_ESCAPE },
+		{ C_DURAL_STAGE, C_DURAL_STAGE_GP_HELP, C_DURAL_STAGE_START_GP } });
 	page_shots(gm, w, h, "pages_controls.png", P_CONTROLS, {
 		{ P_PLAYER_1, CTL_P1_HELP, F(CTL_ANY_PAD, { { "pad", "Xbox Series X Controller" } }) }, { P_PLAYER_2, CTL_P2_HELP, CTL_ANY_PAD_NONE },
 		{ CTL_SWAP, CTL_SWAP_HELP, "" } });
