@@ -47,6 +47,9 @@ struct RoomMember
 	};
 	std::string room_name;
 	bool listed = false, locked = false, owner = false;
+	// (the room's rules, the creator's, as the lobby has them: none for a room an older build made, each game its own settings then)
+	bool has_rules = false, rule_side = false, rule_dural = false, rule_custom = false, rule_stage = true;
+	int rule_max = 0;
 	int ready_ms = 15000;
 	Who a, b;                       // (the table: side a is the session's host)
 	bool has_a = false, has_b = false;
@@ -79,6 +82,7 @@ struct RoomMember
 	std::string epoch_pair;
 	double watch_started_at = -1e18, applied_at = -1e18;   // (a watched match's start; the last state's applying)
 	std::string side;               // ("a" or "b" at the table)
+	std::string stayer;             // (this seat's one who stays, "a" or "b": the streak's holder against a challenger; "" a cold pair)
 	bool seated = false;            // (a seat: an opponent, a token)
 	Seat seat;
 	int misses = 0;
@@ -102,6 +106,7 @@ struct RoomMember
 	// The membership's own link (STUN and TURN gathered once), handed to each seat's session and back
 	std::unique_ptr<vfnet::RoomLink> link;
 	double gathered_at = 0;
+	bool turn_given = false;        // (the lobby gave a relay's login when it was gathered: a link without the relay then is gathered again soon)
 	std::string kept;               // (what room2.txt last said: written again only when it changes)
 
 	// The lobby: its socket (pushed states; ping every 15 s), or polling every 10 s over HTTPS

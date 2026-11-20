@@ -164,15 +164,19 @@ void game_menu::set_net(const net_cells &c)
 	if (name.size() > 10) name = name.substr(0, 9) + "\xE2\x80\xA6";
 	std::string rml = "<div class=\"row\"><div class=\"c name\" style=\"width: 118dp;\"><span class=\"v\">" + escape(name) + "</span><span class=\"dot\">" + (m->mono ? "\xE2\x97\x8F" : "\xE2\x80\xA2") + "</span></div>";   // (a circle of the font: drawn round at any size; Barlow has only the bullet)
 	const std::string watchers = c.watchers > 0 ? cell(tr::CELL_WATCHING.c_str(), std::to_string(std::min(c.watchers, 99999)), 112, "eye") : "";   // (how many watch, if any: drawn only)
-	if (c.watching) {   // (a watched match: one cell, watching and how many, and the score)
+	// (a Rooms 2 room's: who plays next, this player's own name in gold)
+	std::string nx = c.next;
+	if (nx.size() > 10) nx = nx.substr(0, 9) + "\xE2\x80\xA6";
+	const std::string next = c.next.empty() ? "" : cell(tr::ROOM2_TAG_NEXT.c_str(), nx, 150, c.next_me ? "next me" : "next");
+	if (c.watching) {   // (a watched match: one cell, watching and how many, and the score (none in a room's first match of two: who's next instead))
 		rml = "<div class=\"row\"><div class=\"c name\" style=\"width: 166dp;\"><span class=\"v\">" + escape(c.watchers > 0 ? tr::fill(tr::CELL_WATCHING_N, { { "n", std::to_string(std::min(c.watchers, 99999)) } }) : std::string(tr::CELL_WATCHING)) +
-		      "</span><span class=\"dot\">" + (m->mono ? "\xE2\x97\x8F" : "\xE2\x80\xA2") + "</span></div>" + cell("", c.score, 220, "mid") + "</div>";
+		      "</span><span class=\"dot\">" + (m->mono ? "\xE2\x97\x8F" : "\xE2\x80\xA2") + "</span></div>" + (c.score.empty() ? "" : cell("", c.score, 220, "mid")) + next + "</div>";
 		show_net(rml, c.level <= 0 ? "cells good" : "cells fair");
 		return;
 	}
 	if (c.interrupted) rml += cell("", tr::CELL_INTERRUPTED, 222, "lost");
 	else rml += cell(tr::CELL_PING.c_str(), std::to_string(std::min(c.ping, 9999)), 86) + cell(tr::CELL_DELAY.c_str(), std::to_string(c.delay), 76) + cell(tr::CELL_RB.c_str(), std::to_string(c.rollback), 50);
-	rml += cell("", c.relay ? tr::CELL_RELAY : tr::CELL_DIRECT, 78, c.relay ? "via relay" : "via direct") + watchers + "</div>";
+	rml += cell("", c.relay ? tr::CELL_RELAY : tr::CELL_DIRECT, 78, c.relay ? "via relay" : "via direct") + watchers + next + "</div>";
 	if (c.detailed && !c.interrupted)   // (above it: the first row stays where it is either way)
 		rml = "<div class=\"row two\">" + cell(tr::CELL_JITTER.c_str(), num("%.0f", c.jitter), 92) + cell(tr::CELL_RB_AVG.c_str(), num("%.1f", c.rb_avg), 92) +
 		      cell(tr::CELL_AHEAD.c_str(), num("%+.1f", c.ahead), 86) + cell(tr::CELL_FRAME.c_str(), num("%.1f", c.frame_ms), 92) + "</div>" + rml;
@@ -276,11 +280,18 @@ void game_menu::show_versus(const versus &v, double seconds)
 	};
 	// (each player's fighter, in a game with a choice of them: under the name, smaller)
 	auto ft = [](const char *side, const std::string &f) { return f.empty() ? std::string() : "<div class=\"ft " + std::string(side) + "\">" + escape(f) + "</div>"; };
-	e->SetInnerRML("<div class=\"fl left\">" + fl(v.left_country) + "</div><div class=\"pl left\">" + escape(v.left_label) + "</div><div class=\"nm left\">" + escape(v.left) + "</div>" + ft("left", v.left_fighter) +
+	const std::string rml = "<div class=\"fl left\">" + fl(v.left_country) + "</div><div class=\"pl left\">" + escape(v.left_label) + "</div><div class=\"nm left\">" + escape(v.left) + "</div>" + ft("left", v.left_fighter) +
 	               "<div class=\"fl right\">" + fl(v.right_country) + "</div><div class=\"pl right\">" + escape(v.right_label) + "</div><div class=\"nm right\">" + escape(v.right) + "</div>" + ft("right", v.right_fighter) +
 	               "<div class=\"badge\"><div>VS</div></div>"
 	               "<div class=\"bar\"><div class=\"line" + std::string(v.relay ? " relay" : "") + "\"><span class=\"dot\"></span>" + escape(v.line) + "</div>"
-	               "<div class=\"sub\">" + escape(v.sub) + "</div></div>");
+	               "<div class=\"sub\">" + escape(v.sub) + "</div></div>";
+	// (shown already: its time made longer and its words as they are now, never faded out and in again: one versus screen
+	// from a room's seat, or its catching up, to the match itself; the same words not laid out again)
+	const bool on = versus_showing() && SDL_GetTicks() - m_vs_from >= 250;
+	const auto longer = [&] { m_vs_until = std::max(m_vs_until, SDL_GetTicks() + uint64_t(seconds * 1000)); };
+	if (on && rml == m_vs_rml) { longer(); return; }
+	m_vs_rml = rml;
+	e->SetInnerRML(rml);
 	// (a long name, 10 letters wide ones, made smaller to fit its side: from the edge's 72dp to the badge, 20dp short
 	// of it)
 	m->overlay->UpdateDocument();
@@ -291,6 +302,8 @@ void game_menu::show_versus(const versus &v, double seconds)
 		if (w > room) n->SetProperty("font-size", std::to_string(92 * dp * std::max(0.3f, room / w)) + "px");
 	}
 	e->SetProperty("visibility", "visible");
+	m_vs_under = false;
+	if (on) { longer(); return; }
 	m_vs_from = SDL_GetTicks();
 	m_vs_until = m_vs_from + uint64_t(seconds * 1000);
 }
@@ -693,6 +706,20 @@ void game_menu::refresh()
 
 void game_menu::build()
 {
+	// (the left button down on a row: the page made again only once it's up, so the click lands on the row it was pressed on.
+	// Made again between the two (a room's page as its state changes, its countdown 4 times a second), the row pressed was
+	// gone by the release and the click went nowhere: a room's buttons sometimes didn't take a click)
+	if (m_mouse_down && !(SDL_GetMouseState(nullptr, nullptr) & SDL_BUTTON_LMASK)) m_mouse_down = false;   // (its release went elsewhere)
+	if (m_mouse_down) { m_build_pending = true; return; }
+	m_build_pending = false;
+	build_now();
+	// (the pointer where it is, over the rows made again: else the row under a still pointer wasn't known till it moved,
+	// and a click without a move first went nowhere)
+	if (m_mouse_seen && m->ctx) m->ctx->ProcessMouseMove(m_mouse_x, m_mouse_y, 0);
+}
+
+void game_menu::build_now()
+{
 	const menu_page &p = m_stack.back();
 	const bool scr = p.screen && m->screen;
 	if (m_open) {   // (the page's own document shown, the other hidden)
@@ -1017,15 +1044,30 @@ bool game_menu::handle_event(const SDL_Event &e)
 	case SDL_EVENT_MOUSE_MOTION: {
 		m_pointer_moved = true;
 		const float d = SDL_GetWindowPixelDensity(m->win);
-		m->ctx->ProcessMouseMove(int(e.motion.x * d), int(e.motion.y * d), 0);
+		m_mouse_x = int(e.motion.x * d);
+		m_mouse_y = int(e.motion.y * d);
+		m_mouse_seen = true;
+		m->ctx->ProcessMouseMove(m_mouse_x, m_mouse_y, 0);
 		return true;
 	}
 	case SDL_EVENT_MOUSE_BUTTON_DOWN:
-		if (e.button.button == SDL_BUTTON_LEFT) m->ctx->ProcessMouseButtonDown(0, 0);
+		if (e.button.button == SDL_BUTTON_LEFT) {
+			const float d = SDL_GetWindowPixelDensity(m->win);   // (where it's pressed, moved there or not)
+			m_mouse_x = int(e.button.x * d);
+			m_mouse_y = int(e.button.y * d);
+			m_mouse_seen = true;
+			m->ctx->ProcessMouseMove(m_mouse_x, m_mouse_y, 0);
+			m->ctx->ProcessMouseButtonDown(0, 0);
+			m_mouse_down = true;
+		}
 		else if (e.button.button == SDL_BUTTON_RIGHT) pop();
 		return true;
 	case SDL_EVENT_MOUSE_BUTTON_UP:
-		if (e.button.button == SDL_BUTTON_LEFT) m->ctx->ProcessMouseButtonUp(0, 0);
+		if (e.button.button == SDL_BUTTON_LEFT) {
+			m_mouse_down = false;
+			m->ctx->ProcessMouseButtonUp(0, 0);
+			if (m_build_pending && !m_stack.empty() && m_open) build();   // (held back while it was down)
+		}
 		return true;
 	case SDL_EVENT_MOUSE_WHEEL:
 		if (e.wheel.y) move(e.wheel.y > 0 ? -1 : +1);
@@ -1063,7 +1105,12 @@ void game_menu::render(bool fps)
 	m->ctx->SetDensityIndependentPixelRatio(dp_of(w, h));
 	if (m_open && !m_stack.empty() && m_stack.back().by_height && on_screen() && std::lround(height_dp()) != m_built_h) build();   // (a taller or shorter window: its page for it)
 	m->ctx->Update();
-	if (m_vs_until) draw_versus(w, h);
+	// (the versus screen under the menu, never over it: an open page (a room's, the lobby's) hides it, names and all, the
+	// overlay's names being over the page's otherwise; it's back if it's still on when the menu closes)
+	if (Rml::Element *e = m->overlay && m_vs_until ? m->overlay->GetElementById("vs") : nullptr) {
+		if (m_vs_under != m_open) { m_vs_under = m_open; e->SetProperty("visibility", m_open ? "hidden" : "visible"); }
+	}
+	if (m_vs_until && !m_open) draw_versus(w, h);
 	m->gfx->BeginOverlay();
 	m->ctx->Render();
 	m->gfx->EndFrame();

@@ -46,6 +46,7 @@ constexpr double WS_STEADY_MS = 60000;   // (open this long: its tries counted a
 constexpr int OP_TRIES = 5;              // (an op not seen taken: sent this many times in all, 3 s, 6, 12, 24 apart: never past the lobby's
                                          // rate for a member, a burst of 10 then one per 2 s, with the polls)
 constexpr double OP_AGAIN_MS = 3000;
+constexpr double ROOM2_NO_RELAY_MS = 180000;   // (the room's link with no relay: gathered again this long after, between seats)
 constexpr double STUCK_MS = 5000;        // (seated, the table PLAYING, no session: this long (the state that moves on may be coming), then disconnect told)
 constexpr double STUCK_AGAIN_MS = 30000; // (the same seat stuck again (the lobby played on with it): told again only after this)
 
@@ -283,6 +284,14 @@ void Online::room2_state(const Value &st)
 	m.locked = truthy(rm["locked"]);
 	m.owner = truthy(rm["owner"]);
 	m.ready_ms = num(rm["ready_ms"], 1000, 120000, 15000);
+	if ((m.has_rules = rm["rules"].kind == Value::object)) {
+		const Value &ru = rm["rules"];
+		m.rule_side = truthy(ru["side"]);
+		m.rule_dural = truthy(ru["dural"]);
+		m.rule_custom = truthy(ru["custom"]);
+		m.rule_stage = ru["stage"].kind != Value::boolean || ru["stage"].b;
+		m.rule_max = num(ru["max"], 0, 99, 0);
+	}
 	m.has_a = t["a"].kind == Value::object;
 	m.has_b = t["b"].kind == Value::object;
 	m.a = m.has_a ? who_of(t["a"]) : RoomMember::Who{};
@@ -524,6 +533,7 @@ void Online::room2_poll()
 			}
 			if (!j->stun.empty()) m.link->use_stun(j->stun);
 			if (!j->turn.empty()) m.link->use_turn(j->turn, j->user, j->password);
+			m.turn_given = !j->turn.empty();
 			country_me = country(j->country);
 		}
 		if (!r2_gather && m.link->gathered()) {
@@ -543,6 +553,8 @@ void Online::room2_poll()
 			if (m.creating) {
 				extra += std::string(",\"listed\":") + (w.room_who >= 1 ? "true" : "false") + (w.room_name.empty() ? "" : ",\"room\":" + quote(w.room_name));
 				if (!release.empty()) extra += ",\"build\":" + quote(release);   // (an older build given this room's code is told "The host has <it>")
+				extra += std::string(",\"rules\":{\"side\":") + (w.rule_side ? "true" : "false") + ",\"dural\":" + (w.rule_dural ? "true" : "false") +
+				         ",\"custom\":" + (w.rule_custom ? "true" : "false") + ",\"max\":" + std::to_string(w.rule_max) + ",\"stage\":" + (w.rule_stage ? "true" : "false") + "}";
 			} else {
 				extra += ",\"code\":" + quote(m.code);
 				// (a membership from before, this room's: a crash or a restart, its place taken back if it's still there)
@@ -720,7 +732,13 @@ void Online::room2_regather()
 	const bool between = !m.in_seat && m.pos != 0 && (m.pos > 0 || m.watcher) && !m.ready_you && m.ready_place() != 1 && !asked && !may_sit &&
 	                     !m.settling && m.have_state && !m.test;
 	if (!r2_fresh) {
-		if (!between || now - m.gathered_at < room2_regather_ms || now < m.regather_at || r2_gather) return;
+		// (a link with no relay (it didn't answer when gathered: a log's "relay none", then "the relay didn't answer" at every
+		// seat for the rest of the room, and a pair that needs one void (connect) again and again): gathered again between
+		// seats every few minutes till it has one, not after the relay's login's hours)
+		const bool no_relay = m.link && m.link->relay_address().empty() && m.turn_given;
+		const double every = no_relay ? std::min(room2_regather_ms, ROOM2_NO_RELAY_MS) : room2_regather_ms;
+		if (!between || now - m.gathered_at < every || now < m.regather_at || r2_gather) return;
+		if (no_relay) log("Rooms 2: the room's link has no relay: gathered again for one");
 		m.regather_at = now + 60000;   // (once a minute at most, whatever comes of it)
 		auto l = std::make_unique<vfnet::RoomLink>();
 		l->allow_loopback(online_detail::lobby_local(lobby));
@@ -859,7 +877,7 @@ void Online::room2_react()
 		m.was_called = true;
 		m.ready_sent = false;
 		log("Rooms 2: getting ready: seated in " + std::to_string(int((m.ready_until - now) / 1000 + 0.5)) + " s (Esc: AWAY)");
-		notices.push_back({ Notice::called, tr::line(tr::ROOM2_YOURE_NEXT) });
+		notices.push_back({ Notice::called, tr::line(tr::ROOM2_CHIP_YOUR_TURN) });
 		m.ready_auto_at = room2_test_ready == "now" || room2_test_ready == "esc" ? now + 1000 : 0;
 	}
 	if (!m.ready_you) m.was_called = false;
@@ -930,12 +948,17 @@ void Online::room2_seat()
 	m.in_seat = true;
 	m.seen_peer = m.seat.peer.name;
 	m.seen_token = m.seat.token;
+	// (the one who stays: the table's holder, a winner on, against the newcomer; the stage select the newcomer's)
+	m.stayer = m.holder == "a" || m.holder == "b" ? m.holder : "";
 	if (!use_terms(m.seat.as, m.seat.them)) {   // (can't play this one: the lobby moves on when neither says started)
 		log("Rooms 2: the opponent's terms can't be played (" + m.seat.as + ")");
 		m.failed_token = m.seat.token;
 		stop_activity(true);
 		return;
 	}
+	// (the room's rules: the challenger's stage select as the creator set it, in the match's terms the host sends (a pool's
+	// match plays the host's settings: an older build hosting plays its own))
+	if (m.has_rules && adapter.host_terms) adapter.stage_select_on = m.rule_stage;
 	room->set_peer(m.seat.cands, m.seat.relay, is_host);
 	room_session(is_host);
 	ph = is_host ? Phase::hosting : Phase::joining;
@@ -1163,6 +1186,20 @@ bool Online::room2_settings(const std::string &name, bool listed, int ready_ms, 
 	r2_asks.push_back({ "settings", fetch("POST", lobby_url("/v2/room/settings"), body, 8000, 64 << 10), now });
 	log("Rooms 2: the room's settings: " + std::string(listed ? "listed" : "not listed") + ", the ready check " + std::to_string(ready_ms / 1000) + " s");
 	return true;
+}
+
+void Online::room2_rules(const OnlineSettings &s)
+{
+	if (!r2 || r2->owner_key.empty()) return;
+	const std::string body = "{\"code\":" + quote(r2->code) + ",\"owner_key\":" + quote(r2->owner_key) + ",\"rules\":{\"side\":" + (s.rule_side ? "true" : "false") +
+	                         ",\"dural\":" + (s.rule_dural ? "true" : "false") + ",\"custom\":" + (s.rule_custom ? "true" : "false") + ",\"max\":" + std::to_string(s.rule_max) +
+	                         ",\"stage\":" + (s.rule_stage ? "true" : "false") + "}}";
+	r2_asks.push_back({ "settings", fetch("POST", lobby_url("/v2/room/settings"), body, 8000, 64 << 10), now });
+	r2->has_rules = true;   // (as asked, till the lobby's state says)
+	r2->rule_side = s.rule_side; r2->rule_dural = s.rule_dural; r2->rule_custom = s.rule_custom; r2->rule_stage = s.rule_stage; r2->rule_max = s.rule_max;
+	r2->version++;
+	log("Rooms 2: the room's rules: the winner may change side " + std::string(s.rule_side ? "yes" : "no") + ", Dural " + (s.rule_dural ? "yes" : "no") + ", random or custom fighters " +
+	    (s.rule_custom ? "yes" : "no") + ", players at most " + (s.rule_max ? std::to_string(s.rule_max) : std::string("no limit")) + ", the challenger's stage select " + (s.rule_stage ? "yes" : "no"));
 }
 
 void Online::room2_close()

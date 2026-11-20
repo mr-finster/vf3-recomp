@@ -46,6 +46,11 @@ struct OnlineSettings
 	int room_who = 0;
 	int rooms_show = 0;           // the rooms list's filter, kept: 0 all, 1 open, 2 playing
 	bool quick_listed = true;     // Show my Quick Match games in Rooms (listed only if both players have it on)
+	// A Rooms 2 room's rules, the creator's (Room settings; the lobby keeps them with the room): the winner may change side
+	// when a newcomer's seated, Dural on the select, random or custom fighters, players in the room at most (0 no limit), the
+	// challenger's stage select. The last ones set, for the next room made
+	bool rule_side = false, rule_dural = false, rule_custom = false, rule_stage = true;
+	int rule_max = 0;
 };
 
 class Online
@@ -210,6 +215,7 @@ public:
 	int room2_streak(int p) const;  // (player p's run of wins at the room's table, the HUD's; 0 none)
 	int room2_version() const { return r2 ? r2->version * 4 + (watching() ? 2 : 0) + 1 : 0; }   // (the room's page made again when it changes)
 	bool room2_settings(const std::string &name, bool listed, int ready_ms, tr::line &error);   // (the creator's)
+	void room2_rules(const OnlineSettings &s);   // (the creator's: the room's rules as s has them, to the lobby)
 	void room2_close();   // (the creator's: the room closed for everyone)
 	void set_room2_file(const std::string &path) { r2_file = path; }   // (the data folder's room2.txt: a rejoin after a crash)
 	void set_room2_test(const std::string &state_json, const std::string &code = "KXQ4M7");   // (menutest: a member in a made-up state)
@@ -489,10 +495,12 @@ private:
 	std::string room2_body(const std::string &extra = "") const;
 	bool room2_in_seat() const { return r2 && r2->in_seat; }
 	bool room2_moving_on() const;   // (this seat's decided match: the lobby calling the next in line, or about to: the rematch held)
-	bool rematch_coming() const;    // (a decided match's out player back in, or their Start pressed since: a rematch on its way)
+	bool rematch_coming() const;
+	void room2_next_cell(game_menu::net_cells &c) const;   // (the footer's: who plays next in the room)    // (a decided match's out player back in, or their Start pressed since: a rematch on its way)
 	void stop_activity(bool said = false, uint8_t quit_reason = 0);   // (stop as it was: whatever's on, a room's membership kept)
 	void watch_begin(const std::string &w);   // (watching w from here: what's on stopped first, a room's membership kept)
 	bool persist = false;               // (the room's own: kept through its match, opened again after it)
+	bool r2_start_held = false;         // (a Rooms 2 challenger's Start held this frame: the one who stays is in first)
 	double hold_at = 0;
 };
 

@@ -72,6 +72,10 @@
 		/* how many watch the match (drawn only), and a watched match's players and score */
 		#net .c.eye .v { color: #ffd23f; }
 		#net .c.mid .v { left: 0; right: 0; text-align: center; }
+		/* a Rooms 2 room's: who plays next, this player's own name in gold */
+		#net .c.next .v { color: #ffffff; }
+		#net .c.next.me { border-color: #ffd23f80; }
+		#net .c.next.me .v { color: #ffd23f; }
 		/* a notice that comes and goes, at the bottom right (out of the menu's way and the HUD's) */
 		#toast {
 			position: absolute;

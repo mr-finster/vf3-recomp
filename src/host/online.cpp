@@ -465,6 +465,8 @@ int Online::start_wait() const
 			if (in[start_scan[p]] & vf3net::START_BUTTON) start_seen[p] = true;
 	}
 	const int me = local_player();
+	if (r2 && r2->in_seat && !r2->stayer.empty() && !both_in && (r2->stayer == "a" ? 0 : 1) != me && !(score.players_now() >> (me ^ 1) & 1))
+		return 2;   // (a room's challenger: in after the one who stays, their Start held till then: waiting for them)
 	if (!start_seen[me] || !start_seen[me ^ 1]) return !start_seen[me] ? 1 : 2;
 	// after both have been in: one out of the game (a match lost; the winner plays on against the computer), until
 	// they press Start (the game's back in only once a fighter's chosen: nothing to say over its character select)
@@ -2430,10 +2432,34 @@ bool Online::step(uint16_t input)
 	// room2_moving_on): the player out of the game gets no rematch, their Start taken out of their input here, before
 	// it's sent (so both sides run the same: the next in line comes on). The two playing on (nobody READY when it was
 	// decided), it's a rematch as ever
-	if (room2_in_seat() && ph == Phase::playing && session && both_in && score.players() != 3 &&
-	    !(score.players() >> local_player() & 1) && (input & vf3net::START_BUTTON) && room2_moving_on()) {
+	// (and before it's decided, someone READY in the line (the lobby will move on): from the KO a Start takes the loser out and
+	// straight to New Challenger, the rematch's select, seconds before the held reading has them out. A player mashing Start
+	// after a loss got that rematch in both games, against the winner, till the lobby moved on and cut it: a match nobody
+	// seated. So with someone READY no Start of this player's goes in once the match is on (both in), but at the select
+	// (a fighter's outfit is Start held there); the two playing on, nobody READY, a rematch as ever)
+	const bool r2_ko_hold = room2_in_seat() && ph == Phase::playing && session && both_in && r2->next_ready() && r2->reported_n != r2->n &&
+	                        r2->phase == "PLAYING" && !vf3net::in_select(board);
+	if (room2_in_seat() && ph == Phase::playing && session && both_in && (input & vf3net::START_BUTTON) &&
+	    ((score.players() != 3 && !(score.players() >> local_player() & 1) && room2_moving_on()) || r2_ko_hold)) {
 		if (start_edge) log_line("Rooms 2: Start for a rematch held back: " + online_menu::clean_name(r2->next_name()) + " is next in the room's line");
 		input = uint16_t(input & ~vf3net::START_BUTTON);
+	}
+	// A Rooms 2 seat's first match, a challenger against the one who stays (the streak's holder): the arcade's way, the one who
+	// stays is in the game first (their Start pressed for them, this side's own input, so both games run it) and the
+	// challenger comes in after them, a new challenger: the stage select's the challenger's (CHALLENGER: the later one in picks).
+	// The challenger's Start held till the stayer's in, so a winner's Start after the challenger's never picks the stage
+	r2_start_held = false;
+	if (room2_in_seat() && ph == Phase::playing && session && !both_in && !r2->stayer.empty()) {
+		const int stay = r2->stayer == "a" ? 0 : 1, me = local_player();
+		const bool stayer_in = score.players_now() >> stay & 1;
+		if (me == stay && !stayer_in && !(score.players_now() >> (me ^ 1) & 1)) {
+			static uint32_t tap = 0;
+			if (++tap % 8 < 3) input = uint16_t(input | vf3net::START_BUTTON);   // (pressed, let go: a press the title takes)
+			else input = uint16_t(input & ~vf3net::START_BUTTON);
+		} else if (me != stay && !stayer_in) {
+			if (input & vf3net::START_BUTTON) r2_start_held = true;
+			input = uint16_t(input & ~vf3net::START_BUTTON);
+		}
 	}
 	if (session) snapper.before_step(*session);   // (a snapshot's copy the step could save over: stopped first, tried again)
 	if (!(ph == Phase::playing && session && session->step(input))) return false;
@@ -2522,6 +2548,14 @@ std::string Online::status() const
 	}
 }
 
+// (a Rooms 2 room's footer: who plays next (the one called, else the first READY in the line), this player's own name in gold)
+void Online::room2_next_cell(game_menu::net_cells &c) const
+{
+	if (!r2 || !r2->have_state) return;
+	c.next = r2->next_name();
+	c.next_me = !c.next.empty() && r2->pos >= 1 && (r2->ready_you || r2->ready_place() == 1);
+}
+
 bool Online::connection(game_menu::net_cells &c, bool detailed) const
 {
 	cells_at = now;
@@ -2531,7 +2565,9 @@ bool Online::connection(game_menu::net_cells &c, bool detailed) const
 		c.watching = true;
 		c.name = tr::WATCHING;   // (the cell's word, set again as it's drawn: menu.cpp)
 		const vfnet::watch::Info &i = spec->info();
-		c.score = player_name(0) + "  " + std::to_string(i.wins[0]) + "\xE2\x80\x93" + std::to_string(i.wins[1]) + "  " + player_name(1);
+		// (a Rooms 2 room's: no score but between the same two again (a play-on), who plays next instead)
+		if (!r2 || i.wins[0] + i.wins[1] > 0) c.score = player_name(0) + "  " + std::to_string(i.wins[0]) + "\xE2\x80\x93" + std::to_string(i.wins[1]) + "  " + player_name(1);
+		room2_next_cell(c);
 		c.watchers = watch_watchers;
 		c.level = spec->state() == vfnet::watch::Spectator::State::buffering ? 1 : 0;
 		return true;
@@ -2541,6 +2577,7 @@ bool Online::connection(game_menu::net_cells &c, bool detailed) const
 	c = {};
 	c.watchers = watchers();
 	c.name = opponent();
+	room2_next_cell(c);
 	c.relay = via_relay();
 	c.interrupted = session->interrupted();
 	c.ping = int(stt.rtt_ms + 0.5);
@@ -3070,6 +3107,21 @@ menu_page room2_settings_page(Online &o, OnlineSettings &s, game_menu &menu, std
 	p.items.push_back({ tr::LISTED_IN_ROOMS, tr::ROOM2_LISTED_HELP,
 		[&o] { return std::string(o.room2() && o.room2()->listed ? tr::ON : tr::OFF); },
 		[&o, put](int) { if (RoomMember *m = const_cast<RoomMember *>(o.room2())) { m->listed = !m->listed; put(); } } });
+	// (the room's rules: each change to the lobby at once, and kept as this player's for the next room made)
+	auto rules = [&o, &s, changed] { o.room2_rules(s); if (changed) changed(); };
+	auto onoff = [](bool v) { return std::string(v ? tr::ON : tr::OFF); };
+	p.items.push_back({ tr::ROOM2_RULE_SIDE, tr::ROOM2_RULE_SIDE_HELP, [&s, onoff] { return onoff(s.rule_side); }, [&s, rules](int) { s.rule_side = !s.rule_side; rules(); } });
+	p.items.push_back({ tr::ROOM2_RULE_DURAL, tr::ROOM2_RULE_DURAL_HELP, [&s, onoff] { return onoff(s.rule_dural); }, [&s, rules](int) { s.rule_dural = !s.rule_dural; rules(); } });
+	p.items.push_back({ tr::ROOM2_RULE_CUSTOM, tr::ROOM2_RULE_CUSTOM_HELP, [&s, onoff] { return onoff(s.rule_custom); }, [&s, rules](int) { s.rule_custom = !s.rule_custom; rules(); } });
+	p.items.push_back({ tr::ROOM2_RULE_MAX, tr::ROOM2_RULE_MAX_HELP, [&s] { return s.rule_max ? std::to_string(s.rule_max) : std::string(tr::ROOM2_NO_LIMIT); },
+		[&s, rules](int d) {   // (no limit, 2 to 16, then no limit again)
+			static const int steps[] = { 0, 2, 3, 4, 5, 6, 8, 10, 12, 16 };
+			int i = 0;
+			for (int k = 0; k < 10; k++) if (steps[k] == s.rule_max) i = k;
+			s.rule_max = steps[(i + (d < 0 ? 9 : 1)) % 10];
+			rules();
+		} });
+	p.items.push_back({ tr::ROOM2_RULE_STAGE, tr::ROOM2_RULE_STAGE_HELP, [&s, onoff] { return onoff(s.rule_stage); }, [&s, rules](int) { s.rule_stage = !s.rule_stage; rules(); } });
 	p.items.push_back({ tr::ROOM2_CLOSE_ROOM, tr::ROOM2_CLOSE_HELP, {}, {}, [&o, &s, &menu, changed] {
 		o.room2_close();
 		while (menu.depth() > 1 && menu.top_name() != tr::P_ONLINE.c_str()) menu.pop();
@@ -3858,7 +3910,9 @@ void match_rows(Online &o, OnlineSettings &s, game_menu &menu, std::function<voi
 	if (o.in_room2()) {   // (a Rooms 2 room's member: its page, a step away; watching in its line stopped there, or not)
 		rows.push_back({ tr::P_ROOM, "", {}, {}, [&o, &s, &menu, changed] { menu.push(room2_page(o, s, menu, changed)); } });
 		if (o.watching()) {
-			rows.push_back({ tr::STOP_WATCHING, "", {}, {}, [&o, &menu] { o.room2_watch(false); menu.close(); } });
+			// (the match stopped and the room's page on, where WATCH puts it back: the game behind it still, never running
+			// on alone; before, the menu closed over the board left as it was, which looked like nothing had happened)
+			rows.push_back({ tr::STOP_WATCHING, "", {}, {}, [&o, &s, &menu, changed] { o.room2_watch(false); menu.push(room2_page(o, s, menu, changed)); } });
 			return;
 		}
 		if (o.phase() != Online::Phase::playing) return;   // (in its line, or at its table with no match on: its page only, no match's rows)

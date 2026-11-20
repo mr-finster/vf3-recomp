@@ -81,7 +81,9 @@ public:
 	                   double jitter = 0, rb_avg = 0, ahead = 0, frame_ms = 0;
 	                   int watchers = -1;          // (how many watch this match: -1 none can)
 	                   bool watching = false;      // (a watched match's: the players and the score)
-	                   std::string score; };
+	                   std::string score;
+	                   std::string next;           // (a Rooms 2 room's: who plays next, "" none; next_me: it's this player, in gold)
+	                   bool next_me = false; };
 	void set_net(const net_cells &c);
 	void toast(const std::string &text, double seconds = 4);
 	void set_notice(const std::string &title, const std::string &sub = "", const std::string &small = "");
@@ -91,6 +93,8 @@ public:
 	void show_versus(const versus &v, double seconds = 3.5);
 	bool versus_showing() const { return m_vs_until > SDL_GetTicks(); }
 	bool toast_showing() const { return m_toast_until || m_toast_wait > 0; }   // (up, or waiting for the menu to close)
+	bool m_vs_under = false;   // (the versus screen's names hidden under an open page)
+	std::string m_vs_rml;      // (its words as last laid out)
 	void hide_versus() { if (m_vs_until) m_vs_until = SDL_GetTicks(); }   // (gone at the next draw: a match over before its time)
 	// At the bottom in the middle over the game, while it's set: what the players are waited for (Press Start)
 	void set_banner(const std::string &title, const std::string &sub = "", const std::string &key = "");   // (key: a button, shown as one after the title)
@@ -148,6 +152,9 @@ private:
 	bool m_text_on = false;              // the keyboard's text turned on for a screen (and so to be turned off)
 	bool m_text_fresh = false;           // (text_fresh)
 	bool m_pointer_moved = false;        // (since the rows were last made: only then does hovering select)
+	bool m_mouse_down = false, m_build_pending = false, m_mouse_seen = false;   // (the left button down: the page made again at its release)
+	int m_mouse_x = 0, m_mouse_y = 0;    // (the pointer, in the context's pixels)
+	void build_now();
 	std::function<bool(const SDL_Event &)> m_capture;
 	std::string m_capture_prompt;
 	std::function<void()> m_capture_cancel;   // (Esc while capturing)
