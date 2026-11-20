@@ -56,4 +56,8 @@ export const WHOLE = [
 	'NIQUE', 'PEDE', 'BATARD',
 ];
 
-export const COMPOUNDS = ['FACE', 'FACED', 'HEAD', 'HOLE', 'BAG', 'SUCK', 'SUCKER', 'SUCKA', 'LICK', 'LICKER', 'EATER', 'WIT', 'HAT', 'STAIN', 'WAD', 'BRAIN', 'MUNCH', 'MUNCHER'];
+export const COMPOUNDS = ['FACE', 'FACED', 'HEAD', 'HOLE', 'BAG', 'SUCK', 'SUCKER', 'SUCKA', 'LICK', 'LICKER', 'EATER', 'WIT', 'HAT', 'STAIN', 'WAD', 'BRAIN', 'MUNCH', 'MUNCHER',
+	'MASTER', 'LORD', 'KING', 'BOY', 'MAN'];
+// HEADS: what may come before any of WHOLE's or STRONG's words in one word to make an insult of it (MASTERCOCK, BIGDICK,
+// SUCKMYDICK): only these, so HANCOCK, PEACOCK and SHERLOCK pass
+export const HEADS = ['MASTER', 'BIG', 'FAT', 'SUCK', 'SUCKMY', 'LICK', 'LICKMY', 'EAT', 'EATMY', 'SMALL', 'TINY', 'HUGE', 'KING', 'LORD'];

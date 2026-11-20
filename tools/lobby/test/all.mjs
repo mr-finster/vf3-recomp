@@ -7,6 +7,7 @@ const lobby = process.argv[2] || 'src/index.js';
 const files = ['pairing.test.mjs', 'watch.test.mjs', 'ws-over.test.mjs', 'switches.test.mjs', 'pairing-switched.mjs', 'review.test.mjs', 'counts.test.mjs', 'score.test.mjs'];
 files.push('room2.test.mjs');   // (Rooms 2, /v2/room/*: its truth table and rotation)
 files.push('room2-review.test.mjs');   // (Rooms 2: the review's findings before it went live, a test each)
+files.push('room2-beta2.test.mjs');   // (Rooms beta2: the room's rules, the name filter's HEADS)
 const quiet = process.argv.includes('--quiet');   // (only the failures and the summary)
 const failed = [];
 files.push('snap.test.mjs');   // (watching's snapshots: their own line, so the list above can grow apart)

@@ -100,8 +100,13 @@
 //   POST /v2/room/leave
 //   POST /v2/room/leave_line   (out of the line, or off the table (a match on: forfeited), still in the room watching: you.pos -1,
 //        you.watcher; counted as the room's; told every change)    POST /v2/room/join_line   (a watcher: to the back of the line)
-//   POST /v2/room/settings {owner_key, room?, listed?, locked?, ready_ms?}   POST /v2/room/close {owner_key}
-// state: {code, seq, room: {name, listed, locked, ready_ms, owner}, table: {a, b, phase, streak, holder, n, last, match: {n, streak,
+//   POST /v2/room/settings {owner_key, room?, listed?, locked?, ready_ms?, rules?}   POST /v2/room/close {owner_key}
+//        (rules, the creator's, at create too (beta2's builds): {side, dural, custom, max, stage}: the winner may change side when a
+//        newcomer's seated (false: the arcade's, the one who stays keeps theirs; true: the newcomer is always player 2, side b), Dural on
+//        the select (false: a pool match's terms without her, whoever has her on), random or custom fighters (the games'), players in
+//        the room at most (0 none: enter answers full 409 past it), the challenger's stage select (the games': the host's match).
+//        A room made without rules (an older build's) has none: each game plays its own settings, as before)
+// state: {code, seq, room: {name, listed, locked, ready_ms, owner, rules?}, table: {a, b, phase, streak, holder, n, last, match: {n, streak,
 // holder (a name)}: the match on and the streak it's played for (what's shown over it)}, watchers: n, line: [{name,
 // country, ready}], you: {mid, pos (0 at the table, 1.. in line, -1 a watcher: Leave line), side?, watcher?, seat?, ready}, ready
 // (GET READY: the next to play, seated when its 3 s are up, after a match with both still seated): {pos, deadline_ms, you} | null,
@@ -116,7 +121,7 @@
 // A member's call on a code with no room, or with a mid and mkey that aren't a member's, answers no_room 404 alike (so a
 // code can't be found by them: only enter is charged as a code tried); a member let go, by its own key, 410 removed.
 
-import { ANYWHERE, STRONG, ENDINGS, WHOLE, COMPOUNDS } from './words.js';
+import { ANYWHERE, STRONG, ENDINGS, WHOLE, COMPOUNDS, HEADS } from './words.js';
 
 const PROTOCOL = 1;
 const LETTERS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';   // (no 0/O, 1/I/L: read out over voice chat, typed on a pad)
@@ -186,6 +191,9 @@ const SPAN_FORMS = [...forms(ANYWHERE, SPAN_ENDINGS), ...forms(STRONG, SPAN_ENDI
 // with anything else after it, COCKPIT, SHITAKE, nor before it, HANCOCK, SCUNTHORPE)
 const TAILS = COMPOUNDS.flatMap((c) => [c, c + 'S']);
 const compound = (word, roots) => roots.some((r) => { const w = plain(word, r), p = runs(r, doubled(r) ? 2 : 1); return w.startsWith(p) && TAILS.includes(w.slice(p.length)); });
+// (one of HEADS before a WHOLE or STRONG word, with an ending or a COMPOUNDS word after it or nothing: MASTERCOCK, BIGDICKS)
+const headed = (word) => HEADS.some((h) => word.startsWith(h) && word.length > h.length && [...STRONG, ...WHOLE].some((r) => { const rest = word.slice(h.length), p = runs(r, doubled(r) ? 2 : 1), w = plain(rest, r);
+	return w === p || (w.startsWith(p) && [...TAILS, 'S', 'ES'].includes(w.slice(p.length))); }));
 const WORD_ROOTS = [...STRONG, ...WHOLE, ...ANYWHERE], SPAN_ROOTS = [...STRONG, ...ANYWHERE];
 function name_words(s, vu = false) {   // (made plain, its words; one-letter words in a row joined; vu: V read as U too, FVCK)
 	let t = String(s || '').toUpperCase().replace(/[013457!|$@]/g, (c) => SUBS[c] || c);
@@ -206,6 +214,7 @@ export function name_ok(s) {   // (exported for test/watch.test.mjs)
 			if (ANY.some(([w, p]) => plain(word, w).includes(p))) return false;
 			if (ALL_FORMS.some(([r, fs]) => fs.includes(plain(word, r)))) return false;
 			if (compound(word, WORD_ROOTS)) return false;
+			if (headed(word)) return false;
 		}
 		// (a word with a space in it: NI GGER, FU CK, BIT CH; two to four words in a row, run together)
 		for (let i = 0; i < words.length; i++)
@@ -1008,8 +1017,11 @@ function r2_clear_match(t) {
 // can't play each other)
 function r2_seat(r, now, reseat = false) {
 	const t = r.t, A = r.members[t.a], B = r.members[t.b];
-	const as = A && B ? terms(B.who, A.who) : null;
+	let as = A && B ? terms(B.who, A.who) : null;
 	if (as === null) return false;
+	// (the room's rules: no Dural on the select, a pool match's terms without her whoever has her on (both games play the
+	// lobby's terms, whatever their build))
+	if (r.rules && !r.rules.dural && A.who.pool && A.who.pool === B.who.pool) as = A.who.pool;
 	t.token = random_hex(8); t.as = as; t.n++;
 	t.match = { n: t.n, streak: t.streak, holder: t.holder };   // (the streak this match is played for: what's shown over it)
 	t.phase = 'CONNECTING'; t.deadline = now + R2.CONNECT_MS; t.started = {}; t.reports = {}; t.reseated = reseat; t.lost = false; t.restart = false; t.playon = false;
@@ -1141,6 +1153,8 @@ function r2_take(r, mid, now) {
 		t[out] = null;
 	}
 	t[t.a ? 'b' : 'a'] = mid;
+	// (the room's rules: the winner may change side, the newcomer always player 2 (side b), the one who stays player 1)
+	if (r.rules && r.rules.side && t.b !== mid && t.a === mid) { t.a = t.b; t.b = mid; }
 	if (!t.holder) t.holder = stays;
 	r2_seat(r, now);
 }
@@ -1341,7 +1355,7 @@ function r2_view(r, mid, now, watch_on) {
 		seat = { role: side === 'a' ? 'host' : 'guest', side, peer: { name: p.who.name, cands: p.who.cands, relay: p.who.relay, country: p.who.country }, token: t.token, as: t.as, them: p.who.version, n: t.n,
 			seamless: m.caps.includes('cut1') && p.caps.includes('cut1'), ...(side === 'a' && t.armed && t.wkey ? { wkey: t.wkey } : {}) };
 	}
-	return { code: r.code, seq: r.seq || 0, room: { name: r.name, listed: r.listed, locked: r.locked, ready_ms: r.ready_ms, owner: r.owner === mid },
+	return { code: r.code, seq: r.seq || 0, room: { name: r.name, listed: r.listed, locked: r.locked, ready_ms: r.ready_ms, owner: r.owner === mid, ...(r.rules ? { rules: r.rules } : {}) },
 		table: { a: pub(t.a), b: pub(t.b), phase: t.phase, streak: t.streak, holder: r2_side(r, t.holder), n: t.n, last: t.last,
 			match: t.match ? { n: t.match.n, streak: t.match.streak, holder: t.match.holder && r.members[t.match.holder] ? r.members[t.match.holder].who.name : '' } : null },
 		line: r.line.map(inl),
@@ -1349,6 +1363,16 @@ function r2_view(r, mid, now, watch_on) {
 		watchers: Object.values(r.members).filter((x) => x.watcher).length,
 		ready: r.ready ? { pos: r.line.indexOf(r.ready.mid) + 1, deadline_ms: Math.max(0, r.ready.deadline - now), you: r.ready.mid === mid } : null,
 		watch: watch_on ? r.wid : '' };
+}
+// (a room's rules, as the creator set them: each known one checked, the rest as they were (or the defaults))
+const R2_RULES = { side: false, dural: false, custom: false, max: 0, stage: true };
+function r2_rules(x, was) {
+	if (!x || typeof x !== 'object' || Array.isArray(x)) return was;
+	const r = { ...(was || R2_RULES) };
+	for (const k of ['side', 'dural', 'custom', 'stage']) if (typeof x[k] === 'boolean') r[k] = x[k];
+	if (Number.isFinite(x.max)) r.max = Math.min(Math.max(Math.round(x.max), 0), R2.MEMBERS_MAX);
+	if (r.max === 1) r.max = 2;   // (a room for one plays nobody)
+	return r;
 }
 const r2_caps = (l) => (Array.isArray(l) ? l.slice(0, 8).filter((c) => typeof c === 'string' && /^[a-z0-9]{1,16}$/.test(c)) : []);
 const r2_ready_ms = (x, was) => (Number.isFinite(x) ? Math.min(Math.max(Math.round(x), R2.READY_MIN_MS), R2.READY_MAX_MS) : was);
@@ -1376,7 +1400,7 @@ async function room2_route(env, req, url, op) {
 		const me = who(b, req);
 		if (!GAMES.test(me.game) || !me.version) return json({ error: 'bad' }, 400);
 		const ask = { me, caps: r2_caps(b.caps), sid: await player_id(req, me.name), pid: await player_id(req, '#member'), aid: await player_id(req, '#room', 3),
-			listed: b.listed === true, locked: b.listed === true && b.locked === true, room: room_name(b.room), ready_ms: r2_ready_ms(+b.ready_ms, R2.READY_MS), region: region_of(req), build: r2_build(b.build) };
+			listed: b.listed === true, locked: b.listed === true && b.locked === true, room: room_name(b.room), ready_ms: r2_ready_ms(+b.ready_ms, R2.READY_MS), region: region_of(req), build: r2_build(b.build), ...(r2_rules(b.rules) ? { rules: r2_rules(b.rules) } : {}) };
 		// (Rooms 2 rooms made from one address a day (an IPv6 one by its /48), CREATES_PER_DAY (ROOMS2_CREATES_PER_DAY): each
 		// one is the online count's to keep, so one address can't make them without end; the count not reached: not held up)
 		const limits = env.LIMITS && env.LIMITS.get(env.LIMITS.idFromName('rooms2')), from = sender(req, 3);
@@ -1411,7 +1435,8 @@ async function room2_route(env, req, url, op) {
 	if (!code_ok(code)) return json({ error: 'no_room' }, 404);
 	const ask = { mid: clean(b.mid, 16), mkey: clean(b.mkey, 64), owner_key: clean(b.owner_key, 64), winner: R2_RESULTS.has(b.winner) ? b.winner : '', n: Number.isInteger(b.n) ? b.n : null };
 	if (op === 'settings') Object.assign(ask, { ...(typeof b.room === 'string' ? { room: room_name(b.room) } : {}), ...(typeof b.listed === 'boolean' ? { listed: b.listed } : {}),
-		...(typeof b.locked === 'boolean' ? { locked: b.locked } : {}), ...(Number.isFinite(b.ready_ms) ? { ready_ms: b.ready_ms } : {}) });
+		...(typeof b.locked === 'boolean' ? { locked: b.locked } : {}), ...(Number.isFinite(b.ready_ms) ? { ready_ms: b.ready_ms } : {}),
+		...(b.rules && typeof b.rules === 'object' ? { rules: b.rules } : {}) });
 	return room(env, code).fetch('https://room/v2/' + op, { method: 'POST', body: JSON.stringify(ask) });
 }
 
@@ -1710,7 +1735,8 @@ Object.assign(Room.prototype, {
 			const me = b.me;
 			this.r = { v: 2, code: b.code, game: me.game, content: me.content, version: me.pool || me.version, base: me, born: now, active: now, owner_key: random_hex(16), owner: '',
 				name: room_name(b.room), listed: !!b.listed, locked: !!b.locked, ready_ms: r2_ready_ms(+b.ready_ms, R2.READY_MS), region: typeof b.region === 'string' ? b.region.slice(0, 2) : '',
-				aid: hex16(b.aid), wid: b.code, members: {}, line: [], t: r2_table(), ready: null, empty_since: 0, removed: [], build: r2_build(b.build) };
+				aid: hex16(b.aid), wid: b.code, members: {}, line: [], t: r2_table(), ready: null, empty_since: 0, removed: [], build: r2_build(b.build),
+				...(r2_rules(b.rules) ? { rules: r2_rules(b.rules) } : {}) };
 			const r = this.r, m = this.v2_new_member(r, b, now);
 			r.owner = m.mid;
 			r2_enter(r, m, now);
@@ -1758,7 +1784,7 @@ Object.assign(Room.prototype, {
 				return json({ code: r.code, mid: was.mid, mkey: was.mkey, wid: watch_on ? r.wid : '', back: true, state: r2_view(this.r, was.mid, Date.now(), watch_on) });
 			}
 			const members = Object.values(r.members);
-			if (members.length >= R2.MEMBERS_MAX || members.filter((x) => x.pid && x.pid === clean(b.pid, 16)).length >= (+this.env.ROOMS2_PER_ADDRESS || R2.PER_ADDRESS)) {
+			if (members.length >= R2.MEMBERS_MAX || (r.rules && r.rules.max > 0 && members.length >= r.rules.max) || members.filter((x) => x.pid && x.pid === clean(b.pid, 16)).length >= (+this.env.ROOMS2_PER_ADDRESS || R2.PER_ADDRESS)) {
 				if (swept) await this.v2_commit(true);
 				return json({ error: 'full' }, 409);
 			}
@@ -1783,8 +1809,9 @@ Object.assign(Room.prototype, {
 			if (typeof b.locked === 'boolean') r.locked = b.locked;
 			if (!r.listed) r.locked = false;
 			r.ready_ms = r2_ready_ms(+b.ready_ms, r.ready_ms);
+			if (r2_rules(b.rules, r.rules)) r.rules = r2_rules(b.rules, r.rules);
 			await this.v2_commit(true);
-			return json({ ok: true, room: { name: r.name, listed: r.listed, locked: r.locked, ready_ms: r.ready_ms } });
+			return json({ ok: true, room: { name: r.name, listed: r.listed, locked: r.locked, ready_ms: r.ready_ms, ...(r.rules ? { rules: r.rules } : {}) } });
 		}
 		const m = this.v2_member(r, b);
 		if (!m) { if (swept) await this.v2_commit(true); return this.v2_gone_why(r, b); }
