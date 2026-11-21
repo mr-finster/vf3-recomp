@@ -40,6 +40,8 @@ struct menu_page
 	bool text = false;                    // (a screen's) typed into: the keyboard's text on while it's shown
 	bool own_note = false;                // (a screen's) a note (toast) shown in the page's own place for it, its element
 	                                      // #pagenote (#pagehelp hidden meanwhile), not over the page; its time counted there
+	bool by_select = false;               // (a screen's) made again when the selection moves (what it shows under its rows
+	                                      // depends on it: the create form's rule help)
 	bool by_height = false;               // (a screen's) made again when the window's height in dp changes (height_dp: what
 	                                      // it shows depends on it, the room page's line)
 };
@@ -162,7 +164,8 @@ private:
 	std::vector<std::pair<std::string, std::string>> m_built;   // (the page's rows as last drawn, their ids and labels: row_now)
 	size_t m_built_depth = 0;
 	std::string m_built_name;
-	int m_dropped = 0;                   // (clicks on a row gone since it was drawn: dropped_clicks)
+	int m_dropped = 0;
+	bool m_redraw_soon = false;          // (a screen with by_select: made again at the next render)                   // (clicks on a row gone since it was drawn: dropped_clicks)
 	int row_now(int i) const;
 	void build_now();
 	std::function<bool(const SDL_Event &)> m_capture;

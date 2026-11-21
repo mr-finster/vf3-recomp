@@ -3074,34 +3074,65 @@ menu_page room_name_page(OnlineSettings &s, game_menu &menu, std::function<void(
 
 // Create room: its name (filled in) and whether it's listed in Rooms (not, by default: the code only, as every room
 // before). Every match in it may be watched by anyone with the code; after each, the next in line plays the host.
+// (Players in the room's values: no limit, 2 to 16, then no limit again; d -1 the other way)
+static int room2_next_max(int now, int d)
+{
+	static const int steps[] = { 0, 2, 3, 4, 5, 6, 8, 10, 12, 16 };
+	int i = 0;
+	for (int k = 0; k < 10; k++) if (steps[k] == now) i = k;
+	return steps[(i + (d < 0 ? 9 : 1)) % 10];
+}
+
 menu_page create_room_page(Online &o, OnlineSettings &s, game_menu &menu, std::function<void()> changed)
 {
 	menu_page p{ tr::P_CREATE_ROOM, "", {} };
 	auto problem = std::make_shared<std::string>();
 	const bool listing = o.rooms_state() != 3;   // (no Rooms at the lobby: nothing to be listed in, not offered)
-	const int name = 0, listed = listing ? 1 : -1, go = listing ? 2 : 1;
+	const int name = 0, listed = listing ? 1 : -1;
 	p.items.push_back({ tr::ROOM_NAME_FIELD, "", {}, {}, [&s, &menu, changed] { menu.push(room_name_page(s, menu, changed)); } });
 	if (listing) p.items.push_back({ tr::LISTED_IN_ROOMS, "", {}, {}, [&s, changed] { s.room_who = s.room_who ? 0 : 2; changed(); } });
+	// the room's rules, as Room settings has them (the creator's saved ones, settings.ini online_room_rules), set here
+	// before the room is made and sent with its create; Room settings changes them later
+	struct rule { tr::text label, help; std::function<std::string()> value; std::function<void(int)> change; };
+	auto onoff = [](bool v) { return std::string(v ? tr::ON : tr::OFF); };
+	const std::vector<rule> rules = {
+		{ tr::ROOM2_RULE_SIDE, tr::ROOM2_RULE_SIDE_HELP, [&s, onoff] { return onoff(s.rule_side); }, [&s, changed](int) { s.rule_side = !s.rule_side; changed(); } },
+		{ tr::ROOM2_RULE_DURAL, tr::ROOM2_RULE_DURAL_HELP, [&s, onoff] { return onoff(s.rule_dural); }, [&s, changed](int) { s.rule_dural = !s.rule_dural; changed(); } },
+		{ tr::ROOM2_RULE_MAX, tr::ROOM2_RULE_MAX_HELP, [&s] { return s.rule_max ? std::to_string(s.rule_max) : std::string(tr::ROOM2_NO_LIMIT); },
+		  [&s, changed](int d) { s.rule_max = room2_next_max(s.rule_max, d); changed(); } },
+		{ tr::ROOM2_RULE_STAGE, tr::ROOM2_RULE_STAGE_HELP, [&s, onoff] { return onoff(s.rule_stage); }, [&s, changed](int) { s.rule_stage = !s.rule_stage; changed(); } },
+	};
+	const int first_rule = int(p.items.size());
+	for (const rule &r : rules) {
+		menu_item it{ r.label, r.help, r.value, r.change, {} };
+		it.activate = [change = r.change] { change(+1); };   // (Enter / A / a click: the next value; the screen's Left / Right move between rows)
+		p.items.push_back(it);
+	}
+	const int go = int(p.items.size());
 	p.items.push_back({ tr::BUTTON_CREATE, "", {}, {}, [&o, &s, &menu, problem, changed] {
 		if (s.room_name.empty()) s.room_name = room_name_of(s);
 		tr::line err;
-		if (!o.room2_create(s, err)) { *problem = err.str(); return; }   // (a Rooms 2 room; a lobby without them: as before)
+		if (!o.room2_create(s, err)) { *problem = err.str(); return; }   // (a Rooms 2 room, its rules s's; a lobby without them: as before)
 		menu.pop();
 		again(o, s, menu, changed);   // (the Online screen: the room's code, step by step)
 	} });
 	p.start = go;
 	p.on_event = [&menu](const SDL_Event &e) { return backs(menu, e); };
-	p.screen = [&s, problem, listed, go](int sel, bool pad) {
+	p.by_select = true;   // (the selected rule's help under the rows, the hint's word)
+	p.screen = [&s, problem, listed, go, first_rule, rules](int sel, bool pad) {
 		std::string r = "<div class=\"scr\"><div class=\"col\"><div class=\"title\">" + E(tr::CREATE_ROOM_TITLE) + "</div><div class=\"form\">";
 		r += "<div " + menu_row(name, sel, "fr") + "><div class=\"fl\">" + E(tr::ROOM_NAME_FIELD) + "</div><div class=\"fv\"><span class=\"fbox\">" + E(room_name_of(s)) + "</span></div></div>";
 		if (listed >= 0)
 			r += "<div " + menu_row(listed, sel, "fr") + "><div class=\"fl\">" + E(tr::LISTED_IN_ROOMS) + "</div><div class=\"fv\">" + E(s.room_who ? tr::ON : tr::OFF) + "</div>"
 			     "<div class=\"fs fr2\">" + E(s.room_who ? tr::LISTED_ON : tr::LISTED_OFF) + "</div></div>";
+		for (size_t i = 0; i < rules.size(); i++)   // (the room's rules: a label, its value at the right)
+			r += "<div " + menu_row(first_rule + int(i), sel, "fr rule") + "><div class=\"fl\">" + E(rules[i].label) + "</div><div class=\"fv\">" + E(rules[i].value()) + "</div></div>";
 		r += "</div>";
-		r += "<div class=\"note\">" + E(tr::CREATE_ROOM_NOTE) + "</div>";
+		const bool on_rule = sel >= first_rule && sel < first_rule + int(rules.size());
+		r += "<div class=\"fnote\">" + E(on_rule ? std::string(rules[size_t(sel - first_rule)].help) : std::string(tr::CREATE_ROOM_NOTE)) + "</div>";
 		if (!problem->empty()) r += "<div class=\"problem\">" + E(*problem) + "</div>";
 		r += "<div class=\"btns\"><div " + menu_row(go, sel, "btn") + ">" + E(tr::BUTTON_CREATE) + "</div></div></div>";
-		return r + foot(pad, { { "A", "Enter", sel == name ? tr::HINT_CHANGE_NAME : sel == listed ? tr::HINT_CHANGE : tr::HINT_CREATE }, { "B", "Esc", tr::HINT_BACK } }) + "</div>";
+		return r + foot(pad, { { "A", "Enter", sel == name ? tr::HINT_CHANGE_NAME : sel == listed || on_rule ? tr::HINT_CHANGE : tr::HINT_CREATE }, { "B", "Esc", tr::HINT_BACK } }) + "</div>";
 	};
 	return p;
 }

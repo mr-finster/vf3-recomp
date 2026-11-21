@@ -331,6 +331,12 @@ div { display: block; }
 .fs { color: #8f9ac8; font-size: 20dp; }
 .fbox { padding: 0 10dp; border: 2dp #3a4682; border-radius: 6dp; }
 .fr.selected .fl, .fr.selected .fv, .fr.selected .fs { color: #0b1026; }
+/* (the room's rules on the form, as Room settings has them: lower rows, the label wide, the value at the right; the
+   selected one's help in the note's place under the rows, a box of 3 lines whatever it holds, so nothing moves) */
+.fr.rule { height: 44dp; font-size: 22dp; }
+.fr.rule .fl { width: 0; flex: 1; }
+.fr.rule .fv { text-align: right; }
+.fnote { width: 820dp; height: 72dp; margin-top: 12dp; font-size: 19dp; line-height: 24dp; font-weight: 500; color: #8f9ac8; text-align: center; overflow: hidden; }
 .roomname { margin-top: 40dp; font-size: 64dp; line-height: 72dp; font-weight: 700; font-style: italic; color: #ffffff; border-bottom: 3dp #f2d14b; min-width: 300dp; text-align: center; }
 .roomname .caret { display: inline-block; width: 4dp; height: 56dp; margin-left: 6dp; background-color: #f2d14b; }
 

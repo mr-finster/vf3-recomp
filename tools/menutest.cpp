@@ -868,12 +868,42 @@ int main(int argc, char **argv)
 		gm.select_row(2);
 		key(SDL_SCANCODE_RETURN);   // (Create room: the name's set)
 		const bool listing = o.rooms_state() != 3;   // (as create_room_page has it: Rooms off, no row to be listed by)
-		const int c_listed = listing ? 1 : -1, c_go = listing ? 2 : 1;
+		const int c_listed = listing ? 1 : -1, c_rule = listing ? 2 : 1, c_go = c_rule + 4;   // (the room's rules between Listed and Create)
 		printf("Create room: Rooms %s at the lobby, so %s\n", listing ? "on (or not known)" : "off", listing ? "Listed in Rooms offered" : "no Listed in Rooms");
 		check(top() == tr::P_CREATE_ROOM.c_str() && gm.selected() == c_go && s.room_who == 0, "Create room: on Create, not listed (the code only) as ever");
 		gm.select_row(c_go + 1);
-		check(gm.selected() == c_go, listing ? "Create room: its name, Listed in Rooms and Create" : "Rooms off: Create room has its name and Create only, no Listed in Rooms");
+		check(gm.selected() == c_go, listing ? "Create room: its name, Listed in Rooms, the room's rules and Create" : "Rooms off: Create room has its name, the room's rules and Create, no Listed in Rooms");
+		settle_check("create_room.png", w, h);
 		shot("create_room.png", w, h);
+		room2_clear("create_room.png");
+		{   // the room's rules, set before the room is made (the creator's saved ones), sent with its create
+			const bool side0 = s.rule_side, dural0 = s.rule_dural, stage0 = s.rule_stage;
+			const int max0 = s.rule_max;
+			gm.select_row(c_rule);
+			key(SDL_SCANCODE_RETURN);   // (Winner may change side)
+			pad(SDL_GAMEPAD_BUTTON_SOUTH);   // (and back, by the pad)
+			gm.select_row(c_rule + 1);
+			key(SDL_SCANCODE_RETURN);   // (Dural)
+			gm.select_row(c_rule + 2);
+			key(SDL_SCANCODE_RETURN);   // (Players in the room: the next value)
+			check(s.rule_side == side0 && s.rule_dural == !dural0 && s.rule_max == (max0 ? s.rule_max : 2) && s.rule_stage == stage0,
+			      "Create room: the room's rules on the form, each row its next value (Enter, the pad's A)");
+			gm.select_row(c_rule + 3);
+			for (int i = 0; i < 8; i++) { shot("", w, h); SDL_Delay(40); }
+			shot("create_room_rule.png", w, h);   // (a rule selected: its help under the rows)
+			room2_clear("create_room_rule.png");
+			{   // a click on a rule's row: its next value
+				std::vector<game_menu::box> rows = gm.boxes("row");
+				if (int(rows.size()) > c_rule + 3) {
+					const auto &b = rows[size_t(c_rule + 3)];
+					button(true, (b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2);
+					button(false, (b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2);
+				}
+				check(s.rule_stage == !stage0, "Create room: a click on Challenger picks the stage changes it");
+			}
+			s.rule_side = side0; s.rule_dural = dural0; s.rule_max = max0; s.rule_stage = stage0;
+			gm.select_row(c_go);
+		}
 		if (c_listed >= 0) {
 			gm.select_row(c_listed);
 			key(SDL_SCANCODE_RETURN);
@@ -1104,9 +1134,9 @@ int main(int argc, char **argv)
 			gm.select_row(2);
 			key(SDL_SCANCODE_RETURN);   // (Create room)
 			shot("create_room_unlisted.png", w, h);
-			check(top() == tr::P_CREATE_ROOM.c_str() && gm.selected() == 1, "Rooms off at the lobby: Create room has no Listed in Rooms (on Create)");
-			gm.select_row(2);
-			check(gm.selected() == 1, "its name and Create only");
+			check(top() == tr::P_CREATE_ROOM.c_str() && gm.selected() == 1 + 4, "Rooms off at the lobby: Create room has no Listed in Rooms (on Create)");
+			gm.select_row(2 + 4);
+			check(gm.selected() == 1 + 4, "its name, the room's rules and Create only");
 			key(SDL_SCANCODE_ESCAPE);
 			s.lobby = lobby_before;
 			o.set_rooms({});

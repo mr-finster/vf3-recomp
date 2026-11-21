@@ -871,7 +871,8 @@ void game_menu::select(int i)
 	if (auto *old = d->GetElementById("r" + std::to_string(m_sel))) old->SetClass("selected", false);
 	m_sel = i;
 	if (auto *e = d->GetElementById("r" + std::to_string(m_sel))) e->SetClass("selected", true);
-	if (on_screen()) return;
+	if (on_screen()) { if (p.by_select) m_redraw_soon = true; return; }   // (made again at the next picture: never inside the
+	                                                                       // event that moved it, its element still in use)
 	scroll_to_selected();
 	show_help();
 }
@@ -1106,6 +1107,7 @@ bool game_menu::handle_event(const SDL_Event &e)
 
 void game_menu::render(bool fps)
 {
+	if (std::exchange(m_redraw_soon, false) && m_open && !m_stack.empty()) build();
 	if (!m->ctx) return;   // (no menu: its files weren't found)
 	if (m_vs_until && SDL_GetTicks() >= m_vs_until) {
 		m_vs_until = 0;
