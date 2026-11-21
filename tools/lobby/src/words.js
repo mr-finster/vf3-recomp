@@ -60,7 +60,7 @@ export const COMPOUNDS = ['FACE', 'FACED', 'HEAD', 'HOLE', 'BAG', 'SUCK', 'SUCKE
 	'MASTER', 'LORD', 'KING', 'BOY', 'MAN'];
 // ALLOW: words a name may have as they are, though a rule above would block them: real surnames a COMPOUNDS word makes (MAN
 // after DICK, COCK, ASS) and words with an ANYWHERE one inside (SWANKER). Matched as the whole word, made plain (upper
-// case, 0→O and the rest as above): D1CKMAN passes, BIGDICKMAN and DICKMANS don't
+// case, 0→O and the rest as above), a run of a letter read as one: D1CKMAN and DICKMANN pass, BIGDICKMAN and DICKMANS don't
 export const ALLOW = ['DICKMAN', 'COCKMAN', 'ASSMAN', 'SWANKER', 'SWANKERS'];
 // HEADS: what may come before any of WHOLE's or STRONG's words in one word to make an insult of it (MASTERCOCK, BIGDICK,
 // SUCKMYDICK): only these, so HANCOCK, PEACOCK and SHERLOCK pass

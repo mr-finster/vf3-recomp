@@ -211,7 +211,7 @@ for (const how of ['leave_line', 'leave', 'quiet']) {
 check('names blocked', ['DICKMASTER', 'MASTERCOCK', 'BIGDICK', 'SUCKMYDICK'].map(name_ok), [false, false, false, false]);
 check('names kept', ['HANCOCK', 'PEACOCK', 'SHERLOCK', 'DICKENS', 'COCKPIT', 'MASTER', 'BIGBOSS', 'KINGKONG'].map(name_ok), [true, true, true, true, true, true, true, true]);
 // (the review's: real surnames a COMPOUNDS word makes pass (ALLOW), as in beta 1; WANKER and SHITTER inside a name blocked)
-const kept = ['DICKMAN', 'COCKMAN', 'ASSMAN', 'D1CKMAN', 'ASSMANN', 'SWANKER', 'COCKBURN', 'HITMAN', 'BATMAN', 'KINGPIN', 'MASTERCHIEF', 'SCUNTHORPE'];
+const kept = ['DICKMAN', 'COCKMAN', 'ASSMAN', 'D1CKMAN', 'ASSMANN', 'DICKMANN', 'COCKMANN', 'SWANKER', 'COCKBURN', 'HITMAN', 'BATMAN', 'KINGPIN', 'MASTERCHIEF', 'SCUNTHORPE'];
 check('surnames and words kept', kept.filter((n) => !name_ok(n)), []);
 const blocked = ['WANKER', 'SHITTER', 'BIGWANKER', 'FATSHITTER', 'WANKERBOY', 'MRSHITTER', 'W4NKER', 'SH1TTERS', 'WANK ER', 'BIGWANKING', 'FATSLUTS', 'BIGDICKMAN', 'DICKMANS'];
 check('WANKER, SHITTER inside names blocked', blocked.filter((n) => name_ok(n)), []);

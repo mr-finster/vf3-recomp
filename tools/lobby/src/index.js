@@ -196,6 +196,7 @@ const compound = (word, roots) => roots.some((r) => { const w = plain(word, r), 
 const headed = (word) => HEADS.some((h) => word.startsWith(h) && word.length > h.length && [...STRONG, ...WHOLE].some((r) => { const rest = word.slice(h.length), p = runs(r, doubled(r) ? 2 : 1), w = plain(rest, r);
 	return w === p || (w.startsWith(p) && [...TAILS, 'S', 'ES', ...(STRONG.includes(r) ? ENDINGS : [])].includes(w.slice(p.length))); }));
 const WORD_ROOTS = [...STRONG, ...WHOLE, ...ANYWHERE], SPAN_ROOTS = [...STRONG, ...ANYWHERE];
+const ALLOWED = new Set(ALLOW.map((w) => runs(w, 1)));   // (ALLOW as the words are read: DICKMAN and DICKMANN alike)
 function name_words(s, vu = false) {   // (made plain, its words; one-letter words in a row joined; vu: V read as U too, FVCK)
 	let t = String(s || '').toUpperCase().replace(/[013457!|$@]/g, (c) => SUBS[c] || c);
 	if (vu) t = t.replace(/V/g, 'U');
@@ -212,7 +213,7 @@ export function name_ok(s) {   // (exported for test/watch.test.mjs)
 	for (const vu of /V/i.test(String(s || '')) ? [false, true] : [false]) {
 		const words = name_words(s, vu);
 		for (const word of words) {
-			if (ALLOW.includes(word)) continue;   // (a known surname or word: as it is)
+			if (ALLOWED.has(runs(word, 1))) continue;   // (a known surname or word, its letters' runs cut to one as the checks below read it: DICKMANN too)
 			if (ANY.some(([w, p]) => plain(word, w).includes(p))) return false;
 			if (ALL_FORMS.some(([r, fs]) => fs.includes(plain(word, r)))) return false;
 			if (compound(word, WORD_ROOTS)) return false;
