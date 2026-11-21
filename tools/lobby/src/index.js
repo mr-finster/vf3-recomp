@@ -121,7 +121,7 @@
 // A member's call on a code with no room, or with a mid and mkey that aren't a member's, answers no_room 404 alike (so a
 // code can't be found by them: only enter is charged as a code tried); a member let go, by its own key, 410 removed.
 
-import { ANYWHERE, STRONG, ENDINGS, WHOLE, COMPOUNDS, HEADS } from './words.js';
+import { ANYWHERE, STRONG, ENDINGS, WHOLE, COMPOUNDS, HEADS, ALLOW } from './words.js';
 
 const PROTOCOL = 1;
 const LETTERS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';   // (no 0/O, 1/I/L: read out over voice chat, typed on a pad)
@@ -191,9 +191,10 @@ const SPAN_FORMS = [...forms(ANYWHERE, SPAN_ENDINGS), ...forms(STRONG, SPAN_ENDI
 // with anything else after it, COCKPIT, SHITAKE, nor before it, HANCOCK, SCUNTHORPE)
 const TAILS = COMPOUNDS.flatMap((c) => [c, c + 'S']);
 const compound = (word, roots) => roots.some((r) => { const w = plain(word, r), p = runs(r, doubled(r) ? 2 : 1); return w.startsWith(p) && TAILS.includes(w.slice(p.length)); });
-// (one of HEADS before a WHOLE or STRONG word, with an ending or a COMPOUNDS word after it or nothing: MASTERCOCK, BIGDICKS)
+// (one of HEADS before a WHOLE or STRONG word, with an ending (a STRONG one's: ENDINGS) or a COMPOUNDS word after it or
+// nothing: MASTERCOCK, BIGDICKS, FATSLUTS, BIGWANKING)
 const headed = (word) => HEADS.some((h) => word.startsWith(h) && word.length > h.length && [...STRONG, ...WHOLE].some((r) => { const rest = word.slice(h.length), p = runs(r, doubled(r) ? 2 : 1), w = plain(rest, r);
-	return w === p || (w.startsWith(p) && [...TAILS, 'S', 'ES'].includes(w.slice(p.length))); }));
+	return w === p || (w.startsWith(p) && [...TAILS, 'S', 'ES', ...(STRONG.includes(r) ? ENDINGS : [])].includes(w.slice(p.length))); }));
 const WORD_ROOTS = [...STRONG, ...WHOLE, ...ANYWHERE], SPAN_ROOTS = [...STRONG, ...ANYWHERE];
 function name_words(s, vu = false) {   // (made plain, its words; one-letter words in a row joined; vu: V read as U too, FVCK)
 	let t = String(s || '').toUpperCase().replace(/[013457!|$@]/g, (c) => SUBS[c] || c);
@@ -211,6 +212,7 @@ export function name_ok(s) {   // (exported for test/watch.test.mjs)
 	for (const vu of /V/i.test(String(s || '')) ? [false, true] : [false]) {
 		const words = name_words(s, vu);
 		for (const word of words) {
+			if (ALLOW.includes(word)) continue;   // (a known surname or word: as it is)
 			if (ANY.some(([w, p]) => plain(word, w).includes(p))) return false;
 			if (ALL_FORMS.some(([r, fs]) => fs.includes(plain(word, r)))) return false;
 			if (compound(word, WORD_ROOTS)) return false;
@@ -1013,16 +1015,29 @@ function r2_table() {
 function r2_clear_match(t) {
 	t.token = ''; t.as = ''; t.started = {}; t.reports = {}; t.deadline = 0; t.reseated = false; t.wkey = ''; t.armed = false; t.arm = false; t.lost = false; t.restart = false; t.playon = false; t.decide_at = 0;
 }
+// (the room's rules on the seated terms, whatever either game sent: both play the lobby's terms, whatever their build. A
+// modified game with no pool and a version with a Dural flag is seated on version terms the honest one adopts (its accepts
+// have the flag): so no Dural flag at all in a room with Dural off, pool terms or version terms. And version terms (not a
+// pool's, whose host applies the stage rule itself) with "+stage" as the room's rule says, in a game with a stage select
+// (the creator's accepts it): a VF3 game takes either; its pool has no stage flag. A room without rules: the terms as before)
+function r2_ruled(r, as) {
+	if (!r.rules) return as;
+	const base = base_of(as);
+	let flags = as.slice(base.length).split('+').slice(1);
+	if (!r.rules.dural) flags = flags.filter((f) => !DURAL.test(f));
+	if (!flags.some((f) => /^host\d*$/.test(f)) && Array.isArray(r.base.accepts) && r.base.accepts.includes('stage')) {
+		flags = flags.filter((f) => f !== 'stage');
+		if (r.rules.stage !== false) flags.push('stage');
+	}
+	return [base, ...flags].join('+');
+}
 // (the two seated, a new session between them, cold: its token and terms, a new watch key for side a's game; false: they
 // can't play each other)
 function r2_seat(r, now, reseat = false) {
 	const t = r.t, A = r.members[t.a], B = r.members[t.b];
-	let as = A && B ? terms(B.who, A.who) : null;
+	const as = A && B ? terms(B.who, A.who) : null;
 	if (as === null) return false;
-	// (the room's rules: no Dural on the select, a pool match's terms without her whoever has her on (both games play the
-	// lobby's terms, whatever their build))
-	if (r.rules && !r.rules.dural && A.who.pool && A.who.pool === B.who.pool) as = A.who.pool;
-	t.token = random_hex(8); t.as = as; t.n++;
+	t.token = random_hex(8); t.as = r2_ruled(r, as); t.n++;
 	t.match = { n: t.n, streak: t.streak, holder: t.holder };   // (the streak this match is played for: what's shown over it)
 	t.phase = 'CONNECTING'; t.deadline = now + R2.CONNECT_MS; t.started = {}; t.reports = {}; t.reseated = reseat; t.lost = false; t.restart = false; t.playon = false;
 	t.wkey = random_hex(16); t.armed = false; t.arm = true;   // (armed by the object: v2_commit)
@@ -1095,12 +1110,14 @@ function r2_enter(r, m, now) {
 	r.active = now;
 	r2_advance(r, now);
 }
-// (a seated member off the table, its seat empty: a match on forfeited; a match DECIDED by a report that the other side won
-// (the one left reported it, or the one leaving conceded it) counted as that win, the streak raised: a loser who quits just
-// after the decision, its Start pressed, left the winner's win uncounted, the streak not raised)
+// (a seated member off the table, its seat empty: a match on forfeited. A match the lobby has seen decided by both games:
+// both reports agreeing (READY: the result already applied, nothing forfeited by leaving), or the leaver's own report
+// conceding it (DECIDED, the other side's not in yet): counted as that win, the streak raised (a loser who quits just after
+// the decision, its Start pressed, left the winner's win uncounted). The stayer's report alone is no decision: a win
+// claimed at once and the other leaving or going quiet is a forfeit, the streak not raised, as before)
 function r2_vacate(r, side, mid) {
 	const t = r.t, other = r2_other(side), stays = t[other];
-	const won = t.phase === 'DECIDED' && stays && Object.values(t.reports).includes(other);
+	const won = t.phase === 'DECIDED' && stays && t.reports[side] === other;   // (its own report conceded it: not the stayer's alone)
 	t[side] = null;
 	if (won) {
 		if (t.holder === stays) t.streak++; else { t.holder = stays; t.streak = 1; }

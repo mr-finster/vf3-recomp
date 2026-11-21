@@ -126,27 +126,73 @@ for (const side of [false, true]) {
 	const name = (mid) => r.members[mid].who.name;
 	check('side ' + side + ': after B (b) won, C seated; sides', [name(r.t.a), name(r.t.b)], side ? ['B', 'C'] : ['C', 'B']);
 }
-// a loser who leaves just after the decision (one report in, the winner's): the win counted, the streak raised, the next seated
+// a loser who leaves just after the decision: counted only when the lobby saw the decision from both games, both reports
+// agreeing, or the leaver's own report conceding; the winner's report alone then a leave (or going quiet) is a forfeit,
+// the streak not raised (a win claimed at once against a rage-quit: beta 1's way); a forfeit mid-match as before
 {
 	const A = await create('A', { listed: true, room: 'QUIT' });
 	const B = await enter(A.code, 'B');
 	const C = await enter(A.code, 'C');
 	await act(A, 'started'); await act(B, 'started');
-	await act(A, 'result', { winner: 'a' });
-	check('decided, one report', rec(A.code).t.phase, 'DECIDED');
+	await act(A, 'result', { winner: 'a' }); await act(B, 'result', { winner: 'a' });
 	await act(B, 'leave');
 	const r = rec(A.code);
-	check('the loser left: A\'s win counted', [r.t.last.result, r.t.streak, r.members[r.t.holder].who.name], ['a', 1, 'A']);
+	check('both reports, then the loser left: A\'s win counted', [r.t.last.result, r.t.streak, r.members[r.t.holder].who.name], ['a', 1, 'A']);
 	check('the next seated', [r.t.phase, r.members[r.t.b] && r.members[r.t.b].who.name], ['CONNECTING', 'C']);
-	// and a forfeit mid-match as before: not counted
+	// the loser's own report conceding it, then its Leave line before the winner's report: counted
+	const D = await enter(A.code, 'D');
 	await act(A, 'started'); await act(C, 'started');
-	await act(C, 'leave');
+	await act(C, 'result', { winner: 'a' });
+	check('decided by the loser\'s report', rec(A.code).t.phase, 'DECIDED');
+	await act(C, 'leave_line');
 	const r2 = rec(A.code);
-	check('a forfeit mid-match: kept, not raised', [r2.t.last.result, r2.t.streak], ['forfeit', 1]);
+	check('the loser conceded and left the line: counted', [r2.t.last.result, r2.t.streak], ['a', 2]);
+	// and a forfeit mid-match as before: not counted
+	await act(A, 'started'); await act(D, 'started');
+	await act(D, 'leave');
+	const r3 = rec(A.code);
+	check('a forfeit mid-match: kept, not raised', [r3.t.last.result, r3.t.streak], ['forfeit', 2]);
+}
+// (the review's P2 and P4) a win reported at once, no match played: the opponent leaving the line, leaving the room or going
+// quiet is a forfeit, never a counted win
+for (const how of ['leave_line', 'leave', 'quiet']) {
+	const A = await create('A', { listed: true, room: 'FORGE' });
+	const B = await enter(A.code, 'B', {}, how !== 'quiet');
+	await enter(A.code, 'C');
+	await act(A, 'started'); await act(B, 'started');
+	await act(A, 'result', { winner: 'a' });
+	if (how === 'quiet') { advance(31000); await alarm(A.code); } else await act(B, how);
+	const r = rec(A.code);
+	check('A\'s lone report, then B ' + how + ': a forfeit, the streak not raised', [r.t.last && r.t.last.result, r.t.streak], ['forfeit', 0]);
+}
+// (the review's P1) the room's rules on the seated terms whatever a game sent: a modified one with no pool and a version
+// with the Dural flag, in a Dural Off room, seated without her; the stage rule on version terms as the room says; a room
+// without rules, and an honest pair, as before
+{
+	const BASE = 'v0.1.7-online-preview', POOL = BASE + '+host1';
+	const honest = { version: BASE + '+stage', pool: POOL, accepts: ['stage', 'dural3', 'dural2'] };
+	const sneaky = { version: BASE + '+dural3', pool: '', accepts: [] };
+	const seat_as = async (rules, b) => {
+		const A = await create('A', { listed: true, room: 'TERMS', ...(rules ? { rules } : {}), ...honest });
+		await enter(A.code, 'B', b);
+		return rec(A.code).t.as;
+	};
+	check('Dural off, no pool and +dural3: no Dural, the stage on', await seat_as({ dural: false, stage: true }, sneaky), BASE + '+stage');
+	check('Dural off, stage off, no pool and +dural3+stage: neither', await seat_as({ dural: false, stage: false }, { ...sneaky, version: BASE + '+dural3+stage' }), BASE);
+	check('Dural on, stage on, no pool and +dural3: Dural kept, the stage added', await seat_as({ dural: true, stage: true }, sneaky), BASE + '+dural3+stage');
+	check('no rules: the terms as before', await seat_as(null, sneaky), BASE + '+dural3');
+	check('Dural off, an honest pair, B with her on: the pool\'s', await seat_as({ dural: false }, { ...honest, version: BASE + '+dural3+stage' }), POOL);
+	check('Dural on, an honest pair, B with her on: the pool\'s and Dural', await seat_as({ dural: true }, { ...honest, version: BASE + '+dural3+stage' }), POOL + '+dural3');
+	check('stage off, an honest pair: the pool\'s (its host applies the stage rule)', await seat_as({ stage: false }, honest), POOL);
 }
 // the name filter's HEADS: insults made with a word before, innocent names kept
 check('names blocked', ['DICKMASTER', 'MASTERCOCK', 'BIGDICK', 'SUCKMYDICK'].map(name_ok), [false, false, false, false]);
 check('names kept', ['HANCOCK', 'PEACOCK', 'SHERLOCK', 'DICKENS', 'COCKPIT', 'MASTER', 'BIGBOSS', 'KINGKONG'].map(name_ok), [true, true, true, true, true, true, true, true]);
+// (the review's: real surnames a COMPOUNDS word makes pass (ALLOW), as in beta 1; WANKER and SHITTER inside a name blocked)
+const kept = ['DICKMAN', 'COCKMAN', 'ASSMAN', 'D1CKMAN', 'ASSMANN', 'SWANKER', 'COCKBURN', 'HITMAN', 'BATMAN', 'KINGPIN', 'MASTERCHIEF', 'SCUNTHORPE'];
+check('surnames and words kept', kept.filter((n) => !name_ok(n)), []);
+const blocked = ['WANKER', 'SHITTER', 'BIGWANKER', 'FATSHITTER', 'WANKERBOY', 'MRSHITTER', 'W4NKER', 'SH1TTERS', 'WANK ER', 'BIGWANKING', 'FATSLUTS', 'BIGDICKMAN', 'DICKMANS'];
+check('WANKER, SHITTER inside names blocked', blocked.filter((n) => name_ok(n)), []);
 
 console.log((fails ? fails + ' FAILED' : 'all passed') + ' (' + checks + ' checks)');
 process.exit(fails ? 1 : 0);
