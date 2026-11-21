@@ -88,13 +88,13 @@ const { name_ok } = await import(new URL('../' + process.argv[2], import.meta.ur
 // rules at create: kept and in every member's state; max players enforced at enter; settings change them
 {
 	const A = await create('A', { listed: true, room: 'RULES', rules: { side: false, dural: false, custom: false, max: 3, stage: true } });
-	check('rules at create', A.state.room.rules, { side: false, dural: false, custom: false, max: 3, stage: true });
+	check('rules at create', A.state.room.rules, { side: false, dural: false, custom: false, max: 3, stage: true, random: false });
 	const B = await enter(A.code, 'B'), C = await enter(A.code, 'C'), D = await enter(A.code, 'D');
 	check('max 3: two more entered', [B.status, C.status], [200, 200]);
 	check('max 3: the 4th refused full', [D.status, D.body && D.body.error], [409, 'full']);
 	check('a member sees the rules', B.state.room.rules.max, 3);
 	const s = await call('POST', '/v2/room/settings', { code: A.code, owner_key: A.owner_key, rules: { max: 0, stage: false, bogus: 1 } }, A.ip);
-	check('settings: rules changed, the rest kept', s.body.room.rules, { side: false, dural: false, custom: false, max: 0, stage: false });
+	check('settings: rules changed, the rest kept', s.body.room.rules, { side: false, dural: false, custom: false, max: 0, stage: false, random: false });
 	check('settings: then 4th enters', (await enter(A.code, 'D')).status, 200);
 	const n = await call('POST', '/v2/room/settings', { code: A.code, mid: B.mid, mkey: B.mkey, owner_key: 'x'.repeat(32), rules: { max: 2 } }, B.ip);
 	check('settings by a non-owner refused', n.status, 403);
@@ -184,6 +184,28 @@ for (const how of ['leave_line', 'leave', 'quiet']) {
 	check('Dural off, an honest pair, B with her on: the pool\'s', await seat_as({ dural: false }, { ...honest, version: BASE + '+dural3+stage' }), POOL);
 	check('Dural on, an honest pair, B with her on: the pool\'s and Dural', await seat_as({ dural: true }, { ...honest, version: BASE + '+dural3+stage' }), POOL + '+dural3');
 	check('stage off, an honest pair: the pool\'s (its host applies the stage rule)', await seat_as({ stage: false }, honest), POOL);
+}
+// random fighters (Online > Settings > Your fighter), Off by default: VF2's terms the plain match's (no "mix", no "random"),
+// whoever has one; VF1's with "+norandom", which its games obey (no fighter of their own, an opponent's refused); On, as
+// before; a room without rules (an older build's) as before
+{
+	const V2 = 'v0.1.16', P2 = V2 + '+mix1';
+	const vf2 = (x = {}) => ({ game: 'vf2', version: V2, pool: P2, accepts: ['random'], ...x });
+	const seat2 = async (rules, a, b) => { const A = await create('A', { listed: true, room: 'R2', ...(rules ? { rules } : {}), ...a }); await enter(A.code, 'B', b); return rec(A.code).t.as; };
+	check('VF2, random off (default): the plain match whoever has one', await seat2({ side: false }, vf2(), vf2({ version: V2 + '+random' })), V2);
+	check('VF2, random off: a modified one with no pool and +random, the plain match', await seat2({ random: false }, vf2(), { game: 'vf2', version: V2 + '+random', pool: '', accepts: [] }), V2);
+	check('VF2, random on: the pool\'s (each player\'s own fighter)', await seat2({ random: true }, vf2(), vf2()), P2);
+	check('VF2, no rules: the pool\'s as before', await seat2(null, vf2(), vf2()), P2);
+	const V1 = 'v1.5.0', vf1 = { game: 'vf1', version: V1, pool: '', accepts: [] };
+	check('VF1, random off (default): +norandom', await seat2({ side: true }, vf1, vf1), V1 + '+norandom');
+	check('VF1, random on: the version as before', await seat2({ random: true }, vf1, vf1), V1);
+	check('VF1, no rules: the version as before', await seat2(null, vf1, vf1), V1);
+	const A = await create('A', { listed: true, room: 'R1', rules: { random: false }, ...vf1 });
+	const B = await enter(A.code, 'B', vf1);
+	check('VF1, random off: the seat\'s terms say so to both', [A.state && rec(A.code) && B.state.you.seat && B.state.you.seat.as], [V1 + '+norandom']);
+	const s = await call('POST', '/v2/room/settings', { code: A.code, owner_key: A.owner_key, rules: { random: true } }, A.ip);
+	check('VF1, settings: random on', s.body.room.rules.random, true);
+	check('VF3: random fighters change nothing (no such terms)', await seat2({ random: false }, { version: 'v0.1.7-online-preview+stage', pool: 'v0.1.7-online-preview+host1', accepts: ['stage'] }, { version: 'v0.1.7-online-preview+stage', pool: 'v0.1.7-online-preview+host1', accepts: ['stage'] }), 'v0.1.7-online-preview+host1');
 }
 // the name filter's HEADS: insults made with a word before, innocent names kept
 check('names blocked', ['DICKMASTER', 'MASTERCOCK', 'BIGDICK', 'SUCKMYDICK'].map(name_ok), [false, false, false, false]);

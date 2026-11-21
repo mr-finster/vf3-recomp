@@ -1025,6 +1025,12 @@ function r2_ruled(r, as) {
 	const base = base_of(as);
 	let flags = as.slice(base.length).split('+').slice(1);
 	if (!r.rules.dural) flags = flags.filter((f) => !DURAL.test(f));
+	// (random fighters off (Online > Settings > Your fighter, VF1's and VF2's), the default: VF2's are in its terms, the
+	// pool's "mix" or an older version's "random", so the plain match's terms, every VF2 build's, the select's fighters
+	// whatever each chose; VF1 has no terms of its own (a fighter is each player's, in its hello), so "+norandom", which a VF1
+	// game from beta 2 on obeys: no fighter of its own, an opponent's refused at the match's start (an older build ignores it))
+	if (r.rules.random !== true && r.game === 'vf2') flags = flags.filter((f) => !/^(mix|random)\d*$/.test(f));
+	if (r.rules.random !== true && r.game === 'vf1' && !flags.includes('norandom')) flags.push('norandom');
 	if (!flags.some((f) => /^host\d*$/.test(f)) && Array.isArray(r.base.accepts) && r.base.accepts.includes('stage')) {
 		flags = flags.filter((f) => f !== 'stage');
 		if (r.rules.stage !== false) flags.push('stage');
@@ -1388,11 +1394,11 @@ function r2_view(r, mid, now, watch_on) {
 		watch: watch_on ? r.wid : '' };
 }
 // (a room's rules, as the creator set them: each known one checked, the rest as they were (or the defaults))
-const R2_RULES = { side: false, dural: false, custom: false, max: 0, stage: true };
+const R2_RULES = { side: false, dural: false, custom: false, max: 0, stage: true, random: false };
 function r2_rules(x, was) {
 	if (!x || typeof x !== 'object' || Array.isArray(x)) return was;
 	const r = { ...(was || R2_RULES) };
-	for (const k of ['side', 'dural', 'custom', 'stage']) if (typeof x[k] === 'boolean') r[k] = x[k];
+	for (const k of ['side', 'dural', 'custom', 'stage', 'random']) if (typeof x[k] === 'boolean') r[k] = x[k];
 	if (Number.isFinite(x.max)) r.max = Math.min(Math.max(Math.round(x.max), 0), R2.MEMBERS_MAX);
 	if (r.max === 1) r.max = 2;   // (a room for one plays nobody)
 	return r;
