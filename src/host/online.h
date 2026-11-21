@@ -83,7 +83,14 @@ public:
 	// What was tried last (for Try again): hosting or joining, with a code or by address
 	enum class Try { none, host_room, join_room, host, join, random, watch, room2_create, room2_enter };   // (room2_*: a Rooms 2 room's, made or entered)
 
-	explicit Online(m3::Model3 &board) : adapter(board), board(board) {}
+	explicit Online(m3::Model3 &board) : adapter(board), board(board)
+	{
+		// (a match's frames run for good: the other player's inputs come so far; a watched match's, all of them)
+		adapter.known = [this] {
+			if (ph != Phase::playing || !session || session->state() != vfnet::Session::State::running) return UINT32_MAX;
+			return uint32_t(session->inputs(1 - session->local_player()).size());
+		};
+	}
 	~Online();
 	vf3net::Adapter adapter;      // (its run, settle and program_changed set by main)
 	vfnet::Identity identity;     // the game, build and ROM hash (main's); the name from the settings
@@ -331,6 +338,7 @@ private:
 	std::string ticket, country_me, country_peer;
 	int players = 0;
 	uint64_t logged_rb = 0, logged_resim = 0, logged_stalls = 0, logged_waits = 0, logged_steps = 0;
+	vf3net::Adapter::SoundStats logged_sound;   // (the sound under rollback's, as last logged)
 	double logged_save = 0, logged_run = 0, logged_resim_ms = 0, logged_hash = 0;
 	std::deque<Notice> notices;
 	vfnet::Config config(const OnlineSettings &s) const;

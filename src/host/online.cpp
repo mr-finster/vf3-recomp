@@ -2158,6 +2158,7 @@ void Online::begin_match(const std::string &who)
 	// (the log's figures from this session's own: the last match's would wrap the first line's differences)
 	logged_at = now;
 	logged_rb = logged_resim = logged_stalls = logged_waits = logged_steps = 0;
+	logged_sound = {};
 	logged_save = logged_run = logged_resim_ms = logged_hash = 0;
 	if (rooms) {
 		log_line(std::string("connected ") + (room->via_relay() ? "through a relay" : "directly") + ", " + mask(room->way()) + ": " + room->report(mask));
@@ -2345,6 +2346,14 @@ void Online::poll(double t)
 			        stt.step_max_ms, (stt.save_ms - logged_save) / n, (stt.run_ms - logged_run) / n, (stt.resim_ms - logged_resim_ms) / n, (stt.hash_ms - logged_hash) / n,
 			        stt.step_recent_ms, stt.resim_recent_ms, adelay.rollback_room(stt), stt.peer_room);
 		}
+		// (the sound under rollback, when it did anything but send each frame's at once: vf3net::Adapter::take_midi)
+		if (const vf3net::Adapter::SoundStats &x = adapter.sound_stats, &w = logged_sound;
+		    logged_at > 0 && (x.late != w.late || x.stray != w.stray || x.held != w.held || x.waited != w.waited))
+			fprintf(stderr, "online: the sound: %llu effects sent late (their frame's guess hadn't them), %llu a guess's never made (heard), "
+			        "music held for its frame's inputs in %llu frames (%u frames ahead at most this match), %llu frames' effects behind it\n",
+			        (unsigned long long)(x.late - w.late), (unsigned long long)(x.stray - w.stray), (unsigned long long)(x.held - w.held), x.held_most,
+			        (unsigned long long)(x.waited - w.waited));
+		logged_sound = adapter.sound_stats;
 		session->clear_step_max();
 		logged_steps = stt.steps;
 		logged_save = stt.save_ms;

@@ -150,22 +150,99 @@ std::vector<uint8_t> Adapter::host_blob() const
 	return out;
 }
 
-// (a frame's MIDI bytes go at once, a guessed frame's as much as a certain one's, so no sound waits for the other
-// side's input)
+namespace {
+
+// A frame's MIDI bytes as sound commands (A0, request, value: the request and value), false if they're not all that
+bool sound_commands(const std::vector<uint8_t> &b, std::vector<uint16_t> &out)
+{
+	out.clear();
+	if (b.size() % 3) return false;
+	for (size_t i = 0; i < b.size(); i += 3) {
+		if (b[i] != 0xA0 || b[i + 1] >= 0x80 || b[i + 2] >= 0x80) return false;
+		out.push_back(uint16_t(b[i + 1] << 8 | b[i + 2]));
+	}
+	return true;
+}
+
+bool is_effect(uint16_t c) { return (c >> 8) >= 0x11 && (c >> 8) <= 0x14; }
+
+void put_command(std::vector<uint8_t> &out, uint16_t c)
+{
+	out.push_back(0xA0);
+	out.push_back(uint8_t(c >> 8));
+	out.push_back(uint8_t(c));
+}
+
+} // namespace
+
 void Adapter::take_midi(std::vector<uint8_t> &out)
 {
 	midi_taken = true;
-	scratch.assign(board.midi.begin(), board.midi.end());
-	board.midi.clear();
 	out.clear();
-	auto it = midi_sent.find(frame);
-	const bool sent = it != midi_sent.end() && !it->second.empty();
-	if (!scratch.empty() && !sent) {
-		out = scratch;
-		midi_sent[frame] = scratch;
-	} else if (it == midi_sent.end())
-		midi_sent[frame] = {};
-	while (!midi_sent.empty() && midi_sent.begin()->first + 64 < frame) midi_sent.erase(midi_sent.begin());
+	const uint32_t f = frame, k = known ? known() : UINT32_MAX;
+	const bool first = !sound.count(f);
+	SoundFrame &s = sound[f];
+	s.bytes.assign(board.midi.begin(), board.midi.end());
+	board.midi.clear();
+	std::vector<uint16_t> &cmds = scratch_cmds;
+	const bool parsed = sound_commands(s.bytes, cmds);
+	s.held = !parsed || std::any_of(cmds.begin(), cmds.end(), [](uint16_t c) { return !is_effect(c); });
+	if (first) s.guess = f >= k;
+	if (first && f >= k && !s.bytes.empty()) {   // (a guess, run the first time: its effects now, unless music waits)
+		bool behind = false;
+		for (auto it = sound.lower_bound(sound_final); it != sound.end() && it->first < f && !behind; ++it) behind = it->second.held;
+		if (!s.held && !behind) {
+			out = s.bytes;
+			s.guessed = cmds;
+		} else if (s.held) {
+			sound_stats.held++;
+			sound_stats.held_most = std::max(sound_stats.held_most, f + 1 - std::max(k, sound_final));
+		} else
+			sound_stats.waited++;
+	}
+	// the frames run for good now, in order: what no guess sent
+	for (const uint32_t upto = std::min(f + 1, k); sound_final < upto; sound_final++) settle_sound(sound_final, out);
+	while (!sound.empty() && sound.begin()->first + 2 * SOUND_NEAR < sound_final) sound.erase(sound.begin());
+}
+
+bool Adapter::take_guessed(uint32_t f, uint16_t c)
+{
+	for (uint32_t d = 0; d <= SOUND_NEAR; d++)   // (its own frame's first, then the nearest)
+		for (const uint32_t g : { f - d, f + d }) {
+			if ((d && g == f) || (d > f && g == f - d)) continue;
+			const auto it = sound.find(g);
+			if (it == sound.end()) continue;
+			std::vector<uint16_t> &v = it->second.guessed;
+			const auto at = std::find(v.begin(), v.end(), c);
+			if (at == v.end()) continue;
+			v.erase(at);
+			return true;
+		}
+	return false;
+}
+
+void Adapter::settle_sound(uint32_t f, std::vector<uint8_t> &out)
+{
+	const auto it = sound.find(f);
+	if (it == sound.end()) return;
+	SoundFrame &s = it->second;
+	std::vector<uint16_t> &cmds = scratch_cmds;
+	if (!sound_commands(s.bytes, cmds)) {   // (not all commands: as they are, in order; a guess never sent them)
+		out.insert(out.end(), s.bytes.begin(), s.bytes.end());
+		return;
+	}
+	for (const uint16_t c : cmds) {
+		if (is_effect(c)) {
+			if (take_guessed(f, c)) continue;   // (a guess sent it, on this frame or one near it)
+			if (s.guess) sound_stats.late++;   // (none went with its guess)
+		}
+		put_command(out, c);
+	}
+	// (SOUND_NEAR frames on, what a guess sent for this one and no frame made: a stray, heard)
+	if (const auto old = sound.find(f - std::min(f, SOUND_NEAR)); old != sound.end() && f >= SOUND_NEAR) {
+		sound_stats.stray += old->second.guessed.size();
+		old->second.guessed.clear();
+	}
 }
 
 bool Adapter::begin(const std::vector<uint8_t> &blob)
@@ -212,7 +289,9 @@ bool Adapter::begin(const std::vector<uint8_t> &blob)
 	set_versus_count(board, blob[base - 1] % 16);
 	board.midi.clear();
 	frame = 0;
-	midi_sent.clear();
+	sound.clear();
+	sound_final = 0;
+	sound_stats = {};
 	checkpoints.clear();
 	return true;
 }
@@ -246,7 +325,11 @@ bool Adapter::load_snap(const std::vector<uint8_t> &state, const std::vector<uin
 	if (state.size() < least || state.size() > most) return false;
 	std::vector<uint8_t> was;   // (refused, the game as it was: its own state back, every part of it, not half another's)
 	save(was);
-	if (load(state) && frame == snap_frame) return true;
+	if (load(state) && frame == snap_frame) {
+		sound.clear();   // (a watcher's: its sound from here)
+		sound_final = frame;
+		return true;
+	}
 	load(was);
 	return false;
 }

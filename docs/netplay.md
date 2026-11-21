@@ -112,8 +112,14 @@ From a survey of other projects' online play (Oct 2026; many sources secondhand,
 - **Joining**: room codes, and a lobby with a ping column and challenge / accept; UDP hole punching first, the
   relay when that fails (shown as relayed, with what it adds). Rematch and back to the lobby after a match.
 - **Sound**: VF3's sound board is apart from the game's state, so it can't be rolled back. Waiting for certain
-  frames would make every sound up to 7 frames late, so the MIDI bytes of guessed frames go to it at once, and after
-  a rollback only bytes that weren't sent already: a wrong guess can leave a stray sound, never a late one.
+  frames would make every sound up to 7 frames late, so a guessed frame's effects (requests 0x11-0x14: hits, voices,
+  the announcer) go to it at once; the music's and the sound program's other commands only once their frame is run for
+  good (both players' inputs here), in order, a frame's effects after them waiting with them; and once a frame is run
+  for good, its effects no guess sent go then, late (one a guess sent within 4 frames of it counts as its own). So the
+  music is always the straight run's and no effect is lost; a wrong guess's effect can still be heard (a stray).
+  Before (every release to Rooms beta 2), a frame run again sent only what its first run hadn't: under heavy rollback (a player at 228
+  ms, delay 4, nearly every frame run again) the real frame's effects were dropped now and then and a guess's music
+  command could stay. `vf3net` with VF3NET_MIDI=dir and tools/midicmp.py measure it against a straight run.
 - **Watching and the room browser** (below): done. **Later**: shared replays, ranked play, a lag simulator for practice, a wifi badge.
 
 ## Rooms and watching

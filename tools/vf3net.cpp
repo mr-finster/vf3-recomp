@@ -362,6 +362,9 @@ int main(int argc, char **argv)
 	       int(B.adapter.dural), host_terms ? " (a pool match: the host's)" : "");
 	vfnet::Session sa(wire.a(), A.adapter, ia, cfg, true, blob);
 	vfnet::Session sb(wire.b(), B.adapter, ib, cfg, false);
+	// (each side's frames run for good as the game has them: the other player's inputs come so far)
+	A.adapter.known = [&] { return uint32_t(sa.inputs(1).size()); };
+	B.adapter.known = [&] { return uint32_t(sb.inputs(0).size()); };
 
 	// a side's input word as its player's game makes it (Cheats > Dural's stage, if on there)
 	auto own_word = [&](dural_stage::Picker &pick, m3::Model3 &m, int player, uint16_t bits) {
@@ -674,6 +677,12 @@ int main(int argc, char **argv)
 		}
 	}
 	for (FILE *f : midi_f) if (f) fclose(f);
+	for (int s = 0; s < 2; s++) {   // (what each side's sound under rollback did: Adapter::take_midi)
+		const vf3net::Adapter::SoundStats &x = (s ? B : A).adapter.sound_stats;
+		printf("  %s's sound: %llu effects sent once their frame was run for good (none with its guess), %llu a guess sent that the game never made, "
+		       "%llu frames' music held for their inputs (%u frames at most), %llu frames' effects behind them\n", s ? "guest" : "host",
+		       (unsigned long long)x.late, (unsigned long long)x.stray, (unsigned long long)x.held, x.held_most, (unsigned long long)x.waited);
+	}
 	const auto &xa = sa.stats(), &xb = sb.stats();
 	printf("%s: %u frames confirmed, %u checkpoints against a straight run; %.0f ms each way, jitter %.0f, %.0f%% lost; delay %d\n",
 	       failed ? "FAILED" : "in step", n, checked, p.latency_ms, p.jitter_ms, p.loss * 100, delay);

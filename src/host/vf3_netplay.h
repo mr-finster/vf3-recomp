@@ -177,11 +177,30 @@ public:
 	// and its frame is the snapshot's; refused, the board and this as they were)
 	bool load_snap(const std::vector<uint8_t> &state, const std::vector<uint8_t> &extra, uint32_t frame) override;
 	std::pair<size_t, size_t> snap_state_bytes() const override;
-	// The frame's MIDI bytes to send now (board.midi emptied): all of them the first time a frame runs; run again
-	// after a rollback, none if its bytes went already (the sound board can't take back what it played: a wrong
-	// guess's sound stays), and if it sent none and has some now, those (late)
+	// The MIDI bytes to send the sound board now, after a frame (board.midi emptied). The sound board can't go back, so
+	// under rollback (issue: a player's sound out of step at 228 ms, nearly every frame run again) each frame's sound
+	// commands (A0, request, value) go as:
+	// - the game's effects, voices and announcer (requests 0x11-0x14, docs/step4-game.md): at once the first time a
+	//   frame runs, a guess's as much as a certain one's (no hit's sound waits for the other side's input);
+	// - every other command (the music, its volume and fades, the sound program's state) and a frame's bytes that
+	//   aren't all commands: only once the frame is run for good (both players' inputs here, `known`), in the frames'
+	//   order, so the music is always the straight run's; a frame after one waiting with them waits too (its effects
+	//   never before the music's command the game made first);
+	// - once a frame is run for good, its effects that went with no guess (the guess made none, or another) go then,
+	//   late (a late sound beats a missing one); one a guess sent within SOUND_NEAR frames of it counts as its own (sent
+	//   early or late by those frames, never twice); one a guess sent that the game never made stays heard (a stray).
+	// Without `known` (a watcher, a straight run: every frame for good at once) the bytes go as the frames make them.
 	void take_midi(std::vector<uint8_t> &out);
 	uint32_t frame_now() const { return frame; }   // (the frame running now, or the next: tests' logs)
+	// The frames whose inputs are all here, both players' (the session's other player's inputs come: a frame before
+	// this, run, is run for good); unset or UINT32_MAX, all of them
+	std::function<uint32_t()> known;
+	static constexpr uint32_t SOUND_NEAR = 4;
+	// what take_midi did, since the match's start (the log's): effects sent once their frame was run for good (none
+	// went with a guess), effects a guess sent that the game never made, music commands held for their frame's inputs
+	// (and how many frames it was behind then at most), frames held behind one
+	struct SoundStats { uint64_t late = 0, stray = 0, held = 0, waited = 0; uint32_t held_most = 0; };
+	SoundStats sound_stats;
 
 	// tests: the state's hash after each frame a multiple of this, the last time it ran (0: none kept)
 	uint32_t checkpoint_every = 0;
@@ -190,9 +209,16 @@ public:
 private:
 	m3::Model3 &board;
 	uint32_t frame = 0;   // the session's frame the board is at
-	// per frame: the MIDI bytes the sound board was sent for it (a frame run again sends only what wasn't)
-	std::map<uint32_t, std::vector<uint8_t>> midi_sent;
-	std::vector<uint8_t> scratch, check_buf;
+	// per frame (those not yet run for good, and SOUND_NEAR before them): its MIDI bytes as its last run made them,
+	// whether they hold anything but effects (its first run: nothing sent then), whether its first run was a guess, the effects a guess sent for it not
+	// yet matched with a frame's own
+	struct SoundFrame { std::vector<uint8_t> bytes; std::vector<uint16_t> guessed; bool held = false, guess = false; };
+	std::map<uint32_t, SoundFrame> sound;
+	uint32_t sound_final = 0;   // (the frames before it settled: their sound sent)
+	void settle_sound(uint32_t f, std::vector<uint8_t> &out);
+	bool take_guessed(uint32_t f, uint16_t command);
+	std::vector<uint8_t> check_buf;
+	std::vector<uint16_t> scratch_cmds;
 	bool midi_taken = false;
 };
 
