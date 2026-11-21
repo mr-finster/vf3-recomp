@@ -337,6 +337,25 @@ int main(int argc, char **argv)
 	cfg.handshake_ms = 120000;   // (both boots run here one after the other, on the one clock)
 	const vfnet::Identity ia{ "vf3", "test", content, "HOST" }, ib{ "vf3", "test", content, "GUEST" };
 	A.adapter.checkpoint_every = B.adapter.checkpoint_every = 300;
+	// VF3NET_MIDI=dir: the MIDI bytes each board's sound board was sent, as they went (host.mid, guest.mid, straight.mid:
+	// records of the live frame then (the frame the side's next step runs; the straight run's own), the frame that made
+	// them, their length and the bytes, u32 u32 u32 then the bytes): tools/midicmp.py compares them
+	const char *midi_dir = getenv("VF3NET_MIDI");
+	FILE *midi_f[3] = {};
+	uint32_t midi_live[3] = {};
+	if (midi_dir) {
+		std::filesystem::create_directories(midi_dir);
+		const char *names[3] = { "host.mid", "guest.mid", "straight.mid" };
+		for (int i = 0; i < 3; i++) midi_f[i] = fopen((std::string(midi_dir) + "/" + names[i]).c_str(), "wb");
+	}
+	auto midi_log = [&](int i, uint32_t made, const std::vector<uint8_t> &b) {
+		if (!midi_f[i] || b.empty()) return;
+		const uint32_t h[3] = { midi_live[i], made, uint32_t(b.size()) };
+		fwrite(h, 4, 3, midi_f[i]);
+		fwrite(b.data(), 1, b.size(), midi_f[i]);
+	};
+	A.adapter.midi_out = [&](const std::vector<uint8_t> &b) { midi_log(0, A.adapter.frame_now(), b); };
+	B.adapter.midi_out = [&](const std::vector<uint8_t> &b) { midi_log(1, B.adapter.frame_now(), b); };
 	B.adapter.stage_select_on = guest_stage < 0 ? stage : guest_stage != 0;
 	B.adapter.dural = guest_dural < 0 ? dural : guest_dural != 0;
 	printf("host: stage select %d, Dural %d; the guest's own: stage select %d, Dural %d%s\n", int(stage), int(dural), int(B.adapter.stage_select_on),
@@ -413,6 +432,7 @@ int main(int argc, char **argv)
 			const auto s0 = Clock::now();
 			const uint64_t rb0 = sa.stats().resim_frames;
 			snapper.before_step(sa);
+			midi_live[0] = sa.frame();
 			if (sa.step(own_word(pick_a, A.m, 0, vf3net::pack(real[std::min(na, real.size() - 1)], 0)))) { na++; score_a.frame(A.m); score_a_at[sa.frame()] = score_a; }
 			if (!feed_on && sa.state() == vfnet::Session::State::running) {   // (the host's match to the lobby, as the game sends it)
 				vw::Start st;
@@ -438,6 +458,7 @@ int main(int argc, char **argv)
 		}
 		if (t >= next_b) {
 			const auto s0 = Clock::now();
+			midi_live[1] = sb.frame();
 			if (sb.step(own_word(pick_b, B.m, 1, vf3net::pack(real[std::min(nb, real.size() - 1)], 1)))) { nb++; score_b.frame(B.m); score_b_at[sb.frame()] = score_b; }
 			if (connected) tb.add(std::chrono::duration<double, std::milli>(Clock::now() - s0).count());
 			next_b += fb / (1 - (soft ? std::clamp(sb.stats().lead * 0.02, 0.0, 0.04) : 0.0));
@@ -537,6 +558,7 @@ int main(int argc, char **argv)
 		C.adapter.host_terms = host_terms;
 		if (!C.open(rom, profile, error) || !C.adapter.begin(blob)) { fprintf(stderr, "vf3net: the straight board didn't start\n"); return 1; }
 		C.adapter.checkpoint_every = hashes_path ? 30 : 300;
+		C.adapter.midi_out = [&](const std::vector<uint8_t> &b) { midi_live[2] = C.adapter.frame_now(); midi_log(2, midi_live[2], b); };
 		std::vector<uint32_t> watch;
 		std::string watched;
 		if (const char *w = getenv("VF3NET_WATCH"))   // tests: "addr,addr,..." (hex, the game's RAM addresses)
@@ -651,6 +673,7 @@ int main(int argc, char **argv)
 			}
 		}
 	}
+	for (FILE *f : midi_f) if (f) fclose(f);
 	const auto &xa = sa.stats(), &xb = sb.stats();
 	printf("%s: %u frames confirmed, %u checkpoints against a straight run; %.0f ms each way, jitter %.0f, %.0f%% lost; delay %d\n",
 	       failed ? "FAILED" : "in step", n, checked, p.latency_ms, p.jitter_ms, p.loss * 100, delay);

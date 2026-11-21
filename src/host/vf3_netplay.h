@@ -181,6 +181,7 @@ public:
 	// after a rollback, none if its bytes went already (the sound board can't take back what it played: a wrong
 	// guess's sound stays), and if it sent none and has some now, those (late)
 	void take_midi(std::vector<uint8_t> &out);
+	uint32_t frame_now() const { return frame; }   // (the frame running now, or the next: tests' logs)
 
 	// tests: the state's hash after each frame a multiple of this, the last time it ran (0: none kept)
 	uint32_t checkpoint_every = 0;
