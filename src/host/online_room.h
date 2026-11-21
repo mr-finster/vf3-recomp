@@ -159,6 +159,7 @@ struct RoomMember
 	bool test_away_done = false;    // (tests: ROOM2_READY=away, AWAY once a member)
 	double regather_at = 0;         // (the link's addresses gathered again (the relay's login past its hours, or a seat that
 	                                // didn't get going): not before this)
+	int no_relay_tries = 0;         // (the link gathered again for a relay it hasn't got: each try the next one twice as late, capped)
 
 	// The first READY one in the line (the next to play), or null
 	const Who *next_ready() const { for (const Who &w : line) if (w.ready) return &w; return nullptr; }

@@ -2448,8 +2448,14 @@ bool Online::step(uint16_t input)
 	// (a fighter's outfit is Start held there); the two playing on, nobody READY, a rematch as ever)
 	const bool r2_ko_hold = room2_in_seat() && ph == Phase::playing && session && both_in && r2->next_ready() && r2->reported_n != r2->n &&
 	                        r2->phase == "PLAYING" && !vf3net::in_select(board);
+	// (a game without the room's socket (refused, a proxy) hears the lobby only when it asks, every 4 s at the table: someone
+	// READY just before the KO isn't known yet, and the loser's Start would take both games to the rematch's select. So its
+	// Start, once the match is on but at the select, waits for a word from the lobby at most 2 s old (a poll asked at once);
+	// nobody READY then, it goes in, a moment late)
+	const bool r2_unsure = room2_in_seat() && ph == Phase::playing && session && both_in && (input & vf3net::START_BUTTON) && !vf3net::in_select(board) &&
+	                       room2_unsure(2000);
 	if (room2_in_seat() && ph == Phase::playing && session && both_in && (input & vf3net::START_BUTTON) &&
-	    ((score.players() != 3 && !(score.players() >> local_player() & 1) && room2_moving_on()) || r2_ko_hold)) {
+	    ((score.players() != 3 && !(score.players() >> local_player() & 1) && room2_moving_on()) || r2_ko_hold || r2_unsure)) {
 		static int held_said = -1;   // (said once a match: a player mashing Start pressed it hundreds of times)
 		if (start_edge && held_said != r2->n) { held_said = r2->n; log_line("Rooms 2: Start for a rematch held back: " + online_menu::clean_name(r2->next_name()) + " is next in the room's line"); }
 		input = uint16_t(input & ~vf3net::START_BUTTON);
@@ -3117,21 +3123,34 @@ menu_page room2_settings_page(Online &o, OnlineSettings &s, game_menu &menu, std
 	p.items.push_back({ tr::LISTED_IN_ROOMS, tr::ROOM2_LISTED_HELP,
 		[&o] { return std::string(o.room2() && o.room2()->listed ? tr::ON : tr::OFF); },
 		[&o, put](int) { if (RoomMember *m = const_cast<RoomMember *>(o.room2())) { m->listed = !m->listed; put(); } } });
-	// (the room's rules: each change to the lobby at once, and kept as this player's for the next room made)
-	auto rules = [&o, &s, changed] { o.room2_rules(s); if (changed) changed(); };
+	// (the room's rules as the lobby has them (this player's own till its first word, or a lobby without them); each change
+	// the room's with that one changed, to the lobby at once (sent again if it fails), and kept as this player's for the next
+	// room made. Random and custom fighters not shown till Customize comes: nothing plays it yet)
+	struct ruled { bool side, dural, stage; int max; };
+	auto now = [&o, &s] {
+		const RoomMember *m = o.room2();
+		return m && m->has_rules ? ruled{ m->rule_side, m->rule_dural, m->rule_stage, m->rule_max } : ruled{ s.rule_side, s.rule_dural, s.rule_stage, s.rule_max };
+	};
+	auto rules = [&o, &s, now, changed](const std::function<void(ruled &)> &f) {
+		ruled r = now();
+		f(r);
+		s.rule_side = r.side; s.rule_dural = r.dural; s.rule_stage = r.stage; s.rule_max = r.max;
+		o.room2_rules(s);
+		if (changed) changed();
+	};
 	auto onoff = [](bool v) { return std::string(v ? tr::ON : tr::OFF); };
-	p.items.push_back({ tr::ROOM2_RULE_SIDE, tr::ROOM2_RULE_SIDE_HELP, [&s, onoff] { return onoff(s.rule_side); }, [&s, rules](int) { s.rule_side = !s.rule_side; rules(); } });
-	p.items.push_back({ tr::ROOM2_RULE_DURAL, tr::ROOM2_RULE_DURAL_HELP, [&s, onoff] { return onoff(s.rule_dural); }, [&s, rules](int) { s.rule_dural = !s.rule_dural; rules(); } });
-	p.items.push_back({ tr::ROOM2_RULE_CUSTOM, tr::ROOM2_RULE_CUSTOM_HELP, [&s, onoff] { return onoff(s.rule_custom); }, [&s, rules](int) { s.rule_custom = !s.rule_custom; rules(); } });
-	p.items.push_back({ tr::ROOM2_RULE_MAX, tr::ROOM2_RULE_MAX_HELP, [&s] { return s.rule_max ? std::to_string(s.rule_max) : std::string(tr::ROOM2_NO_LIMIT); },
-		[&s, rules](int d) {   // (no limit, 2 to 16, then no limit again)
-			static const int steps[] = { 0, 2, 3, 4, 5, 6, 8, 10, 12, 16 };
-			int i = 0;
-			for (int k = 0; k < 10; k++) if (steps[k] == s.rule_max) i = k;
-			s.rule_max = steps[(i + (d < 0 ? 9 : 1)) % 10];
-			rules();
+	p.items.push_back({ tr::ROOM2_RULE_SIDE, tr::ROOM2_RULE_SIDE_HELP, [now, onoff] { return onoff(now().side); }, [rules](int) { rules([](ruled &r) { r.side = !r.side; }); } });
+	p.items.push_back({ tr::ROOM2_RULE_DURAL, tr::ROOM2_RULE_DURAL_HELP, [now, onoff] { return onoff(now().dural); }, [rules](int) { rules([](ruled &r) { r.dural = !r.dural; }); } });
+	p.items.push_back({ tr::ROOM2_RULE_MAX, tr::ROOM2_RULE_MAX_HELP, [now] { const int n = now().max; return n ? std::to_string(n) : std::string(tr::ROOM2_NO_LIMIT); },
+		[rules](int d) {   // (no limit, 2 to 16, then no limit again)
+			rules([d](ruled &r) {
+				static const int steps[] = { 0, 2, 3, 4, 5, 6, 8, 10, 12, 16 };
+				int i = 0;
+				for (int k = 0; k < 10; k++) if (steps[k] == r.max) i = k;
+				r.max = steps[(i + (d < 0 ? 9 : 1)) % 10];
+			});
 		} });
-	p.items.push_back({ tr::ROOM2_RULE_STAGE, tr::ROOM2_RULE_STAGE_HELP, [&s, onoff] { return onoff(s.rule_stage); }, [&s, rules](int) { s.rule_stage = !s.rule_stage; rules(); } });
+	p.items.push_back({ tr::ROOM2_RULE_STAGE, tr::ROOM2_RULE_STAGE_HELP, [now, onoff] { return onoff(now().stage); }, [rules](int) { rules([](ruled &r) { r.stage = !r.stage; }); } });
 	p.items.push_back({ tr::ROOM2_CLOSE_ROOM, tr::ROOM2_CLOSE_HELP, {}, {}, [&o, &s, &menu, changed] {
 		o.room2_close();
 		while (menu.depth() > 1 && menu.top_name() != tr::P_ONLINE.c_str()) menu.pop();

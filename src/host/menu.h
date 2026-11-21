@@ -70,6 +70,10 @@ public:
 	std::string page_fit();
 	void set_title(const std::string &text);    // (PAUSED; a match goes on under the menu: ONLINE MATCH)
 	void select_row(int i) { select(i); }
+	void set_test_held(int held) { m_test_held = held; }   // (tests: the left button down (1) or up (0) as SDL would say; -1 SDL's own)
+	int dropped_clicks() const { return m_dropped; }       // (tests: clicks on a row gone by the button's release, not run)
+	size_t row_count() const { return m_stack.empty() ? 0 : m_stack.back().items.size(); }   // (tests: the page's rows, and a row's value)
+	std::string row_value(size_t i) const { return i < row_count() && m_stack.back().items[i].value ? m_stack.back().items[i].value() : std::string(); }
 	void set_fps(const std::string &text);      // the small FPS at the top right; empty hides it
 	// Over the game, the menu open or not: online play's connection at the bottom (empty hides it; level 0 good,
 	// 1 fair, 2 poor), a notice for a few seconds near the bottom, and one that stays in the middle while it's
@@ -154,6 +158,12 @@ private:
 	bool m_pointer_moved = false;        // (since the rows were last made: only then does hovering select)
 	bool m_mouse_down = false, m_build_pending = false, m_mouse_seen = false;   // (the left button down: the page made again at its release)
 	int m_mouse_x = 0, m_mouse_y = 0;    // (the pointer, in the context's pixels)
+	int m_test_held = -1;                // (set_test_held)
+	std::vector<std::pair<std::string, std::string>> m_built;   // (the page's rows as last drawn, their ids and labels: row_now)
+	size_t m_built_depth = 0;
+	std::string m_built_name;
+	int m_dropped = 0;                   // (clicks on a row gone since it was drawn: dropped_clicks)
+	int row_now(int i) const;
 	void build_now();
 	std::function<bool(const SDL_Event &)> m_capture;
 	std::string m_capture_prompt;

@@ -164,6 +164,7 @@ bool Online::room2_begin(const OnlineSettings &s, const std::string &code_in, bo
 	code = code_in;
 	r2_join.reset();
 	r2_asks.clear();
+	r2_again.clear();
 	auto j = std::make_shared<Job>();
 	r2_gather = j;
 	std::thread([j, work = gather(lobby, turn_json())] { work(*j); j->done = true; }).detach();
@@ -414,6 +415,7 @@ void Online::room2_end(const std::string &why)
 	if (r2 && r2->ws) std::thread([w = std::move(r2->ws)] {}).detach();
 	r2.reset();
 	r2_asks.clear();
+	r2_again.clear();
 	r2_join.reset();
 	r2_gather.reset();
 	r2_fresh.reset();
@@ -554,7 +556,7 @@ void Online::room2_poll()
 				extra += std::string(",\"listed\":") + (w.room_who >= 1 ? "true" : "false") + (w.room_name.empty() ? "" : ",\"room\":" + quote(w.room_name));
 				if (!release.empty()) extra += ",\"build\":" + quote(release);   // (an older build given this room's code is told "The host has <it>")
 				extra += std::string(",\"rules\":{\"side\":") + (w.rule_side ? "true" : "false") + ",\"dural\":" + (w.rule_dural ? "true" : "false") +
-				         ",\"custom\":" + (w.rule_custom ? "true" : "false") + ",\"max\":" + std::to_string(w.rule_max) + ",\"stage\":" + (w.rule_stage ? "true" : "false") + "}";
+				         ",\"custom\":false,\"max\":" + std::to_string(w.rule_max) + ",\"stage\":" + (w.rule_stage ? "true" : "false") + "}";
 			} else {
 				extra += ",\"code\":" + quote(m.code);
 				// (a membership from before, this room's: a crash or a restart, its place taken back if it's still there)
@@ -651,6 +653,12 @@ void Online::room2_poll()
 			m.poll_at = std::min(m.poll_at, now);
 		}
 	}
+	for (size_t i = 0; i < r2_again.size(); i++)   // (the creator's settings or rules not taken: again when it's time)
+		if (now >= r2_again[i].sent) {
+			const R2Ask a = r2_again[i];
+			room2_owner_send(a.op, a.body, a.tries + 1);   // (takes it off r2_again)
+			break;   // (one a pass)
+		}
 	const bool socket_open = m.ws && m.ws->state() == vfnet::http::Socket::State::open;
 	// (no socket: asked every 10 s, the lobby's word that this member's still here; every 3 s at the table, next to play,
 	// called, or an op not seen taken: GET READY, a new seat and the line's moves seen in time. One poll on its way at most)
@@ -667,9 +675,18 @@ void Online::room2_poll()
 		const std::string op = r2_asks[i].op;
 		const double sent = r2_asks[i].sent;
 		const vfnet::http::Reply r = r2_asks[i].f->reply;
+		const R2Ask was = r2_asks[i];
 		r2_asks.erase(r2_asks.begin() + long(i));
 		Value v;
 		const bool parsed = vfnet::json::parse(r.body, v);
+		if ((op == "settings" || op == "rules") && !(r.status == 200 && parsed && !(v["ok"].kind == Value::boolean && !v["ok"].b)) && r.status != 410 &&
+		    !(r.status == 404 && parsed)) {   // (the creator's change not taken: again later, OP_TRIES in all; not_owner never)
+			const bool again = was.tries < OP_TRIES && r.status != 403;
+			log("Rooms 2: the room's " + op + " not taken (" + (r.status ? "the lobby said " + std::to_string(r.status) : r.error) + "): " +
+			    (again ? "sent again in " + std::to_string(int(OP_AGAIN_MS / 1000) << (was.tries - 1)) + " s" : "given up"));
+			if (again) r2_again.push_back({ op, nullptr, now + OP_AGAIN_MS * double(1 << (was.tries - 1)), was.body, was.tries });
+			continue;
+		}
 		if (r.status == 410 && parsed) { room2_end(v["why"].str()); return; }
 		// (the room gone, closed, or Rooms 2 switched off at the lobby (its "off"); not a member any more: the lobby's
 		// no_room or not_member): the membership over, said
@@ -721,7 +738,11 @@ void Online::room2_poll()
 // The room's link gathered again (its STUN address and a new relay login: the relay's lasts the lobby's TURN TTL, 6 h;
 // or a seat that didn't get going, the network perhaps changed) past room2_regather_ms, only between seats: in the line or
 // watching, not next, not called. A new link, its addresses gathered, then told the lobby (enter again with this
-// membership's id and key: its place kept), then it's the room's from the next seat (room2_seat). Never mid-match
+// membership's id and key: its place kept), then it's the room's from the next seat (room2_seat). Never mid-match.
+// A link with no relay (it didn't answer when gathered) is gathered again for one sooner, 3 min after, then 6, 12, 24 and
+// every 24 min (each try a relay login from the lobby, counted against the address's day whether the relay answers this
+// network or not), and between matches too: next in line (not called yet), or at the table between a decided match and
+// the next seat (or alone at it), which in a room of 2 or 3 is nearly all the time
 void Online::room2_regather()
 {
 	RoomMember &m = *r2;
@@ -731,14 +752,18 @@ void Online::room2_regather()
 	const bool may_sit = !m.watcher && (m.me_ready || m.lobby_ready) && !(m.has_a && m.has_b);
 	const bool between = !m.in_seat && m.pos != 0 && (m.pos > 0 || m.watcher) && !m.ready_you && m.ready_place() != 1 && !asked && !may_sit &&
 	                     !m.settling && m.have_state && !m.test;
+	const vfnet::RoomLink *now_link = m.link ? m.link.get() : m.in_seat ? room.get() : nullptr;   // (seated, the link's the session's)
+	const bool no_relay = now_link && now_link->relay_address().empty() && m.turn_given;
+	// (for a relay, between matches as well: next in line (its match not begun), or at the table, its match decided and this
+	// side's result said, or no session on (alone, or a seat that didn't get going): never a match on)
+	const bool quiet = !m.ready_you && !asked && m.have_state && !m.test;
+	const bool next_up = !m.in_seat && m.pos > 0 && !m.watcher && m.ready_place() == 1 && !m.settling;
+	const bool at_table = m.pos == 0 && (m.in_seat ? m.reported_n == m.n && (m.phase == "DECIDED" || m.phase == "READY")
+	                                               : !(m.has_a && m.has_b) || m.seat.token == m.failed_token);
+	const bool may = between || (no_relay && quiet && (next_up || at_table));
 	if (!r2_fresh) {
-		// (a link with no relay (it didn't answer when gathered: a log's "relay none", then "the relay didn't answer" at every
-		// seat for the rest of the room, and a pair that needs one void (connect) again and again): gathered again between
-		// seats every few minutes till it has one, not after the relay's login's hours)
-		const bool no_relay = m.link && m.link->relay_address().empty() && m.turn_given;
-		const double every = no_relay ? std::min(room2_regather_ms, ROOM2_NO_RELAY_MS) : room2_regather_ms;
-		if (!between || now - m.gathered_at < every || now < m.regather_at || r2_gather) return;
-		if (no_relay) log("Rooms 2: the room's link has no relay: gathered again for one");
+		const double every = no_relay ? std::min(room2_regather_ms, ROOM2_NO_RELAY_MS) * double(1 << std::min(m.no_relay_tries, 3)) : room2_regather_ms;
+		if (!may || now - m.gathered_at < every || now < m.regather_at || r2_gather) return;
 		m.regather_at = now + 60000;   // (once a minute at most, whatever comes of it)
 		auto l = std::make_unique<vfnet::RoomLink>();
 		l->allow_loopback(online_detail::lobby_local(lobby));
@@ -749,7 +774,13 @@ void Online::room2_regather()
 		auto j = std::make_shared<Job>();
 		r2_gather = j;
 		std::thread([j, work = gather(lobby, turn_json())] { work(*j); j->done = true; }).detach();
-		log("Rooms 2: the room's link gathered again (" + std::to_string(int((now - m.gathered_at) / 60000)) + " min since the last)");
+		if (no_relay) {   // (said once a try)
+			m.no_relay_tries++;
+			log("Rooms 2: the room's link has no relay: gathered again for one (try " + std::to_string(m.no_relay_tries) + ", " +
+			    std::to_string(int((now - m.gathered_at) / 60000)) + " min since the last" + (m.in_seat ? ", at the table between matches" : next_up ? ", next in line" : "") +
+			    "; if it has none, the next in " + std::to_string(int(std::min(room2_regather_ms, ROOM2_NO_RELAY_MS) * double(1 << std::min(m.no_relay_tries, 3)) / 60000)) + " min)");
+		} else
+			log("Rooms 2: the room's link gathered again (" + std::to_string(int((now - m.gathered_at) / 60000)) + " min since the last)");
 		return;
 	}
 	std::vector<uint8_t> p;
@@ -767,6 +798,7 @@ void Online::room2_regather()
 		if (j->reply.status == 0) { give_up("the lobby wasn't reached"); return; }
 		if (!j->stun.empty()) r2_fresh->use_stun(j->stun);
 		if (!j->turn.empty()) r2_fresh->use_turn(j->turn, j->user, j->password);
+		m.turn_given = !j->turn.empty();   // (no relay login this time (the address's day used up): no more tries for one soon)
 	}
 	if (r2_fresh_told) {   // (the lobby has it: the room's link at once if there's no seat on, else at the next seat)
 		if (!m.in_seat && m.link) {
@@ -774,13 +806,14 @@ void Online::room2_regather()
 			r2_fresh_told = false;
 			m.gathered_at = now;
 			log("Rooms 2: the room's link gathered again: in use");
+			if (!m.link->relay_address().empty()) m.no_relay_tries = 0;   // (a relay at last: the next time without one from 3 min again)
 		}
 		return;
 	}
 	if (!r2_rejoin) {
 		if (!r2_fresh->gathered()) return;
 		if (started_with.hide_ip && r2_fresh->relay_address().empty()) { give_up("Hide my IP: the relay didn't answer"); return; }
-		if (!between) return;   // (seated or called meanwhile: told once it's between seats again)
+		if (!may) return;   // (seated or called meanwhile: told once it's between seats again)
 		std::swap(room, r2_fresh);   // (me_json's addresses are the room link's: the fresh one's lent for it)
 		const std::string body = me_json(",\"caps\":[],\"code\":" + quote(m.code) + ",\"mid\":" + quote(m.mid) + ",\"mkey\":" + quote(m.mkey));
 		std::swap(room, r2_fresh);
@@ -921,6 +954,7 @@ void Online::room2_seat()
 		r2_fresh_told = false;
 		m.gathered_at = now;
 		log("Rooms 2: the room's link gathered again: in use from this seat");
+		if (!m.link->relay_address().empty()) m.no_relay_tries = 0;   // (a relay at last: the next time without one from 3 min again)
 	}
 	if (!m.link) {
 		log("Rooms 2: the room's link is gone: leaving the room");
@@ -1058,6 +1092,17 @@ void Online::room2_decided()
 // side reported not resolved yet with someone READY in the line (it'll call them). Only then is the out player's Start
 // held (no rematch: the next comes on); else the two play on, the loser's Start a rematch (a play-on's PLAYING n+1, someone
 // READY since: the lobby calls them while neither has said started for it, room2_poll's; GET READY then)
+// (a game polling the lobby, its socket refused or not open: its last state older than ms (a READY in the line since may not
+// be known), and a poll asked now, one on its way at most; on a socket the lobby's word comes as it changes)
+bool Online::room2_unsure(double ms)
+{
+	if (!r2 || r2->test) return false;
+	RoomMember &m = *r2;
+	if ((m.ws && m.ws->state() == vfnet::http::Socket::State::open) || now - m.state_at <= ms) return false;
+	m.poll_at = std::min(m.poll_at, now);
+	return true;
+}
+
 bool Online::room2_moving_on() const
 {
 	if (!r2 || !r2->in_seat) return false;
@@ -1167,6 +1212,7 @@ void Online::room2_leave(bool keep_watching)
 	if (r2->ws) std::thread([s = std::move(r2->ws)] {}).detach();
 	r2.reset();
 	r2_asks.clear();
+	r2_again.clear();
 	r2_join.reset();
 	r2_gather.reset();
 	r2_fresh.reset();
@@ -1183,23 +1229,31 @@ bool Online::room2_settings(const std::string &name, bool listed, int ready_ms, 
 	if (!r2 || r2->owner_key.empty()) { error = tr::NOTHING_TO_TRY; return false; }
 	const std::string body = "{\"code\":" + quote(r2->code) + ",\"owner_key\":" + quote(r2->owner_key) + ",\"room\":" + quote(name) +
 	                         ",\"listed\":" + (listed ? "true" : "false") + ",\"ready_ms\":" + std::to_string(std::clamp(ready_ms, 5000, 60000)) + "}";
-	r2_asks.push_back({ "settings", fetch("POST", lobby_url("/v2/room/settings"), body, 8000, 64 << 10), now });
+	room2_owner_send("settings", body);
 	log("Rooms 2: the room's settings: " + std::string(listed ? "listed" : "not listed") + ", the ready check " + std::to_string(ready_ms / 1000) + " s");
 	return true;
+}
+
+// The creator's settings and rules, to the lobby's /v2/room/settings; one it didn't take (busy, not reached, its error) sent
+// again 3 s later, 6, 12, 24, then given up (in the log): a change made once isn't lost to a busy lobby. A newer one of
+// the same kind takes the place of one waiting
+void Online::room2_owner_send(const std::string &op, const std::string &body, int tries)
+{
+	r2_again.erase(std::remove_if(r2_again.begin(), r2_again.end(), [&](const R2Ask &a) { return a.op == op; }), r2_again.end());
+	r2_asks.push_back({ op, fetch("POST", lobby_url("/v2/room/settings"), body, 8000, 64 << 10), now, body, tries });
 }
 
 void Online::room2_rules(const OnlineSettings &s)
 {
 	if (!r2 || r2->owner_key.empty()) return;
 	const std::string body = "{\"code\":" + quote(r2->code) + ",\"owner_key\":" + quote(r2->owner_key) + ",\"rules\":{\"side\":" + (s.rule_side ? "true" : "false") +
-	                         ",\"dural\":" + (s.rule_dural ? "true" : "false") + ",\"custom\":" + (s.rule_custom ? "true" : "false") + ",\"max\":" + std::to_string(s.rule_max) +
-	                         ",\"stage\":" + (s.rule_stage ? "true" : "false") + "}}";
-	r2_asks.push_back({ "settings", fetch("POST", lobby_url("/v2/room/settings"), body, 8000, 64 << 10), now });
+	                         ",\"dural\":" + (s.rule_dural ? "true" : "false") + ",\"custom\":false,\"max\":" + std::to_string(s.rule_max) +
+	                         ",\"stage\":" + (s.rule_stage ? "true" : "false") + "}}";   // (custom: none till Customize comes, whatever's kept)
+	room2_owner_send("rules", body);
 	r2->has_rules = true;   // (as asked, till the lobby's state says)
-	r2->rule_side = s.rule_side; r2->rule_dural = s.rule_dural; r2->rule_custom = s.rule_custom; r2->rule_stage = s.rule_stage; r2->rule_max = s.rule_max;
+	r2->rule_side = s.rule_side; r2->rule_dural = s.rule_dural; r2->rule_custom = false; r2->rule_stage = s.rule_stage; r2->rule_max = s.rule_max;
 	r2->version++;
-	log("Rooms 2: the room's rules: the winner may change side " + std::string(s.rule_side ? "yes" : "no") + ", Dural " + (s.rule_dural ? "yes" : "no") + ", random or custom fighters " +
-	    (s.rule_custom ? "yes" : "no") + ", players at most " + (s.rule_max ? std::to_string(s.rule_max) : std::string("no limit")) + ", the challenger's stage select " + (s.rule_stage ? "yes" : "no"));
+	log("Rooms 2: the room's rules: the winner may change side " + std::string(s.rule_side ? "yes" : "no") + ", Dural " + (s.rule_dural ? "yes" : "no") + ", players at most " + (s.rule_max ? std::to_string(s.rule_max) : std::string("no limit")) + ", the challenger's stage select " + (s.rule_stage ? "yes" : "no"));
 }
 
 void Online::room2_close()

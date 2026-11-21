@@ -477,8 +477,10 @@ private:
 	std::shared_ptr<Job> r2_gather;
 	std::shared_ptr<Fetch> r2_join;   // (create or enter)
 	double r2_join_sent = 0, r2_rejoin_sent = 0;
-	struct R2Ask { std::string op; std::shared_ptr<Fetch> f; double sent = 0; };
+	struct R2Ask { std::string op; std::shared_ptr<Fetch> f; double sent = 0; std::string body = {}; int tries = 0; };
 	std::vector<R2Ask> r2_asks;       // (each op POSTed, its answer: a state; sent: when, the state's age)
+	std::vector<R2Ask> r2_again;      // (the creator's settings or rules the lobby didn't take: sent again at .sent, room2_owner_send)
+	void room2_owner_send(const std::string &op, const std::string &body, int tries = 1);
 	std::string r2_tried;             // (the code a Rooms 2 enter was tried with: Try again's)
 	std::unique_ptr<vfnet::RoomLink> r2_fresh;   // (the link gathered again, at a seat's boundary: the lobby told its addresses, then it's the room's)
 	std::shared_ptr<Fetch> r2_rejoin;            // (that telling: enter again with this membership's id and key)
@@ -502,6 +504,7 @@ private:
 	void room2_keep();                         // (its code, id and key to room2.txt)
 	std::string room2_body(const std::string &extra = "") const;
 	bool room2_in_seat() const { return r2 && r2->in_seat; }
+	bool room2_unsure(double ms);   // (no room socket, the lobby's last word older than ms: true, and a poll asked at once)
 	bool room2_moving_on() const;   // (this seat's decided match: the lobby calling the next in line, or about to: the rematch held)
 	bool rematch_coming() const;
 	void room2_next_cell(game_menu::net_cells &c) const;   // (the footer's: who plays next in the room)    // (a decided match's out player back in, or their Start pressed since: a rematch on its way)

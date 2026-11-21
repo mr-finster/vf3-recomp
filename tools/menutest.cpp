@@ -194,6 +194,19 @@ void mouse(float x, float y)
 	menu->handle_event(e);
 }
 
+// the left button pressed or let go at (x, y), as SDL gives it (the pointer moved there first, as a real press)
+void button(bool down, float x, float y)
+{
+	mouse(x, y);
+	SDL_Event e{};
+	e.type = down ? SDL_EVENT_MOUSE_BUTTON_DOWN : SDL_EVENT_MOUSE_BUTTON_UP;
+	e.button.button = SDL_BUTTON_LEFT;
+	e.button.down = down;
+	e.button.x = x;
+	e.button.y = y;
+	menu->handle_event(e);
+}
+
 void text(const char *t)
 {
 	SDL_Event e{};
@@ -1498,6 +1511,61 @@ int main(int argc, char **argv)
 			shot("room2_pos_past.png", w, h);
 			o.set_room2_test("");
 		}
+		{   // the mouse: the room's page made again while the left button is down (the room changed: called meanwhile, READY
+			// NOW and SKIP THIS TURN over the row pressed; the table down to one) waits for its release, and the click is the
+			// row's that was pressed, by its id, wherever it is now (LEAVE LINE stays LEAVE LINE, never the row now in its
+			// place); a row gone by then: no click at all, never a row past the page's end
+			const std::string head = R"({"code":"KXQ4M7","room":{"name":"FRIDAY FIGHTS","listed":true,"locked":false,"ready_ms":15000,"owner":false},)";
+			const std::string line3 = R"(,"line":[{"name":"PAIPAI","country":"US","ready":true},{"name":"MRFINSTER","country":"GB","ready":true},{"name":"JACKYB","country":"FR","ready":true}],)";
+			const std::string in_line = head + table + line3 + R"("you":{"mid":"x","pos":2,"ready":true},"ready":null,"watch":"KXQ4M7"})";
+			const std::string called = head + table + R"(,"line":[{"name":"MRFINSTER","country":"GB","ready":true},{"name":"JACKYB","country":"FR","ready":true}],"you":{"mid":"x","pos":1,"ready":true},"ready":{"pos":1,"deadline_ms":9000,"you":true},"watch":"KXQ4M7"})";
+			const std::string alone = head + R"("table":{"a":{"name":"AKIRAFAN","country":"JP"},"b":null,"phase":"SOLO","streak":0,"holder":"a","n":5,"last":null},"line":[{"name":"PAIPAI","country":"US"}],"you":{"mid":"x","pos":-1,"watcher":true,"misses":0},"watchers":1,"ready":null,"watch":"KXQ4M7"})";
+			auto mid = [](const game_menu::box &b) { return std::make_pair((b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2); };
+			o.set_room2_test(in_line);
+			again();
+			std::vector<game_menu::box> rows = gm.boxes("row");
+			check(rows.size() == 4, ("Rooms 2's mouse: in the line, 4 buttons (" + std::to_string(rows.size()) + ")").c_str());
+			if (rows.size() == 4) {
+				// LEAVE LINE (the 3rd) pressed; called before it's let go: the page made again only at the release
+				auto [x, y] = mid(rows[2]);
+				gm.set_test_held(1);
+				button(true, x, y);
+				o.set_room2_test(called);
+				again();
+				button(false, x, y);
+				gm.set_test_held(-1);
+				check(o.room2() && o.room2()->pending("leave_line") && gm.top_name() == tr::P_ONLINE.c_str(),
+				      "Rooms 2's mouse: LEAVE LINE pressed, called before the release: LEAVE LINE's click (not WATCH, now in its place)");
+			}
+			o.set_room2_test("");
+			o.set_room2_test(called);
+			again();
+			rows = gm.boxes("row");
+			check(rows.size() == 5, ("Rooms 2's mouse: called, 5 buttons (" + std::to_string(rows.size()) + ")").c_str());
+			if (rows.size() == 5) {
+				// WATCH (the 3rd) pressed; meanwhile out of the line and the table down to one: WATCH gone, and the page's 2 rows
+				// short of the one pressed: no click
+				auto [x, y] = mid(rows[2]);
+				const int dropped = gm.dropped_clicks();
+				gm.set_test_held(1);
+				button(true, x, y);
+				o.set_room2_test(alone);
+				again();
+				button(false, x, y);
+				gm.set_test_held(-1);
+				check(o.room2() && o.room2()->outbox.empty() && gm.top_name() == tr::P_ONLINE.c_str() && o.in_room2() && gm.dropped_clicks() == dropped + 1,
+				      "Rooms 2's mouse: WATCH pressed, gone by the release (2 rows left): no click, nothing past the rows");
+				// and a click with nothing changed under it takes as ever
+				rows = gm.boxes("row");
+				if (!rows.empty()) {
+					auto [x2, y2] = mid(rows[0]);
+					button(true, x2, y2);
+					button(false, x2, y2);
+					check(o.room2() && o.room2()->pending("join_line"), "Rooms 2's mouse: a click with the page as it was: JOIN THE LINE");
+				}
+			}
+			o.set_room2_test("");
+		}
 		{   // the lobby's states in order: one older than the last applied (a poll's answer sent before it, the table's match
 			// number lower) not applied; the lobby's seq when it sends one; a state that says the room's closed ends it
 			const std::string head = R"({"code":"KXQ4M7","room":{"name":"FRIDAY FIGHTS","listed":true,"locked":false,"ready_ms":15000,"owner":false},)";
@@ -1704,6 +1772,22 @@ int main(int argc, char **argv)
 		key(SDL_SCANCODE_RETURN);
 		check(top() == tr::ROOM2_SETTINGS.c_str(), "Rooms 2: the creator's Room settings");
 		shot("room2_settings.png", w, h);
+		{   // the rows: the room's rules as the lobby has them, not this player's saved ones (a change the lobby didn't take, or
+			// a room made with others); no Random and custom fighters row (nothing plays it yet). A change: the room's with that
+			// one changed, kept as this player's
+			check(gm.row_count() == 7 && gm.row_value(1) == std::string(tr::OFF) && gm.row_value(4) == std::string(tr::ON),
+			      "Rooms 2's settings: 7 rows (no Random and custom fighters), the side and the stage as the room's");
+			const bool side0 = s.rule_side;
+			o.set_room2_test(R"({"code":"KXQ4M7","room":{"name":"","listed":false,"locked":false,"ready_ms":15000,"owner":true,"rules":{"side":true,"dural":true,"custom":false,"max":4,"stage":false}},"table":{"a":{"name":"MRFINSTER","country":"GB"},"b":null,"phase":"SOLO","streak":0,"holder":"a","n":0,"last":null},"line":[],"you":{"mid":"x","pos":0,"side":"a","misses":0},"ready":null,"watch":"KXQ4M7"})");
+			gm.refresh();
+			check(gm.row_value(1) == std::string(tr::ON) && gm.row_value(2) == std::string(tr::ON) && gm.row_value(3) == "4" && gm.row_value(4) == std::string(tr::OFF) && s.rule_side == side0,
+			      "Rooms 2's settings: the room's rules shown (side On, Dural On, 4 players, stage Off), the saved ones left alone");
+			gm.select_row(3);
+			key(SDL_SCANCODE_RIGHT);
+			check(gm.row_value(3) == "5" && s.rule_max == 5 && s.rule_side && s.rule_dural && !s.rule_stage && o.room2()->rule_max == 5,
+			      "Rooms 2's settings: Players 4 to 5: the room's others kept, all kept as this player's");
+			s.rule_side = false; s.rule_dural = false; s.rule_max = 0; s.rule_stage = true;
+		}
 		settle_check("room2_settings.png", w, h);
 		for (int row : { 0, 1 }) {   // (each row's help, Close the room's the longest)
 			gm.select_row(row);

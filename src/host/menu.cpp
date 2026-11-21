@@ -87,10 +87,14 @@ struct menu_listener : Rml::EventListener
 		// (a row comes under a still pointer when the rows are made again, a status line's change: that's no choice;
 		// on a Steam Deck the selection kept going back to the row under the pointer)
 		if (ev.GetId() == Rml::EventId::Mouseover && !menu->m_pointer_moved) return;
-		const int i = atoi(e->GetId().c_str() + 1);
+		// (the row as the page is now: the page made again while the left button was down (a room's, as it changed) is
+		// drawn again only at its release, so the row clicked is the one drawn then: found by its id, or else in its place
+		// only if it's the same row there; gone, no click at all (it ran another row's, or read past the rows' end))
+		const int i = menu->row_now(atoi(e->GetId().c_str() + 1));
+		if (i < 0) { if (ev.GetId() == Rml::EventId::Click) menu->m_dropped++; return; }
 		menu->select(i);
 		if (ev.GetId() == Rml::EventId::Click) {
-			const menu_item &it = menu->m_stack.back().items[i];
+			const menu_item &it = menu->m_stack.back().items[size_t(i)];
 			const Rml::Element *t = ev.GetTargetElement();
 			if (it.activate) menu->activate();
 			else if (it.change) menu->click_change(t && t->IsClassSet("back") ? -1 : +1);   // (the "<": down)
@@ -709,7 +713,8 @@ void game_menu::build()
 	// (the left button down on a row: the page made again only once it's up, so the click lands on the row it was pressed on.
 	// Made again between the two (a room's page as its state changes, its countdown 4 times a second), the row pressed was
 	// gone by the release and the click went nowhere: a room's buttons sometimes didn't take a click)
-	if (m_mouse_down && !(SDL_GetMouseState(nullptr, nullptr) & SDL_BUTTON_LMASK)) m_mouse_down = false;   // (its release went elsewhere)
+	const bool held = m_test_held >= 0 ? m_test_held != 0 : (SDL_GetMouseState(nullptr, nullptr) & SDL_BUTTON_LMASK) != 0;
+	if (m_mouse_down && !held) m_mouse_down = false;   // (its release went elsewhere)
 	if (m_mouse_down) { m_build_pending = true; return; }
 	m_build_pending = false;
 	build_now();
@@ -718,9 +723,31 @@ void game_menu::build()
 	if (m_mouse_seen && m->ctx) m->ctx->ProcessMouseMove(m_mouse_x, m_mouse_y, 0);
 }
 
+// A row drawn (its element's number) as the page is now (-1 none): the same number unless the page was made again since
+// it was drawn (build held back while the left button is down), then the row by its id, or in its place if that's still
+// the same row (its label); never one past the page's rows, nor a line of text
+int game_menu::row_now(int i) const
+{
+	if (m_stack.empty() || i < 0) return -1;
+	const menu_page &p = m_stack.back();
+	if (m_build_pending) {
+		if (size_t(i) >= m_built.size() || m_built_depth != m_stack.size() || m_built_name != p.name) return -1;
+		const std::string &id = m_built[size_t(i)].first;
+		if (!id.empty()) {
+			i = -1;
+			for (size_t k = 0; k < p.items.size() && i < 0; k++) if (p.items[k].id == id) i = int(k);
+		} else if (size_t(i) >= p.items.size() || p.items[size_t(i)].label != m_built[size_t(i)].second) return -1;
+	}
+	return i >= 0 && size_t(i) < p.items.size() && !p.items[size_t(i)].info ? i : -1;
+}
+
 void game_menu::build_now()
 {
 	const menu_page &p = m_stack.back();
+	m_built.clear();   // (the rows as drawn: row_now)
+	for (const menu_item &it : p.items) m_built.emplace_back(it.id, it.label);
+	m_built_depth = m_stack.size();
+	m_built_name = p.name;
 	const bool scr = p.screen && m->screen;
 	if (m_open) {   // (the page's own document shown, the other hidden)
 		Rml::ElementDocument *show = scr ? m->screen : m->doc, *hide = scr ? m->doc : m->screen;
