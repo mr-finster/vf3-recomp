@@ -134,6 +134,7 @@ public:
 	// on it: the host program sets both), her patches applied at the start (Model3::set_dural)
 	bool dural = false;
 	bool dural_legacy = false;   // (her patches v0.1.16-alpha's: the match's terms on its flag, both sides the same)
+	bool dural_refused = false;  // (begin: the host's blob had Dural otherwise than the terms: refused, said in the log)
 	// The arcade's stage select in this match (Online > Settings: "+stage" on the online version, both sides the
 	// same): on, CHALLENGER (0), the challenger picks and so the loser on every rematch; off (as every build before
 	// it), OFF (1)

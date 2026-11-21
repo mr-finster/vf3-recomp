@@ -477,9 +477,9 @@ private:
 	std::shared_ptr<Job> r2_gather;
 	std::shared_ptr<Fetch> r2_join;   // (create or enter)
 	double r2_join_sent = 0, r2_rejoin_sent = 0;
-	struct R2Ask { std::string op; std::shared_ptr<Fetch> f; double sent = 0; std::string body = {}; int tries = 0; };
+	struct R2Ask { std::string op; std::shared_ptr<Fetch> f; double sent = 0; std::string body = {}; int tries = 0, seq = 0; };
 	std::vector<R2Ask> r2_asks;       // (each op POSTed, its answer: a state; sent: when, the state's age)
-	std::vector<R2Ask> r2_again;      // (the creator's settings or rules the lobby didn't take: sent again at .sent, room2_owner_send)
+	OwnerAsks r2_owner;               // (the creator's settings and rules: the newest of each kind, sent again on a failure)
 	void room2_owner_send(const std::string &op, const std::string &body, int tries = 1);
 	std::string r2_tried;             // (the code a Rooms 2 enter was tried with: Try again's)
 	std::unique_ptr<vfnet::RoomLink> r2_fresh;   // (the link gathered again, at a seat's boundary: the lobby told its addresses, then it's the room's)

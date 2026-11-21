@@ -669,7 +669,7 @@ bool Online::use_terms(const std::string &as, const std::string &them)
 	terms = t;
 	adapter.host_terms = m.host_terms;
 	adapter.team_one = m.team_one;
-	adapter.dural = m.dural;   // (the terms': a pool's marked when either player has Dural on; a guest's from the host's blob, at the start)
+	adapter.dural = m.dural;   // (the terms': a pool's marked when either player has Dural on; a guest refuses a host's blob that says otherwise)
 	adapter.dural_legacy = m.dural_legacy;   // (an older version's Dural flag: its patches, as it plays them)
 	adapter.stage_select_on = m.host_terms ? own_stage : m.stage;
 	if (t != identity.build) log_line("the match's terms: " + t + (m.host_terms ? " (the host's settings)" : " (the other player's version)"));

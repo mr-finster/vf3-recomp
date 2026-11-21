@@ -23,6 +23,7 @@
 #include "../net/http.h"
 #include "../net/json.h"
 #include "../net/room_link.h"
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <vector>
@@ -174,4 +175,43 @@ struct RoomMember
 	// This member's place among the READY ones in the line (1: the next to play), 0 not in it or AWAY
 	// (this player's own place counted by its READY as asked, not the line's as the lobby last had it)
 	int ready_place() const { if (pos <= 0 || !me_ready || pos > int(line.size())) return 0; int k = 0; for (int i = 0; i < pos; i++) if (i == pos - 1 || line[size_t(i)].ready) k++; return k; }
+};
+
+// The creator's settings and rules to the lobby (Online::room2_owner_send): the newest of each kind kept. A call that failed
+// (busy, not reached) is sent again 3 s later, 6, 12, 24 (tries in all: OwnerAsks::TRIES), then given up, but only if it's
+// still the newest of its kind asked: one a newer change went out after (in flight or done) is never sent again over it,
+// and one kind waits to be sent again once at most
+struct OwnerAsks
+{
+	static constexpr int TRIES = 5;
+	static constexpr double AGAIN_MS = 3000;
+	struct Ask { std::string op, body; int seq = 0, tries = 1; double at = 0; };
+	int seq = 0;
+	std::vector<std::pair<std::string, int>> newest;   // (each kind's newest asked)
+	std::vector<Ask> again;                             // (to send again, at .at: one a kind at most)
+	int newest_of(const std::string &op) const { for (const auto &n : newest) if (n.first == op) return n.second; return 0; }
+	// a call going out now (a new change, or one sent again): its seq, the newest of its kind; nothing of its kind waits after it
+	int sent(const std::string &op)
+	{
+		again.erase(std::remove_if(again.begin(), again.end(), [&](const Ask &a) { return a.op == op; }), again.end());
+		for (auto &n : newest) if (n.first == op) return n.second = ++seq;
+		newest.emplace_back(op, ++seq);
+		return seq;
+	}
+	// a call that failed: sent again later if it's still the newest of its kind and has tries left (true), else dropped
+	bool failed(const std::string &op, const std::string &body, int s, int tries, double now)
+	{
+		if (s != newest_of(op) || tries >= TRIES) return false;
+		again.erase(std::remove_if(again.begin(), again.end(), [&](const Ask &a) { return a.op == op; }), again.end());
+		again.push_back({ op, body, s, tries, now + AGAIN_MS * double(1 << (tries - 1)) });
+		return true;
+	}
+	// one due to be sent again (taken off), false none
+	bool due(double now, Ask &out)
+	{
+		for (size_t i = 0; i < again.size(); i++)
+			if (now >= again[i].at) { out = again[i]; again.erase(again.begin() + long(i)); return true; }
+		return false;
+	}
+	void clear() { seq = 0; newest.clear(); again.clear(); }
 };

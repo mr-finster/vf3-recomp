@@ -1771,6 +1771,27 @@ int main(int argc, char **argv)
 		gm.select_row(settings_row);
 		key(SDL_SCANCODE_RETURN);
 		check(top() == tr::ROOM2_SETTINGS.c_str(), "Rooms 2: the creator's Room settings");
+		{   // the creator's settings and rules not taken by the lobby: only the newest of each kind sent again (OwnerAsks)
+			OwnerAsks q;
+			OwnerAsks::Ask a;
+			const int a1 = q.sent("rules"), b1 = q.sent("rules");   // (pressed twice, the lobby unreachable: both fail)
+			const bool old_again = q.failed("rules", "A", a1, 1, 0), new_again = q.failed("rules", "B", b1, 1, 0);
+			check(!old_again && new_again && q.again.size() == 1 && !q.due(2999, a) && q.due(3000, a) && a.body == "B",
+			      "Rooms 2's settings: pressed twice, both failing: only the newer sent again");
+			OwnerAsks r;
+			const int a2 = r.sent("rules");
+			r.sent("rules");   // (B taken by the lobby; A's failure comes after it)
+			check(!r.failed("rules", "A", a2, 1, 0) && r.again.empty(), "Rooms 2's settings: A failing after B was taken: never sent again over B");
+			OwnerAsks t;
+			const int s1 = t.sent("settings"), r1 = t.sent("rules");
+			check(t.failed("settings", "S", s1, 1, 0) && t.failed("rules", "R", r1, 1, 0) && t.again.size() == 2, "Rooms 2's settings: settings and rules each their own newest");
+			int tries = 1, sends = 1;
+			OwnerAsks u;
+			int seq = u.sent("rules");
+			while (u.failed("rules", "R", seq, tries, 0) && u.due(1e9, a)) { seq = u.sent("rules"); tries = a.tries + 1; sends++; }
+			check(sends == OwnerAsks::TRIES, ("Rooms 2's settings: a change that keeps failing sent " + std::to_string(sends) + " times in all, then given up").c_str());
+		}
+
 		shot("room2_settings.png", w, h);
 		{   // the rows: the room's rules as the lobby has them, not this player's saved ones (a change the lobby didn't take, or
 			// a room made with others); no Random and custom fighters row (nothing plays it yet). A change: the room's with that

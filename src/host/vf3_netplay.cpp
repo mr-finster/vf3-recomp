@@ -188,20 +188,21 @@ void Adapter::take_midi(std::vector<uint8_t> &out)
 	const bool parsed = sound_commands(s.bytes, cmds);
 	s.held = !parsed || std::any_of(cmds.begin(), cmds.end(), [](uint16_t c) { return !is_effect(c); });
 	if (first) s.guess = f >= k;
+	// the frames run for good now, in order: what no guess sent (first: one this call makes final isn't behind this frame's
+	// guess, and its late effects go before this frame's)
+	for (const uint32_t upto = std::min(f + 1, k); sound_final < upto; sound_final++) settle_sound(sound_final, out);
 	if (first && f >= k && !s.bytes.empty()) {   // (a guess, run the first time: its effects now, unless music waits)
 		bool behind = false;
 		for (auto it = sound.lower_bound(sound_final); it != sound.end() && it->first < f && !behind; ++it) behind = it->second.held;
 		if (!s.held && !behind) {
-			out = s.bytes;
-			s.guessed = cmds;
+			out.insert(out.end(), s.bytes.begin(), s.bytes.end());
+			sound_commands(s.bytes, s.guessed);   // (its commands, all effects: settle_sound used the scratch meanwhile)
 		} else if (s.held) {
 			sound_stats.held++;
 			sound_stats.held_most = std::max(sound_stats.held_most, f + 1 - std::max(k, sound_final));
 		} else
 			sound_stats.waited++;
 	}
-	// the frames run for good now, in order: what no guess sent
-	for (const uint32_t upto = std::min(f + 1, k); sound_final < upto; sound_final++) settle_sound(sound_final, out);
 	while (!sound.empty() && sound.begin()->first + 2 * SOUND_NEAR < sound_final) sound.erase(sound.begin());
 }
 
@@ -247,6 +248,7 @@ void Adapter::settle_sound(uint32_t f, std::vector<uint8_t> &out)
 
 bool Adapter::begin(const std::vector<uint8_t> &blob)
 {
+	dural_refused = false;
 	uint32_t magic = 0;
 	const size_t base = 4 + board.backup.size() + sizeof board.eeprom.regs + 1;
 	if (blob.size() != base + (host_terms ? TERMS_SIZE : 0)) return false;
@@ -256,7 +258,9 @@ bool Adapter::begin(const std::vector<uint8_t> &blob)
 		memcpy(&magic, blob.data() + base, 4);
 		if (magic != TERMS_MAGIC || blob[base + 4] != 1 || blob[base + 5] > 1 || blob[base + 6] > 1) return false;
 		stage_select_on = blob[base + 5] != 0;
-		dural = blob[base + 6] != 0;
+		// (Dural: the terms' (use_terms, the lobby's, the same on both sides: every host since pools came writes exactly them);
+		// a blob that says otherwise is no match to play: a modified host giving her in a room with Dural off)
+		if ((blob[base + 6] != 0) != dural) { dural_refused = true; return false; }
 		if (dural && !board.profile->dural) return false;
 	}
 	if (settle) settle();
