@@ -1095,10 +1095,20 @@ function r2_advance(r, now) {
 	}
 	const next = r2_next(r);
 	if (t.a && t.b) {   // (READY: the match decided, its loser still seated till the next is)
-		t.phase = 'READY';
-		if (next) r2_call(r, now, next);
-		else r2_rematch(r, now);
-		return;
+		// (nobody READY: the two play on, unless the loser's AWAY (their game said so: lost with no input at all, reno 22 Nov):
+		// then off the table to the back of the line, AWAY, the holder waiting for a challenger, no rematch nobody would play)
+		const loser = t.holder === t.a ? 'b' : t.holder === t.b ? 'a' : '';
+		if (!next && loser && r.members[t[loser]] && r.members[t[loser]].away) {
+			const mid = t[loser];
+			t[loser] = null;
+			r.line = r.line.filter((x) => x !== mid);
+			r.line.push(mid);
+		} else {
+			t.phase = 'READY';
+			if (next) r2_call(r, now, next);
+			else r2_rematch(r, now);
+			return;
+		}
 	}
 	r.ready = null;
 	if (!t.a && !t.b && next) { r.line = r.line.filter((x) => x !== next); t.a = next; }

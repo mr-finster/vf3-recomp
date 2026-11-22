@@ -569,10 +569,9 @@ if (PRINT) for (const [ev, rows] of Object.entries(got)) { console.log(`\t'${ev}
 	check('rotation: D beat A: streak 2; C, the only READY one, next', show(code), 'READY D/A [E*,F*,B*,C] s2 r:C', false);
 	await seated();
 	for (const m of [M.D, M.C]) await act(m, 'started');
-	await act(M.A, 'away');
-	await act(M.C, 'away');   // (at the table, playing: AWAY from when it's back in the line)
+	await act(M.A, 'away');   // (C, at the table, stays READY: an AWAY loser leaves the table instead, room2-beta2.test.mjs)
 	await match('a');
-	check('rotation: nobody READY in line: the two play on (a rematch), as with an empty line', [show(code), rec(code).ready], ['PLAYING D/C* [E*,F*,B*,A*] s3', null], false);
+	check('rotation: nobody READY in line: the two play on (a rematch), as with an empty line', [show(code), rec(code).ready], ['PLAYING D/C [E*,F*,B*,A*] s3', null], false);
 	check('rotation: what each member sees: the table, the line in order with READY, their own place', [M.E.state.table.a.name, M.E.state.table.b.name, M.E.state.table.streak, M.E.state.line.map((p) => p.name + (p.ready ? '' : '*')), M.E.state.you.pos, M.E.state.you.ready],
 		['D', 'C', 3, ['E*', 'F*', 'B*', 'A*'], 1, false], false);
 	check('rotation: the matches counted (n)', rec(code).t.n, 11, false);
@@ -580,7 +579,7 @@ if (PRINT) for (const [ev, rows] of Object.entries(got)) { console.log(`\t'${ev}
 	await act(M.A, 'leave');
 	await act(M.E, 'ready');
 	await match('a');
-	check('rotation: E READY again: it plays next', show(code), 'READY D/C* [E,F*,B*] s4 r:E', false);
+	check('rotation: E READY again: it plays next', show(code), 'READY D/C [E,F*,B*] s4 r:E', false);
 }
 
 // ---- both saying disconnect twice in a row (both alive): the two seated again once, then the holder stays; one-sided

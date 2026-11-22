@@ -227,6 +227,12 @@ for (const how of ['leave_line', 'leave', 'quiet']) {
 	for (const m of [E, F]) await act(m, 'result', { winner: 'a', n: 1 });
 	await act(E, 'away');
 	check('a play-on\'s holder AWAY: kept at the table (the winner never taken off)', show(E.code), 'PLAYING EEE*/FFF [] s1');
+	const G = await create('GGG'), H = await enter(G.code, 'HHH');
+	await act(G, 'started'); await act(H, 'started');
+	await act(G, 'result', { winner: 'a', n: 1 });
+	await act(H, 'away');   // (lost with no input at all: AWAY before the second report)
+	await act(H, 'result', { winner: 'a', n: 1 });
+	check('the loser AWAY before the result: no play-on, off the table to the back of the line; the holder alone', show(G.code), 'SOLO GGG/- [HHH*] s1');
 }
 // the name filter's HEADS: insults made with a word before, innocent names kept
 check('names blocked', ['DICKMASTER', 'MASTERCOCK', 'BIGDICK', 'SUCKMYDICK'].map(name_ok), [false, false, false, false]);
