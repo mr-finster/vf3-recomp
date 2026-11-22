@@ -390,7 +390,7 @@ T(ROOM2_CLOSE_HELP, "Закрывает комнату для всех в ней
 T(BUTTON_JOIN_LINE, "В ОЧЕРЕДЬ")
 T(ROOM2_STREAK_1, "1 ПОБЕДА")
 T(ROOM2_GET_READY_N, "ПРИГОТОВЬСЯ \xE2\x80\x94 {n}")
-T(ROOM2_NOT_NOW, "{key}: пропустить ход (AWAY)")
+T(ROOM2_NOT_NOW, "Меню: пропустить ход (AWAY)")
 T(BUTTON_READY_ON, "ГОТОВ: ДА")
 T(BUTTON_READY_OFF, "ГОТОВ: НЕТ")
 T(BUTTON_READY_NOW, "ИГРАТЬ СЕЙЧАС")

@@ -390,7 +390,7 @@ T(ROOM2_CLOSE_HELP, "Chiude la stanza per tutti quelli dentro: l'incontro in cor
 T(BUTTON_JOIN_LINE, "METTITI IN FILA")
 T(ROOM2_STREAK_1, "1 VITTORIA")
 T(ROOM2_GET_READY_N, "PREPARATI \xE2\x80\x94 {n}")
-T(ROOM2_NOT_NOW, "{key}: salta questo turno (AWAY)")
+T(ROOM2_NOT_NOW, "Menu: salta questo turno (AWAY)")
 T(BUTTON_READY_ON, "PRONTO: SÌ")
 T(BUTTON_READY_OFF, "PRONTO: NO")
 T(BUTTON_READY_NOW, "GIOCA ORA")

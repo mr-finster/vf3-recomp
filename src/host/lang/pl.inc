@@ -390,7 +390,7 @@ T(ROOM2_CLOSE_HELP, "Zamyka pokój dla wszystkich w nim: trwający mecz się ko�
 T(BUTTON_JOIN_LINE, "STAŃ W KOLEJCE")
 T(ROOM2_STREAK_1, "1 ZWYCIĘSTWO")
 T(ROOM2_GET_READY_N, "PRZYGOTUJ SIĘ \xE2\x80\x94 {n}")
-T(ROOM2_NOT_NOW, "{key}: pomiń tę kolejkę (AWAY)")
+T(ROOM2_NOT_NOW, "Menu: pomiń tę kolejkę (AWAY)")
 T(BUTTON_READY_ON, "GOTOWY: TAK")
 T(BUTTON_READY_OFF, "GOTOWY: NIE")
 T(BUTTON_READY_NOW, "GRAM TERAZ")

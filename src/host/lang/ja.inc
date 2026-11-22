@@ -390,7 +390,7 @@ T(ROOM2_CLOSE_HELP, "ルームにいる全員に対してルームを閉じま�
 T(BUTTON_JOIN_LINE, "順番待ちに並ぶ")
 T(ROOM2_STREAK_1, "1勝")
 T(ROOM2_GET_READY_N, "準備して \xE2\x80\x94 {n}")
-T(ROOM2_NOT_NOW, "{key}：今回はパス (AWAY)")
+T(ROOM2_NOT_NOW, "メニュー：今回はパス (AWAY)")
 T(BUTTON_READY_ON, "準備：オン")
 T(BUTTON_READY_OFF, "準備：オフ")
 T(BUTTON_READY_NOW, "今すぐ対戦")

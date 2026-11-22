@@ -390,7 +390,7 @@ T(ROOM2_CLOSE_HELP, "Ferme le salon pour tous ceux qui y sont\xC2\xA0: le match 
 T(BUTTON_JOIN_LINE, "REJOINDRE LA FILE")
 T(ROOM2_STREAK_1, "1 VICTOIRE")
 T(ROOM2_GET_READY_N, "PRÉPARE-TOI \xE2\x80\x94 {n}")
-T(ROOM2_NOT_NOW, "{key}\xC2\xA0: passer ce tour (AWAY)")
+T(ROOM2_NOT_NOW, "Menu\xC2\xA0: passer ce tour (AWAY)")
 T(BUTTON_READY_ON, "PRÊT\xC2\xA0: OUI")
 T(BUTTON_READY_OFF, "PRÊT\xC2\xA0: NON")
 T(BUTTON_READY_NOW, "J'Y VAIS")

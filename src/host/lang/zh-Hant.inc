@@ -390,7 +390,7 @@ T(ROOM2_CLOSE_HELP, "為房間裡的所有人關閉房間：正在進行的對�
 T(BUTTON_JOIN_LINE, "加入排隊")
 T(ROOM2_STREAK_1, "1 勝")
 T(ROOM2_GET_READY_N, "準備 \xE2\x80\x94 {n}")
-T(ROOM2_NOT_NOW, "{key}：這次暫不 (AWAY)")
+T(ROOM2_NOT_NOW, "選單：這次暫不 (AWAY)")
 T(BUTTON_READY_ON, "準備：開")
 T(BUTTON_READY_OFF, "準備：關")
 T(BUTTON_READY_NOW, "立即開始")

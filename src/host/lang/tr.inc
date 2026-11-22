@@ -391,7 +391,7 @@ T(ROOM2_CLOSE_HELP, "Odayı içindeki herkes için kapatır: süren maç biter."
 T(BUTTON_JOIN_LINE, "SIRAYA GİR")
 T(ROOM2_STREAK_1, "1 GALİBİYET")
 T(ROOM2_GET_READY_N, "HAZIRLAN \xE2\x80\x94 {n}")
-T(ROOM2_NOT_NOW, "{key}: bu sırayı geç (AWAY)")
+T(ROOM2_NOT_NOW, "Menü: bu sırayı geç (AWAY)")
 T(BUTTON_READY_ON, "HAZIR: AÇIK")
 T(BUTTON_READY_OFF, "HAZIR: KAPALI")
 T(BUTTON_READY_NOW, "ŞİMDİ OYNA")

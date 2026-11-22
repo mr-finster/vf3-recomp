@@ -379,6 +379,7 @@ void Adapter::advance(const uint16_t input[2], bool resim)
 		} else if (!out.empty() && midi_out)
 			midi_out(out);
 	}
+	if (after_frame) after_frame(frame);
 	frame++;
 	if (checkpoint_every && frame % checkpoint_every == 0) {
 		board.save_state(check_buf);
@@ -386,12 +387,24 @@ void Adapter::advance(const uint16_t input[2], bool resim)
 	}
 }
 
-void Score::frame(const m3::Model3 &board)
+bool Score::bytes(const m3::Model3 &board, uint8_t r_out[3])
 {
 	auto byte = [&](uint32_t a) { return board.ram[a ^ 3]; };   // (the RAM's host-order words: the game's byte)
 	const m3::Profile &p = *board.profile;
-	if (!p.rounds_p1) return;   // (not known for this program)
+	if (!p.rounds_p1) return false;   // (not known for this program)
 	const uint8_t r[3] = { byte(p.rounds_p1), byte(p.rounds_p2), uint8_t(byte(p.playing) & 3) };
+	memcpy(r_out, r, 3);
+	return true;
+}
+
+void Score::frame(const m3::Model3 &board)
+{
+	uint8_t r[3];
+	if (bytes(board, r)) feed(r);
+}
+
+void Score::feed(const uint8_t r[3])
+{
 	if (memcmp(r, now, 3) != 0) { memcpy(now, r, 3); held = 0; return; }
 	if (++held != 30) return;   // (once, when it's held long enough)
 	playing = r[2];

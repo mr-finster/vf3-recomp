@@ -390,7 +390,7 @@ T(ROOM2_CLOSE_HELP, "Schließt den Raum für alle darin: ein laufendes Match end
 T(BUTTON_JOIN_LINE, "ANSTELLEN")
 T(ROOM2_STREAK_1, "1 SIEG")
 T(ROOM2_GET_READY_N, "MACH DICH BEREIT \xE2\x80\x94 {n}")
-T(ROOM2_NOT_NOW, "{key}: diese Runde aussetzen (AWAY)")
+T(ROOM2_NOT_NOW, "Menü: diese Runde aussetzen (AWAY)")
 T(BUTTON_READY_ON, "BEREIT: AN")
 T(BUTTON_READY_OFF, "BEREIT: AUS")
 T(BUTTON_READY_NOW, "JETZT SPIELEN")

@@ -520,17 +520,31 @@ private:
 	uint32_t r2_auto_tap = 0;   // (a seat's first match: this player's Start pressed by their game, its frames)
 	bool r2_lost = false;   // (this player beaten in the seat's match on now: from its deciding KO till a new one's on)
 	int r2_to_win = 0;   // (the seat's match's rounds to win: the host's setting, read at its start; 0 not known)
+	// (the score's held reading from frames run for good only (both players' inputs in): each frame's bytes kept by the
+	// adapter as it ran it (again after a rollback: the last run's), fed in order up to the session's confirmed frames;
+	// a Rooms 2 match is decided by it, both games alike)
+	struct ConfBytes { uint32_t f = UINT32_MAX; uint8_t r[3] = {}; };
+	std::vector<ConfBytes> conf_ring = std::vector<ConfBytes>(1024);
+	vf3net::Score score_conf;
+	uint32_t conf_fed = 0;
+	bool both_in_conf = false;
+	int conf_winner = -1;        // (by the rounds, frames run for good: the match on now decided, 1 player 1, 2 player 2, 0 a draw; -1 not)
+	bool conf_armed = false;     // (a match on: both in at 0-0, run for good)
 	int r2_alone = 0;   // (frames one player's been alone in the game before both have been in: the log's check)
-	// (Winner may change character off: the winner keeps the fighter they won with) this player's own input at a select
-	// they chose at, frame by frame from its first frame (sel_rec; sel_last once that select's over), kept when they win a
-	// match (sel_keep, their side then), and played back at their next seat's select as the one who stays, their own
-	// input left out till it's over: the same presses on the same select, so the same fighter and outfit
-	std::vector<uint16_t> sel_rec, sel_last, sel_keep;
+	// (Winner may change character off: the winner keeps the fighter they won with) where this player's cursor was on the
+	// character select and whether Start was held at their last button press there (the outfit): sel_now as the select goes,
+	// sel_last once it's over, sel_keep (with their side) once they win a match. At their next seat's select as the one who
+	// stays, their game steers the cursor there and confirms it, their own input left out till the select's over
+	struct SelPick { int row = -1, col = -1; uint16_t press = 0; };   // (press: the word they picked with, the stick's moves left out: its button and the outfit's own (Start held, Up, the button))
+	SelPick sel_now, sel_last, sel_keep;
 	int sel_phase = 0;          // (this seat's session: 0 no select yet, 1 at one, 2 after it)
 	bool sel_recording = false, sel_playing = false, sel_won_last = false;
-	size_t sel_base = 0;      // (the select's first frame: the session's frame count then)
+	size_t sel_base = 0;        // (the select's first frame: the session's frame count then)
 	int sel_keep_side = -1;
 	int sel_ends = 0;
+	uint16_t sel_was = 0;       // (this player's input the frame before: a button's press)
+	bool sel_joined(int p) const;   // (player p at the select or in the game: a seat's Start pressed for them no more)
+	bool sel_cursor(int p, int &row, int &col) const;   // (player p's cursor on the character select, the game's RAM; false: not on it)
 	double hold_at = 0;
 };
 

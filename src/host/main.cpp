@@ -4940,7 +4940,7 @@ int main(int argc, char **argv)
 		if (online.making_way()) menu.set_banner(tr::BANNER_NEXT_IN_LINE, tr::fill(tr::BANNER_MAKES_WAY, { { "name", online.opponent() } }));
 		else if (r2_ready >= 0) {   // (a Rooms 2 room's ready check: this player called, its seconds counting down)
 			const std::string stays = !r2m ? "" : r2m->holder == "a" ? r2m->a.name : r2m->holder == "b" ? r2m->b.name : r2m->has_a ? r2m->a.name : r2m->b.name;
-			const std::string not_now = tr::fill(tr::ROOM2_NOT_NOW, { { "key", pads[0] ? "B" : "Esc" } });   // (Esc or B: AWAY; Start: now)
+			const std::string not_now = std::string(tr::ROOM2_NOT_NOW);   // (D-19: AWAY from the menu only; Start: now)
 			menu.set_banner(tr::fill(tr::ROOM2_GET_READY_N, { { "n", std::to_string(r2_ready) } }), (stays.empty() ? std::string(tr::ROOM2_CHIP_YOUR_TURN) : tr::fill(tr::ROOM2_YOU_PLAY, { { "name", stays } })) + "   " + not_now);
 			static uint64_t ready_since = 0;
 			static bool shot_taken = false;
@@ -5156,6 +5156,7 @@ int main(int argc, char **argv)
 			online_page();   // (the identity, as opening the Online page sets it)
 			tr::line err;
 			if (getenv("VF3_HOST_PUBLIC")) cfg.online.room_who = 2;
+			if (getenv("VF3_ROOM2_RULE_CHANGE")) cfg.online.rule_change = true;   // (tests: the room made with Winner may change character on)
 			if (!(test_r2_enter ? online.room2_enter(cfg.online, test_r2_enter, err) : online.room2_create(cfg.online, err)))
 				fprintf(stderr, "online: (test) %s\n", err.en().c_str());
 		}
@@ -5276,15 +5277,7 @@ int main(int argc, char **argv)
 				const bool k = e.type == SDL_EVENT_KEY_DOWN && !e.key.repeat && (e.key.scancode == c.key[C_START] || (c.key2[C_START] != SDL_SCANCODE_UNKNOWN && e.key.scancode == c.key2[C_START]));
 				const bool b = e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN && (e.gbutton.button == SDL_GAMEPAD_BUTTON_START || int(e.gbutton.button) == c.pad[C_START] || int(e.gbutton.button) == c.pad2[C_START]);
 				if ((k || b) && online.room2_ready()) fprintf(stderr, "online: Rooms 2: Start pressed (%s): ready\n", k ? "keyboard" : "pad");
-				// (Esc or B with the menu closed: AWAY, not the menu: kept in the line, passed over; said)
-				const bool esc = !menu.is_open() && ((e.type == SDL_EVENT_KEY_DOWN && !e.key.repeat && e.key.scancode == SDL_SCANCODE_ESCAPE) ||
-				                                     (e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN && e.gbutton.button == SDL_GAMEPAD_BUTTON_EAST));
-				if (esc) {
-					online.room2_set_ready(false);
-					menu.toast(tr::line(tr::ROOM2_AWAY_SAID).str(), 6);
-					fprintf(stderr, "online: Rooms 2: %s pressed while getting ready: AWAY\n", e.type == SDL_EVENT_KEY_DOWN ? "Esc" : "B");
-					continue;
-				}
+				// (D-19: no key or button sets AWAY while getting ready; Esc or B opens the menu as ever, its SKIP THIS TURN the way)
 			}
 			// (a Mac's open-URL event, as SDL gives it: a link from the web, the game running or just started by it)
 			if (e.type == SDL_EVENT_DROP_FILE && e.drop.data && links::is_link(e.drop.data)) arg_link = std::string(e.drop.data).substr(0, 64);
@@ -6038,7 +6031,7 @@ int main(int argc, char **argv)
 		if (static const bool sel_shot = getenv("VF3_ROOM2_SELECT_SHOT") != nullptr; sel_shot) {   // (tests: the window 4 s after each room seat's select ends)
 			static int seen = 0;
 			static uint64_t due = 0;   // (4 s after it: the fighters on screen, the select's end is a black frame)
-			if (online.select_ends() != seen) { seen = online.select_ends(); due = SDL_GetTicks() + 4000; }
+			if (online.select_ends() != seen) { seen = online.select_ends(); const int s = atoi(getenv("VF3_ROOM2_SELECT_SHOT")); due = SDL_GetTicks() + uint64_t(s > 1 ? s : 4) * 1000; }   // (the value: its seconds, 4 below 2)
 			if (due && SDL_GetTicks() >= due) { due = 0; read_window(("build/select_end_" + std::to_string(seen) + ".png").c_str()); }
 		}
 		if (room2_shot) { room2_shot = false; read_window("build/host_room2_ready.png"); fprintf(stderr, "(test) the ready check's banner: build/host_room2_ready.png\n"); }

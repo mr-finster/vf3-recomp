@@ -913,7 +913,7 @@ void Online::room2_react()
 	if (m.ready_you && !m.was_called) {
 		m.was_called = true;
 		m.ready_sent = false;
-		log("Rooms 2: getting ready: seated in " + std::to_string(int((m.ready_until - now) / 1000 + 0.5)) + " s (Esc: AWAY)");
+		log("Rooms 2: getting ready: seated in " + std::to_string(int((m.ready_until - now) / 1000 + 0.5)) + " s (AWAY: the menu's SKIP THIS TURN)");
 		notices.push_back({ Notice::called, tr::line(tr::ROOM2_CHIP_YOUR_TURN) });
 		m.ready_auto_at = room2_test_ready == "now" || room2_test_ready == "esc" ? now + 1000 : 0;
 	}
@@ -986,7 +986,7 @@ void Online::room2_seat()
 	m.in_seat = true;
 	sel_phase = 0;
 	sel_base = 0;
-	sel_rec.clear();
+	sel_now = {};
 	sel_recording = sel_playing = false;
 	m.touched = m.idle_away = m.decided_seen = false;
 	m.playon_out_at = 0;
@@ -1075,9 +1075,14 @@ void Online::room2_decided()
 {
 	RoomMember &m = *r2;
 	if (ph != Phase::playing || !session || session->state() != vfnet::Session::State::running) return;
-	const int in = score.players();
+	// (decided by the held reading of frames run for good only (Online::score_conf): one from guessed frames (the input
+	// delay high, the loser's Start 24 frames after going out not here yet) reported a win the other game never saw, the
+	// lobby left DECIDED while the two played a rematch. Both games decide on the same frames this way)
+	// (by the rounds when the rounds to win are known (both armed at the match's start), else the held reading of who's in)
+	const bool by_rounds = r2_to_win >= 1 && r2_to_win <= 5;
+	const int in = by_rounds ? (conf_winner < 0 ? 3 : conf_winner) : score_conf.players();
 	if (in == 3) m.result_armed = true;
-	if (both_in && in != 3 && m.result_armed && m.reported_n != m.n && (m.phase == "PLAYING" || m.phase == "DECIDED")) {
+	if ((by_rounds || both_in_conf) && in != 3 && m.result_armed && m.reported_n != m.n && (m.phase == "PLAYING" || m.phase == "DECIDED")) {
 		const char *winner = in == 1 ? "a" : in == 2 ? "b" : "draw";
 		m.reported_n = m.n;
 		m.result_armed = false;
@@ -1085,12 +1090,12 @@ void Online::room2_decided()
 		const bool won = (in >> local_player()) & 1;
 		// (the fighter they won with kept for their next seat, the select's input it was chosen with; lost, none)
 		sel_won_last = won && in != 3;
-		if (sel_won_last && !sel_last.empty()) { sel_keep = sel_last; sel_keep_side = local_player(); }
-		else if (!sel_won_last) sel_keep.clear();
+		if (sel_won_last && sel_last.col >= 0) { sel_keep = sel_last; sel_keep_side = local_player(); }
+		else if (!sel_won_last) sel_keep = {};
 		log("Rooms 2: match " + std::to_string(m.n) + " decided: " + (in == 0 ? std::string("a draw") : std::string(won ? "this player" : opponent()) + " won") +
 		    " (side " + winner + "); " + (!m.next_ready() ? "nobody READY in the line: the two play on" : m.next_ready()->name + " is next"));
 	}
-	const bool decided = both_in && in != 3 && !m.result_armed && m.reported_n >= 0;
+	const bool decided = (by_rounds || both_in_conf) && in != 3 && !m.result_armed && m.reported_n >= 0;
 	// the banners as it is: the line moving on (someone called, or about to be), "YOU LOST: NEXT IS ..." to the loser and
 	// "n WINS IN A ROW: you stay on" to the winner, till the line moves; else (the two playing on) neither, the game's own
 	// "Start for a rematch" said then

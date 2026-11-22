@@ -390,7 +390,7 @@ T(ROOM2_CLOSE_HELP, "방에 있는 모두에게 방을 닫아요. 진행 중인 
 T(BUTTON_JOIN_LINE, "대기열에 서기")
 T(ROOM2_STREAK_1, "1승")
 T(ROOM2_GET_READY_N, "준비하세요 \xE2\x80\x94 {n}")
-T(ROOM2_NOT_NOW, "{key}: 이번 차례는 나중에 (AWAY)")
+T(ROOM2_NOT_NOW, "메뉴: 이번 차례는 나중에 (AWAY)")
 T(BUTTON_READY_ON, "준비: 켜짐")
 T(BUTTON_READY_OFF, "준비: 꺼짐")
 T(BUTTON_READY_NOW, "바로 시작")
