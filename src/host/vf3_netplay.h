@@ -112,6 +112,7 @@ struct Score
 	void frame(const m3::Model3 &board);
 	int players() const { return playing; }
 	uint8_t players_now() const { return now[2]; }   // (as the RAM has it this frame, not yet held: when one went out)
+	uint8_t rounds_now(int p) const { return now[p]; }   // (a player's rounds won in this match, as the RAM has it this frame)
 	int round_ends = 0;   // (each round's end, any players': a moment no one's in control, ~2 s while the game shows who won)   // (who's in the game, as held: bit 0 player 1, bit 1 player 2)
 private:
 	uint8_t seen[2] = {}, now[3] = {}, playing = 0;

@@ -2501,6 +2501,15 @@ bool Online::step(uint16_t input)
 		feed.set_info(i);
 	}
 	if (score.players() == 3) both_in = true;
+	if (room2_in_seat()) {   // (the log: who's in the game and each one's rounds, as the RAM has them, each time it changes)
+		const uint32_t g = uint32_t(score.players_now()) | uint32_t(score.rounds_now(0)) << 8 | uint32_t(score.rounds_now(1)) << 16;
+		if (g != r2_game_seen) {
+			r2_game_seen = g;
+			const uint8_t in = score.players_now();
+			log_line(std::string("the game: in it ") + (in == 3 ? "both" : in == 1 ? "player 1 only" : in == 2 ? "player 2 only" : "no one") + ", rounds " +
+			         std::to_string(score.rounds_now(0)) + "-" + std::to_string(score.rounds_now(1)) + " (frame " + std::to_string(session->inputs(local_player()).size()) + ", this player " + std::to_string(local_player() + 1) + ")");
+		}
+	}
 	if (held_before == 3 && score.players() != 3) decided_in = uint8_t(score.players());   // (the match decided: who's in, the winner)
 	held_before = uint8_t(score.players());
 	const uint8_t in_now = score.players_now();

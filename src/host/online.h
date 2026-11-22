@@ -514,6 +514,7 @@ private:
 	void watch_begin(const std::string &w);   // (watching w from here: what's on stopped first, a room's membership kept)
 	bool persist = false;               // (the room's own: kept through its match, opened again after it)
 	bool r2_start_held = false;         // (a Rooms 2 challenger's Start held this frame: the one who stays is in first)
+	uint32_t r2_game_seen = UINT32_MAX;   // (the log's: who's in the game and the rounds, as last said)
 	double hold_at = 0;
 };
 

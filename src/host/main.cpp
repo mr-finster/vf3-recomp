@@ -87,6 +87,7 @@
 //                        random play (win) or nothing (lose: the other wins), and Start again as the loser (a rematch,
 //                        held back while the line moves on); for runs with several matches in a row
 //   VF3_ROOM2_REMATCH_AFTER=s  with VF3_ROOM2_FIGHT: the loser's Start for a rematch only s seconds after they're out
+//   VF3_ROOM2_AWAY_AFTER=s  no input at all from s seconds after the start on (FIGHT and SPAM_START too): a player away
 //   VF3_ROOM2_WINNER_IDLE=1  with VF3_ROOM2_FIGHT=win: no input once the match is decided (the other out): the computer
 //                        beats this player, who then presses Start to go on (the play-on's winner out and back)
 //   VF3_ROOM2_LEAVE_AT=N leaves the room (Leave room) at pass N
@@ -5626,7 +5627,9 @@ int main(int argc, char **argv)
 					vf3net::unpack(uint16_t(vf3net::pack(live, 0) | sb), 0, live);
 				}
 				uint16_t bits = menu.is_open() || fc.on ? 0 : uint16_t(vf3net::pack(live, 0) | vf3net::pack(live, 1) | step_carry);
-				if (static const char *rf = getenv("VF3_ROOM2_FIGHT"); rf && online.in_room2() && online.room2()->in_seat && !online.watching()) {
+				static const double r2_away_after = getenv("VF3_ROOM2_AWAY_AFTER") ? atof(getenv("VF3_ROOM2_AWAY_AFTER")) * 1000 : -1;   // (tests: no input at all from s s on: away)
+				const bool r2_away = r2_away_after >= 0 && double(SDL_GetTicks()) >= r2_away_after;
+				if (static const char *rf = getenv("VF3_ROOM2_FIGHT"); rf && !r2_away && online.in_room2() && online.room2()->in_seat && !online.watching()) {
 					// (tests: Start whenever the match wants it from this player (its start, a rematch), tapped; then
 					// random play, or none: the other wins)
 					static uint64_t rng = 0x9E3779B97F4A7C15ull ^ uint64_t(SDL_GetTicksNS());
@@ -5653,6 +5656,7 @@ int main(int argc, char **argv)
 					}
 				}
 				if (room2_spam && online.in_room2() && pass % 10 < 3) bits |= vf3net::START_BUTTON;   // (tests: Start pressed over and over)
+				if (r2_away) bits = 0;
 				if (!online.watching()) {   // (Cheats > Dural's stage: this player's own input word, from the board as both sides have it; inputs only)
 					stage_pick.trigger = cfg.dural_stage;
 					dural_stage::Picker::Said said;
