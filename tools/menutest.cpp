@@ -884,7 +884,7 @@ int main(int argc, char **argv)
 		gm.select_row(2);
 		key(SDL_SCANCODE_RETURN);   // (Create room: the name's set)
 		const bool listing = o.rooms_state() != 3;   // (as create_room_page has it: Rooms off, no row to be listed by)
-		const int c_listed = listing ? 1 : -1, c_rule = listing ? 2 : 1, c_go = c_rule + 4;   // (the room's rules between Listed and Create)
+		const int c_listed = listing ? 1 : -1, c_rule = listing ? 2 : 1, c_go = c_rule + 5;   // (the room's rules between Listed and Create)
 		printf("Create room: Rooms %s at the lobby, so %s\n", listing ? "on (or not known)" : "off", listing ? "Listed in Rooms offered" : "no Listed in Rooms");
 		check(top() == tr::P_CREATE_ROOM.c_str() && gm.selected() == c_go && s.room_who == 0, "Create room: on Create, not listed (the code only) as ever");
 		gm.select_row(c_go + 1);
@@ -943,10 +943,10 @@ int main(int argc, char **argv)
 			// the last and back up (at most 6 shown), each step: the selected row in view, "more" above / below just when rows are out of view,
 			// nothing over anything, the help strip and CREATE where they were. Pictures at the top, the middle and the end
 			key(SDL_SCANCODE_ESCAPE);
-			online_menu::test_create_extra = 9 - 4;
+			online_menu::test_create_extra = 9 - 5;
 			gm.select_row(2);
 			key(SDL_SCANCODE_RETURN);
-			const int last = c_go + 9 - 4 - 1;
+			const int last = c_go + 9 - 5 - 1;
 			const std::vector<game_menu::box> strip0 = gm.boxes("crstrip"), go0 = gm.boxes("crgo");
 			int bad = 0, steps = 0;
 			auto look = [&](const char *pic) {
@@ -1270,9 +1270,9 @@ int main(int argc, char **argv)
 			gm.select_row(2);
 			key(SDL_SCANCODE_RETURN);   // (Create room)
 			shot("create_room_unlisted.png", w, h);
-			check(top() == tr::P_CREATE_ROOM.c_str() && gm.selected() == 1 + 4, "Rooms off at the lobby: Create room has no Listed in Rooms (on Create)");
+			check(top() == tr::P_CREATE_ROOM.c_str() && gm.selected() == 1 + 5, "Rooms off at the lobby: Create room has no Listed in Rooms (on Create)");
 			gm.select_row(2 + 4);
-			check(gm.selected() == 1 + 4, "its name, the room's rules and Create only");
+			check(gm.selected() == 1 + 5, "its name, the room's rules and Create only");
 			key(SDL_SCANCODE_ESCAPE);
 			s.lobby = lobby_before;
 			o.set_rooms({});
@@ -2003,8 +2003,8 @@ int main(int argc, char **argv)
 		{   // the rows: the room's rules as the lobby has them, not this player's saved ones (a change the lobby didn't take, or
 			// a room made with others); no Random and custom fighters row (nothing plays it yet). A change: the room's with that
 			// one changed, kept as this player's
-			check(gm.row_count() == 7 && gm.row_value(1) == std::string(tr::OFF) && gm.row_value(4) == std::string(tr::ON),
-			      "Rooms 2's settings: 7 rows (no Random and custom fighters), the side and the stage as the room's");
+			check(gm.row_count() == 8 && gm.row_value(1) == std::string(tr::OFF) && gm.row_value(4) == std::string(tr::ON) && gm.row_value(5) == std::string(tr::OFF),
+			      "Rooms 2's settings: 8 rows (no Random and custom fighters), the side, the stage and the winner's character (Off) as the room's");
 			const bool side0 = s.rule_side;
 			o.set_room2_test(R"({"code":"KXQ4M7","room":{"name":"","listed":false,"locked":false,"ready_ms":15000,"owner":true,"rules":{"side":true,"dural":true,"custom":false,"max":4,"stage":false}},"table":{"a":{"name":"MRFINSTER","country":"GB"},"b":null,"phase":"SOLO","streak":0,"holder":"a","n":0,"last":null},"line":[],"you":{"mid":"x","pos":0,"side":"a","misses":0},"ready":null,"watch":"KXQ4M7"})");
 			gm.refresh();

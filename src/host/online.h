@@ -51,6 +51,7 @@ struct OnlineSettings
 	// challenger's stage select. The last ones set, for the next room made
 	bool rule_side = false, rule_dural = false, rule_custom = false, rule_stage = true;
 	int rule_max = 0;
+	bool rule_change = false;   // (the winner may change character: off, the winner's game keeps the fighter they won with)
 };
 
 class Online
@@ -161,6 +162,7 @@ public:
 	const LastMatch &last_match() const { return last; }
 	// Why the last try didn't get going ("" if it did, or none yet): shown on the page it was made from
 	std::string join_failure() const { return failure.str(); }
+	int select_ends() const { return sel_ends; }   // (tests: a room seat's selects over so far, <game>_ROOM2_SELECT_SHOT's)
 	uint32_t room_serial() const { return room_turns; }   // (one more each time a room's left, made or entered: COPY CODE's "Copied" its room's only)
 	const tr::line &join_failure_line() const { return failure; }
 	Step failed_at() const { return fail_step; }   // (how far the failed try got)
@@ -519,6 +521,16 @@ private:
 	bool r2_lost = false;   // (this player beaten in the seat's match on now: from its deciding KO till a new one's on)
 	int r2_to_win = 0;   // (the seat's match's rounds to win: the host's setting, read at its start; 0 not known)
 	int r2_alone = 0;   // (frames one player's been alone in the game before both have been in: the log's check)
+	// (Winner may change character off: the winner keeps the fighter they won with) this player's own input at a select
+	// they chose at, frame by frame from its first frame (sel_rec; sel_last once that select's over), kept when they win a
+	// match (sel_keep, their side then), and played back at their next seat's select as the one who stays, their own
+	// input left out till it's over: the same presses on the same select, so the same fighter and outfit
+	std::vector<uint16_t> sel_rec, sel_last, sel_keep;
+	int sel_phase = 0;          // (this seat's session: 0 no select yet, 1 at one, 2 after it)
+	bool sel_recording = false, sel_playing = false, sel_won_last = false;
+	size_t sel_base = 0;      // (the select's first frame: the session's frame count then)
+	int sel_keep_side = -1;
+	int sel_ends = 0;
 	double hold_at = 0;
 };
 

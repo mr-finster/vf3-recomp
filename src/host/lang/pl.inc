@@ -375,6 +375,8 @@ T(ROOM2_LISTED_HELP, "Widoczny na liście pokoi u wszystkich albo tylko dla tych
 T(ROOM2_CLOSE_ROOM, "Zamknij pokój")
 T(ROOM2_RULE_SIDE, "Zwycięzca może zmienić stronę")
 T(ROOM2_RULE_SIDE_HELP, "Wł.: nowy rywal zawsze gra jako gracz 2. Wył.: zwycięzca zostaje po swojej stronie, jak na automacie.")
+T(ROOM2_RULE_CHANGE, "Zwycięzca może zmienić postać")
+T(ROOM2_RULE_CHANGE_HELP, "Wł.: zwycięzca wybiera ponownie przy każdym nowym rywalu. Wył.: zwycięzca zachowuje postać, którą wygrał, jak na automacie.")
 T(ROOM2_RULE_DURAL, "Dural")
 T(ROOM2_RULE_DURAL_HELP, "Wył.: Dural nie ma w wyborze w meczach tego pokoju, bez względu na to, kto ją ma.")
 T(ROOM2_RULE_CUSTOM, "Losowi i własni wojownicy")

@@ -375,6 +375,8 @@ T(ROOM2_LISTED_HELP, "顯示在所有人的房間列表中，或只給有代碼�
 T(ROOM2_CLOSE_ROOM, "關閉房間")
 T(ROOM2_RULE_SIDE, "勝者可換邊")
 T(ROOM2_RULE_SIDE_HELP, "開：新挑戰者總是作為2P對戰。關：勝者留在自己這一邊，和街機一樣。")
+T(ROOM2_RULE_CHANGE, "勝者可換角色")
+T(ROOM2_RULE_CHANGE_HELP, "開：每位新挑戰者到來時勝者重新選擇。關：勝者保留獲勝時的角色，和街機一樣。")
 T(ROOM2_RULE_DURAL, "Dural")
 T(ROOM2_RULE_DURAL_HELP, "關：這個房間的對戰中不能選 Dural。")
 T(ROOM2_RULE_CUSTOM, "隨機和 Customize 角色")

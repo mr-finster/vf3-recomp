@@ -446,6 +446,7 @@ bool Online::try_again(const OnlineSettings &s, tr::line &error)
 		// asked with, the create form's, not the ones saved)
 		OnlineSettings w = s;
 		w.rule_side = started_with.rule_side;
+		w.rule_change = started_with.rule_change;
 		w.rule_dural = started_with.rule_dural;
 		w.rule_custom = started_with.rule_custom;
 		w.rule_stage = started_with.rule_stage;
@@ -2509,6 +2510,40 @@ bool Online::step(uint16_t input)
 			if (r2_auto_tap++ % 40 < 3) input = uint16_t(input | vf3net::START_BUTTON);
 		} else r2_auto_tap = 0;
 	}
+	// The winner's fighter kept (the room's Winner may change character off, the default): at a seat's first select, the one
+	// who stays plays back the input they chose their fighter with at the select they last won from (Online::sel_keep),
+	// their own left out till the select's over; at a rematch's select (a play-on) the arcade keeps its winner in already.
+	// Each select this player chose at is recorded (not a rematch's that they won the match before: the arcade's choice)
+	if (room2_in_seat() && ph == Phase::playing && session) {
+		const bool sel = vf3net::in_select(board);
+		const size_t at = session->inputs(me).size();   // (the frame this input is for: a step that doesn't run one (the select's
+		                                                 // lockstep waiting on the other side) is asked again with the same)
+		if (sel && sel_phase != 1) {   // (a select begins)
+			sel_phase = 1;
+			sel_base = at;
+			sel_rec.clear();
+			sel_recording = !(both_in && sel_won_last);
+			const bool keep = !r2->has_rules || !r2->rule_change;
+			// (not yet: the same input on a seat's select doesn't give the same fighter (its cursor and timing aren't the same
+			// seat to seat, checked: identical words sent, another fighter), so the lock needs the select's cursor and the
+			// fighter in RAM, game by game; till then the winner picks again whatever the rule)
+			sel_playing = false && !both_in && keep && r2->stayer == (me == 0 ? "a" : "b") && !sel_keep.empty() && sel_keep_side == me;
+			if (sel_playing) log_line("Rooms 2: the winner keeps their fighter: the select's input played back (" + std::to_string(sel_keep.size()) + " frames)");
+		} else if (!sel && sel_phase == 1) {   // (and it's over)
+			sel_phase = 2;
+			sel_ends++;
+			if (sel_recording && !sel_rec.empty()) sel_last = sel_rec;
+			sel_recording = sel_playing = false;
+		}
+		if (sel_phase == 1 && at >= sel_base) {
+			const size_t k = at - sel_base;
+			if (sel_playing) input = k < sel_keep.size() ? sel_keep[k] : uint16_t(0);
+			if (sel_recording && k < 20000) {
+				if (sel_rec.size() <= k) sel_rec.resize(k + 1, 0);
+				sel_rec[k] = input;
+			}
+		}
+	}
 	if (session) snapper.before_step(*session);   // (a snapshot's copy the step could save over: stopped first, tried again)
 	if (!(ph == Phase::playing && session && session->step(input))) return false;
 	score.frame(board);   // (the score between the two, from the game's RAM: vf3net::Score)
@@ -3157,7 +3192,7 @@ menu_page create_room_page(Online &o, OnlineSettings &s, game_menu &menu, std::f
 	menu_page p{ tr::P_CREATE_ROOM, "", {} };
 	auto problem = std::make_shared<std::string>();
 	const bool listing = o.rooms_state() != 3;   // (no Rooms at the lobby: nothing to be listed in, not offered)
-	struct rules_now { bool side = false, dural = false, stage = true; int max = 0; std::vector<bool> extra; };
+	struct rules_now { bool change = false, side = false, dural = false, stage = true; int max = 0; std::vector<bool> extra; };
 	auto r = std::make_shared<rules_now>();
 	r->extra.assign(size_t(std::max(0, test_create_extra)), false);
 	auto onoff = [](bool v) { return std::string(v ? tr::ON : tr::OFF); };
@@ -3173,12 +3208,14 @@ menu_page create_room_page(Online &o, OnlineSettings &s, game_menu &menu, std::f
 	p.items.push_back({ tr::ROOM2_RULE_MAX, tr::ROOM2_RULE_MAX_HELP, [r] { return r->max ? std::to_string(r->max) : std::string(tr::ROOM2_NO_LIMIT); },
 		[r](int d) { r->max = room2_next_max(r->max, d); } });
 	p.items.push_back({ tr::ROOM2_RULE_STAGE, tr::ROOM2_RULE_STAGE_HELP, [r, onoff] { return onoff(r->stage); }, [r](int) { r->stage = !r->stage; } });
+	p.items.push_back({ tr::ROOM2_RULE_CHANGE, tr::ROOM2_RULE_CHANGE_HELP, [r, onoff] { return onoff(r->change); }, [r](int) { r->change = !r->change; } });
 	for (size_t i = 0; i < r->extra.size(); i++)   // (tests: made-up rules, a list longer than its column)
 		p.items.push_back({ "TEST RULE " + std::to_string(i + 1), "A made-up rule (menutest).", [r, i, onoff] { return onoff(r->extra[i]); }, [r, i](int) { r->extra[i] = !r->extra[i]; } });
 	const int go = int(p.items.size());
 	p.items.push_back({ tr::BUTTON_CREATE, tr::CREATE_ROOM_NOTE, {}, {}, [&o, &s, &menu, problem, changed, r] {
 		if (s.room_name.empty()) s.room_name = room_name_of(s);
 		OnlineSettings with = s;   // (the form's rules for this room only: never kept as this player's)
+		with.rule_change = r->change;
 		with.rule_side = r->side; with.rule_dural = r->dural; with.rule_stage = r->stage; with.rule_max = r->max;
 		tr::line err;
 		if (!o.room2_create(with, err)) { *problem = err.str(); return; }   // (a Rooms 2 room, its rules these; a lobby without them: as before)
@@ -3254,15 +3291,16 @@ menu_page room2_settings_page(Online &o, OnlineSettings &s, game_menu &menu, std
 		[&o, put](int) { if (RoomMember *m = const_cast<RoomMember *>(o.room2())) { m->listed = !m->listed; put(); } } });
 	// (the room's rules as the lobby has them (as made till its first word; a lobby without them: this player's saved
 	// ones); each change the room's with that one changed, to the lobby at once (sent again if it fails). Random and custom fighters not shown till Customize comes: nothing plays it yet)
-	struct ruled { bool side, dural, stage; int max; };
+	struct ruled { bool side, dural, stage; int max; bool change; };
 	auto now = [&o, &s] {
 		const RoomMember *m = o.room2();
-		return m && m->has_rules ? ruled{ m->rule_side, m->rule_dural, m->rule_stage, m->rule_max } : ruled{ s.rule_side, s.rule_dural, s.rule_stage, s.rule_max };
+		return m && m->has_rules ? ruled{ m->rule_side, m->rule_dural, m->rule_stage, m->rule_max, m->rule_change } : ruled{ s.rule_side, s.rule_dural, s.rule_stage, s.rule_max, s.rule_change };
 	};
 	auto rules = [&o, &s, now](const std::function<void(ruled &)> &f) {
 		ruled r = now();
 		f(r);
 		OnlineSettings with = s;   // (the room's, never kept as this player's: Create room starts at the defaults)
+		with.rule_change = r.change;
 		with.rule_side = r.side; with.rule_dural = r.dural; with.rule_stage = r.stage; with.rule_max = r.max;
 		o.room2_rules(with);
 	};
@@ -3279,6 +3317,7 @@ menu_page room2_settings_page(Online &o, OnlineSettings &s, game_menu &menu, std
 			});
 		} });
 	p.items.push_back({ tr::ROOM2_RULE_STAGE, tr::ROOM2_RULE_STAGE_HELP, [now, onoff] { return onoff(now().stage); }, [rules](int) { rules([](ruled &r) { r.stage = !r.stage; }); } });
+	p.items.push_back({ tr::ROOM2_RULE_CHANGE, tr::ROOM2_RULE_CHANGE_HELP, [now, onoff] { return onoff(now().change); }, [rules](int) { rules([](ruled &r) { r.change = !r.change; }); } });
 	p.items.push_back({ tr::ROOM2_CLOSE_ROOM, tr::ROOM2_CLOSE_HELP, {}, {}, [&o, &s, &menu, changed] {
 		o.room2_close();
 		while (menu.depth() > 1 && menu.top_name() != tr::P_ONLINE.c_str()) menu.pop();

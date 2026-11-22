@@ -163,6 +163,7 @@ bool Online::room2_begin(const OnlineSettings &s, const std::string &code_in, bo
 	r2 = std::move(m);
 	if (create) {   // (the rules it's made with, as the room's till the lobby's word: Room settings shows them, never this player's saved ones)
 		r2->has_rules = true;
+		r2->rule_change = s.rule_change;
 		r2->rule_side = s.rule_side; r2->rule_dural = s.rule_dural; r2->rule_stage = s.rule_stage; r2->rule_max = s.rule_max; r2->rule_custom = false;
 	}
 	r2->step = 0;
@@ -293,6 +294,7 @@ void Online::room2_state(const Value &st)
 	if ((m.has_rules = rm["rules"].kind == Value::object)) {
 		const Value &ru = rm["rules"];
 		m.rule_side = truthy(ru["side"]);
+		m.rule_change = truthy(ru["change"]);
 		m.rule_dural = truthy(ru["dural"]);
 		m.rule_custom = truthy(ru["custom"]);
 		m.rule_stage = ru["stage"].kind != Value::boolean || ru["stage"].b;
@@ -562,7 +564,7 @@ void Online::room2_poll()
 				extra += std::string(",\"listed\":") + (w.room_who >= 1 ? "true" : "false") + (w.room_name.empty() ? "" : ",\"room\":" + quote(w.room_name));
 				if (!release.empty()) extra += ",\"build\":" + quote(release);   // (an older build given this room's code is told "The host has <it>")
 				extra += std::string(",\"rules\":{\"side\":") + (w.rule_side ? "true" : "false") + ",\"dural\":" + (w.rule_dural ? "true" : "false") +
-				         ",\"custom\":false,\"max\":" + std::to_string(w.rule_max) + ",\"stage\":" + (w.rule_stage ? "true" : "false") + "}";
+				         ",\"custom\":false,\"max\":" + std::to_string(w.rule_max) + ",\"stage\":" + (w.rule_stage ? "true" : "false") + ",\"change\":" + (w.rule_change ? "true" : "false") + "}";
 			} else {
 				extra += ",\"code\":" + quote(m.code);
 				// (a membership from before, this room's: a crash or a restart, its place taken back if it's still there)
@@ -982,6 +984,10 @@ void Online::room2_seat()
 	m.started_n = -1;
 	m.result_armed = false;
 	m.in_seat = true;
+	sel_phase = 0;
+	sel_base = 0;
+	sel_rec.clear();
+	sel_recording = sel_playing = false;
 	m.touched = m.idle_away = m.decided_seen = false;
 	m.playon_out_at = 0;
 	m.seen_peer = m.seat.peer.name;
@@ -1077,6 +1083,10 @@ void Online::room2_decided()
 		m.result_armed = false;
 		room2_send("result", ",\"winner\":\"" + std::string(winner) + "\",\"n\":" + std::to_string(m.n), true, m.n);
 		const bool won = (in >> local_player()) & 1;
+		// (the fighter they won with kept for their next seat, the select's input it was chosen with; lost, none)
+		sel_won_last = won && in != 3;
+		if (sel_won_last && !sel_last.empty()) { sel_keep = sel_last; sel_keep_side = local_player(); }
+		else if (!sel_won_last) sel_keep.clear();
 		log("Rooms 2: match " + std::to_string(m.n) + " decided: " + (in == 0 ? std::string("a draw") : std::string(won ? "this player" : opponent()) + " won") +
 		    " (side " + winner + "); " + (!m.next_ready() ? "nobody READY in the line: the two play on" : m.next_ready()->name + " is next"));
 	}
@@ -1285,12 +1295,13 @@ void Online::room2_rules(const OnlineSettings &s)
 	if (!r2 || r2->owner_key.empty()) return;
 	const std::string body = "{\"code\":" + quote(r2->code) + ",\"owner_key\":" + quote(r2->owner_key) + ",\"rules\":{\"side\":" + (s.rule_side ? "true" : "false") +
 	                         ",\"dural\":" + (s.rule_dural ? "true" : "false") + ",\"custom\":false,\"max\":" + std::to_string(s.rule_max) +
-	                         ",\"stage\":" + (s.rule_stage ? "true" : "false") + "}}";   // (custom: none till Customize comes, whatever's kept)
+	                         ",\"stage\":" + (s.rule_stage ? "true" : "false") + ",\"change\":" + (s.rule_change ? "true" : "false") + "}}";   // (custom: none till Customize comes, whatever's kept)
 	room2_owner_send("rules", body);
 	r2->has_rules = true;   // (as asked, till the lobby's state says)
+	r2->rule_change = s.rule_change;
 	r2->rule_side = s.rule_side; r2->rule_dural = s.rule_dural; r2->rule_custom = false; r2->rule_stage = s.rule_stage; r2->rule_max = s.rule_max;
 	r2->version++;
-	log("Rooms 2: the room's rules: the winner may change side " + std::string(s.rule_side ? "yes" : "no") + ", Dural " + (s.rule_dural ? "yes" : "no") + ", players at most " + (s.rule_max ? std::to_string(s.rule_max) : std::string("no limit")) + ", the challenger's stage select " + (s.rule_stage ? "yes" : "no"));
+	log("Rooms 2: the room's rules: the winner may change side " + std::string(s.rule_side ? "yes" : "no") + ", character " + (s.rule_change ? "yes" : "no") + ", Dural " + (s.rule_dural ? "yes" : "no") + ", players at most " + (s.rule_max ? std::to_string(s.rule_max) : std::string("no limit")) + ", the challenger's stage select " + (s.rule_stage ? "yes" : "no"));
 }
 
 void Online::room2_close()

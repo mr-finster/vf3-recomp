@@ -375,6 +375,8 @@ T(ROOM2_LISTED_HELP, "모두의 방 목록에 표시하거나, 코드를 아는 
 T(ROOM2_CLOSE_ROOM, "방 닫기")
 T(ROOM2_RULE_SIDE, "승자가 사이드를 바꿀 수 있어요")
 T(ROOM2_RULE_SIDE_HELP, "켜기: 새 도전자는 항상 2P로 대전해요. 끄기: 승자는 아케이드처럼 자기 사이드를 지켜요.")
+T(ROOM2_RULE_CHANGE, "승자가 캐릭터를 바꿀 수 있어요")
+T(ROOM2_RULE_CHANGE_HELP, "켜기: 새 도전자가 올 때마다 승자도 다시 골라요. 끄기: 승자는 아케이드처럼 이긴 캐릭터를 그대로 써요.")
 T(ROOM2_RULE_DURAL, "듀랄")
 T(ROOM2_RULE_DURAL_HELP, "끄기: 이 방의 대전에서는 듀랄을 고를 수 없어요.")
 T(ROOM2_RULE_CUSTOM, "랜덤 캐릭터와 Customize 캐릭터")

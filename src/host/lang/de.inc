@@ -375,6 +375,8 @@ T(ROOM2_LISTED_HELP, "In der Raumliste aller zu sehen, oder nur für die mit dem
 T(ROOM2_CLOSE_ROOM, "Raum schließen")
 T(ROOM2_RULE_SIDE, "Sieger darf die Seite wechseln")
 T(ROOM2_RULE_SIDE_HELP, "An: ein neuer Herausforderer spielt immer als Spieler 2. Aus: der Sieger behält seine Seite, wie am Automaten.")
+T(ROOM2_RULE_CHANGE, "Sieger darf den Kämpfer wechseln")
+T(ROOM2_RULE_CHANGE_HELP, "An: der Sieger wählt bei jedem neuen Herausforderer neu. Aus: der Sieger behält den Kämpfer, mit dem er gewonnen hat, wie am Automaten.")
 T(ROOM2_RULE_DURAL, "Dural")
 T(ROOM2_RULE_DURAL_HELP, "Aus: Dural steht in den Matches dieses Raums nicht zur Wahl, egal wer sie an hat.")
 T(ROOM2_RULE_CUSTOM, "Zufällige und eigene Kämpfer")

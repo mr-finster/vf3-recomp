@@ -381,6 +381,8 @@ T(ROOM2_LISTED_HELP, "Shown in everyone's Rooms list, or only to those with its 
 T(ROOM2_CLOSE_ROOM, "Close the room")   // (a row: the room's creator's)
 T(ROOM2_RULE_SIDE, "Winner may change side")   // (Room settings: a rule of the room, the creator's)
 T(ROOM2_RULE_SIDE_HELP, "On: a new challenger always plays as player 2. Off: the winner keeps their side, as in the arcade.")
+T(ROOM2_RULE_CHANGE, "Winner may change character")   // (Room settings: a rule of the room, the creator's; off, the winner's own game picks their fighter again at a new seat)
+T(ROOM2_RULE_CHANGE_HELP, "On: the winner picks again at each new challenger's select. Off: the winner keeps the fighter they won with, as in the arcade.")
 T(ROOM2_RULE_DURAL, "Dural")
 T(ROOM2_RULE_DURAL_HELP, "Off: Dural isn't on the select in this room's matches, whoever has her on.")
 T(ROOM2_RULE_CUSTOM, "Random and custom fighters")

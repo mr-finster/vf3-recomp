@@ -376,6 +376,8 @@ T(ROOM2_LISTED_HELP, "Herkesin oda listesinde görünür ya da yalnızca kodu bi
 T(ROOM2_CLOSE_ROOM, "Odayı kapat")
 T(ROOM2_RULE_SIDE, "Kazanan taraf değiştirebilir")
 T(ROOM2_RULE_SIDE_HELP, "Açık: yeni rakip her zaman 2. oyuncu olarak oynar. Kapalı: kazanan, salondaki gibi kendi tarafında kalır.")
+T(ROOM2_RULE_CHANGE, "Kazanan karakter değiştirebilir")
+T(ROOM2_RULE_CHANGE_HELP, "Açık: kazanan her yeni rakipte yeniden seçer. Kapalı: kazanan, salondaki gibi kazandığı karakterle kalır.")
 T(ROOM2_RULE_DURAL, "Dural")
 T(ROOM2_RULE_DURAL_HELP, "Kapalı: Dural bu odanın maçlarında seçimde yok, kimde açık olursa olsun.")
 T(ROOM2_RULE_CUSTOM, "Rastgele ve özel dövüşçüler")

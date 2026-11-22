@@ -6035,6 +6035,12 @@ int main(int argc, char **argv)
 			else ++it;
 		for (uint64_t s : shot_at) if (s == pass) read_window("build/host_window_at_" + std::to_string(pass) + ".png");
 		if (!story_shot.empty()) { read_window("build/" + story_shot + ".png"); story_shot.clear(); }
+		if (static const bool sel_shot = getenv("VF3_ROOM2_SELECT_SHOT") != nullptr; sel_shot) {   // (tests: the window 4 s after each room seat's select ends)
+			static int seen = 0;
+			static uint64_t due = 0;   // (4 s after it: the fighters on screen, the select's end is a black frame)
+			if (online.select_ends() != seen) { seen = online.select_ends(); due = SDL_GetTicks() + 4000; }
+			if (due && SDL_GetTicks() >= due) { due = 0; read_window(("build/select_end_" + std::to_string(seen) + ".png").c_str()); }
+		}
 		if (room2_shot) { room2_shot = false; read_window("build/host_room2_ready.png"); fprintf(stderr, "(test) the ready check's banner: build/host_room2_ready.png\n"); }
 		if (menu_shot) { read_window("build/host_window_menu_" + std::to_string(menu_shot) + ".png"); menu_shot = 0; }
 		if (static const char *ft = getenv("VF3_TEST_FREECAM"); ft) {   // (tests: the free camera at these frames)

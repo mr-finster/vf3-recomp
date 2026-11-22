@@ -375,6 +375,8 @@ T(ROOM2_LISTED_HELP, "Mostrata nell'elenco stanze di tutti, o solo a chi ha il c
 T(ROOM2_CLOSE_ROOM, "Chiudi la stanza")
 T(ROOM2_RULE_SIDE, "Il vincitore può cambiare lato")
 T(ROOM2_RULE_SIDE_HELP, "Sì: un nuovo sfidante gioca sempre come giocatore 2. No: il vincitore tiene il suo lato, come in sala giochi.")
+T(ROOM2_RULE_CHANGE, "Il vincitore può cambiare personaggio")
+T(ROOM2_RULE_CHANGE_HELP, "Sì: il vincitore sceglie di nuovo a ogni nuovo sfidante. No: il vincitore tiene il personaggio con cui ha vinto, come in sala giochi.")
 T(ROOM2_RULE_DURAL, "Dural")
 T(ROOM2_RULE_DURAL_HELP, "No: Dural non è nella selezione nei match di questa stanza, chiunque l'abbia attiva.")
 T(ROOM2_RULE_CUSTOM, "Lottatori casuali e personalizzati")

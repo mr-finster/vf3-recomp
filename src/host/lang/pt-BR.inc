@@ -375,6 +375,8 @@ T(ROOM2_LISTED_HELP, "Aparece na lista de salas de todos, ou só para quem tem o
 T(ROOM2_CLOSE_ROOM, "Fechar a sala")
 T(ROOM2_RULE_SIDE, "Vencedor pode trocar de lado")
 T(ROOM2_RULE_SIDE_HELP, "Sim: um novo desafiante sempre joga como jogador 2. Não: o vencedor mantém o lado, como no arcade.")
+T(ROOM2_RULE_CHANGE, "Vencedor pode trocar de lutador")
+T(ROOM2_RULE_CHANGE_HELP, "Sim: o vencedor escolhe de novo a cada novo desafiante. Não: o vencedor mantém o lutador com que venceu, como no arcade.")
 T(ROOM2_RULE_DURAL, "Dural")
 T(ROOM2_RULE_DURAL_HELP, "Não: a Dural não aparece na seleção nas partidas desta sala, seja quem for que a tenha.")
 T(ROOM2_RULE_CUSTOM, "Lutadores aleatórios e personalizados")

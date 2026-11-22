@@ -375,6 +375,8 @@ T(ROOM2_LISTED_HELP, "全員のルーム一覧に表示するか、コードを�
 T(ROOM2_CLOSE_ROOM, "ルームを閉じる")
 T(ROOM2_RULE_SIDE, "勝者のサイド変更")
 T(ROOM2_RULE_SIDE_HELP, "オン：新しい挑戦者はいつも2Pで対戦。オフ：勝者は自分のサイドのまま (アーケードと同じ)。")
+T(ROOM2_RULE_CHANGE, "勝者のキャラクター変更")
+T(ROOM2_RULE_CHANGE_HELP, "オン：新しい挑戦者が来るたびに勝者も選び直す。オフ：勝者は勝ったキャラクターのまま (アーケードと同じ)。")
 T(ROOM2_RULE_DURAL, "デュラル")
 T(ROOM2_RULE_DURAL_HELP, "オフ：このルームの対戦ではデュラルを選べません。")
 T(ROOM2_RULE_CUSTOM, "ランダム・カスタムのキャラクター")

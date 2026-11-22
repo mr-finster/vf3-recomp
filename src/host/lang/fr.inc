@@ -375,6 +375,8 @@ T(ROOM2_LISTED_HELP, "Affiché dans la liste des salons de tous, ou seulement po
 T(ROOM2_CLOSE_ROOM, "Fermer le salon")
 T(ROOM2_RULE_SIDE, "Le gagnant peut changer de côté")
 T(ROOM2_RULE_SIDE_HELP, "Activé\xC2\xA0: un nouveau challenger joue toujours en joueur 2. Désactivé\xC2\xA0: le gagnant garde son côté, comme en salle d'arcade.")
+T(ROOM2_RULE_CHANGE, "Le gagnant peut changer de personnage")
+T(ROOM2_RULE_CHANGE_HELP, "Activé\xC2\xA0: le gagnant choisit à nouveau à chaque nouveau challenger. Désactivé\xC2\xA0: le gagnant garde le personnage avec lequel il a gagné, comme en salle d'arcade.")
 T(ROOM2_RULE_DURAL, "Dural")
 T(ROOM2_RULE_DURAL_HELP, "Désactivé\xC2\xA0: Dural n'est pas à la sélection dans les matchs de ce salon, qui que ce soit qui l'ait.")
 T(ROOM2_RULE_CUSTOM, "Combattants aléatoires et personnalisés")
