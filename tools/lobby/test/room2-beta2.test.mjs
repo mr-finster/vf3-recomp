@@ -88,14 +88,16 @@ const { name_ok } = await import(new URL('../' + process.argv[2], import.meta.ur
 // rules at create: kept and in every member's state; max players enforced at enter; settings change them
 {
 	const A = await create('A', { listed: true, room: 'RULES', rules: { side: false, dural: false, custom: false, max: 3, stage: true } });
-	check('rules at create', A.state.room.rules, { side: false, dural: false, custom: false, max: 3, stage: true, random: false });
+	check('rules at create', A.state.room.rules, { side: false, dural: false, custom: false, max: 3, stage: true, random: false, change: false });
 	const B = await enter(A.code, 'B'), C = await enter(A.code, 'C'), D = await enter(A.code, 'D');
 	check('max 3: two more entered', [B.status, C.status], [200, 200]);
 	check('max 3: the 4th refused full', [D.status, D.body && D.body.error], [409, 'full']);
 	check('a member sees the rules', B.state.room.rules.max, 3);
 	const s = await call('POST', '/v2/room/settings', { code: A.code, owner_key: A.owner_key, rules: { max: 0, stage: false, bogus: 1 } }, A.ip);
-	check('settings: rules changed, the rest kept', s.body.room.rules, { side: false, dural: false, custom: false, max: 0, stage: false, random: false });
+	check('settings: rules changed, the rest kept', s.body.room.rules, { side: false, dural: false, custom: false, max: 0, stage: false, random: false, change: false });
 	check('settings: then 4th enters', (await enter(A.code, 'D')).status, 200);
+	const ch = await call('POST', '/v2/room/settings', { code: A.code, owner_key: A.owner_key, rules: { change: true } }, A.ip);
+	check('settings: the winner may change character (off by default), on', [ch.body.room.rules.change, ch.body.room.rules.stage], [true, false]);
 	const n = await call('POST', '/v2/room/settings', { code: A.code, mid: B.mid, mkey: B.mkey, owner_key: 'x'.repeat(32), rules: { max: 2 } }, B.ip);
 	check('settings by a non-owner refused', n.status, 403);
 	check('the room\'s rules unchanged', rec(A.code).rules.max, 0);

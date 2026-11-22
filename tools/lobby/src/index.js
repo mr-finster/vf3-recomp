@@ -1415,11 +1415,11 @@ function r2_view(r, mid, now, watch_on) {
 		watch: watch_on ? r.wid : '' };
 }
 // (a room's rules, as the creator set them: each known one checked, the rest as they were (or the defaults))
-const R2_RULES = { side: false, dural: false, custom: false, max: 0, stage: true, random: false };
+const R2_RULES = { side: false, dural: false, custom: false, max: 0, stage: true, random: false, change: false };
 function r2_rules(x, was) {
 	if (!x || typeof x !== 'object' || Array.isArray(x)) return was;
 	const r = { ...(was || R2_RULES) };
-	for (const k of ['side', 'dural', 'custom', 'stage', 'random']) if (typeof x[k] === 'boolean') r[k] = x[k];
+	for (const k of ['side', 'dural', 'custom', 'stage', 'random', 'change']) if (typeof x[k] === 'boolean') r[k] = x[k];   // (change: the winner may change character; off, their game keeps the fighter they won with)
 	if (Number.isFinite(x.max)) r.max = Math.min(Math.max(Math.round(x.max), 0), R2.MEMBERS_MAX);
 	if (r.max === 1) r.max = 2;   // (a room for one plays nobody)
 	return r;
