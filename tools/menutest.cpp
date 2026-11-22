@@ -104,7 +104,7 @@ struct FakeLobby
 {
 	int fd = -1, port = 0;
 	std::mutex lock;
-	std::vector<std::string> asked;
+	std::vector<std::string> asked, bodies;   // (each request's first line, and its body)
 	std::function<std::pair<int, std::string>(const std::string &line)> answer;
 	std::atomic<bool> stop{ false };
 	std::thread thread;
@@ -141,7 +141,8 @@ struct FakeLobby
 					}
 				}
 				const std::string line = req.substr(0, req.find("\r\n"));
-				{ std::lock_guard<std::mutex> l(lock); asked.push_back(line); }
+				const size_t head_end = req.find("\r\n\r\n");
+				{ std::lock_guard<std::mutex> l(lock); asked.push_back(line); bodies.push_back(head_end == std::string::npos ? std::string() : req.substr(head_end + 4)); }
 				const auto [status, body] = answer ? answer(line) : std::pair<int, std::string>{ 404, "{\"error\":\"bad\"}" };
 				const std::string out = "HTTP/1.1 " + std::to_string(status) + " X\r\nContent-Type: application/json\r\nContent-Length: " + std::to_string(body.size()) +
 				                        "\r\nConnection: close\r\n\r\n" + body;
@@ -976,6 +977,54 @@ int main(int argc, char **argv)
 			key(SDL_SCANCODE_RETURN);
 			gm.select_row(c_go);
 		}
+#ifndef _WIN32
+		{   // TRY AGAIN after a create that failed: the room asked for with the form's rules again, never this player's saved ones
+			FakeLobby fl;
+			fl.answer = [](const std::string &) { return std::pair<int, std::string>{ 503, "{\"error\":\"busy\"}" }; };   // (no room made: it couldn't open)
+			check(fl.open(), "a lobby of the test's own (one that makes no room)");
+			const bool hide0 = s.hide_ip, side0 = s.rule_side;
+			const int max0 = s.rule_max;
+			s.hide_ip = false;
+			s.rule_side = false;   // (this player's saved: side Off, no limit)
+			s.rule_max = 0;
+			s.lobby = "http://127.0.0.1:" + std::to_string(fl.port);
+			gm.select_row(c_rule);
+			key(SDL_SCANCODE_RIGHT);   // (on the form: Winner may change side On)
+			gm.select_row(c_rule + 2);
+			key(SDL_SCANCODE_RIGHT);   // (Players in the room: 2)
+			const bool form_ok = gm.row_value(size_t(c_rule)) == std::string(tr::ON) && gm.row_value(size_t(c_rule + 2)) == "2";
+			auto creates = [&] {   // (the creates asked of the lobby: their bodies)
+				std::vector<std::string> v;
+				std::lock_guard<std::mutex> l(fl.lock);
+				for (size_t i = 0; i < fl.asked.size(); i++) if (fl.asked[i].find("/v2/room/create") != std::string::npos) v.push_back(fl.bodies[i]);
+				return v;
+			};
+			auto form_rules = [](const std::string &b) { return b.find("\"rules\":{\"side\":true,") != std::string::npos && b.find(",\"max\":2,") != std::string::npos; };
+			gm.select_row(c_go);
+			key(SDL_SCANCODE_RETURN);   // (CREATE)
+			poll_for(20000, [&] { return !o.join_failure().empty(); });
+			again();
+			const std::vector<std::string> first = creates();
+			check(form_ok && first.size() == 1 && form_rules(first[0]) && !o.join_failure().empty() && o.last_try() == Online::Try::room2_create,
+			      ("Create room, its rules changed on the form: asked with them, and it couldn't open (" + o.join_failure() + ")").c_str());
+			key(SDL_SCANCODE_RETURN);   // (TRY AGAIN)
+			poll_for(20000, [&] { return creates().size() >= 2 && !o.join_failure().empty(); });
+			const std::vector<std::string> both = creates();
+			check(both.size() == 2 && form_rules(both[1]) && !s.rule_side && s.rule_max == 0,
+			      ("TRY AGAIN after a create that failed: the form's rules again (side On, 2 players), not the saved ones (" + (both.size() == 2 ? both[1].substr(both[1].find("\"rules\"") == std::string::npos ? 0 : both[1].find("\"rules\""), 80) : std::to_string(both.size()) + " creates") + ")").c_str());
+			o.stop();
+			o.forget_failure();
+			s.lobby = "none";
+			s.hide_ip = hide0;
+			s.rule_side = side0;
+			s.rule_max = max0;
+			again();
+			gm.select_row(2);
+			key(SDL_SCANCODE_RETURN);   // (Create room again, for what follows)
+			gm.select_row(c_go);
+			check(top() == tr::P_CREATE_ROOM.c_str() && gm.selected() == c_go, "Create room opened again after");
+		}
+#endif
 		if (c_listed >= 0) {
 			gm.select_row(c_listed);
 			key(SDL_SCANCODE_RETURN);
@@ -1689,6 +1738,23 @@ int main(int argc, char **argv)
 				again();
 				shot("", w, h);
 				check(!gm.boxes("good").empty(), "Rooms 2: \"Copied\" still shown after the page is made again");
+				// its seconds up on a page nothing else changes: the page made again by itself, "Copied" gone
+				const uint64_t t0 = SDL_GetTicks();
+				while (SDL_GetTicks() - t0 < 6000 && !gm.boxes("good").empty()) { shot("", w, h); SDL_Delay(50); }
+				const double took = double(SDL_GetTicks() - t0) / 1000;
+				check(gm.boxes("good").empty() && took > 2.5 && took < 4.6, ("Rooms 2: \"Copied\" gone at its 4 s, nothing else made the page again (" + std::to_string(took) + " s after)").c_str());
+				// copied, then that room left and another entered at once: not "Copied" there
+				gm.select_row(1);
+				key(SDL_SCANCODE_RETURN);
+				shot("", w, h);
+				const bool shown = !gm.boxes("good").empty();
+				const std::string st = R"({"code":"KXQ4M7","room":{"name":"FRIDAY FIGHTS","listed":true,"locked":false,"ready_ms":15000,"owner":true},"table":{"a":{"name":"MRFINSTER","country":"GB"},"b":{"name":"LAUCHAN","country":"KR"},"phase":"PLAYING","streak":0,"holder":"a","n":1,"last":null},"line":[],"you":{"mid":"x","pos":0,"side":"a","ready":true},"watchers":0,"ready":null,"watch":"KXQ4M7"})";
+				o.set_room2_test("");
+				o.stop();   // (out of it: a room left)
+				o.set_room2_test(st, "QX7KMP");   // (and another's page)
+				again();
+				shot("", w, h);
+				check(shown && gm.boxes("good").empty(), "Rooms 2: COPY CODE, then the room left and another entered: no \"Copied\" in that one");
 			}
 			o.set_room2_test("");
 		}

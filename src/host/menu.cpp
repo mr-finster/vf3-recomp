@@ -1195,6 +1195,7 @@ bool game_menu::handle_event(const SDL_Event &e)
 
 void game_menu::render(bool fps)
 {
+	if (m_redraw_at && SDL_GetTicks() >= m_redraw_at) { m_redraw_at = 0; m_redraw_soon = true; }
 	if (std::exchange(m_redraw_soon, false) && m_open && !m_stack.empty()) build();
 	if (!m->ctx) return;   // (no menu: its files weren't found)
 	if (m_vs_until && SDL_GetTicks() >= m_vs_until) {

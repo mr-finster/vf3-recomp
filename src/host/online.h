@@ -161,6 +161,7 @@ public:
 	const LastMatch &last_match() const { return last; }
 	// Why the last try didn't get going ("" if it did, or none yet): shown on the page it was made from
 	std::string join_failure() const { return failure.str(); }
+	uint32_t room_serial() const { return room_turns; }   // (one more each time a room's left, made or entered: COPY CODE's "Copied" its room's only)
 	const tr::line &join_failure_line() const { return failure; }
 	Step failed_at() const { return fail_step; }   // (how far the failed try got)
 	Try last_try() const { return tried; }
@@ -344,6 +345,7 @@ private:
 	vfnet::Config config(const OnlineSettings &s) const;
 	bool open_host(tr::line &error);
 	OnlineSettings started_with;
+	uint32_t room_turns = 0;   // (room_serial)
 	vfnet::Link &the_link() { return room ? static_cast<vfnet::Link &>(*room) : static_cast<vfnet::Link &>(*link); }
 
 	// ---- a room code's match ----
@@ -506,8 +508,8 @@ private:
 	bool room2_in_seat() const { return r2 && r2->in_seat; }
 	bool room2_unsure(double ms);   // (no room socket, the lobby's last word older than ms: true, and a poll asked at once)
 	bool room2_moving_on() const;   // (this seat's decided match: the lobby calling the next in line, or about to: the rematch held)
-	bool rematch_coming() const;
-	void room2_next_cell(game_menu::net_cells &c) const;   // (the footer's: who plays next in the room)    // (a decided match's out player back in, or their Start pressed since: a rematch on its way)
+	bool rematch_coming() const;    // (a decided match's out player back in, or their Start pressed since: a rematch on its way)
+	void room2_next_cell(game_menu::net_cells &c) const;   // (the footer's: who plays next in the room)
 	void stop_activity(bool said = false, uint8_t quit_reason = 0);   // (stop as it was: whatever's on, a room's membership kept)
 	void watch_begin(const std::string &w);   // (watching w from here: what's on stopped first, a room's membership kept)
 	bool persist = false;               // (the room's own: kept through its match, opened again after it)

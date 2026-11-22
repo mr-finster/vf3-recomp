@@ -442,7 +442,16 @@ bool Online::try_again(const OnlineSettings &s, tr::line &error)
 	case Try::join: return join(s, error);
 	case Try::random: return find_random(s, error);
 	case Try::watch: { const std::string w = watch_tried; return watch(s, w, error); }
-	case Try::room2_create: return room2_create(s, error);   // (a Rooms 2 room's again: made, or entered by the same code)
+	case Try::room2_create: {   // (a Rooms 2 room's again: made, or entered by the same code; the rules the room was
+		// asked with, the create form's, not the ones saved)
+		OnlineSettings w = s;
+		w.rule_side = started_with.rule_side;
+		w.rule_dural = started_with.rule_dural;
+		w.rule_custom = started_with.rule_custom;
+		w.rule_stage = started_with.rule_stage;
+		w.rule_max = started_with.rule_max;
+		return room2_create(w, error);
+	}
 	case Try::room2_enter: { const std::string c = r2_tried; return room2_enter(s, c, error); }
 	default: error = tr::NOTHING_TO_TRY; return false;
 	}
@@ -2075,6 +2084,7 @@ std::string Online::country(const std::string &c)
 
 void Online::stop()
 {
+	room_turns++;   // (every try starts here: a room made or entered; and a room left)
 	stop_activity();
 	if (r2) room2_leave(false);
 }
@@ -2638,10 +2648,18 @@ int test_create_extra = 0;   // (menutest: this many made-up rule rows more on C
 namespace {
 
 // COPY CODE's "Copied": shown for a few seconds whatever makes the page again meanwhile (a room's page is made again as
-// the room changes, every half second in a match: a flag of the page's own went with it at once)
+// the room changes, every half second in a match: a flag of the page's own went with it at once), and only in the room
+// it was copied in (one left, made or entered since: gone); the page made again when its time's up, nothing else changed
 constexpr uint64_t COPIED_MS = 4000;
 uint64_t copied_until = 0;
-bool copied_now() { return SDL_GetTicks() < copied_until; }
+uint32_t copied_room = 0;   // (Online::room_serial then)
+bool copied_now(const Online &o) { return SDL_GetTicks() < copied_until && o.room_serial() == copied_room; }
+void copied(const Online &o, game_menu &menu)
+{
+	copied_until = SDL_GetTicks() + COPIED_MS;
+	copied_room = o.room_serial();
+	menu.redraw_at(copied_until);
+}
 
 const std::string NAME_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 .-!?";
 const std::string ADDRESS_LETTERS = "0123456789.:abcdefghijklmnopqrstuvwxyz-[]";
@@ -3257,9 +3275,9 @@ menu_page room2_page(Online &o, OnlineSettings &s, game_menu &menu, std::functio
 	if ((in_line || watcher) && !o.watching() && m->has_a && m->has_b) watch = add({ tr::BUTTON_WATCH, "", {}, {}, [&o, redo] { o.room2_watch(true); redo(); } }, "r2.watch");
 	if (in_line) leave_line = add({ tr::BUTTON_LEAVE_LINE, "", {}, {}, [&o, redo] { o.room2_line(false); redo(); } }, "r2.leaveline");
 	if (owner && !in_line)
-		copy = add({ tr::BUTTON_COPY_CODE, "", {}, {}, [&o] {
+		copy = add({ tr::BUTTON_COPY_CODE, "", {}, {}, [&o, &menu] {
 			SDL_SetClipboardText(o.room_code().c_str());
-			copied_until = SDL_GetTicks() + COPIED_MS;
+			copied(o, menu);
 		} }, "r2.copy");
 	if (owner) settings = add({ tr::BUTTON_ROOM_SETTINGS, "", {}, {}, [&o, &s, &menu, changed] { menu.push(room2_settings_page(o, s, menu, changed)); } }, "r2.settings");
 	const int leave = add({ tr::BUTTON_LEAVE_ROOM, "", {}, {}, [&o, redo] { o.room2_leave(false); redo(); } }, "r2.leave");
@@ -3337,7 +3355,7 @@ menu_page room2_page(Online &o, OnlineSettings &s, game_menu &menu, std::functio
 			if (m->watchers > 0) r += "<div class=\"r2watch\">" + E(tr::fill(tr::N_WATCHING, { { "n", std::to_string(m->watchers) } })) + "</div>";
 			// under it: its help (READY and AWAY), or "Copied", or a note while one's up (game_menu::place_note)
 			r += "<div class=\"r2foot\">";
-			if (copied_now()) r += "<div id=\"pagehelp\" class=\"r2help good\">" + E(tr::COPIED) + "</div>";
+			if (copied_now(o)) r += "<div id=\"pagehelp\" class=\"r2help good\">" + E(tr::COPIED) + "</div>";
 			else if (ready >= 0) r += "<div id=\"pagehelp\" class=\"r2help\">" + E(tr::ROOM2_READY_NOTE) + "</div>";
 			r += "<div id=\"pagenote\" class=\"r2note\"></div></div>";
 		}
@@ -3773,10 +3791,10 @@ menu_page page(Online &o, OnlineSettings &s, game_menu &menu, std::function<void
 		int copy = -1;
 		if (hosting) {
 			copy = int(p.items.size());
-			p.items.push_back({ tr::BUTTON_COPY_CODE, "", {}, {}, [&o] {
+			p.items.push_back({ tr::BUTTON_COPY_CODE, "", {}, {}, [&o, &menu] {
 				if (o.room_code().empty()) return;
 				SDL_SetClipboardText(o.room_code().c_str());
-				copied_until = SDL_GetTicks() + COPIED_MS;
+				copied(o, menu);
 			} });
 		}
 		const int stop = int(p.items.size());
@@ -3805,7 +3823,7 @@ menu_page page(Online &o, OnlineSettings &s, game_menu &menu, std::function<void
 			}
 			r += "<div class=\"stepsat\">" + steps(v) + "</div>";
 			// the state under the steps, as on every screen with them (a host's: the code copied, or a player who couldn't join)
-			if (hosting && copied_now()) r += "<div class=\"status good\">" + E(tr::COPIED) + "</div>";
+			if (hosting && copied_now(o)) r += "<div class=\"status good\">" + E(tr::COPIED) + "</div>";
 			else if (hosting && !o.host_note().empty()) r += "<div class=\"status bad\">" + E(o.host_note()) + "</div>";
 			else {
 				std::string why = !hosting && st == Online::Step::connecting && !started ? std::string(tr::DIRECT_THEN_RELAY) : "";

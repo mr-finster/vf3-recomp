@@ -411,6 +411,7 @@ void Online::room2_state(const Value &st)
 void Online::room2_end(const std::string &why)
 {
 	if (!r2) return;
+	room_turns++;
 	const tr::line said = why == "ready" ? tr::line(tr::ROOM2_REMOVED_READY) : why == "version" ? tr::line(tr::ROOM2_NEEDS_NEWER)
 	                    : why == "closed" ? tr::line(tr::ROOM2_CLOSED) : why == "gone" ? tr::line(tr::ROOM2_REMOVED_GONE) : tr::line(tr::ROOM2_LEFT);
 	log("Rooms 2: out of room " + room_code() + ": " + why + " (" + said.en() + ")");
@@ -1202,6 +1203,7 @@ void Online::room2_watch(bool on)
 void Online::room2_leave(bool keep_watching)
 {
 	if (!r2) return;
+	room_turns++;
 	const std::string w = r2->wid;
 	if (!r2->mid.empty()) {   // (the lobby told, not waited for: a match on is forfeited)
 		online_detail::goodbye(lobby_url("/v2/room/leave"), room2_body());   // (a quit waits a moment for it: Online::flush)
