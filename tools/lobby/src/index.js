@@ -1206,6 +1206,16 @@ function r2_away(r, mid, now) {
 	m.away = true;
 	if (r.ready && r.ready.mid === mid) { r.ready = null; r2_advance(r, now); return null; }
 	if (side && t.phase === 'CONNECTING' && t.holder !== mid) { r2_unseat(r, side, 'away', now); return null; }
+	// (a play-on's loser, its rematch not begun (neither said started): off the table to the back of the line, AWAY, the
+	// last match's result as it stands; the holder waits for a challenger. Their game says so when its rematch's Start
+	// isn't pressed in 20 s, or they lost with no input at all (reno, 22 Nov))
+	if (side && t.phase === 'PLAYING' && t.playon && !t.started.a && !t.started.b && t.holder && t.holder !== mid) {
+		t[side] = null;
+		r.line = r.line.filter((x) => x !== mid);
+		r.line.push(mid);
+		r2_advance(r, now);
+		return null;
+	}
 	return null;
 }
 // The seated side that can't play this pair (AWAY, or its session never started) back to the front of the line, AWAY

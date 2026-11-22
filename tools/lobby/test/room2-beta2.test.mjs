@@ -207,6 +207,27 @@ for (const how of ['leave_line', 'leave', 'quiet']) {
 	check('VF1, settings: random on', s.body.room.rules.random, true);
 	check('VF3: random fighters change nothing (no such terms)', await seat2({ random: false }, { version: 'v0.1.7-online-preview+stage', pool: 'v0.1.7-online-preview+host1', accepts: ['stage'] }, { version: 'v0.1.7-online-preview+stage', pool: 'v0.1.7-online-preview+host1', accepts: ['stage'] }), 'v0.1.7-online-preview+host1');
 }
+{   // (reno, 22 Nov) a play-on's loser who goes AWAY before the rematch began: off the table to the back of the line, the holder waits
+	const A = await create('AAA'), B = await enter(A.code, 'BBB');
+	await act(A, 'started'); await act(B, 'started');
+	for (const m of [A, B]) await act(m, 'result', { winner: 'a', n: 1 });
+	const playon = show(A.code);
+	await act(B, 'away');
+	check('play-on: the loser AWAY before the rematch: off the table, AWAY at the back; the holder alone', [playon, show(A.code)], ['PLAYING AAA/BBB [] s1', 'SOLO AAA/- [BBB*] s1']);
+	await act(B, 'ready');
+	check('play-on AWAY ... READY again: seated against the holder at once', show(A.code), 'CONNECTING AAA/BBB [] s1');
+	const C = await create('CCC'), D = await enter(C.code, 'DDD');
+	await act(C, 'started'); await act(D, 'started');
+	for (const m of [C, D]) await act(m, 'result', { winner: 'a', n: 1 });
+	for (const m of [C, D]) await act(m, 'started', { n: 2 });
+	await act(D, 'away');
+	check('a play-on begun (both said started), AWAY: kept at the table till that match is over', show(C.code), 'PLAYING CCC/DDD* [] s1');
+	const E = await create('EEE'), F = await enter(E.code, 'FFF');
+	await act(E, 'started'); await act(F, 'started');
+	for (const m of [E, F]) await act(m, 'result', { winner: 'a', n: 1 });
+	await act(E, 'away');
+	check('a play-on\'s holder AWAY: kept at the table (the winner never taken off)', show(E.code), 'PLAYING EEE*/FFF [] s1');
+}
 // the name filter's HEADS: insults made with a word before, innocent names kept
 check('names blocked', ['DICKMASTER', 'MASTERCOCK', 'BIGDICK', 'SUCKMYDICK'].map(name_ok), [false, false, false, false]);
 check('names kept', ['HANCOCK', 'PEACOCK', 'SHERLOCK', 'DICKENS', 'COCKPIT', 'MASTER', 'BIGBOSS', 'KINGKONG'].map(name_ok), [true, true, true, true, true, true, true, true]);
