@@ -1596,6 +1596,30 @@ int main(int argc, char **argv)
 			}
 			o.set_room2_test("");
 		}
+		{   // COPY CODE at the table during a match: the room's page made again (a match's, every half second) between the
+			// press and the release: the code copied all the same, and "Copied" kept for its seconds as the page is made again
+			o.set_room2_test(R"({"code":"KXQ4M7","room":{"name":"FRIDAY FIGHTS","listed":true,"locked":false,"ready_ms":15000,"owner":true},"table":{"a":{"name":"MRFINSTER","country":"GB"},"b":{"name":"LAUCHAN","country":"KR"},"phase":"PLAYING","streak":0,"holder":"a","n":1,"last":null},"line":[],"you":{"mid":"x","pos":0,"side":"a","ready":true},"watchers":0,"ready":null,"watch":"KXQ4M7"})");
+			again();
+			std::vector<game_menu::box> rows = gm.boxes("row");
+			check(rows.size() == 4, ("Rooms 2: the creator at the table, 4 buttons, COPY CODE the 2nd (" + std::to_string(rows.size()) + ")").c_str());
+			if (rows.size() == 4) {
+				const float x = (rows[1].x0 + rows[1].x1) / 2, y = (rows[1].y0 + rows[1].y1) / 2;
+				auto clip = [] { char *c = SDL_GetClipboardText(); std::string t = c ? c : ""; SDL_free(c); return t; };
+				SDL_SetClipboardText("none");
+				gm.set_test_held(1);
+				button(true, x, y);
+				gm.refresh();
+				gm.render(false);
+				gm.set_test_held(0);
+				button(false, x, y);
+				gm.set_test_held(-1);
+				check(clip() == o.room_code() && !o.room_code().empty(), ("Rooms 2: COPY CODE pressed, the page made again before the release: the code copied (" + clip() + ")").c_str());
+				again();
+				shot("", w, h);
+				check(!gm.boxes("good").empty(), "Rooms 2: \"Copied\" still shown after the page is made again");
+			}
+			o.set_room2_test("");
+		}
 		{   // the lobby's states in order: one older than the last applied (a poll's answer sent before it, the table's match
 			// number lower) not applied; the lobby's seq when it sends one; a state that says the room's closed ends it
 			const std::string head = R"({"code":"KXQ4M7","room":{"name":"FRIDAY FIGHTS","listed":true,"locked":false,"ready_ms":15000,"owner":false},)";

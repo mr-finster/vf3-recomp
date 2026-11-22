@@ -324,16 +324,15 @@ div { display: block; }
 
 /* Create room: a form, a row a choice */
 .form { width: 820dp; margin-top: 24dp; }
-.fr { display: flex; align-items: center; height: 56dp; padding: 0 22dp; border-bottom: 2dp #2a3466; font-size: 25dp; }
+.fr { display: flex; align-items: center; height: 46dp; padding: 0 22dp; border-bottom: 2dp #2a3466; font-size: 23dp; }   /* (every row of the form one size, the room's rules' too) */
 .fr.selected { border-radius: 10dp; border: 3dp #ffffff; }
 .fl { width: 250dp; color: #8f9ac8; }
 .fv { color: #ffffff; }
 .fs { color: #8f9ac8; font-size: 20dp; }
 .fbox { padding: 0 10dp; border: 2dp #3a4682; border-radius: 6dp; }
 .fr.selected .fl, .fr.selected .fv, .fr.selected .fs { color: #0b1026; }
-/* (the room's rules on the form, as Room settings has them: lower rows, the label wide, the value at the right; the
+/* (the room's rules on the form, as Room settings has them: the label wide, the value at the right; the
    selected one's help in the note's place under the rows, a box of 3 lines whatever it holds, so nothing moves) */
-.fr.rule { height: 44dp; font-size: 22dp; }
 .fr.rule .fl { width: 0; flex: 1; }
 .fr.rule .fv { text-align: right; }
 .fnote { width: 820dp; height: 72dp; margin-top: 12dp; font-size: 19dp; line-height: 24dp; font-weight: 500; color: #8f9ac8; text-align: center; overflow: hidden; }
