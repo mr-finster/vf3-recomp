@@ -160,6 +160,10 @@ bool Online::room2_begin(const OnlineSettings &s, const std::string &code_in, bo
 	m->link->set_relay_only(s.hide_ip);
 	identity.name = s.name;
 	r2 = std::move(m);
+	if (create) {   // (the rules it's made with, as the room's till the lobby's word: Room settings shows them, never this player's saved ones)
+		r2->has_rules = true;
+		r2->rule_side = s.rule_side; r2->rule_dural = s.rule_dural; r2->rule_stage = s.rule_stage; r2->rule_max = s.rule_max; r2->rule_custom = false;
+	}
 	r2->step = 0;
 	code = code_in;
 	r2_join.reset();

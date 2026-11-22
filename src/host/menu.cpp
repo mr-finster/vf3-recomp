@@ -419,7 +419,9 @@ std::vector<std::string> game_menu::overflow()
 					if (a->GetDisplay() == Rml::Style::Display::Inline) continue;
 					const Rml::Vector2f p = a->GetAbsoluteOffset(Rml::BoxArea::Border), sz = a->GetBox().GetSize(Rml::BoxArea::Border);
 					if (sz.x <= 0) continue;
-					// (a box that clips what's past its bottom, but not the menu's list of rows: it scrolls)
+					// (a box that clips what's past its bottom, but not the menu's list of rows, nor a screen's list that scrolls: their
+					// rows past their bottom are scrolled away, not cut)
+					if (a->IsClassSet("scrolls")) break;
 					const bool clips = a->GetComputedValues().overflow_y() != Rml::Style::Overflow::Visible && a->GetId() != "rows";
 					if (x0 < p.x - 1.5f || x1 > p.x + sz.x + 1.5f || (clips && (y0 < p.y - 1.5f || y1 > p.y + sz.y + 1.5f)))
 						where = "#" + a->GetId() + "." + a->GetClassNames();
@@ -451,6 +453,16 @@ std::vector<std::string> game_menu::clashes()
 	std::vector<Rml::ElementDocument *> docs;
 	if (m_open) docs.push_back(on_screen() && m->screen ? m->screen : m->doc);
 	if (m->overlay) docs.push_back(m->overlay);
+	// (what an ancestor that clips (overflow not visible: a list scrolled inside its box) shows of a box: false nothing)
+	auto clip = [](Rml::Element *e, float &x0, float &y0, float &x1, float &y1) {
+		for (Rml::Element *a = e->GetParentNode(); a; a = a->GetParentNode()) {
+			const auto &cv = a->GetComputedValues();
+			if (cv.overflow_x() == Rml::Style::Overflow::Visible && cv.overflow_y() == Rml::Style::Overflow::Visible) continue;
+			const Rml::Vector2f p = a->GetAbsoluteOffset(Rml::BoxArea::Padding), sz = a->GetBox().GetSize(Rml::BoxArea::Padding);
+			x0 = std::max(x0, p.x); y0 = std::max(y0, p.y); x1 = std::min(x1, p.x + sz.x); y1 = std::min(y1, p.y + sz.y);
+		}
+		return x1 > x0 && y1 > y0;
+	};
 	std::function<void(Rml::Element *)> walk = [&](Rml::Element *e) {
 		if (!e->IsVisible()) return;
 		if (auto *t = dynamic_cast<Rml::ElementText *>(e)) {
@@ -460,7 +472,8 @@ std::vector<std::string> game_menu::clashes()
 				const float x0 = at.x + ln.position.x, y1 = at.y + ln.position.y, y0 = y1 - t->GetLineHeight() * 0.7f;
 				size_t cut = std::min<size_t>(ln.text.size(), 40);
 				while (cut < ln.text.size() && (uint8_t(ln.text[cut]) & 0xC0) == 0x80) cut--;
-				boxes.push_back({ x0, y0, x0 + float(ln.width), y1, ln.text.substr(0, cut), e });
+				float bx0 = x0, by0 = y0, bx1 = x0 + float(ln.width), by1 = y1;
+				if (clip(e, bx0, by0, bx1, by1)) boxes.push_back({ bx0, by0, bx1, by1, ln.text.substr(0, cut), e });
 			}
 		}
 		for (int i = 0; i < e->GetNumChildren(); i++) walk(e->GetChild(i));
@@ -474,8 +487,9 @@ std::vector<std::string> game_menu::clashes()
 		if (!e->IsVisible()) return;
 		const auto &cv = e->GetComputedValues();
 		const Rml::Vector2f p = e->GetAbsoluteOffset(Rml::BoxArea::Border), sz = e->GetBox().GetSize(Rml::BoxArea::Border);
-		if ((cv.has_decorator() || cv.background_color().alpha > 0) && sz.x > 4 && sz.y > 4 && !(sz.x > win.x * 0.9f && sz.y > win.y * 0.9f))
-			cards.push_back({ p.x, p.y, p.x + sz.x, p.y + sz.y, e });
+		float cx0 = p.x, cy0 = p.y, cx1 = p.x + sz.x, cy1 = p.y + sz.y;
+		if ((cv.has_decorator() || cv.background_color().alpha > 0) && sz.x > 4 && sz.y > 4 && !(sz.x > win.x * 0.9f && sz.y > win.y * 0.9f) && clip(e, cx0, cy0, cx1, cy1))
+			cards.push_back({ cx0, cy0, cx1, cy1, e });
 		for (int i = 0; i < e->GetNumChildren(); i++) filled(e->GetChild(i));
 	};
 	for (Rml::ElementDocument *d : docs) if (d && d->IsVisible()) { walk(d); filled(d); }
@@ -496,6 +510,42 @@ std::vector<std::string> game_menu::clashes()
 			if (w > 2 && h > 2) out.push_back("#" + c.e->GetId() + "." + c.e->GetClassNames() + " over \"" + b.text + "\"");
 		}
 	return out;
+}
+
+std::string game_menu::class_text(const std::string &classes)
+{
+	if (!m->ctx || !m_open) return {};
+	m->ctx->Update();
+	std::vector<std::string> want;
+	for (size_t a = 0, b; a < classes.size(); a = b + 1) { b = classes.find(' ', a); if (b == std::string::npos) b = classes.size(); if (b > a) want.push_back(classes.substr(a, b - a)); }
+	Rml::Element *found = nullptr;
+	std::function<void(Rml::Element *)> find = [&](Rml::Element *e) {
+		if (found) return;
+		bool all = !want.empty();
+		for (const std::string &c : want) all = all && e->IsClassSet(c);
+		if (all) { found = e; return; }
+		for (int i = 0; i < e->GetNumChildren(); i++) find(e->GetChild(i));
+	};
+	if (Rml::ElementDocument *d = on_screen() && m->screen ? m->screen : m->doc) find(d);
+	std::string out;
+	std::function<void(Rml::Element *)> words = [&](Rml::Element *e) {
+		if (auto *t = dynamic_cast<Rml::ElementText *>(e)) out += t->GetText();
+		for (int i = 0; i < e->GetNumChildren(); i++) words(e->GetChild(i));
+	};
+	if (found) words(found);
+	return out;
+}
+
+bool game_menu::row_box(int i, box &out)
+{
+	if (!m->ctx || !m_open) return false;
+	m->ctx->Update();
+	Rml::ElementDocument *d = on_screen() && m->screen ? m->screen : m->doc;
+	Rml::Element *e = d ? d->GetElementById("r" + std::to_string(i)) : nullptr;
+	if (!e || !e->IsVisible()) return false;
+	const Rml::Vector2f p = e->GetAbsoluteOffset(Rml::BoxArea::Border), sz = e->GetBox().GetSize(Rml::BoxArea::Border);
+	out = { p.x, p.y, p.x + sz.x, p.y + sz.y };
+	return true;
 }
 
 std::vector<game_menu::box> game_menu::boxes(const std::string &cls)
@@ -773,6 +823,44 @@ void game_menu::build_now()
 			for (int i = 0; pick < 0 && i < int(p.items.size()); i++)
 				if (!p.items[i].info && shown(i)) pick = i;
 			if (pick >= 0 && pick != m_sel) { m_sel = pick; root->SetInnerRML(p.screen(m_sel, m_pad)); }
+		}
+		// (a list that scrolls inside the screen, class "scrolls" (Create room's rules, past its column): where it was kept as
+		// the page is made again, and moved only as far as the selected row needs to be all in it)
+		{
+			Rml::ElementList lists;
+			m->screen->GetElementsByClassName(lists, "scrolls");
+			if (m_scroll_page != p.name) { m_scroll_page = p.name; m_scroll_top = 0; }
+			for (Rml::Element *box : lists) {
+				m->screen->UpdateDocument();
+				box->SetScrollTop(m_scroll_top);
+				Rml::Element *e = m->screen->GetElementById("r" + std::to_string(m_sel));
+				bool inside = false;
+				for (Rml::Element *x = e; x && !inside; x = x->GetParentNode()) inside = x == box;
+				// (the page says which row is its first shown, data-row: it counts those above and below for itself)
+				const Rml::String row_at = box->GetAttribute<Rml::String>("data-row", "");
+				if (!row_at.empty() && box->GetNumChildren() > 0) box->SetScrollTop(float(atoi(row_at.c_str())) * box->GetChild(0)->GetOffsetHeight());
+				else if (inside) {
+					const float top = e->GetAbsoluteOffset(Rml::BoxArea::Border).y - box->GetAbsoluteOffset(Rml::BoxArea::Padding).y + box->GetScrollTop();
+					const float hgt = e->GetOffsetHeight(), view = box->GetClientHeight();
+					float at = box->GetScrollTop();   // (in whole rows: never half a row at its top)
+					if (top < at) at = std::floor(top / hgt + 0.01f) * hgt;
+					else if (top + hgt > at + view) at = std::ceil((top + hgt - view) / hgt - 0.01f) * hgt;
+					box->SetScrollTop(at);
+				}
+				m_scroll_top = box->GetScrollTop();
+				// (a row only partly in it (the list's height no whole number of rows) not drawn: never half a row)
+				const float shown_top = box->GetAbsoluteOffset(Rml::BoxArea::Padding).y, shown_bottom = shown_top + box->GetClientHeight();
+				for (int c = 0; c < box->GetNumChildren(); c++) {
+					Rml::Element *row = box->GetChild(c);
+					const float y0 = row->GetAbsoluteOffset(Rml::BoxArea::Border).y, y1 = y0 + row->GetOffsetHeight();
+					row->SetClass("cut", y0 < shown_top - 0.5f || y1 > shown_bottom + 0.5f);
+				}
+				// (rows above or below what's shown: an edge says so, more-up / more-down)
+				const bool up = m_scroll_top > 0.5f, down = m_scroll_top + box->GetClientHeight() < box->GetScrollHeight() - 0.5f;
+				box->SetClass("more-up", up);
+				box->SetClass("more-down", down);
+				if (Rml::Element *around = box->GetParentNode()) { around->SetClass("more-up", up); around->SetClass("more-down", down); }   // (its "more" marks there)
+			}
 		}
 		place_note(true);   // (the page made again: its note in its place)
 		return;

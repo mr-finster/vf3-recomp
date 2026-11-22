@@ -873,35 +873,107 @@ int main(int argc, char **argv)
 		check(top() == tr::P_CREATE_ROOM.c_str() && gm.selected() == c_go && s.room_who == 0, "Create room: on Create, not listed (the code only) as ever");
 		gm.select_row(c_go + 1);
 		check(gm.selected() == c_go, listing ? "Create room: its name, Listed in Rooms, the room's rules and Create" : "Rooms off: Create room has its name, the room's rules and Create, no Listed in Rooms");
+		auto rule_values = [&] { std::vector<std::string> v; for (int i = 0; i < 4; i++) v.push_back(gm.row_value(size_t(c_rule + i))); return v; };
+		auto defaults = [&] { std::vector<std::string> v; for (tr::text t : std::initializer_list<tr::text>{ tr::OFF, tr::OFF, tr::ROOM2_NO_LIMIT, tr::ON }) v.push_back(std::string(t)); return v; };
+		check(gm.boxes("crmore").empty(), "Create room: all the rules in view: no more-bars, nor their place");
+		check(rule_values() == defaults(), "Create room: the rules at the defaults (side Off, Dural Off, no limit, stage On)");
 		settle_check("create_room.png", w, h);
 		shot("create_room.png", w, h);
 		room2_clear("create_room.png");
-		{   // the room's rules, set before the room is made (the creator's saved ones), sent with its create
+		{   // the room's rules: Left / Right (keys and the pad's), Enter, the pad's A and a click each change them; never this player's saved ones
 			const bool side0 = s.rule_side, dural0 = s.rule_dural, stage0 = s.rule_stage;
 			const int max0 = s.rule_max;
 			gm.select_row(c_rule);
-			key(SDL_SCANCODE_RETURN);   // (Winner may change side)
-			pad(SDL_GAMEPAD_BUTTON_SOUTH);   // (and back, by the pad)
-			gm.select_row(c_rule + 1);
-			key(SDL_SCANCODE_RETURN);   // (Dural)
+			key(SDL_SCANCODE_RIGHT);   // (Winner may change side: On)
+			check(gm.row_value(size_t(c_rule)) == std::string(tr::ON) && gm.selected() == c_rule, "Create room: Right changes the rule, the row stays selected");
+			pad(SDL_GAMEPAD_BUTTON_DPAD_LEFT);   // (and back, by the pad's Left)
+			check(gm.row_value(size_t(c_rule)) == std::string(tr::OFF), "Create room: the pad's Left changes it back");
 			gm.select_row(c_rule + 2);
-			key(SDL_SCANCODE_RETURN);   // (Players in the room: the next value)
-			check(s.rule_side == side0 && s.rule_dural == !dural0 && s.rule_max == (max0 ? s.rule_max : 2) && s.rule_stage == stage0,
-			      "Create room: the room's rules on the form, each row its next value (Enter, the pad's A)");
-			gm.select_row(c_rule + 3);
-			for (int i = 0; i < 8; i++) { shot("", w, h); SDL_Delay(40); }
-			shot("create_room_rule.png", w, h);   // (a rule selected: its help under the rows)
-			room2_clear("create_room_rule.png");
+			key(SDL_SCANCODE_RETURN);   // (Players in the room: 2)
+			pad(SDL_GAMEPAD_BUTTON_SOUTH);   // (the pad's A: 3)
+			key(SDL_SCANCODE_LEFT);   // (Left: back to 2)
+			check(gm.row_value(size_t(c_rule + 2)) == "2", ("Create room: Players by Enter, the pad's A and Left (" + gm.row_value(size_t(c_rule + 2)) + ")").c_str());
 			{   // a click on a rule's row: its next value
 				std::vector<game_menu::box> rows = gm.boxes("row");
-				if (int(rows.size()) > c_rule + 3) {
-					const auto &b = rows[size_t(c_rule + 3)];
+				if (int(rows.size()) > c_rule + 1) {
+					const auto &b = rows[size_t(c_rule + 1)];
 					button(true, (b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2);
 					button(false, (b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2);
 				}
-				check(s.rule_stage == !stage0, "Create room: a click on Challenger picks the stage changes it");
+				check(gm.row_value(size_t(c_rule + 1)) == std::string(tr::ON), "Create room: a click on a rule changes it");
 			}
-			s.rule_side = side0; s.rule_dural = dural0; s.rule_max = max0; s.rule_stage = stage0;
+			for (int i = 0; i < 8; i++) { shot("", w, h); SDL_Delay(40); }
+			shot("create_room_rule.png", w, h);   // (a rule selected: the panel its)
+			room2_clear("create_room_rule.png");
+			check(s.rule_side == side0 && s.rule_dural == dural0 && s.rule_stage == stage0 && s.rule_max == max0, "Create room: the rules never kept as this player's");
+			// the Name row: Left / Right do nothing there (its name's typed on a page of its own)
+			const std::string name0 = s.room_name;
+			gm.select_row(0);
+			key(SDL_SCANCODE_RIGHT);
+			pad(SDL_GAMEPAD_BUTTON_DPAD_LEFT);
+			check(gm.selected() == 0 && s.room_name == name0 && top() == tr::P_CREATE_ROOM.c_str(), "Create room: Left / Right on Name: nothing, Name still selected");
+			// the pad's Up / Down still reach every control: Create from the last rule, the last rule from Create
+			gm.select_row(c_go - 1);
+			pad(SDL_GAMEPAD_BUTTON_DPAD_DOWN);
+			check(gm.selected() == c_go, "Create room: the pad's Down from the last rule: CREATE");
+			pad(SDL_GAMEPAD_BUTTON_DPAD_UP);
+			check(gm.selected() == c_go - 1, "Create room: the pad's Up from CREATE: the last rule");
+			// opened again: the defaults again
+			key(SDL_SCANCODE_ESCAPE);
+			gm.select_row(2);
+			key(SDL_SCANCODE_RETURN);
+			check(top() == tr::P_CREATE_ROOM.c_str() && rule_values() == defaults(), "Create room opened again: the rules at the defaults again");
+			// 9 rules in all (made-up ones past the real 4: more to come): at most 5 shown, the list scrolling in its box; down to
+			// the last and back up (at most 6 shown), each step: the selected row in view, "more" above / below just when rows are out of view,
+			// nothing over anything, the help strip and CREATE where they were. Pictures at the top, the middle and the end
+			key(SDL_SCANCODE_ESCAPE);
+			online_menu::test_create_extra = 9 - 4;
+			gm.select_row(2);
+			key(SDL_SCANCODE_RETURN);
+			const int last = c_go + 9 - 4 - 1;
+			const std::vector<game_menu::box> strip0 = gm.boxes("crstrip"), go0 = gm.boxes("crgo");
+			int bad = 0, steps = 0;
+			auto look = [&](const char *pic) {
+				for (int i = 0; i < 4; i++) { shot("", w, h); SDL_Delay(20); }
+				const std::vector<game_menu::box> list = gm.boxes("crlist"), selb = gm.boxes("selected"), up = gm.boxes("up"), down = gm.boxes("down"),
+				                                  strip = gm.boxes("crstrip"), go = gm.boxes("crgo");
+				if (list.size() != 1 || selb.empty() || strip.size() != 1 || go.size() != 1) { bad++; return; }
+				const game_menu::box &L = list[0];
+				auto in = [&](const game_menu::box &b) { return b.y0 >= L.y0 - 1 && b.y1 <= L.y1 + 1; };
+				// (the rules' rows wholly in the list's box and drawn: those shown)
+				const bool sel_in = gm.selected() < c_rule || gm.selected() > last || in(selb[0]);
+				std::vector<int> shown_rows;
+				for (int i = c_rule; i <= last; i++) { game_menu::box b; if (gm.row_box(i, b) && in(b)) shown_rows.push_back(i); }
+				const int first_in = shown_rows.empty() ? -1 : shown_rows.front(), last_in = shown_rows.empty() ? -1 : shown_rows.back();
+				// (the bars: how many rows are out of view above and below, none: empty)
+				const int n_up = first_in < 0 ? 0 : first_in - c_rule, n_down = last_in < 0 ? 0 : last - last_in;
+				const std::string up_text = gm.class_text("crmore up"), down_text = gm.class_text("crmore down");
+				const std::string up_want = n_up ? tr::fill(tr::CREATE_MORE_ABOVE, { { "n", std::to_string(n_up) } }) : std::string();
+				const std::string down_want = n_down ? tr::fill(tr::CREATE_MORE_BELOW, { { "n", std::to_string(n_down) } }) : std::string();
+				const bool want_up = n_up > 0, want_down = n_down > 0;
+				(void)up; (void)down;
+				const bool ok = sel_in && int(shown_rows.size()) == 6 && up_text == up_want && down_text == down_want && gm.clashes().empty() &&
+				                strip[0].y0 == strip0[0].y0 && strip[0].y1 == strip0[0].y1 && go[0].y0 == go0[0].y0;
+				if (!ok) { bad++; printf("menutest: scroll step %d: selected %d, shown %d..%d (%zu), more up '%s' (want '%s'), down '%s' (want '%s'), sel in %d, clashes %zu\n", steps, gm.selected(), first_in, last_in,
+				                         shown_rows.size(), up_text.c_str(), up_want.c_str(), down_text.c_str(), down_want.c_str(), int(sel_in), gm.clashes().size()); (void)want_up; (void)want_down; }
+				steps++;
+				if (pic) { shot(pic, w, h); room2_clear(pic); printf("ok   %s: the bars '%s' / '%s'\n", pic, up_text.c_str(), down_text.c_str()); }
+			};
+			gm.select_row(c_rule);
+			look("create_room_scroll_top.png");
+			for (int i = c_rule; i < last; i++) { key(SDL_SCANCODE_DOWN); look(i + 1 == c_rule + 6 ? "create_room_scroll_middle.png" : nullptr); }
+			check(gm.selected() == last, "Create room, 9 rules: Down to the last");
+			look("create_room_scroll_end.png");
+			for (int i = last; i > c_rule; i--) { key(SDL_SCANCODE_UP); look(nullptr); }
+			check(gm.selected() == c_rule && bad == 0, ("Create room, 9 rules: down to the last and back up, " + std::to_string(steps) + " steps: the selected row in view, more-marks right, nothing over anything, the strip and CREATE still (" + std::to_string(bad) + " wrong)").c_str());
+			gm.select_row(last);
+			shot("", w, h);
+			key(SDL_SCANCODE_DOWN);
+			check(gm.selected() == last + 1, "Create room: Down from the last made-up rule: CREATE");
+			online_menu::test_create_extra = 0;
+			key(SDL_SCANCODE_ESCAPE);
+			gm.select_row(2);
+			key(SDL_SCANCODE_RETURN);
 			gm.select_row(c_go);
 		}
 		if (c_listed >= 0) {
@@ -1859,9 +1931,8 @@ int main(int argc, char **argv)
 			      "Rooms 2's settings: the room's rules shown (side On, Dural On, 4 players, stage Off), the saved ones left alone");
 			gm.select_row(3);
 			key(SDL_SCANCODE_RIGHT);
-			check(gm.row_value(3) == "5" && s.rule_max == 5 && s.rule_side && s.rule_dural && !s.rule_stage && o.room2()->rule_max == 5,
-			      "Rooms 2's settings: Players 4 to 5: the room's others kept, all kept as this player's");
-			s.rule_side = false; s.rule_dural = false; s.rule_max = 0; s.rule_stage = true;
+			check(gm.row_value(3) == "5" && o.room2()->rule_max == 5 && o.room2()->rule_side && o.room2()->rule_dural && !o.room2()->rule_stage && s.rule_max == 0 && !s.rule_side,
+			      "Rooms 2's settings: Players 4 to 5: the room's others kept, never this player's saved ones");
 		}
 		settle_check("room2_settings.png", w, h);
 		for (int row : { 0, 1 }) {   // (each row's help, Close the room's the longest)

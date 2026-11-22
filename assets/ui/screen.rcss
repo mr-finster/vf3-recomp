@@ -322,20 +322,32 @@ div { display: block; }
 .bsbt { position: absolute; right: 44dp; width: 6dp; border-radius: 3dp; background-color: #8f9ac8; }
 .bproblem { position: absolute; left: 0; right: 0; bottom: 100dp; text-align: center; font-size: 22dp; color: #ff7a6b; }
 
-/* Create room: a form, a row a choice */
-.form { width: 820dp; margin-top: 24dp; }
-.fr { display: flex; align-items: center; height: 46dp; padding: 0 22dp; border-bottom: 2dp #2a3466; font-size: 23dp; }   /* (every row of the form one size, the room's rules' too) */
-.fr.selected { border-radius: 10dp; border: 3dp #ffffff; }
-.fl { width: 250dp; color: #8f9ac8; }
-.fv { color: #ffffff; }
-.fs { color: #8f9ac8; font-size: 20dp; }
+/* Create room (layout B1): one column, the room, its rules (at most 6 rows, a list that scrolls in its box past them,
+   "more" above and below while rows are out of it), a strip with the selected row's help that never moves; the keys at
+   the bottom left and CREATE at the right, under the column */
+.crtitle { position: absolute; left: 0; right: 0; top: 22dp; font-size: 50dp; line-height: 54dp; }
+.crcol { position: absolute; top: 84dp; left: 50%; width: 880dp; margin-left: -440dp; display: flex; flex-direction: column; }
+.crow { flex: none; display: flex; align-items: center; box-sizing: border-box; height: 44dp; padding: 0 16dp; border-bottom: 1dp #2a3466; font-size: 24dp; }   /* (44dp, borders in: CREATE_ROW_DP) */
+.crow.selected { border-radius: 10dp; border: 1dp #ffffff; }
+.cl { flex: 1; color: #9aa6d8; white-space: nowrap; overflow: hidden; }
+.cv { flex: none; padding-left: 16dp; color: #ffffff; font-weight: 600; white-space: nowrap; }
+.crow.selected .cl, .crow.selected .cv { color: #0b1026; font-weight: 700; }
 .fbox { padding: 0 10dp; border: 2dp #3a4682; border-radius: 6dp; }
-.fr.selected .fl, .fr.selected .fv, .fr.selected .fs { color: #0b1026; }
-/* (the room's rules on the form, as Room settings has them: the label wide, the value at the right; the
-   selected one's help in the note's place under the rows, a box of 3 lines whatever it holds, so nothing moves) */
-.fr.rule .fl { width: 0; flex: 1; }
-.fr.rule .fv { text-align: right; }
-.fnote { width: 820dp; height: 72dp; margin-top: 12dp; font-size: 19dp; line-height: 24dp; font-weight: 500; color: #8f9ac8; text-align: center; overflow: hidden; }
+.crow.selected .fbox { border-color: #0b1026; }
+.crow.last { border-bottom: 2dp #3a4682; }   /* (2dp, a little lighter than the rows' lines) */   /* (Listed in Rooms, or Name: the room's rows apart from its rules) */
+.crbox { flex: none; display: flex; flex-direction: column; margin-top: 10dp; }   /* (a gap under the room's rows) */
+.crlist { flex: none; overflow: hidden; }
+.crlist .cut { visibility: hidden; }   /* (a row only partly in view: not drawn) */
+.crmore { flex: none; display: flex; justify-content: center; align-items: center; gap: 10dp; height: 34dp; margin: 4dp 0; border-radius: 8dp; font-size: 20dp; font-weight: 700; letter-spacing: 1dp; color: #f2d14b; }
+.crmore.on { background-color: #121a3d; }   /* (rows out of view: how many; none, the bar's place kept, empty) */
+.chev { width: 0; height: 0; border-left: 6dp #f2d14b00; border-right: 6dp #f2d14b00; }   /* (a triangle of borders: the fonts have no arrows) */
+.crmore.up .chev { border-bottom: 8dp #f2d14b; }
+.crmore.down .chev { border-top: 8dp #f2d14b; }
+.crstrip { flex: none; display: flex; align-items: center; box-sizing: border-box; height: 60dp; margin-top: 10dp; padding: 0 16dp; border-radius: 10dp; background-color: #121a3d; font-size: 20dp; line-height: 24dp; font-weight: 500; color: #d8ddf5; overflow: hidden; }
+.crbar { position: absolute; bottom: 24dp; left: 50%; width: 880dp; margin-left: -440dp; height: 68dp; }
+.crfoot { position: absolute; left: 0; right: auto; bottom: 0; top: 0; justify-content: flex-start; }
+.crgo { position: absolute; right: 0; top: 0; }
+.crproblem { position: absolute; left: 0; right: 0; bottom: 96dp; text-align: center; }
 .roomname { margin-top: 40dp; font-size: 64dp; line-height: 72dp; font-weight: 700; font-style: italic; color: #ffffff; border-bottom: 3dp #f2d14b; min-width: 300dp; text-align: center; }
 .roomname .caret { display: inline-block; width: 4dp; height: 56dp; margin-left: 6dp; background-color: #f2d14b; }
 

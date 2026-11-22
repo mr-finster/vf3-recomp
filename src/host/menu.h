@@ -73,7 +73,10 @@ public:
 	void set_title(const std::string &text);    // (PAUSED; a match goes on under the menu: ONLINE MATCH)
 	void select_row(int i) { select(i); }
 	void set_test_held(int held) { m_test_held = held; }   // (tests: the left button down (1) or up (0) as SDL would say; -1 SDL's own)
-	int dropped_clicks() const { return m_dropped; }       // (tests: clicks on a row gone by the button's release, not run)
+	int dropped_clicks() const { return m_dropped; }
+	float scroll_top() const { return m_scroll_top; }   // (tests: a screen's scrolling list, where it is)
+	bool row_box(int i, box &out);
+	std::string class_text(const std::string &classes);  // (tests: the words in the first element with all these classes, space apart)                       // (tests: row i's element as drawn: false not there or not drawn)       // (tests: clicks on a row gone by the button's release, not run)
 	size_t row_count() const { return m_stack.empty() ? 0 : m_stack.back().items.size(); }   // (tests: the page's rows, and a row's value)
 	std::string row_value(size_t i) const { return i < row_count() && m_stack.back().items[i].value ? m_stack.back().items[i].value() : std::string(); }
 	void set_fps(const std::string &text);      // the small FPS at the top right; empty hides it
@@ -165,7 +168,9 @@ private:
 	size_t m_built_depth = 0;
 	std::string m_built_name;
 	int m_dropped = 0;
-	bool m_redraw_soon = false;          // (a screen with by_select: made again at the next render)                   // (clicks on a row gone since it was drawn: dropped_clicks)
+	bool m_redraw_soon = false;
+	std::string m_scroll_page;           // (a screen's list that scrolls: the page it's of, and where it was)
+	float m_scroll_top = 0;          // (a screen with by_select: made again at the next render)                   // (clicks on a row gone since it was drawn: dropped_clicks)
 	int row_now(int i) const;
 	void build_now();
 	std::function<bool(const SDL_Event &)> m_capture;

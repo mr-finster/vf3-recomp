@@ -569,4 +569,5 @@ std::string clean_room(const std::string &s);
 // A room code as typed: its letters only (no 0/O, 1/I/L), upper case, at most 6
 std::string clean_code(const std::string &s);
 
+extern int test_create_extra;   // (menutest: made-up rule rows more on Create room's form)
 } // namespace online_menu
