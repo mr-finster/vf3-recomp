@@ -139,6 +139,13 @@ std::vector<uint8_t> Adapter::host_blob() const
 	if (const m3::Profile::Settings &set = board.profile->settings; team_one >= 0 && set.team_mode && set.at &&
 		set.at + size_t(set.team_mode) < board.backup.size())
 		out[4 + set.at + size_t(set.team_mode)] = uint8_t(team_one);
+	// (Team Battle 3 vs 3 is never one round: its VS screen waits for ever with 1 (the room spec's ROM checks). No setting
+	// gives it online (the Arcade settings 2-5, the blob's ONLINE_VS_ROUNDS), but a test's VF3_TEST_VS_ROUNDS=1 or a host's
+	// backup RAM with 1 would: ONLINE_VS_ROUNDS then)
+	if (const m3::Profile::Settings &set = board.profile->settings; set.team_mode && set.at &&
+	    set.at + size_t(std::max(set.team_mode, set.rounds_vs)) < board.backup.size() && out[4 + set.at + size_t(set.team_mode)] == 0 &&
+	    out[4 + set.at + size_t(set.rounds_vs)] == 1)
+		out[4 + set.at + size_t(set.rounds_vs)] = uint8_t(ONLINE_VS_ROUNDS);
 	if (!host_terms) return out;
 	const size_t n = out.size();
 	out.resize(n + TERMS_SIZE);

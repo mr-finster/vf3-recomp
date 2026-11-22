@@ -474,8 +474,7 @@ int Online::start_wait() const
 			if (in[start_scan[p]] & vf3net::START_BUTTON) start_seen[p] = true;
 	}
 	const int me = local_player();
-	if (r2 && r2->in_seat && !r2->stayer.empty() && !both_in && (r2->stayer == "a" ? 0 : 1) != me && !(score.players_now() >> (me ^ 1) & 1))
-		return 2;   // (a room's challenger: in after the one who stays, their Start held till then: waiting for them)
+	if (r2 && r2->in_seat && !both_in) return 0;   // (a room's seat: both put in by their own games, nothing to press or wait for)
 	if (!start_seen[me] || !start_seen[me ^ 1]) return !start_seen[me] ? 1 : 2;
 	// after both have been in: one out of the game (a match lost; the winner plays on against the computer), until
 	// they press Start (the game's back in only once a fighter's chosen: nothing to say over its character select)
@@ -2447,45 +2446,68 @@ bool Online::step(uint16_t input)
 			         " (frame " + std::to_string(f) + ", " + std::to_string(session->confirmed()) + " confirmed)");
 		}
 	}
-	// A Rooms 2 seat, the match decided and the lobby moving on to the next in the room's line (calling them, or about to:
-	// room2_moving_on): the player out of the game gets no rematch, their Start taken out of their input here, before
-	// it's sent (so both sides run the same: the next in line comes on). The two playing on (nobody READY when it was
-	// decided), it's a rematch as ever
-	// (and before it's decided, someone READY in the line (the lobby will move on): from the KO a Start takes the loser out and
-	// straight to New Challenger, the rematch's select, seconds before the held reading has them out. A player mashing Start
-	// after a loss got that rematch in both games, against the winner, till the lobby moved on and cut it: a match nobody
-	// seated. So with someone READY no Start of this player's goes in once the match is on (both in), but at the select
-	// (a fighter's outfit is Start held there); the two playing on, nobody READY, a rematch as ever)
-	const bool r2_ko_hold = room2_in_seat() && ph == Phase::playing && session && both_in && r2->next_ready() && r2->reported_n != r2->n &&
-	                        r2->phase == "PLAYING" && !vf3net::in_select(board);
+	// A Rooms 2 seat's Starts. Only a Start that would start a match the lobby hasn't seated is ever taken out: every
+	// other one goes in as pressed (the winner skipping the win poses, the challenger's, the select's and the stage's).
+	const int me = local_player();
+	const bool r2_play = room2_in_seat() && ph == Phase::playing && session && both_in;   // (the seat's match on, both have been in)
+	// (the match's rounds to win, the host's setting both play, read at the seat's start; and this player beaten: the other
+	// has won the match's rounds, as the RAM has it this frame, from the deciding KO on. Only this player's Start can
+	// then be a rematch of their own; before it, or as the winner, a Start is never one)
+	if (!both_in) r2_to_win = [this] { const m3::Profile::Settings &set = board.profile->settings; return set.at && set.at + size_t(set.rounds_vs) < board.backup.size() ? int(board.backup[set.at + size_t(set.rounds_vs)]) : 0; }();
+	// (kept from the deciding KO till a new match is on, both in at 0-0: the game clears the rounds a moment after the loser's out)
+	if (!r2_play) r2_lost = false;
+	else if (r2_to_win >= 1 && r2_to_win <= 5 ? score.rounds_now(me ^ 1) >= r2_to_win : score.rounds_now(me ^ 1) > score.rounds_now(me)) r2_lost = true;
+	else if (score.players_now() == 3 && score.rounds_now(0) == 0 && score.rounds_now(1) == 0) r2_lost = false;
+	const bool r2_beaten = r2_lost;
+	if (room2_in_seat() && (input & 0x7fff)) r2->touched = true;   // (this player's own input in this match: not away)
+	// The loser's Start for a rematch, with the lobby moving on to the next in the room's line: taken out. Once the match is
+	// decided (room2_moving_on: the lobby calling the next, or about to), the player out of the game's; and before the held
+	// reading has them out, from the deciding KO, with someone READY in the line (the lobby will move on): a Start then takes
+	// the loser straight to the rematch's select (2 frames after the KO), seconds before the held reading, so it's taken out
+	// for the beaten player only. The winner's goes in (skipping the win poses and the replay as offline), and every Start
+	// before the deciding KO and at the select; the two playing on (nobody READY), a rematch as ever
+	// (from the KO till the session ends: the lobby's PLAYING, then DECIDED once the other game's report is in (its own may
+	// be later: on a slow link the gap was seconds, and a mashed Start in it gave the rematch's select), then READY)
+	const bool r2_ko_hold = r2_play && r2_beaten && r2->next_ready() && (r2->phase == "PLAYING" || r2->phase == "DECIDED" || r2->phase == "READY") &&
+	                        !vf3net::in_select(board);
 	// (a game without the room's socket (refused, a proxy) hears the lobby only when it asks, every 4 s at the table: someone
-	// READY just before the KO isn't known yet, and the loser's Start would take both games to the rematch's select. So its
-	// Start, once the match is on but at the select, waits for a word from the lobby at most 2 s old (a poll asked at once);
-	// nobody READY then, it goes in, a moment late)
-	const bool r2_unsure = room2_in_seat() && ph == Phase::playing && session && both_in && (input & vf3net::START_BUTTON) && !vf3net::in_select(board) &&
-	                       room2_unsure(2000);
-	if (room2_in_seat() && ph == Phase::playing && session && both_in && (input & vf3net::START_BUTTON) &&
-	    ((score.players() != 3 && !(score.players() >> local_player() & 1) && room2_moving_on()) || r2_ko_hold || r2_unsure)) {
+	// READY just before the KO isn't known yet. So the beaten player's Start, from the deciding KO but at the select,
+	// waits for a word from the lobby at most 2 s old (a poll asked at once): not lost, given late (3 frames pressed) once the
+	// word's here and nobody's READY; up to 5 s, then dropped)
+	if (!r2_play) r2_late_wait = r2_late_give = 0;
+	const bool r2_could = r2_play && r2_beaten && !vf3net::in_select(board);   // (a Start that could be the loser's rematch)
+	if (r2_late_give > 0) {   // (one held while unsure, given now: its last frames)
+		input = uint16_t(input | vf3net::START_BUTTON);
+		r2_late_give--;
+	} else if (r2_could && ((input & vf3net::START_BUTTON) || r2_late_wait > 0) && room2_unsure(2000)) {
+		if (input & vf3net::START_BUTTON) r2_late_wait = std::max(r2_late_wait, 1);
+		input = uint16_t(input & ~vf3net::START_BUTTON);
+		if (++r2_late_wait > 300) r2_late_wait = 0;
+	} else if (r2_late_wait > 0) {
+		if (r2_could) { input = uint16_t(input | vf3net::START_BUTTON); r2_late_give = 2; }
+		r2_late_wait = 0;
+	}
+	if (r2_play && (input & vf3net::START_BUTTON) &&
+	    ((score.players() != 3 && !(score.players() >> me & 1) && room2_moving_on()) || r2_ko_hold)) {
 		static int held_said = -1;   // (said once a match: a player mashing Start pressed it hundreds of times)
 		if (start_edge && held_said != r2->n) { held_said = r2->n; log_line("Rooms 2: Start for a rematch held back: " + online_menu::clean_name(r2->next_name()) + " is next in the room's line"); }
 		input = uint16_t(input & ~vf3net::START_BUTTON);
+		r2_late_wait = r2_late_give = 0;
 	}
-	// A Rooms 2 seat's first match, a challenger against the one who stays (the streak's holder): the arcade's way, the one who
-	// stays is in the game first (their Start pressed for them, this side's own input, so both games run it) and the
-	// challenger comes in after them, a new challenger: the stage select's the challenger's (CHALLENGER: the later one in picks).
-	// The challenger's Start held till the stayer's in, so a winner's Start after the challenger's never picks the stage
-	r2_start_held = false;
-	if (room2_in_seat() && ph == Phase::playing && session && !both_in && !r2->stayer.empty()) {
-		const int stay = r2->stayer == "a" ? 0 : 1, me = local_player();
-		const bool stayer_in = score.players_now() >> stay & 1;
-		if (me == stay && !stayer_in && !(score.players_now() >> (me ^ 1) & 1)) {
-			static uint32_t tap = 0;
-			if (++tap % 8 < 3) input = uint16_t(input | vf3net::START_BUTTON);   // (pressed, let go: a press the title takes)
-			else input = uint16_t(input & ~vf3net::START_BUTTON);
-		} else if (me != stay && !stayer_in) {
-			if (input & vf3net::START_BUTTON) r2_start_held = true;
-			input = uint16_t(input & ~vf3net::START_BUTTON);
-		}
+	// A Rooms 2 seat's first match (a new pair, a fresh session): both are put in the game by their own games, so the board
+	// never runs one player against the computer. The one who stays (the table's holder; side a with none) first: their
+	// game presses Start for them whether or not they're at the keys (away, they just lose); then the challenger's, once
+	// the one who stays is in (in VF3 the later one in picks the stage: the challenger's). The challenger's own Start
+	// before then isn't lost: it's what their game presses as soon as the one who stays is in (never before them: a
+	// challenger alone in the game is the board against the computer). Each a tap (3 frames) every 40 frames while that
+	// player isn't in; once both are in, every Start as pressed (the select's, the stage's)
+	if (room2_in_seat() && ph == Phase::playing && session && !both_in) {
+		const int stay = r2->stayer == "b" ? 1 : 0;
+		const uint8_t in = vf3net::joined(board);   // (in by Start: the select's; the score's byte only from a fight)
+		if (me != stay && !(in >> stay & 1)) input = uint16_t(input & ~vf3net::START_BUTTON);
+		if (!(in >> me & 1) && (me == stay || (in >> stay & 1))) {
+			if (r2_auto_tap++ % 40 < 3) input = uint16_t(input | vf3net::START_BUTTON);
+		} else r2_auto_tap = 0;
 	}
 	if (session) snapper.before_step(*session);   // (a snapshot's copy the step could save over: stopped first, tried again)
 	if (!(ph == Phase::playing && session && session->step(input))) return false;
@@ -2507,8 +2529,13 @@ bool Online::step(uint16_t input)
 			r2_game_seen = g;
 			const uint8_t in = score.players_now();
 			log_line(std::string("the game: in it ") + (in == 3 ? "both" : in == 1 ? "player 1 only" : in == 2 ? "player 2 only" : "no one") + ", rounds " +
-			         std::to_string(score.rounds_now(0)) + "-" + std::to_string(score.rounds_now(1)) + " (frame " + std::to_string(session->inputs(local_player()).size()) + ", this player " + std::to_string(local_player() + 1) + ")");
+			         std::to_string(score.rounds_now(0)) + "-" + std::to_string(score.rounds_now(1)) + " (frame " + std::to_string(session->inputs(local_player()).size()) + ", this player " + std::to_string(local_player() + 1) + ", rounds to win " + std::to_string(r2_to_win) + ")");
 		}
+		// (a check, for the log: one player alone in the game for 5 s before both have been in, the board running them against
+		// the computer at a seat's start, which a seat's Starts never let happen)
+		const uint8_t in = score.players_now();
+		r2_alone = !both_in && (in == 1 || in == 2) ? r2_alone + 1 : 0;
+		if (r2_alone == 300) log_line("Rooms 2: (check) one player alone in the game for 5 s at the seat's start: the board running them against the computer");
 	}
 	if (held_before == 3 && score.players() != 3) decided_in = uint8_t(score.players());   // (the match decided: who's in, the winner)
 	held_before = uint8_t(score.players());

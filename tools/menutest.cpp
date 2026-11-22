@@ -476,6 +476,21 @@ int main(int argc, char **argv)
 	gm.open(root());
 	int fails = 0;
 	auto check = [&](bool ok, const char *what) { if (!ok) { fprintf(stderr, "menutest: FAIL %s\n", what); fails++; } else printf("ok   %s\n", what); };
+	{   // Team Battle 3 vs 3 never one round online (its VS screen waits for ever with 1): a host's 1 played as ONLINE_VS_ROUNDS; 1 vs 1 as it was
+		static m3::Model3 tb;
+		tb.profile = m3::find_profile("vf3tb");
+		const m3::Profile::Settings &set = tb.profile->settings;
+		tb.backup.assign(0x20000, 0);
+		auto rounds_sent = [&](int team, int rounds) {
+			tb.backup[set.at + size_t(set.team_mode)] = uint8_t(team);
+			tb.backup[set.at + size_t(set.rounds_vs)] = uint8_t(rounds);
+			vf3net::Adapter ad(tb);
+			const std::vector<uint8_t> blob = ad.host_blob();
+			return int(blob[4 + set.at + size_t(set.rounds_vs)]);
+		};
+		check(rounds_sent(0, 1) == vf3net::ONLINE_VS_ROUNDS && rounds_sent(0, 4) == vf3net::ONLINE_VS_ROUNDS && rounds_sent(1, 1) == 1,
+		      "Team Battle 3 vs 3: a host's one round sent as ONLINE_VS_ROUNDS (1 vs 1's 1 and others as before)");
+	}
 	auto top = [&] { return gm.top_name(); };
 	// (a picture's words not drawn over each other: the page's, the note's, a banner's, the versus screen's)
 	auto room2_clear = [&](const char *name) {

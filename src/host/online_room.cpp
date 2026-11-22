@@ -37,6 +37,7 @@ constexpr double POLL_NEAR_MS = 4000;    // (the same, this player at the table,
 constexpr double PING_MS = 15000;        // (the socket pinged: the lobby closes one quiet for 90 s)
 constexpr double WS_POLL_MS = 45000;     // (an open socket the lobby's said nothing on this long: asked (a poll on it, answered with a state))
 constexpr double WS_DEAD_MS = 2 * WS_POLL_MS;   // (nothing on it this long, the poll's answer neither: dead, closed, polling meanwhile)
+constexpr double PLAYON_AWAY_MS = 20000;   // (a play-on's loser: their rematch's Start not pressed in this long, AWAY)
 constexpr double BANNER_MS = 4000;       // (a moment's banner over the game)
 constexpr double REJOIN_MS = 12 * 3600e3; // (a membership kept in room2.txt asked back this long after it was written (when it was made):
                                          // the lobby takes it back only if it still has it (its 30 s), else it's a new member)
@@ -891,7 +892,9 @@ void Online::room2_react()
 	// at the table alone (the other left, or lost and gone): a session still on with them ended
 	if (may_unseat && m.pos == 0 && !m.seated && m.in_seat) {
 		log("Rooms 2: the other player's no longer at the table: the session ended");
-		if (ph == Phase::playing) ended(tr::line(tr::ROOM2_FORFEIT, { { "name", opponent() } }));
+		// (their match lost already, this player the winner (a play-on's loser gone AWAY): you stay on, no forfeit)
+		const bool won_it = both_in && score.players() != 3 && ((score.players() >> local_player()) & 1);
+		if (ph == Phase::playing) ended(won_it ? tr::line(tr::ROOM2_WON_STAYS) : tr::line(tr::ROOM2_FORFEIT, { { "name", opponent() } }));
 		stop_activity(true, QUIT_NEXT_IN_LINE);
 	}
 	// in the line: back from the table (lost, or a void match), then the room's match watched
@@ -979,6 +982,8 @@ void Online::room2_seat()
 	m.started_n = -1;
 	m.result_armed = false;
 	m.in_seat = true;
+	m.touched = m.idle_away = m.decided_seen = false;
+	m.playon_out_at = 0;
 	m.seen_peer = m.seat.peer.name;
 	m.seen_token = m.seat.token;
 	// (the one who stays: the table's holder, a winner on, against the newcomer; the stage select the newcomer's)
@@ -1013,8 +1018,9 @@ void Online::room2_unseat(bool lost)
 	// or the first READY in line. By the side, not the names: two can be the same)
 	const std::string &mine = m.seat.side;
 	const std::string next = mine == "a" && m.has_a ? m.a.name : mine == "b" && m.has_b ? m.b.name : m.next_name();
-	if (lost || m.banner == 1) { m.banner = 1; m.banner_name = next; m.banner_until = now + BANNER_MS; }   // (or said at the table already: the line moving on)
-	if (ph == Phase::playing) ended(tr::line(tr::ROOM2_LOST_NEXT, { { "name", next } }));
+	if ((lost || m.banner == 1) && !next.empty()) { m.banner = 1; m.banner_name = next; m.banner_until = now + BANNER_MS; }
+	else if (next.empty() && m.banner == 1) m.banner = 0;   // (nobody next: no "NEXT IS" with no name)   // (or said at the table already: the line moving on)
+	if (ph == Phase::playing) ended(next.empty() ? (m.me_ready ? tr::line(tr::ROOM2_TO_LINE) : tr::line(tr::ROOM2_AWAY_SAID)) : tr::line(tr::ROOM2_LOST_NEXT, { { "name", next } }));
 	log("Rooms 2: back in the line (" + std::to_string(m.pos) + " of " + std::to_string(m.line.size()) + ")" + (next.empty() ? "" : ": next is " + next) + "; watching the room");
 	stop_activity(true, QUIT_NEXT_IN_LINE);
 	m.seen_peer.clear();
@@ -1086,6 +1092,35 @@ void Online::room2_decided()
 			m.banner_name = m.next_name();
 			m.banner_until = now + 600000;
 		} else if (m.banner != 4) { m.banner = 4; m.banner_until = now + 600000; }
+	}
+	const int me = local_player();
+	const bool lost_it = decided && in != 0 && !((in >> me) & 1);
+	// (reno, 22 Nov) Lost with no input of this player's at all in the match (away: their Start pressed for them at the
+	// seat's start): AWAY, passed over till READY again, so an empty chair isn't seated again and again
+	if (lost_it && !m.touched && !m.idle_away) {
+		m.idle_away = true;
+		log("Rooms 2: lost with no input of this player's in the match (away): AWAY");
+		room2_set_ready(false);
+	}
+	// (reno, 22 Nov) A play-on's loser (nobody READY when it was decided) who doesn't press Start for the rematch in
+	// PLAYON_AWAY_MS: AWAY, to the back of the line (the lobby takes them off the table); the winner waits for a challenger
+	if (!lost_it || room2_moving_on()) m.playon_out_at = 0;
+	else if (!m.playon_out_at) m.playon_out_at = now;
+	else if (now - m.playon_out_at >= PLAYON_AWAY_MS && !m.idle_away) {
+		m.idle_away = true;
+		log("Rooms 2: the rematch's Start not pressed in " + std::to_string(int(PLAYON_AWAY_MS / 1000)) + " s: AWAY, to the back of the line");
+		room2_set_ready(false);
+	}
+	if (decided) m.decided_seen = true;
+	else if (m.decided_seen) { m.decided_seen = false; m.touched = m.idle_away = false; }   // (the next match on: afresh)
+	// (reno, 22 Nov: no CPU fighting in a room seat) Decided with someone READY and the lobby's word in (READY: the result
+	// applied, the next called): the winner's board stops here, its last picture held, "you stay on", till the next pair's
+	// seated (the session ends as the line moving on: the loser's board still too, YOU LOST: NEXT IS ...)
+	if (decided && in != 0 && ((in >> me) & 1) && m.phase == "READY" && ph == Phase::playing) {
+		log("Rooms 2: won, " + m.next_name() + " called: the board still till the next pair's seated");
+		ended(tr::line(tr::ROOM2_WON_STAYS));
+		stop_activity(true, QUIT_NEXT_IN_LINE);
+		return;
 	}
 }
 

@@ -513,8 +513,12 @@ private:
 	void stop_activity(bool said = false, uint8_t quit_reason = 0);   // (stop as it was: whatever's on, a room's membership kept)
 	void watch_begin(const std::string &w);   // (watching w from here: what's on stopped first, a room's membership kept)
 	bool persist = false;               // (the room's own: kept through its match, opened again after it)
-	bool r2_start_held = false;         // (a Rooms 2 challenger's Start held this frame: the one who stays is in first)
 	uint32_t r2_game_seen = UINT32_MAX;   // (the log's: who's in the game and the rounds, as last said)
+	int r2_late_wait = 0, r2_late_give = 0;   // (a Start held while unsure of the lobby's word: frames it's waited, then frames still to give)
+	uint32_t r2_auto_tap = 0;   // (a seat's first match: this player's Start pressed by their game, its frames)
+	bool r2_lost = false;   // (this player beaten in the seat's match on now: from its deciding KO till a new one's on)
+	int r2_to_win = 0;   // (the seat's match's rounds to win: the host's setting, read at its start; 0 not known)
+	int r2_alone = 0;   // (frames one player's been alone in the game before both have been in: the log's check)
 	double hold_at = 0;
 };
 

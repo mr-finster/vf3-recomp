@@ -99,6 +99,11 @@ constexpr uint16_t START_BUTTON = 256;   // (the input word's Start: pack's)
 // lockstep (vfnet::Session::set_lockstep): no frame on a guess, so a face never flashes as a guess is put right.
 inline int scene_byte(const m3::Model3 &board) { const size_t a = board.profile->scene; return a && board.ram.size() > a ? board.ram[a ^ 3] : -1; }
 inline bool in_select(const m3::Model3 &board) { return scene_byte(board) == 5; }
+// Who's pressed Start into the game, from that press on (the select, before any fight: the score's playing byte is set
+// only once a fight starts, so a lone player shows there only against the computer): the byte at 0x10009F in both
+// programs, bit 0x10 player 1, 0x20 player 2 (found by RAM diffs, Revision D and Team Battle: 0x01 nobody, 0x11 player 1,
+// 0x31 both, 0x22 player 2 alone, 0x32 then player 1 too). Bit 0 player 1, bit 1 player 2
+inline uint8_t joined(const m3::Model3 &board) { return uint8_t((board.ram[0x10009F ^ 3] >> 4) & 3); }
 
 // The score between the two players, read from the game's own RAM after each frame (as Fightcade's detectors do,
 // tools/vf3detect.cpp found where; the profile's rounds_p1, rounds_p2 and playing): each player's rounds won in the
