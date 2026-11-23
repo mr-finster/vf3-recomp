@@ -216,7 +216,7 @@ public:
 	void room2_line(bool join);  // (Leave line: no place in it, still in the room watching; Join the line: at its back)
 	// Start pressed (main.cpp's, keyboard or pad, whatever's on): the ready check on, ready said. True if it was taken
 	bool room2_ready();
-	void room2_set_ready(bool on);   // (READY: on, played in turn; off: AWAY, kept in the line and passed over)
+	void room2_set_ready(bool on, const std::string &extra = "");   // (READY: on, played in turn; off: AWAY, kept in the line and passed over; extra: the message's more, a play-on's loser out)
 	int room2_ready_left() const;   // (the ready check on this player: its seconds left; -1 none)
 	// A moment's word over the game: 1 you lost (name: who's next), 2 a new challenger (name: theirs), 3 you're next,
 	// 4 you won and stay on, 5 the other left: a forfeit (name: theirs); 0 none

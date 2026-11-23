@@ -2529,7 +2529,8 @@ bool Online::step(uint16_t input)
 		r2_late_wait = 0;
 	}
 	if (r2_play && (input & vf3net::START_BUTTON) &&
-	    ((score.players() != 3 && !(score.players() >> me & 1) && room2_moving_on()) || r2_ko_hold)) {
+	    ((score.players() != 3 && !(score.players() >> me & 1) && room2_moving_on()) || r2_ko_hold ||
+	     (r2->idle_away && r2_beaten && !(score.players_now() >> me & 1)))) {   // (AWAY, out: no rematch, never back in as a challenger while AWAY)
 		static int held_said = -1;   // (said once a match: a player mashing Start pressed it hundreds of times)
 		if (start_edge && held_said != r2->n) { held_said = r2->n; log_line("Rooms 2: Start for a rematch held back: " + online_menu::clean_name(r2->next_name()) + " is next in the room's line"); }
 		input = uint16_t(input & ~vf3net::START_BUTTON);

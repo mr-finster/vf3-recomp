@@ -1132,7 +1132,7 @@ void Online::room2_decided()
 	if (lost_it && !m.touched && !m.idle_away) {
 		m.idle_away = true;
 		log("Rooms 2: lost with no input of this player's in the match (away): AWAY");
-		room2_set_ready(false);
+		room2_set_ready(false, ",\"out\":" + std::to_string(m.reported_n));
 	}
 	// (reno, 22 Nov) A play-on's loser (nobody READY when it was decided) who doesn't press Start for the rematch in
 	// PLAYON_AWAY_MS: AWAY, to the back of the line (the lobby takes them off the table); the winner waits for a challenger
@@ -1145,7 +1145,9 @@ void Online::room2_decided()
 	else if (now - m.playon_out_at >= PLAYON_AWAY_MS && !m.idle_away) {
 		m.idle_away = true;
 		log("Rooms 2: the rematch's Start not pressed in " + std::to_string(int(PLAYON_AWAY_MS / 1000)) + " s: AWAY, to the back of the line");
-		room2_set_ready(false);
+		// (out: the decided match they lost and are out of: the lobby takes a play-on's loser off the table though both
+		// games said started (its session goes on from the decision), R-52, R-57)
+		room2_set_ready(false, ",\"out\":" + std::to_string(m.reported_n));
 	}
 	if (decided) m.decided_seen = true;
 	else if (m.decided_seen) { m.decided_seen = false; m.touched = m.idle_away = m.playon_pressed = false; }   // (the next match on: afresh)
@@ -1198,13 +1200,13 @@ bool Online::room2_ready()
 }
 
 // READY: on (played in turn) or off (AWAY: kept in the line, passed over)
-void Online::room2_set_ready(bool on)
+void Online::room2_set_ready(bool on, const std::string &extra)
 {
 	if (!r2 || r2->mid.empty()) return;
 	r2->me_ready = on;
 	r2->away_asked = now;
 	if (!on && r2->ready_you) r2->ready_sent = true;   // (the countdown taken down at once)
-	room2_send(on ? "ready" : "away", "", true);
+	room2_send(on ? "ready" : "away", on ? std::string() : extra, true);
 	r2->me_ready = on;   // (as asked, till the lobby's state shows it: room2_ops)
 	r2->version++;
 	log(std::string("Rooms 2: ") + (on ? "READY: on" : "READY: off (AWAY)"));
