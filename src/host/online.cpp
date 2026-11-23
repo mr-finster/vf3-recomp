@@ -2218,6 +2218,7 @@ void Online::begin_match(const std::string &who)
 	both_in_conf = false;
 	conf_winner = -1;
 	conf_armed = false;
+	conf_tie = false;
 	for (ConfBytes &e : conf_ring) e.f = UINT32_MAX;
 	random_misses = 0;
 	out_scan[0] = out_scan[1] = SIZE_MAX;
@@ -2495,7 +2496,7 @@ bool Online::step(uint16_t input)
 	if (!both_in) r2_to_win = [this] { const m3::Profile::Settings &set = board.profile->settings; return set.at && set.at + size_t(set.rounds_vs) < board.backup.size() ? int(board.backup[set.at + size_t(set.rounds_vs)]) : 0; }();
 	// (kept from the deciding KO till a new match is on, both in at 0-0: the game clears the rounds a moment after the loser's out)
 	if (!r2_play) r2_lost = false;
-	else if (r2_to_win >= 1 && r2_to_win <= 5 ? score.rounds_now(me ^ 1) >= r2_to_win : score.rounds_now(me ^ 1) > score.rounds_now(me)) r2_lost = true;
+	else if (r2_to_win >= 1 && r2_to_win <= 5 ? score.rounds_now(me ^ 1) >= r2_to_win && score.rounds_now(me ^ 1) > score.rounds_now(me) : score.rounds_now(me ^ 1) > score.rounds_now(me)) r2_lost = true;   // (R-49: a tie at the rounds to win isn't lost)
 	else if (score.players_now() == 3 && score.rounds_now(0) == 0 && score.rounds_now(1) == 0) r2_lost = false;
 	const bool r2_beaten = r2_lost;
 	if (room2_in_seat() && (input & 0x7fff)) r2->touched = true;   // (this player's own input in this match: not away)
@@ -2663,8 +2664,14 @@ bool Online::step(uint16_t input)
 		const int tw = r2_to_win;
 		if (tw >= 1 && tw <= 5) {
 			const bool won0 = e.r[0] >= tw, won1 = e.r[1] >= tw;
-			if ((won0 || won1) && conf_armed) { conf_winner = won0 && won1 ? 0 : won0 ? 1 : 2; conf_armed = false; }
-			else if (!won0 && !won1 && e.r[0] == 0 && e.r[1] == 0 && (e.r[2] & 3) == 3 && !conf_armed) { conf_armed = true; conf_winner = -1; }
+			// (R-49: both at the rounds to win on the same frame (a double KO, a draw at match point) isn't the match over: the
+			// ROM plays a deciding round (VF1 3-3 back to 2-2, VF2 2-2 back to 1-1, on the two-board testers' straight board),
+			// so decided only when one side is ahead at the rounds to win; a draw only if the game started a match again with
+			// neither ahead, which none of the three was seen to do)
+			if (conf_armed && (won0 || won1) && e.r[0] != e.r[1]) { conf_winner = e.r[0] > e.r[1] ? 1 : 2; conf_armed = false; conf_tie = false; }
+			else if (conf_armed && won0 && won1) conf_tie = true;
+			else if (conf_armed && conf_tie && e.r[0] == 0 && e.r[1] == 0) { conf_winner = 0; conf_armed = false; conf_tie = false; }
+			else if (!won0 && !won1 && e.r[0] == 0 && e.r[1] == 0 && (e.r[2] & 3) == 3 && !conf_armed) { conf_armed = true; conf_tie = false; conf_winner = -1; }
 		}
 	}
 	if (score_conf.players() == 3) both_in_conf = true;

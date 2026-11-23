@@ -531,6 +531,7 @@ private:
 	bool both_in_conf = false;
 	int conf_winner = -1;        // (by the rounds, frames run for good: the match on now decided, 1 player 1, 2 player 2, 0 a draw; -1 not)
 	bool conf_armed = false;     // (a match on: both in at 0-0, run for good)
+	bool conf_tie = false;       // (both at the rounds to win on one frame: the deciding round to come, R-49)
 	int r2_alone = 0;   // (frames one player's been alone in the game before both have been in: the log's check)
 	// (Winner may change character off: the winner keeps the fighter they won with) where this player's cursor was on the
 	// character select and whether Start was held at their last button press there (the outfit): sel_now as the select goes,
