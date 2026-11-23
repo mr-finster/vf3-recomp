@@ -236,6 +236,19 @@ for (const how of ['leave_line', 'leave', 'quiet']) {
 	await act(H, 'result', { winner: 'a', n: 1 });
 	check('the loser AWAY before the result: no play-on, off the table to the back of the line; the holder alone', show(G.code), 'SOLO GGG/- [HHH*] s1');
 }
+{   // (R-71/R-50, round 4) a 40 s drop: one game says disconnect, the other, cut off, says nothing (connecting): settled at
+	// DECIDE_MS, never 15 minutes in DECIDED: both alive, the two seated again once; again the same: the holder stays
+	const A = await create('AAA'), B = await enter(A.code, 'BBB');
+	await act(A, 'started'); await act(B, 'started');
+	await act(A, 'result', { winner: 'disconnect', n: 1 });
+	const decided = show(A.code);
+	advance(25500); await act(A, 'poll'); await act(B, 'poll'); await alarm(A.code);
+	check('a lone disconnect, both alive: seated again at 25 s', [decided, show(A.code), JSON.stringify(rec(A.code).t.last)], ['DECIDED AAA/BBB [] s0', 'CONNECTING AAA/BBB [] s0', JSON.stringify({ result: 'void', why: 'disconnect', n: 1 })]);
+	await act(A, 'started'); await act(B, 'started');
+	await act(B, 'result', { winner: 'disconnect', n: rec(A.code).t.n });
+	advance(25500); await act(A, 'poll'); await act(B, 'poll'); await alarm(A.code);
+	check('... the same again: the holder stays (void), not seated again a second time', [rec(A.code).t.holder === A.mid, rec(A.code).t.last.result, rec(A.code).t.last.why], [true, 'void', 'disconnect']);
+}
 // the name filter's HEADS: insults made with a word before, innocent names kept
 check('names blocked', ['DICKMASTER', 'MASTERCOCK', 'BIGDICK', 'SUCKMYDICK'].map(name_ok), [false, false, false, false]);
 check('names kept', ['HANCOCK', 'PEACOCK', 'SHERLOCK', 'DICKENS', 'COCKPIT', 'MASTER', 'BIGBOSS', 'KINGKONG'].map(name_ok), [true, true, true, true, true, true, true, true]);

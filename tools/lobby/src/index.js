@@ -1313,7 +1313,10 @@ function r2_lone(r, now, alive) {
 	const t = r.t, ra = t.reports.a, rb = t.reports.b;
 	if (!(ra || rb) || (ra && rb)) return false;
 	const silent = ra ? 'b' : 'a';
-	return now >= t.deadline || (now >= (t.decide_at || 0) && ((ra || rb) === silent || !alive(t[silent])));
+	// (a lone disconnect claims no win: settled at DECIDE_MS too, as a disconnect (both alive: seated again once, then the
+	// holder stays; the silent side's game gone: its forfeit), never waited out to PLAYING_MAX_MS while the other side,
+	// cut off, sits connecting (a 40 s drop froze a room in DECIDED for 15 minutes))
+	return now >= t.deadline || (now >= (t.decide_at || 0) && ((ra || rb) === silent || (ra || rb) === 'disconnect' || !alive(t[silent])));
 }
 // The match's result, from the two reports (or one, as r2_lone says): agreed, applied; a draw, the streak's holder
 // stays; a desync, void and the two seated again, cold; disagreeing, void, both to the back, the streak gone; a
@@ -1329,7 +1332,7 @@ function r2_resolve(r, now, alive) {
 	// side's game sees only the connection lost)
 	if (ra && rb) kind = ra === rb ? ra : (ra === 'desync' && rb === 'disconnect') || (ra === 'disconnect' && rb === 'desync') ? 'desync'
 		: ra === 'disconnect' || rb === 'disconnect' ? 'disconnect' : 'disagree';
-	else { const said = ra || rb; kind = said === 'disconnect' ? 'lost_' + (ra ? 'b' : 'a') : said; }
+	else { const said = ra || rb; kind = said === 'disconnect' ? (alive(t[ra ? 'b' : 'a']) ? 'disconnect' : 'lost_' + (ra ? 'b' : 'a')) : said; }   // (a lone disconnect, the other alive: as both saying it)
 	if (kind === 'disconnect') {
 		const da = !alive(t.a), db = !alive(t.b);
 		kind = da && db ? 'disagree' : da ? 'lost_a' : db ? 'lost_b' : t.reseated ? 'held' : 'reseat';

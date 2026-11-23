@@ -656,11 +656,13 @@ const side_of = (code, m) => (rec(code).t.a === m.mid ? 'a' : rec(code).t.b === 
 	}
 	{
 		const [A, B] = await lone(() => 'disconnect');
-		advance(25500); await act(A, 'poll'); await alarm(A.code);
+		advance(10000); await act(A, 'poll'); await alarm(A.code);
 		const waiting = show(A.code);
-		rec(A.code).t.deadline = Date.now() - 1; await alarm(A.code);
-		check('R2 a lone disconnect, the other alive and silent: waited for; at the match\'s end, the silent side\'s forfeit', [waiting, last(A.code), rec(A.code).t.holder === B.mid, rec(A.code).t.streak],
-			['DECIDED HLD/CHL [THD] s0', JSON.stringify({ result: 'forfeit', winner: side_of(A.code, B), n: 1 }), true, 0]);
+		advance(15500); await act(A, 'poll'); await alarm(A.code);
+		// (R-71, round 4: a lone disconnect claims no win: settled at DECIDE_MS as a disconnect, both alive: the two seated
+		// again once (then the holder stays), never waited out to PLAYING_MAX_MS while the other side sits connecting)
+		check('R2 a lone disconnect, the other alive and silent: at 25 s the two seated again, not 15 minutes in DECIDED', [waiting, show(A.code), last(A.code)],
+			['DECIDED HLD/CHL [THD] s0', 'CONNECTING HLD/CHL [THD] s0', JSON.stringify({ result: 'void', why: 'disconnect', n: 1 })]);
 	}
 	{
 		const [A, B] = await lone(() => 'desync');
