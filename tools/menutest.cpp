@@ -920,6 +920,15 @@ int main(int argc, char **argv)
 			}
 			for (int i = 0; i < 8; i++) { shot("", w, h); SDL_Delay(40); }
 			shot("create_room_rule.png", w, h);   // (a rule selected: the panel its)
+			{   // Winner may change character's help (VF1/VF2's the longest: D-20's line on Random) within its strip, in every language
+				const int was = gm.selected();
+				gm.select_row(c_go - 1);
+				for (int i = 0; i < 6; i++) { shot("", w, h); SDL_Delay(20); }
+				for (const std::string &o : gm.overflow()) overflows.push_back("create_room, Winner may change character: " + o);
+				const std::string fit = gm.page_fit();
+				check(fit.empty(), ("Create room: Winner may change character's help fits its strip (" + fit + ")").c_str());
+				gm.select_row(was);
+			}
 			room2_clear("create_room_rule.png");
 			check(s.rule_side == side0 && s.rule_dural == dural0 && s.rule_stage == stage0 && s.rule_max == max0, "Create room: the rules never kept as this player's");
 			// the Name row: Left / Right do nothing there (its name's typed on a page of its own)
@@ -1038,6 +1047,30 @@ int main(int argc, char **argv)
 			key(SDL_SCANCODE_RETURN);   // (Create room again, for what follows)
 			gm.select_row(c_go);
 			check(top() == tr::P_CREATE_ROOM.c_str() && gm.selected() == c_go, "Create room opened again after");
+		}
+		{   // R-68: a Rooms 2 room's code entered with the room full: told so, not /v1's "someone's already joining"
+			FakeLobby fl;
+			fl.answer = [](const std::string &line) {
+				if (line.find("/v2/room/enter") != std::string::npos) return std::pair<int, std::string>{ 409, "{\"error\":\"full\"}" };
+				return std::pair<int, std::string>{ 503, "{\"error\":\"x\"}" };
+			};
+			check(fl.open(), "a lobby of the test's own (a full room)");
+			const std::string lobby0 = s.lobby;
+			const bool hide0 = s.hide_ip;
+			s.hide_ip = false;
+			s.lobby = "http://127.0.0.1:" + std::to_string(fl.port);
+			tr::line e2;
+			if (!o.room2_enter(s, "KXQ4M7", e2)) fprintf(stderr, "menutest: enter: %s\n", e2.en().c_str());
+			poll_for(20000, [&] { return !o.join_failure().empty(); });
+			check(o.join_failure() == std::string(tr::ROOM2_ROOM_FULL), ("R-68: a full room's code: \"The room is full\" (" + o.join_failure() + ")").c_str());
+			o.stop();
+			o.forget_failure();
+			s.lobby = lobby0;
+			s.hide_ip = hide0;
+			again();
+			gm.select_row(2);
+			key(SDL_SCANCODE_RETURN);
+			gm.select_row(c_go);
 		}
 #endif
 		if (c_listed >= 0) {

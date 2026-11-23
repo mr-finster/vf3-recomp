@@ -485,6 +485,14 @@ bool Online::sel_joined(int p) const
 	return vf3net::joined(board) >> p & 1;
 }
 
+// Player p's fighter as picked, its outfit in it (13 on for the other: a Start held), the byte 3 before the cursor's
+// (0x108042, player 2's 0x80 on; found by RAM diffs on the ROM: columns 0, 1, 2 gave 0, 6, 4 and column 1 with Start 19)
+int Online::sel_fighter(int p) const
+{
+	const uint32_t at = board.profile->select_cursor;
+	return at ? board.ram[(at - 3 + (p ? 0x80u : 0u)) ^ 3] : -1;
+}
+
 int Online::start_wait() const
 {
 	if (!session || ph != Phase::playing) return 0;
@@ -2463,6 +2471,11 @@ bool Online::step(uint16_t input)
 			select_was = vf3net::scene_byte(board);
 			if (session->in_lockstep() || sel) log_line("the select's byte " + std::to_string(select_was) + " at frame " + std::to_string(f));
 		}
+		if (static const bool dbg = getenv("VF3_TEST_SEL_LOG") != nullptr; dbg && board.profile->mode) {   // (tests: the mode's screen, each change)
+			static int screen_was = -1;
+			const int m = board.ram[board.profile->mode ^ 3], screen = m == 5 ? board.ram[(board.profile->mode + 8) ^ 3] : -m;
+			if (screen != screen_was) { screen_was = screen; log_line("(test) the mode " + std::to_string(m) + ", its screen " + std::to_string(screen) + " at frame " + std::to_string(f)); }
+		}
 		if (sel) select_off_from = UINT32_MAX;
 		else if (select_off_from == UINT32_MAX) select_off_from = f;
 		const bool want = vf3net::SELECT_LOCKSTEP && (sel || (session->in_lockstep() && f - select_off_from < SELECT_LINGER));
@@ -2486,6 +2499,7 @@ bool Online::step(uint16_t input)
 	else if (score.players_now() == 3 && score.rounds_now(0) == 0 && score.rounds_now(1) == 0) r2_lost = false;
 	const bool r2_beaten = r2_lost;
 	if (room2_in_seat() && (input & 0x7fff)) r2->touched = true;   // (this player's own input in this match: not away)
+	if (room2_in_seat() && r2_lost && (input & vf3net::START_BUTTON)) r2->playon_pressed = true;   // (their rematch's Start: the play-on's 20 s stopped)
 	// The loser's Start for a rematch, with the lobby moving on to the next in the room's line: taken out. Once the match is
 	// decided (room2_moving_on: the lobby calling the next, or about to), the player out of the game's; and before the held
 	// reading has them out, from the deciding KO, with someone READY in the line (the lobby will move on): a Start then takes
@@ -2529,12 +2543,20 @@ bool Online::step(uint16_t input)
 	// player isn't in; once both are in, every Start as pressed (the select's, the stage's)
 	if (room2_in_seat() && ph == Phase::playing && session && !both_in) {
 		const int stay = r2->stayer == "b" ? 1 : 0;
-		const uint8_t in = vf3net::joined(board);   // (in by Start: the select's; the score's byte only from a fight)
-		if (me != stay && !(in >> stay & 1)) input = uint16_t(input & ~vf3net::START_BUTTON);
+		// (in by Start: the select's; the score's byte only from a fight. Kept once seen: the byte's player bit turns over
+		// with each Start of theirs after, at the select, the stage screen and the VS screen (vf3net on the ROM), and a
+		// player in never goes out before the fight)
+		const uint8_t in = r2_in_seen |= vf3net::joined(board);
+		// (only before the holder's Start: from it on, the mode's byte 4 (a Start's screen, ~40 frames) then 5 through the
+		// select, the stage screen and the VS screen, every Start of the challenger's goes in, the joined byte later than
+		// the screens; the select's Start held for the other outfit as ever (R-30, R-31). The mode 3 before: the attract)
+		const int mode_now = board.profile->mode ? board.ram[board.profile->mode ^ 3] : 0;
+		const bool at_select = mode_now == 4 || mode_now == 5;
+		if (me != stay && !(in >> stay & 1) && !at_select) input = uint16_t(input & ~vf3net::START_BUTTON);
 		if (!(in >> me & 1) && (me == stay || (in >> stay & 1))) {
 			if (r2_auto_tap++ % 40 < 3) input = uint16_t(input | vf3net::START_BUTTON);
 		} else r2_auto_tap = 0;
-	}
+	} else r2_in_seen = 0;
 	// The winner's fighter kept (the room's Winner may change character off, the default; D-18): at a seat's first select,
 	// the one who stays has their cursor steered by their own game to where it was at the select they last won from (read
 	// from the game's RAM, sel_cursor), a press a step and a look at where it is, then confirmed, Start held round it for
@@ -2569,13 +2591,17 @@ bool Online::step(uint16_t input)
 			sel_playing = !both_in && keep_rule && r2->stayer == (me == 0 ? "a" : "b") && sel_keep.col >= 0 && sel_keep_side == me;
 			if (sel_playing)
 				log_line("Rooms 2: the winner keeps their fighter: the cursor to row " + std::to_string(sel_keep.row) + ", column " + std::to_string(sel_keep.col) +
-				         ", picked with " + std::to_string(sel_keep.press));
+				         ", picked with " + std::to_string(sel_keep.press) + ", fighter " + std::to_string(sel_keep.fighter));
 		} else if (!sel && sel_phase == 1) {   // (and it's over)
 			sel_phase = 2;
 			sel_ends++;
+			const int got = sel_fighter(me);
+			if (sel_playing) log_line(got == sel_keep.fighter ? "Rooms 2: the winner's fighter kept: " + std::to_string(got)
+			                                                    : "Rooms 2: the winner's fighter NOT kept: " + std::to_string(got) + ", not " + std::to_string(sel_keep.fighter));
 			if (sel_recording && sel_now.col >= 0) {
+				sel_now.fighter = got;
 				sel_last = sel_now;
-				log_line("Rooms 2: this player's pick at the select: row " + std::to_string(sel_now.row) + ", column " + std::to_string(sel_now.col) + ", with " + std::to_string(sel_now.press));
+				log_line("Rooms 2: this player's pick at the select: row " + std::to_string(sel_now.row) + ", column " + std::to_string(sel_now.col) + ", with " + std::to_string(sel_now.press) + ", fighter " + std::to_string(sel_now.fighter));
 			}
 			sel_recording = sel_playing = false;
 		}

@@ -37,6 +37,7 @@ constexpr double POLL_NEAR_MS = 4000;    // (the same, this player at the table,
 constexpr double PING_MS = 15000;        // (the socket pinged: the lobby closes one quiet for 90 s)
 constexpr double WS_POLL_MS = 45000;     // (an open socket the lobby's said nothing on this long: asked (a poll on it, answered with a state))
 constexpr double WS_DEAD_MS = 2 * WS_POLL_MS;   // (nothing on it this long, the poll's answer neither: dead, closed, polling meanwhile)
+constexpr double CONNECT_GIVEUP_MS = 30000;   // (a seated session not going while the match is on: disconnect told then)
 constexpr double PLAYON_AWAY_MS = 20000;   // (a play-on's loser: their rematch's Start not pressed in this long, AWAY)
 constexpr double BANNER_MS = 4000;       // (a moment's banner over the game)
 constexpr double REJOIN_MS = 12 * 3600e3; // (a membership kept in room2.txt asked back this long after it was written (when it was made):
@@ -223,6 +224,7 @@ void Online::room2_joined(const vfnet::http::Reply &r)
 	if (r.status != 200 || !parsed || !online_detail::lobby_key(v["mid"].str(), 0) || !online_detail::lobby_key(v["mkey"].str(), 32) || !online_detail::lobby_room_code(v["code"].str())) {
 		tr::line why = m.creating ? tr::line(tr::COULDNT_OPEN_ROOM_WHY, { { "why", online_detail::lobby_answer(r, room_code(), identity.build) } })
 		                          : online_detail::lobby_answer(r, room_code(), identity.build);
+		if (!m.creating && e == "full") why = tr::line(tr::ROOM2_ROOM_FULL);   // (the room at its players' limit: not a /v1 room's "someone's joining")
 		if (m.rejoining && r.status == 412 && e == "version") {   // (taken back at its table: the version is the opponent's, not a host's)
 			std::string theirs;
 			for (char ch : v["host_version"].str())
@@ -869,6 +871,21 @@ void Online::room2_react()
 		room2_seat();
 		return;
 	}
+	// (R-71) seated with a session that isn't running (connecting again, its link down) while the lobby has the match on or
+	// decided and this side hasn't reported: after CONNECT_GIVEUP_MS, disconnect told and the session let go, never left
+	// "connecting" for good (a 40 s drop: the other side said disconnect, this one sat connecting, the room in DECIDED)
+	if (m.in_seat && session && session->state() != vfnet::Session::State::running && (m.phase == "PLAYING" || m.phase == "DECIDED") && m.reported_n != m.n) {
+		if (m.connecting_since <= 0) m.connecting_since = now;
+		else if (now - m.connecting_since >= CONNECT_GIVEUP_MS) {
+			log("Rooms 2: the session not going for " + std::to_string(int(CONNECT_GIVEUP_MS / 1000)) + " s, the table " + m.phase + ": disconnect told");
+			m.reported_n = m.n;
+			m.connecting_since = 0;
+			room2_send("result", ",\"winner\":\"disconnect\",\"n\":" + std::to_string(m.n), true, m.n);
+			m.failed_token = m.seat.token;
+			stop_activity(true);
+			return;
+		}
+	} else m.connecting_since = 0;
 	// seated, this seat's session played and none on now, the table PLAYING: a rematch's fresh start that never got going,
 	// or a session the lobby hasn't heard ended. Never left seated with no session: disconnect told for the match (at
 	// once for a start that failed, else after a moment for the state that moves on; the same seat stuck again told only
@@ -988,7 +1005,7 @@ void Online::room2_seat()
 	sel_base = 0;
 	sel_now = {};
 	sel_recording = sel_playing = false;
-	m.touched = m.idle_away = m.decided_seen = false;
+	m.touched = m.idle_away = m.decided_seen = m.playon_pressed = false;
 	m.playon_out_at = 0;
 	m.seen_peer = m.seat.peer.name;
 	m.seen_token = m.seat.token;
@@ -1119,7 +1136,11 @@ void Online::room2_decided()
 	}
 	// (reno, 22 Nov) A play-on's loser (nobody READY when it was decided) who doesn't press Start for the rematch in
 	// PLAYON_AWAY_MS: AWAY, to the back of the line (the lobby takes them off the table); the winner waits for a challenger
-	if (!lost_it || room2_moving_on()) m.playon_out_at = 0;
+	// (from when they're out of the game as its RAM has it, the win poses over: the decision comes at the deciding KO,
+	// seconds before; and not once they've pressed Start since losing: their rematch on its way, a select or a continue
+	// between. A VF3 loser who pressed Start 25 frames after going out was set AWAY by a timer counted from the KO)
+	const bool out_now = !((score.players_now() >> me) & 1);
+	if (!lost_it || room2_moving_on() || m.playon_pressed || !out_now) m.playon_out_at = 0;
 	else if (!m.playon_out_at) m.playon_out_at = now;
 	else if (now - m.playon_out_at >= PLAYON_AWAY_MS && !m.idle_away) {
 		m.idle_away = true;
@@ -1127,7 +1148,7 @@ void Online::room2_decided()
 		room2_set_ready(false);
 	}
 	if (decided) m.decided_seen = true;
-	else if (m.decided_seen) { m.decided_seen = false; m.touched = m.idle_away = false; }   // (the next match on: afresh)
+	else if (m.decided_seen) { m.decided_seen = false; m.touched = m.idle_away = m.playon_pressed = false; }   // (the next match on: afresh)
 	// (reno, 22 Nov: no CPU fighting in a room seat) Decided with someone READY and the lobby's word in (READY: the result
 	// applied, the next called): the winner's board stops here, its last picture held, "you stay on", till the next pair's
 	// seated (the session ends as the line moving on: the loser's board still too, YOU LOST: NEXT IS ...)

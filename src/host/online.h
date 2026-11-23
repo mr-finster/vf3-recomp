@@ -518,6 +518,7 @@ private:
 	uint32_t r2_game_seen = UINT32_MAX;   // (the log's: who's in the game and the rounds, as last said)
 	int r2_late_wait = 0, r2_late_give = 0;   // (a Start held while unsure of the lobby's word: frames it's waited, then frames still to give)
 	uint32_t r2_auto_tap = 0;   // (a seat's first match: this player's Start pressed by their game, its frames)
+	uint8_t r2_in_seen = 0;     // (a seat's first match: the players seen in by the joined byte, kept till both are in)
 	bool r2_lost = false;   // (this player beaten in the seat's match on now: from its deciding KO till a new one's on)
 	int r2_to_win = 0;   // (the seat's match's rounds to win: the host's setting, read at its start; 0 not known)
 	// (the score's held reading from frames run for good only (both players' inputs in): each frame's bytes kept by the
@@ -535,7 +536,7 @@ private:
 	// character select and whether Start was held at their last button press there (the outfit): sel_now as the select goes,
 	// sel_last once it's over, sel_keep (with their side) once they win a match. At their next seat's select as the one who
 	// stays, their game steers the cursor there and confirms it, their own input left out till the select's over
-	struct SelPick { int row = -1, col = -1; uint16_t press = 0; };   // (press: the word they picked with, the stick's moves left out: its button and the outfit's own (Start held, Up, the button))
+	struct SelPick { int row = -1, col = -1; uint16_t press = 0; int fighter = -1; };   // (press: the word they picked with, the stick's moves left out: its button and the outfit's own (Start held, Up, the button))
 	SelPick sel_now, sel_last, sel_keep;
 	int sel_phase = 0;          // (this seat's session: 0 no select yet, 1 at one, 2 after it)
 	bool sel_recording = false, sel_playing = false, sel_won_last = false;
@@ -544,7 +545,8 @@ private:
 	int sel_ends = 0;
 	uint16_t sel_was = 0;       // (this player's input the frame before: a button's press)
 	bool sel_joined(int p) const;   // (player p at the select or in the game: a seat's Start pressed for them no more)
-	bool sel_cursor(int p, int &row, int &col) const;   // (player p's cursor on the character select, the game's RAM; false: not on it)
+	bool sel_cursor(int p, int &row, int &col) const;
+	int sel_fighter(int p) const;   // (player p's fighter as the game has it picked, its outfit in it where the game keeps it so; -1 not known)   // (player p's cursor on the character select, the game's RAM; false: not on it)
 	double hold_at = 0;
 };
 
