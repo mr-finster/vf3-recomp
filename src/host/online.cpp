@@ -2618,7 +2618,19 @@ bool Online::step(uint16_t input)
 				if (on) {
 					if (row != to->row) { if (c < 2) steer = row < to->row ? 2 : 1; }
 					else if (col != to->col) { if (c < 2) steer = col < to->col ? 8 : 4; }
-					else {   // (on it: picked with the word it was, its outfit's part (Start, Up) held round the button)
+					else if (to->fighter >= 0 && to->fighter < 26) {
+						// (on it, the fighter known: the outfit by Start, held the whole time on the cell, not only round the
+						// button. The game reads Start for the outfit after the button, not at its press (the harness: a pick
+						// "with 16" (no Start at the press) gave 13, and the lock's Start, let go 4 frames after the button, lost
+						// a winner's 13 one time in 3: "NOT kept: 0, not 13"). Start held gives a side's other outfit: player 1
+						// +13, player 2 the first (its plain pick is 13 on: on the ROM). One long hold: each new Start would turn
+						// the joined byte's bit over again)
+						const bool other = me == 0 ? to->fighter >= 13 : to->fighter < 13;
+						const uint16_t rest = uint16_t((to->press & ~0xF0 & ~vf3net::START_BUTTON) | (other ? vf3net::START_BUTTON : 0));
+						const uint16_t button = (to->press & 0xF0) ? uint16_t(to->press & 0xF0) : uint16_t(0x10);
+						steer = rest;
+						if (c >= 3 && c < 5) steer = uint16_t(rest | button);
+					} else {   // (on it: picked with the word it was, its outfit's part (Start, Up) held round the button)
 						if (c < 8) steer = uint16_t(to->press & ~0xF0);
 						if (c >= 3 && c < 5) steer = to->press ? to->press : uint16_t(0x10);
 					}
@@ -2633,7 +2645,7 @@ bool Online::step(uint16_t input)
 			if (static const bool dbg = getenv("VF3_TEST_SEL_LOG") != nullptr; dbg) {   // (tests: the select as it goes, a line each change)
 				static std::string last;
 				const std::string now_s = std::to_string(int(on)) + " " + std::to_string(row) + " " + std::to_string(col) + " " + std::to_string(input);
-				if (now_s != last) { last = now_s; log_line("(test) select: on row col input " + now_s + " k" + std::to_string(at - std::min(at, sel_base)) + " (frame " + std::to_string(at) + ")" + (sel_playing ? " (keeping)" : "")); }
+				if (now_s != last) { last = now_s; log_line("(test) select: on row col input " + now_s + " k" + std::to_string(at - std::min(at, sel_base)) + " fighter " + std::to_string(sel_fighter(me)) + " (frame " + std::to_string(at) + ")" + (sel_playing ? " (keeping)" : "")); }
 			}
 			sel_was = input;
 		}
