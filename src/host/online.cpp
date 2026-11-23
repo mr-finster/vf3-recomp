@@ -2213,6 +2213,8 @@ void Online::begin_match(const std::string &who)
 	round_ends_seen = 0;
 	round_end_frame = 0;
 	both_in = false;
+	r2_in_seen = 0;   // (a seat that ended before both were in (a drop at the select) left its players seen in: the next seat's
+	r2_auto_tap = 0;  // holder then never pressed in, the challenger's Start held back for good: an attract for 90 s)
 	score_conf = {};
 	conf_fed = 0;
 	both_in_conf = false;
