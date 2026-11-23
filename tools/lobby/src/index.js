@@ -1011,10 +1011,10 @@ function r2_side(r, mid) {
 	return mid && r.t.a === mid ? 'a' : mid && r.t.b === mid ? 'b' : null;
 }
 function r2_table() {
-	return { a: null, b: null, phase: 'EMPTY', streak: 0, holder: null, n: 0, last: null, match: null, token: '', as: '', started: {}, reports: {}, deadline: 0, reseated: false, wkey: '', armed: false, arm: false, lost: false, restart: false, playon: false, hf: null, decide_at: 0 };
+	return { a: null, b: null, phase: 'EMPTY', streak: 0, holder: null, n: 0, last: null, match: null, token: '', as: '', started: {}, reports: {}, deadline: 0, reseated: false, wkey: '', armed: false, arm: false, lost: false, restart: false, playon: false, po: false, hf: null, decide_at: 0 };
 }
 function r2_clear_match(t) {
-	t.token = ''; t.as = ''; t.started = {}; t.reports = {}; t.deadline = 0; t.reseated = false; t.wkey = ''; t.armed = false; t.arm = false; t.lost = false; t.restart = false; t.playon = false; t.decide_at = 0;
+	t.token = ''; t.as = ''; t.started = {}; t.reports = {}; t.deadline = 0; t.reseated = false; t.wkey = ''; t.armed = false; t.arm = false; t.lost = false; t.restart = false; t.playon = false; t.po = false; t.decide_at = 0;
 }
 // (the room's rules on the seated terms, whatever either game sent: both play the lobby's terms, whatever their build. A
 // modified game with no pool and a version with a Dural flag is seated on version terms the honest one adopts (its accepts
@@ -1046,7 +1046,7 @@ function r2_seat(r, now, reseat = false) {
 	if (as === null) return false;
 	t.token = random_hex(8); t.as = r2_ruled(r, as); t.n++;
 	t.match = { n: t.n, streak: t.streak, holder: t.holder };   // (the streak this match is played for: what's shown over it)
-	t.phase = 'CONNECTING'; t.deadline = now + R2.CONNECT_MS; t.started = {}; t.reports = {}; t.reseated = reseat; t.lost = false; t.restart = false; t.playon = false;
+	t.phase = 'CONNECTING'; t.deadline = now + R2.CONNECT_MS; t.started = {}; t.reports = {}; t.reseated = reseat; t.lost = false; t.restart = false; t.playon = false; t.po = false;
 	t.wkey = random_hex(16); t.armed = false; t.arm = true;   // (armed by the object: v2_commit)
 	r.active = now;
 	return true;
@@ -1065,7 +1065,7 @@ function r2_reseat(r, now, reseat) {
 // the loser's Start), the table moves on at once instead (r2_advance))
 function r2_rematch(r, now) {
 	const t = r.t, restart = !!t.lost;
-	t.n++; t.phase = 'PLAYING'; t.reports = {}; t.started = {}; t.lost = false; t.restart = restart; t.playon = true;
+	t.n++; t.phase = 'PLAYING'; t.reports = {}; t.started = {}; t.lost = false; t.restart = restart; t.playon = true; t.po = true;   // (po: a play-on's rematch, kept once both said started (playon isn't))
 	t.deadline = now + (restart ? R2.CONNECT_MS : R2.PLAYING_MAX_MS);
 	t.match = { n: t.n, streak: t.streak, holder: t.holder };
 	r.ready = null;
@@ -1210,7 +1210,7 @@ function r2_ready(r, mid, now) {
 }
 // AWAY: kept in the line, passed over. The one being got ready, or seated and not started yet (the session not going:
 // CONNECTING), back to the front of the line; at the table in a match, AWAY from when they're back in the line
-function r2_away(r, mid, now) {
+function r2_away(r, mid, now, out_n = null) {
 	const t = r.t, m = r.members[mid], side = r2_side(r, mid);
 	if (!m || m.watcher) return 'not_now';
 	m.away = true;
@@ -1218,8 +1218,11 @@ function r2_away(r, mid, now) {
 	if (side && t.phase === 'CONNECTING' && t.holder !== mid) { r2_unseat(r, side, 'away', now); return null; }
 	// (a play-on's loser, its rematch not begun (neither said started): off the table to the back of the line, AWAY, the
 	// last match's result as it stands; the holder waits for a challenger. Their game says so when its rematch's Start
-	// isn't pressed in 20 s, or they lost with no input at all (reno, 22 Nov))
-	if (side && t.phase === 'PLAYING' && t.playon && !t.started.a && !t.started.b && t.holder && t.holder !== mid) {
+	// isn't pressed in 20 s, or they lost with no input at all (reno, 22 Nov). A play-on's session goes on from the
+	// decision, so both games say started at once: the loser's game says which match it's out of (out: the decided one,
+	// sent only while out of the game and their Start not pressed), and that's the same, started or not (R-52, R-57))
+	const out_of_last = Number.isInteger(out_n) && out_n === t.n - 1;
+	if (side && t.phase === 'PLAYING' && ((t.playon && !t.started.a && !t.started.b) || (t.po && out_of_last)) && t.holder && t.holder !== mid) {
 		t[side] = null;
 		r.line = r.line.filter((x) => x !== mid);
 		r.line.push(mid);
@@ -1486,7 +1489,7 @@ async function room2_route(env, req, url, op) {
 	const b = await body_of(req), code = normal_code(b && b.code);
 	if (!b) return json({ error: 'bad' }, 400);
 	if (!code_ok(code)) return json({ error: 'no_room' }, 404);
-	const ask = { mid: clean(b.mid, 16), mkey: clean(b.mkey, 64), owner_key: clean(b.owner_key, 64), winner: R2_RESULTS.has(b.winner) ? b.winner : '', n: Number.isInteger(b.n) ? b.n : null };
+	const ask = { mid: clean(b.mid, 16), mkey: clean(b.mkey, 64), owner_key: clean(b.owner_key, 64), winner: R2_RESULTS.has(b.winner) ? b.winner : '', n: Number.isInteger(b.n) ? b.n : null, out: Number.isInteger(b.out) ? b.out : null };
 	if (op === 'settings') Object.assign(ask, { ...(typeof b.room === 'string' ? { room: room_name(b.room) } : {}), ...(typeof b.listed === 'boolean' ? { listed: b.listed } : {}),
 		...(typeof b.locked === 'boolean' ? { locked: b.locked } : {}), ...(Number.isFinite(b.ready_ms) ? { ready_ms: b.ready_ms } : {}),
 		...(b.rules && typeof b.rules === 'object' ? { rules: b.rules } : {}) });
@@ -1744,7 +1747,7 @@ Object.assign(Room.prototype, {
 	v2_act(r, m, op, b, now) {
 		if (op === 'poll') return null;
 		if (op === 'ready') return r2_ready(r, m.mid, now);
-		if (op === 'away') return r2_away(r, m.mid, now);
+		if (op === 'away') return r2_away(r, m.mid, now, Number.isInteger(b.out) ? b.out : null);
 		if (op === 'started') return r2_started(r, m.mid, now, Number.isInteger(b.n) ? b.n : null);
 		if (op === 'result') {
 			return r2_result(r, m.mid, b.winner, Number.isInteger(b.n) ? b.n : null, now, (x) => this.v2_alive(r, x, now));
@@ -1910,7 +1913,7 @@ Object.assign(Room.prototype, {
 		const graced = this.v2_heard(m, now);
 		try { ws.serializeAttachment({ ...att, at: now }); } catch (e) {}
 		const sig = r2_sig(r);
-		const e = this.v2_act(r, m, b.op, { winner: R2_RESULTS.has(b.winner) ? b.winner : '', n: Number.isInteger(b.n) ? b.n : null }, now);
+		const e = this.v2_act(r, m, b.op, { winner: R2_RESULTS.has(b.winner) ? b.winner : '', n: Number.isInteger(b.n) ? b.n : null, out: Number.isInteger(b.out) ? b.out : null }, now);
 		await this.v2_commit(swept || r2_sig(r) !== sig, graced);
 		if (e) try { ws.send(JSON.stringify({ error: e, op: b.op })); } catch (x) {}
 		if (b.op === 'leave') try { ws.close(1000, 'left'); } catch (x) {}

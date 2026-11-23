@@ -224,6 +224,23 @@ for (const how of ['leave_line', 'leave', 'quiet']) {
 	for (const m of [C, D]) await act(m, 'started', { n: 2 });
 	await act(D, 'away');
 	check('a play-on begun (both said started), AWAY: kept at the table till that match is over', show(C.code), 'PLAYING CCC/DDD* [] s1');
+	{   // (round 6) both said started at the decision (a play-on's session goes on), the loser out and not pressing Start: their
+		// game's AWAY says which match they're out of; off the table all the same, the holder alone (R-52, R-57)
+		const W = await create('WWW'), X = await enter(W.code, 'XXX');
+		await act(W, 'started'); await act(X, 'started');
+		for (const m of [W, X]) await act(m, 'result', { winner: 'a', n: 1 });
+		for (const m of [W, X]) await act(m, 'started', { n: 2 });
+		await act(X, 'away', { out: 1 });
+		check('a play-on begun, the loser out of match 1 AWAY: off the table, AWAY at the back; the holder alone', show(W.code), 'SOLO WWW/- [XXX*] s1');
+		const Y = await create('YYY'), Z = await enter(Y.code, 'ZZZ');
+		await act(Y, 'started'); await act(Z, 'started');
+		for (const m of [Y, Z]) await act(m, 'result', { winner: 'a', n: 1 });
+		for (const m of [Y, Z]) await act(m, 'started', { n: 2 });
+		await act(Z, 'away', { out: 0 });
+		check('an out that isn\'t the last match: kept at the table', show(Y.code), 'PLAYING YYY/ZZZ* [] s1');
+		await act(Y, 'away', { out: 1 });
+		check('the holder\'s out: kept (the winner never taken off)', show(Y.code), 'PLAYING YYY*/ZZZ* [] s1');
+	}
 	const E = await create('EEE'), F = await enter(E.code, 'FFF');
 	await act(E, 'started'); await act(F, 'started');
 	for (const m of [E, F]) await act(m, 'result', { winner: 'a', n: 1 });
