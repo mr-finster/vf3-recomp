@@ -241,6 +241,21 @@ for (const how of ['leave_line', 'leave', 'quiet']) {
 		await act(Y, 'away', { out: 1 });
 		check('the holder\'s out: kept (the winner never taken off)', show(Y.code), 'PLAYING YYY*/ZZZ* [] s1');
 	}
+	{   // (round 9) a play-on begun (both said started), someone READY then, the loser out and their Start held back: their
+		// game's out moves the room on to the one READY, never a computer fight
+		const P = await create('PPP'), Q = await enter(P.code, 'QQQ');
+		await act(P, 'started'); await act(Q, 'started');
+		for (const m of [P, Q]) await act(m, 'result', { winner: 'a', n: 1 });
+		for (const m of [P, Q]) await act(m, 'started', { n: 2 });
+		const R = await enter(P.code, 'RRR');
+		check('a play-on begun, someone READY: still playing on till the loser\'s out', show(P.code), 'PLAYING PPP/QQQ [RRR] s1');
+		await act(Q, 'out', { out: 0 });
+		check('an out of another match: nothing', show(P.code), 'PLAYING PPP/QQQ [RRR] s1');
+		await act(P, 'out', { out: 1 });
+		check('the holder\'s out: nothing', show(P.code), 'PLAYING PPP/QQQ [RRR] s1');
+		await act(Q, 'out', { out: 1 });
+		check('the loser out of match 1, RRR READY: moved on to RRR', show(P.code).startsWith('READY') || show(P.code).startsWith('CONNECTING'), true);
+	}
 	const E = await create('EEE'), F = await enter(E.code, 'FFF');
 	await act(E, 'started'); await act(F, 'started');
 	for (const m of [E, F]) await act(m, 'result', { winner: 'a', n: 1 });

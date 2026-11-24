@@ -1005,16 +1005,16 @@ const R2_RESULTS = new Set(['a', 'b', 'draw', 'desync', 'disconnect']);
 function r2_build(v) {
 	return typeof v === 'string' && /^v\d{1,4}\.\d{1,4}\.\d{1,4}(-[a-z][a-z0-9-]{0,39})?$/.test(v) ? v : '';
 }
-const R2_OPS = new Set(['create', 'enter', 'poll', 'ready', 'away', 'started', 'result', 'leave', 'leave_line', 'join_line', 'settings', 'close']);
+const R2_OPS = new Set(['create', 'enter', 'poll', 'ready', 'away', 'started', 'result', 'leave', 'leave_line', 'join_line', 'settings', 'close', 'out']);
 const r2_other = (side) => (side === 'a' ? 'b' : 'a');
 function r2_side(r, mid) {
 	return mid && r.t.a === mid ? 'a' : mid && r.t.b === mid ? 'b' : null;
 }
 function r2_table() {
-	return { a: null, b: null, phase: 'EMPTY', streak: 0, holder: null, n: 0, last: null, match: null, token: '', as: '', started: {}, reports: {}, deadline: 0, reseated: false, wkey: '', armed: false, arm: false, lost: false, restart: false, playon: false, po: false, hf: null, decide_at: 0 };
+	return { a: null, b: null, phase: 'EMPTY', streak: 0, holder: null, n: 0, last: null, match: null, token: '', as: '', started: {}, reports: {}, deadline: 0, reseated: false, wkey: '', armed: false, arm: false, lost: false, restart: false, playon: false, po: false, out_lost: false, hf: null, decide_at: 0 };
 }
 function r2_clear_match(t) {
-	t.token = ''; t.as = ''; t.started = {}; t.reports = {}; t.deadline = 0; t.reseated = false; t.wkey = ''; t.armed = false; t.arm = false; t.lost = false; t.restart = false; t.playon = false; t.po = false; t.decide_at = 0;
+	t.token = ''; t.as = ''; t.started = {}; t.reports = {}; t.deadline = 0; t.reseated = false; t.wkey = ''; t.armed = false; t.arm = false; t.lost = false; t.restart = false; t.playon = false; t.po = false; t.out_lost = false; t.decide_at = 0;
 }
 // (the room's rules on the seated terms, whatever either game sent: both play the lobby's terms, whatever their build. A
 // modified game with no pool and a version with a Dural flag is seated on version terms the honest one adopts (its accepts
@@ -1046,7 +1046,7 @@ function r2_seat(r, now, reseat = false) {
 	if (as === null) return false;
 	t.token = random_hex(8); t.as = r2_ruled(r, as); t.n++;
 	t.match = { n: t.n, streak: t.streak, holder: t.holder };   // (the streak this match is played for: what's shown over it)
-	t.phase = 'CONNECTING'; t.deadline = now + R2.CONNECT_MS; t.started = {}; t.reports = {}; t.reseated = reseat; t.lost = false; t.restart = false; t.playon = false; t.po = false;
+	t.phase = 'CONNECTING'; t.deadline = now + R2.CONNECT_MS; t.started = {}; t.reports = {}; t.reseated = reseat; t.lost = false; t.restart = false; t.playon = false; t.po = false; t.out_lost = false;
 	t.wkey = random_hex(16); t.armed = false; t.arm = true;   // (armed by the object: v2_commit)
 	r.active = now;
 	return true;
@@ -1065,7 +1065,7 @@ function r2_reseat(r, now, reseat) {
 // the loser's Start), the table moves on at once instead (r2_advance))
 function r2_rematch(r, now) {
 	const t = r.t, restart = !!t.lost;
-	t.n++; t.phase = 'PLAYING'; t.reports = {}; t.started = {}; t.lost = false; t.restart = restart; t.playon = true; t.po = true;   // (po: a play-on's rematch, kept once both said started (playon isn't))
+	t.n++; t.phase = 'PLAYING'; t.reports = {}; t.started = {}; t.lost = false; t.restart = restart; t.playon = true; t.po = true; t.out_lost = false;   // (po: a play-on's rematch, kept once both said started (playon isn't))
 	t.deadline = now + (restart ? R2.CONNECT_MS : R2.PLAYING_MAX_MS);
 	t.match = { n: t.n, streak: t.streak, holder: t.holder };
 	r.ready = null;
@@ -1090,8 +1090,8 @@ function r2_advance(r, now) {
 		// again, joined the line): its match never began (its games hold the loser's Start for the next in line), so the
 		// last match's result stands and the next is got ready at once, not after PLAYING_MAX_MS. Their session as it was:
 		// lost, if it was, for a play-on after all)
-		if (!(t.phase === 'PLAYING' && t.playon && !t.started.a && !t.started.b && r2_next(r))) return;
-		t.lost = t.restart; t.restart = false; t.playon = false; t.reports = {}; t.started = {}; t.deadline = 0;
+		if (!(t.phase === 'PLAYING' && ((t.playon && !t.started.a && !t.started.b) || (t.po && t.out_lost)) && r2_next(r))) return;
+		t.lost = t.restart; t.restart = false; t.playon = false; t.out_lost = false; t.reports = {}; t.started = {}; t.deadline = 0;
 	}
 	const next = r2_next(r);
 	if (t.a && t.b) {   // (READY: the match decided, its loser still seated till the next is)
@@ -1210,6 +1210,16 @@ function r2_ready(r, mid, now) {
 }
 // AWAY: kept in the line, passed over. The one being got ready, or seated and not started yet (the session not going:
 // CONNECTING), back to the front of the line; at the table in a match, AWAY from when they're back in the line
+// (round 9) A play-on's loser out of the game, their rematch's Start held back for someone READY in the line: their
+// game says so (out: the match they lost). Both games said started at the decision (the session goes on), so this is
+// what tells the lobby the rematch never began: moved on to the next as before it began, never a computer fight
+function r2_out(r, mid, now, out_n) {
+	const t = r.t, side = r2_side(r, mid);
+	if (!side || t.phase !== 'PLAYING' || !t.po || !Number.isInteger(out_n) || out_n !== t.n - 1 || !t.holder || t.holder === mid) return null;
+	t.out_lost = true;
+	r2_advance(r, now);
+	return null;
+}
 function r2_away(r, mid, now, out_n = null) {
 	const t = r.t, m = r.members[mid], side = r2_side(r, mid);
 	if (!m || m.watcher) return 'not_now';
@@ -1747,6 +1757,7 @@ Object.assign(Room.prototype, {
 	v2_act(r, m, op, b, now) {
 		if (op === 'poll') return null;
 		if (op === 'ready') return r2_ready(r, m.mid, now);
+		if (op === 'out') return r2_out(r, m.mid, now, Number.isInteger(b.out) ? b.out : null);
 		if (op === 'away') return r2_away(r, m.mid, now, Number.isInteger(b.out) ? b.out : null);
 		if (op === 'started') return r2_started(r, m.mid, now, Number.isInteger(b.n) ? b.n : null);
 		if (op === 'result') {
@@ -1887,7 +1898,7 @@ Object.assign(Room.prototype, {
 		let b = null;
 		if (msg === 'ready' || msg === 'away') b = { op: msg };
 		else if (typeof msg === 'string' && msg.length <= 1024) try { b = JSON.parse(msg); } catch (e) {}
-		if (!b || typeof b !== 'object' || !['poll', 'ready', 'away', 'started', 'result', 'leave', 'leave_line', 'join_line'].includes(b.op)) {
+		if (!b || typeof b !== 'object' || !['poll', 'ready', 'away', 'started', 'result', 'leave', 'leave_line', 'join_line', 'out'].includes(b.op)) {
 			// (one that isn't a message (over 1 KB, binary, not JSON, no op it knows): nothing done, nothing answered, but
 			// counted against the member's rate as any (else a flood of them cost the object without end): MSG_CLOSE of them
 			// past it in a row, its socket closed)
