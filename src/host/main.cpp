@@ -158,6 +158,7 @@
 #include "version.h"      // VF3_VERSION, VF3_DATE (made by the Makefile from git)
 #include "update_check.h"
 #include "online.h"
+#include "present_rate.h"
 #include "links.h"
 #include "text.h"
 #include "chime.h"
@@ -4644,7 +4645,9 @@ int main(int argc, char **argv)
 	// running low gets its frames at once. A picture for each pass (each refresh of the screen, by vsync): with
 	// smooth motion, between the last two frames by the frame clock; else the newest frame's, once.
 	double frame_clock = 0, queue_avg = 0;
-	double screen_hz = 60;   // (looked at once a second, below)
+	double screen_hz = 60;   // (looked at once a second, below: the rate the presents show where slower, present_rate.h)
+	double reported_hz = 0;   // (the rate the screen says)
+	PresentRate present_rate("VF3_TEST_SCREEN_HZ");
 	bool vsync_on = true;    // (the renderer's vsync as it reports it, looked at with the refresh rate)
 	// A picture each refresh with smooth motion: the frame clock moves a refresh's time each pass, pulled a tenth of
 	// the way to the real clock (a real hitch, more than 2 refreshes off: taken whole). By the real clock, each
@@ -5839,11 +5842,13 @@ int main(int argc, char **argv)
 			const bool first_look = !screen_hz_t;
 			screen_hz_t = bt;
 			const SDL_DisplayMode *dm = SDL_GetCurrentDisplayMode(SDL_GetDisplayForWindow(win));
-			const double hz_now = dm && dm->refresh_rate > 0 ? dm->refresh_rate : 60.0;
-			if (hz_now != screen_hz || first_look) fprintf(stderr, "screen: %.2f Hz%s\n", hz_now, !hidden && hz_now <= 126 ? " (a picture each refresh)" : "");
-			screen_hz = hz_now;
+			const double hz_now = present_rate.said_hz(dm && dm->refresh_rate > 0 ? dm->refresh_rate : 60.0);
+			if (hz_now != reported_hz || first_look) fprintf(stderr, "screen: %.2f Hz%s\n", hz_now, !hidden && hz_now <= 126 ? " (a picture each refresh)" : "");
+			if (hz_now != reported_hz) present_rate.reset();   // (another screen or mode: measured again)
+			reported_hz = hz_now;
+			screen_hz = present_rate.rate(hz_now);
 			int vs = 0;
-			const bool vs_now = SDL_GetRenderVSync(ren, &vs) && vs != 0;
+			const bool vs_now = present_rate.faked() || (SDL_GetRenderVSync(ren, &vs) && vs != 0);
 			if (vs_now != vsync_on || first_look) fprintf(stderr, "vsync: %s\n", vs_now ? "on" : "off (pictures by the budget, not a picture each refresh)");
 			vsync_on = vs_now;
 		}
@@ -6189,8 +6194,12 @@ int main(int argc, char **argv)
 		}
 		pass_work_ns = SDL_GetTicksNS() - pass_t0;
 		g_where = "presenting";
+		const uint64_t present_t0 = SDL_GetTicksNS();
 		SDL_RenderPresent(ren);
 		g_where = "presented";
+		present_rate.sleep_after_present();
+		present_rate.after_present(present_t0, reported_hz, vsync_on && !hidden);
+		screen_hz = present_rate.rate(reported_hz > 0 ? reported_hz : screen_hz);
 		{   // the governor's count of refreshes missed (above)
 			static uint64_t last_present = 0;
 			const uint64_t now_p = SDL_GetTicksNS();
