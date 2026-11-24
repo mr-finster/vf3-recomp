@@ -1149,6 +1149,16 @@ void Online::room2_decided()
 		// games said started (its session goes on from the decision), R-52, R-57)
 		room2_set_ready(false, ",\"out\":" + std::to_string(m.reported_n));
 	}
+	// (round 9) The same loser out with their rematch's Start held back for someone READY in the line (room2_moving_on):
+	// both games said started at the decision (the session goes on), so the lobby can't tell the rematch never began;
+	// "out" (the match they lost) moves it on to the one READY, the winner's board then still: never a computer fight.
+	// Said at most 3 times, 5 s apart (no answer kept: an old lobby without it says no)
+	if (lost_it && out_now && room2_moving_on() && m.phase == "PLAYING" && (m.out_n != m.reported_n || (m.out_tries < 3 && now >= m.out_at))) {
+		if (m.out_n != m.reported_n) { m.out_n = m.reported_n; m.out_tries = 0; log("Rooms 2: out of match " + std::to_string(m.reported_n) + ", " + m.next_name() + " READY: the lobby told to move on"); }
+		room2_send("out", ",\"out\":" + std::to_string(m.reported_n), false);
+		m.out_tries++;
+		m.out_at = now + 5000;
+	}
 	if (decided) m.decided_seen = true;
 	else if (m.decided_seen) { m.decided_seen = false; m.touched = m.idle_away = m.playon_pressed = false; }   // (the next match on: afresh)
 	// (reno, 22 Nov: no CPU fighting in a room seat) Decided with someone READY and the lobby's word in (READY: the result
@@ -1182,7 +1192,10 @@ bool Online::room2_moving_on() const
 	if (!r2 || !r2->in_seat) return false;
 	const RoomMember &m = *r2;
 	if (m.ready_on && !m.ready_you) return true;
-	return m.next_ready() && m.reported_n == m.n && (m.phase == "PLAYING" || m.phase == "DECIDED" || m.phase == "READY");
+	// (and a play-on's PLAYING n+1, someone READY in the line since: this side's report the match before, "out" moving the
+	// lobby on once the loser's out, round 9)
+	return m.next_ready() && (m.reported_n == m.n || (m.phase == "PLAYING" && m.reported_n >= 0 && m.n == m.reported_n + 1)) &&
+	       (m.phase == "PLAYING" || m.phase == "DECIDED" || m.phase == "READY");
 }
 
 // ---- what the player does ----
