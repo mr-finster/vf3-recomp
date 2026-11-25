@@ -332,9 +332,16 @@ thaw();
 	await act(A, 'result', { winner: 'disconnect', n: 1 }); await act(B, 'result', { winner: 'disconnect', n: 1 });
 	await act(A, 'started'); await act(B, 'started');
 	await act(A, 'result', { winner: 'disconnect', n: 2 }); await act(B, 'result', { winner: 'disconnect', n: 2 });
-	check('8 held: the two play on, their session to start again', [show(A.code), rec(A.code).t.restart, (await alarm_in(A.code)) <= 30000], ['PLAYING AAA/BBB [] s0', true, true]);
+	check('8 held: the two play on, their session to start again', [show(A.code), rec(A.code).t.restart, (await alarm_in(A.code)) <= 55000], ['PLAYING AAA/BBB [] s0', true, true]);
+	advance(56000); await alarm(A.code);
+	check('8 held, neither started in 55 s: void as a new pair (the newcomer to the front, AWAY)', [show(A.code), (rec(A.code) && rec(A.code).t.last || {}).why], ['SOLO AAA/- [BBB*] s0', 'connect']);
+}
+{   // (round 11c) a new pair that truly can't connect: still seated at 30 s (the holder's ending allowed for), void at 55 s
+	const A = await create('PPP'), B = await enter(A.code, 'QQQ');
 	advance(31000); await alarm(A.code);
-	check('8 held, neither started in 30 s: void as a new pair (the newcomer to the front, AWAY)', [show(A.code), (rec(A.code) && rec(A.code).t.last || {}).why], ['SOLO AAA/- [BBB*] s0', 'connect']);
+	const at30 = show(A.code);
+	advance(25000); await alarm(A.code);
+	check('11c a pair that never connects: kept at 30 s, void at 55 s (the newcomer to the front, AWAY)', [at30, show(A.code), (rec(A.code).t.last || {}).why], ['CONNECTING PPP/QQQ [] s0', 'SOLO PPP/- [QQQ*] s0', 'connect']);
 }
 {   // (held, then both start it: on, with PLAYING's own limit)
 	const A = await create('AAA'), B = await enter(A.code, 'BBB');
@@ -421,7 +428,7 @@ const last = (code) => JSON.stringify(rec(code).t.last);
 	advance(3100); await alarm(A.code);
 	const seated = show(A.code);
 	await act(G, 'started');   // (said, never connected)
-	advance(30500); await alarm(A.code);
+	advance(55500); await alarm(A.code);
 	check('F1 a challenger says started alone: it goes back to the front, the holder keeps the table and its streak', [seated, show(A.code), rec(A.code).t.last.why], ['CONNECTING AAA/GRF [BBB] s2', 'CONNECTING AAA/BBB [GRF*] s2', 'connect']);
 }
 {   // F1: a challenger's started alone isn't counted against the holder (its 3 in a row)
@@ -767,7 +774,7 @@ const raw_act = (m, op, extra = {}) => raw('POST', '/v2/room/' + op, { code: m.c
 	await act(A, 'started');
 	const before = Bm.state.seq;
 	hold_arm(true);
-	advance(31000);
+	advance(56000);
 	const t0 = real_now();
 	await obj(A.code).alarm();
 	const took = real_now() - t0;
@@ -785,7 +792,7 @@ const raw_act = (m, op, extra = {}) => raw('POST', '/v2/room/' + op, { code: m.c
 	const X = await create('XXX'), Y = await enter(X.code, 'YYY'), Z = await enter(X.code, 'ZZZ');
 	await act(X, 'started');
 	hold_arm(true);
-	advance(31000);
+	advance(56000);
 	await obj(X.code).alarm();
 	hold_arm(false);   // (only that one held)
 	await new Promise((ok) => setTimeout(ok, 5500)); await settle();

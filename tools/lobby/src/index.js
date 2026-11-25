@@ -973,7 +973,7 @@ export class Room {
 const R2 = {
 	MEMBERS_MAX: 34,          // (the table's two and a line of QUEUE_MAX)
 	PER_ADDRESS: 8,           // (members of one room from one address, an IPv6 one by its /64: a LAN party's, not a script's line)
-	CONNECT_MS: 30000,        // (a new pair's both "started" within this)
+	CONNECT_MS: 55000,        // (a new pair's both "started" within this: the holder's arcade ending (25 s at most) and a connect, round 11c)
 	DECIDE_MS: 25000,         // (the other result within this of the first: a game says its own again 3 s, 9 and 21 s after the first time
 	                          // till it's taken, so one lost on the way still counts; under GONE_MS, so a decided match is settled by its
 	                          // report before a game that closed as it was decided is let go)
