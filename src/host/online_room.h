@@ -136,6 +136,7 @@ struct RoomMember
 	double connecting_since = 0;    // (seated, the session not running while the match is on: since when)
 	bool playon_pressed = false;
 	int out_n = -1, out_tries = 0; double out_at = 0;   // (round 9: "out" said for match out_n, how often, when next)    // (this player's Start pressed since they lost the match on now: their rematch asked for)
+	double decided_at = 0;          // (when this match was first seen decided: room2_win_sequence)
 	bool decided_seen = false;      // (this match seen decided: the next one's start resets touched and idle_away)
 	bool in_seat = false;           // (a seat's session on (connecting or playing): the link is Online's room meanwhile)
 	bool test = false;              // (menutest's made-up state: shown, nothing done about it)

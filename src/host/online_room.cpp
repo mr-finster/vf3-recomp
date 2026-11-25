@@ -37,7 +37,8 @@ constexpr double POLL_NEAR_MS = 4000;    // (the same, this player at the table,
 constexpr double PING_MS = 15000;        // (the socket pinged: the lobby closes one quiet for 90 s)
 constexpr double WS_POLL_MS = 45000;     // (an open socket the lobby's said nothing on this long: asked (a poll on it, answered with a state))
 constexpr double WS_DEAD_MS = 2 * WS_POLL_MS;   // (nothing on it this long, the poll's answer neither: dead, closed, polling meanwhile)
-constexpr double CONNECT_GIVEUP_MS = 30000;   // (a seated session not going while the match is on: disconnect told then)
+constexpr double CONNECT_GIVEUP_MS = 30000;
+constexpr double WIN_SEQUENCE_MS = 25000;   // (the arcade's end after a decision: the KO, the replay, the win poses, ~8-12 s)   // (a seated session not going while the match is on: disconnect told then)
 constexpr double PLAYON_AWAY_MS = 20000;   // (a play-on's loser: their rematch's Start not pressed in this long, AWAY)
 constexpr double BANNER_MS = 4000;       // (a moment's banner over the game)
 constexpr double REJOIN_MS = 12 * 3600e3; // (a membership kept in room2.txt asked back this long after it was written (when it was made):
@@ -720,7 +721,9 @@ void Online::room2_poll()
 	// has begun: the out player back in, or their Start pressed. Till then the lobby, someone READY in line meanwhile,
 	// lets the last result stand and calls them (GET READY: the loser's Start held then), never a table stuck in PLAYING
 	const bool begun = !m.started_said || !(both_in && score.players() != 3) || rematch_coming();
-	if (m.in_seat && ph == Phase::playing && session && m.started_n != m.n && begun) {
+	// (round 11: never for a new pair's match while this seat's session still plays the arcade's ending, its seat's token not
+	// this session's: the new seat waits, room2_win_sequence)
+	if (m.in_seat && ph == Phase::playing && session && m.started_n != m.n && begun && m.seat.token == m.played_token) {
 		if (!m.started_said) log("Rooms 2: connected with " + opponent() + ": started");
 		else log("Rooms 2: match " + std::to_string(m.n) + " begun (" + (score.players() == 3 ? std::string("both in") : "the out player's Start") +
 		         ", in " + std::to_string(int(score.players())) + "): started");
@@ -861,14 +864,14 @@ void Online::room2_react()
 	if (!r2 || r2->step != 2 || !r2->have_state || r2->test) return;
 	RoomMember &m = *r2;
 	// at the table with an opponent: their session, if it's not the one on (a new pair; seated again cold)
-	if (m.pos == 0 && m.seated && m.seat.token != m.played_token && m.seat.token != m.failed_token) { room2_seat(); return; }
+	if (m.pos == 0 && m.seated && m.seat.token != m.played_token && m.seat.token != m.failed_token) { if (!room2_win_sequence()) room2_seat(); return; }
 	// (the session lost, the lobby's word since: the same two play on, its token kept (a lost match given to the holder,
 	// nobody next): a fresh session with it, both sides alike)
 	if (m.pos == 0 && m.seated && !m.in_seat && !m.retry_token.empty() && m.seat.token == m.retry_token && m.phase == "PLAYING" && m.n != m.reported_n) {
 		log("Rooms 2: the same two play on (match " + std::to_string(m.n) + "): their session started again");
 		m.retry_token.clear();
 		m.played_token.clear();
-		room2_seat();
+		if (!room2_win_sequence()) room2_seat();
 		return;
 	}
 	// (R-71) seated with a session that isn't running (connecting again, its link down) while the lobby has the match on or
@@ -909,7 +912,7 @@ void Online::room2_react()
 	static int kept_said = -2;
 	if (!may_unseat && kept_said != m.n) { kept_said = m.n; log("Rooms 2: a state from before this seat (match " + std::to_string(m.n) + " < " + std::to_string(m.seat_n) + "): the seat kept"); }
 	// at the table alone (the other left, or lost and gone): a session still on with them ended
-	if (may_unseat && m.pos == 0 && !m.seated && m.in_seat) {
+	if (may_unseat && m.pos == 0 && !m.seated && m.in_seat && !room2_win_sequence()) {
 		log("Rooms 2: the other player's no longer at the table: the session ended");
 		// (their match lost already, this player the winner (a play-on's loser gone AWAY): you stay on, no forfeit)
 		const bool won_it = both_in && score.players() != 3 && ((score.players() >> local_player()) & 1);
@@ -917,7 +920,7 @@ void Online::room2_react()
 		stop_activity(true, QUIT_NEXT_IN_LINE);
 	}
 	// in the line: back from the table (lost, or a void match), then the room's match watched
-	if (may_unseat && (m.pos > 0 || m.watcher) && m.in_seat) {
+	if (may_unseat && (m.pos > 0 || m.watcher) && m.in_seat && !room2_win_sequence()) {
 		const std::string mine = m.seat.side;
 		room2_unseat(!m.watcher && (((m.last_result == "a" || m.last_result == "b") && m.last_result != mine) || (m.last_result == "forfeit" && m.last_winner != mine)));
 	}
@@ -1159,12 +1162,13 @@ void Online::room2_decided()
 		m.out_tries++;
 		m.out_at = now + 5000;
 	}
+	if (decided && !m.decided_seen) m.decided_at = now;
 	if (decided) m.decided_seen = true;
 	else if (m.decided_seen) { m.decided_seen = false; m.touched = m.idle_away = m.playon_pressed = false; }   // (the next match on: afresh)
 	// (reno, 22 Nov: no CPU fighting in a room seat) Decided with someone READY and the lobby's word in (READY: the result
 	// applied, the next called): the winner's board stops here, its last picture held, "you stay on", till the next pair's
 	// seated (the session ends as the line moving on: the loser's board still too, YOU LOST: NEXT IS ...)
-	if (decided && in != 0 && ((in >> me) & 1) && m.phase == "READY" && ph == Phase::playing) {
+	if (decided && in != 0 && ((in >> me) & 1) && m.phase == "READY" && ph == Phase::playing && !room2_win_sequence()) {
 		log("Rooms 2: won, " + m.next_name() + " called: the board still till the next pair's seated");
 		ended(tr::line(tr::ROOM2_WON_STAYS));
 		stop_activity(true, QUIT_NEXT_IN_LINE);
@@ -1185,6 +1189,19 @@ bool Online::room2_unsure(double ms)
 	if ((m.ws && m.ws->state() == vfnet::http::Socket::State::open) || now - m.state_at <= ms) return false;
 	m.poll_at = std::min(m.poll_at, now);
 	return true;
+}
+
+// (round 11, reno's staging test) The match decided (from the frames run for good, at the deciding KO) but the arcade's own
+// end still playing: the KO, its replay and the win poses, both still in the game. The handover, the winner's board
+// held, the loser back in the line and a new pair's seat all wait for it, the loser out (the continue, or the next
+// challenger's point), WIN_SEQUENCE_MS at most: the two boards had stopped at the KO and the next versus screen come up
+bool Online::room2_win_sequence() const
+{
+	if (!r2 || !r2->in_seat || !r2->decided_seen || ph != Phase::playing || !session || r2->decided_at <= 0) return false;
+	// (VF3: and the fight's mode still on (the mode byte 7): Team Battle's loser stays in the game's byte through its continue,
+	// the mode moving on is its end there)
+	const bool fight = !board.profile->mode || board.ram[board.profile->mode ^ 3] == 7;
+	return score.players_now() == 3 && fight && now - r2->decided_at < WIN_SEQUENCE_MS;
 }
 
 bool Online::room2_moving_on() const

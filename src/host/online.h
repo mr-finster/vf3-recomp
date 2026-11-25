@@ -509,7 +509,8 @@ private:
 	std::string room2_body(const std::string &extra = "") const;
 	bool room2_in_seat() const { return r2 && r2->in_seat; }
 	bool room2_unsure(double ms);   // (no room socket, the lobby's last word older than ms: true, and a poll asked at once)
-	bool room2_moving_on() const;   // (this seat's decided match: the lobby calling the next in line, or about to: the rematch held)
+	bool room2_moving_on() const;
+	bool room2_win_sequence() const;   // (decided, the arcade's KO, replay and win poses still on: the seat's changes wait)   // (this seat's decided match: the lobby calling the next in line, or about to: the rematch held)
 	bool rematch_coming() const;    // (a decided match's out player back in, or their Start pressed since: a rematch on its way)
 	void room2_next_cell(game_menu::net_cells &c) const;   // (the footer's: who plays next in the room)
 	void stop_activity(bool said = false, uint8_t quit_reason = 0);   // (stop as it was: whatever's on, a room's membership kept)
