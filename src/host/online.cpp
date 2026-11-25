@@ -2511,7 +2511,7 @@ bool Online::step(uint16_t input)
 	// before the deciding KO and at the select; the two playing on (nobody READY), a rematch as ever
 	// (from the KO till the session ends: the lobby's PLAYING, then DECIDED once the other game's report is in (its own may
 	// be later: on a slow link the gap was seconds, and a mashed Start in it gave the rematch's select), then READY)
-	const bool r2_ko_hold = r2_play && r2_beaten && r2->next_ready() && (r2->phase == "PLAYING" || r2->phase == "DECIDED" || r2->phase == "READY") &&
+	const bool r2_ko_hold = r2_play && r2_beaten && (r2->next_ready() || room2_moving_on() || r2->phase == "READY") && (r2->phase == "PLAYING" || r2->phase == "DECIDED" || r2->phase == "READY") &&
 	                        !vf3net::in_select(board);
 	// (a game without the room's socket (refused, a proxy) hears the lobby only when it asks, every 4 s at the table: someone
 	// READY just before the KO isn't known yet. So the beaten player's Start, from the deciding KO but at the select,
