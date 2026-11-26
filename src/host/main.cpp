@@ -4935,6 +4935,7 @@ int main(int argc, char **argv)
 			menu.toast(cpu_notice().str(), 12);
 			fprintf(stderr, "the notice: %s\n", cpu_notice().en().c_str());   // (in the log too: what the player was told)
 		}
+		if (online.in_room2() && wait != 3) wait = 0;   // (hotfix 4: in a room, "press Start" only for this player's rematch)
 		const bool press = wait == 1 || wait == 3;
 		// (a room's host, someone in its line: the guest about to make way for them, said for the moment before)
 		std::string r2_name;
@@ -4943,8 +4944,7 @@ int main(int argc, char **argv)
 		if (online.making_way()) menu.set_banner(tr::BANNER_NEXT_IN_LINE, tr::fill(tr::BANNER_MAKES_WAY, { { "name", online.opponent() } }));
 		else if (r2_ready >= 0) {   // (a Rooms 2 room's ready check: this player called, its seconds counting down)
 			const std::string stays = !r2m ? "" : r2m->holder == "a" ? r2m->a.name : r2m->holder == "b" ? r2m->b.name : r2m->has_a ? r2m->a.name : r2m->b.name;
-			const std::string not_now = std::string(tr::ROOM2_NOT_NOW);   // (D-19: AWAY from the menu only; Start: now)
-			menu.set_banner(tr::fill(tr::ROOM2_GET_READY_N, { { "n", std::to_string(r2_ready) } }), (stays.empty() ? std::string(tr::ROOM2_CHIP_YOUR_TURN) : tr::fill(tr::ROOM2_YOU_PLAY, { { "name", stays } })) + "   " + not_now);
+			menu.set_banner(tr::fill(tr::ROOM2_GET_READY_N, { { "n", std::to_string(r2_ready) } }), (stays.empty() ? std::string(tr::ROOM2_CHIP_YOUR_TURN) : tr::fill(tr::ROOM2_YOU_PLAY, { { "name", stays } })));   // (hotfix 4: no AWAY hint here, too quick to read; the menu says it)
 			static uint64_t ready_since = 0;
 			static bool shot_taken = false;
 			if (!ready_since) ready_since = SDL_GetTicks();
@@ -4962,7 +4962,8 @@ int main(int argc, char **argv)
 		// notice's card come and gone between the room's matches: one versus screen from the seat to the fight)
 		const bool r2_next_vs = r2m && online.in_room2() && r2m->has_a && r2m->has_b && (r2m->phase == "CONNECTING" || r2m->phase == "PLAYING") &&
 		                        !interrupted && (online.starting() || (online.waiting() && r2m->in_seat) || online.watch_between() ||
-		                                         (online.watching() && !online.watch_showing()));
+		                                         (online.watching() && !online.watch_showing()) ||
+		                                         (online.watching() && r2m->phase == "CONNECTING"));   // (hotfix 4: a watcher's last match never a frozen frame while the next pair connects)
 		static uint64_t r2_vs_since = 0;   // (its line says how it's going only after a moment: a quick start never shows "catching up")
 		if (!r2_next_vs) r2_vs_since = 0;
 		else if (!r2_vs_since) r2_vs_since = SDL_GetTicks();

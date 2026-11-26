@@ -685,7 +685,14 @@ void Online::room_session(bool host)
 	c.token = room_token;
 	// (round 11c) a room seat: the handshake given the holder's arcade ending too (room2_win_sequence's cap, 25 s): the holder's
 	// game connects only once its last match's ending is over, and a challenger who gave up first was voided and set AWAY
-	if (r2) c.handshake_ms += 25000;
+	// (hotfix 4) 25 s to connect, counted from the holder's start: the holder connects once its arcade ending is over, so its
+	// game gives up 25 s after that; the newcomer, who starts at once, is given the ending's allowance too (25 s at most).
+	// The lobby told it's connecting: its deadline then 25 s on (else 50 s from the pair's start, an older game's)
+	if (r2) {
+		const bool holder = r2->holder == (host ? "a" : "b");
+		c.handshake_ms = holder ? 25000 : 50000;
+		room2_send("connecting", ",\"n\":" + std::to_string(r2->n), false, r2->n);
+	}
 	snapper.stop();
 	session = std::make_unique<vfnet::Session>(lagged(*room), adapter, match_identity(), c, host, host ? adapter.host_blob() : std::vector<uint8_t>());
 	session->trace = log_line;
@@ -1080,6 +1087,7 @@ void Online::watch_begin(const std::string &w)
 	wid = w;
 	watch_sid = hex64(vfnet::watch::new_match_id());
 	watch_match = watch_next = 0;
+	watch_frame_was = 0; watch_frame_at = now;
 	snap_off = false;
 	watch_gone = false;
 	seen_at = -1e18;
@@ -1250,8 +1258,28 @@ void Online::watch_poll()
 		watch_got_at = spec_at = now;
 		over_at = 0;
 	}
+	// (hotfix 4) a room's watcher: while the next pair connects no match is on (the one watched over, or one that will never
+	// run on: the lobby's frames of it may stop short of its end), so none begun, the room's Connecting screen in its place,
+	// and the next one taken from its start; and one shown that stands still 6 s (no frame) let go the same way, never a
+	// frozen picture
+	if (r2 && spec) {
+		const uint32_t f = spec->frame();
+		if (f != watch_frame_was) { watch_frame_was = f; watch_frame_at = now; }
+		const bool stuck = watch_shown && now - watch_frame_at > 6000;
+		if ((r2->phase == "CONNECTING" && (!watch_shown || watch_ended())) || stuck) {   // (one shown runs to its end first)
+			log_line("watching " + watch_code() + (stuck ? ": no frame for 6 s: let go" : ": the next pair connecting: the last match let go"));
+			stream_stop();
+			spec.reset();
+			watch_job.reset();
+			snap_ask.reset();
+			snap_get.reset();
+			watch_shown = false;
+			watch_match = watch_next;   // (its id: the next one's, when it comes, a newer one)
+			adapter.mute = true;
+		}
+	}
 	if (!spec) {
-		if (now - watch_since > 120000) watch_failed(tr::line(tr::WATCH_NONE_STARTED, { { "code", watch_code() } }));
+		if (!r2 && now - watch_since > 120000) watch_failed(tr::line(tr::WATCH_NONE_STARTED, { { "code", watch_code() } }));
 		return;
 	}
 	switch (spec->state()) {

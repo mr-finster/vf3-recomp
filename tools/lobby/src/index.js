@@ -973,7 +973,8 @@ export class Room {
 const R2 = {
 	MEMBERS_MAX: 34,          // (the table's two and a line of QUEUE_MAX)
 	PER_ADDRESS: 8,           // (members of one room from one address, an IPv6 one by its /64: a LAN party's, not a script's line)
-	CONNECT_MS: 55000,        // (a new pair's both "started" within this: the holder's arcade ending (25 s at most) and a connect, round 11c)
+	CONNECT_MS: 25000,        // (a new pair's both "started" within this from the holder's "connecting" (its arcade ending over), hotfix 4)
+	ENDING_MS: 25000,         // (and the holder's ending, 25 s at most, before it: a holder that never says connecting, an older game's)
 	DECIDE_MS: 25000,         // (the other result within this of the first: a game says its own again 3 s, 9 and 21 s after the first time
 	                          // till it's taken, so one lost on the way still counts; under GONE_MS, so a decided match is settled by its
 	                          // report before a game that closed as it was decided is let go)
@@ -1005,7 +1006,7 @@ const R2_RESULTS = new Set(['a', 'b', 'draw', 'desync', 'disconnect']);
 function r2_build(v) {
 	return typeof v === 'string' && /^v\d{1,4}\.\d{1,4}\.\d{1,4}(-[a-z][a-z0-9-]{0,39})?$/.test(v) ? v : '';
 }
-const R2_OPS = new Set(['create', 'enter', 'poll', 'ready', 'away', 'started', 'result', 'leave', 'leave_line', 'join_line', 'settings', 'close', 'out']);
+const R2_OPS = new Set(['create', 'enter', 'poll', 'ready', 'away', 'started', 'connecting', 'result', 'leave', 'leave_line', 'join_line', 'settings', 'close', 'out']);
 const r2_other = (side) => (side === 'a' ? 'b' : 'a');
 function r2_side(r, mid) {
 	return mid && r.t.a === mid ? 'a' : mid && r.t.b === mid ? 'b' : null;
@@ -1046,7 +1047,7 @@ function r2_seat(r, now, reseat = false) {
 	if (as === null) return false;
 	t.token = random_hex(8); t.as = r2_ruled(r, as); t.n++;
 	t.match = { n: t.n, streak: t.streak, holder: t.holder };   // (the streak this match is played for: what's shown over it)
-	t.phase = 'CONNECTING'; t.deadline = now + R2.CONNECT_MS; t.started = {}; t.reports = {}; t.reseated = reseat; t.lost = false; t.restart = false; t.playon = false; t.po = false; t.out_lost = false;
+	t.phase = 'CONNECTING'; t.deadline = now + R2.CONNECT_MS + R2.ENDING_MS; t.started = {}; t.reports = {}; t.reseated = reseat; t.lost = false; t.restart = false; t.playon = false; t.po = false; t.out_lost = false;
 	t.wkey = random_hex(16); t.armed = false; t.arm = true;   // (armed by the object: v2_commit)
 	r.active = now;
 	return true;
@@ -1279,6 +1280,17 @@ function r2_on(r, now) {
 	t.phase = 'PLAYING'; t.restart = false; t.playon = false; t.deadline = now + R2.PLAYING_MAX_MS; t.hf = null;
 	for (const x of [t.a, t.b]) if (r.members[x]) r.members[x].connect_fails = 0;
 	r.active = now;
+}
+// (hotfix 4: a seated member's game starting its session: the holder's (or either, no holder), its ending over, so the
+// pair's deadline CONNECT_MS from now, never later than it was)
+function r2_connecting(r, mid, now, n) {
+	const t = r.t, side = r2_side(r, mid);
+	if (!side || !t.token) return 'not_now';
+	if (Number.isInteger(n) && n !== t.n) return 'stale';
+	if (t.phase !== 'CONNECTING') return null;
+	const hs = t.holder ? r2_side(r, t.holder) : null;
+	if (!hs || hs === side) t.deadline = Math.min(t.deadline, now + R2.CONNECT_MS);
+	return null;
 }
 // (a seated member's session connected: as often as it's said (a game says it again till it's heard), the same; n, if
 // sent, the match it's for: an earlier one's, late, refused as stale)
@@ -1759,6 +1771,7 @@ Object.assign(Room.prototype, {
 		if (op === 'ready') return r2_ready(r, m.mid, now);
 		if (op === 'out') return r2_out(r, m.mid, now, Number.isInteger(b.out) ? b.out : null);
 		if (op === 'away') return r2_away(r, m.mid, now, Number.isInteger(b.out) ? b.out : null);
+		if (op === 'connecting') return r2_connecting(r, m.mid, now, Number.isInteger(b.n) ? b.n : null);
 		if (op === 'started') return r2_started(r, m.mid, now, Number.isInteger(b.n) ? b.n : null);
 		if (op === 'result') {
 			return r2_result(r, m.mid, b.winner, Number.isInteger(b.n) ? b.n : null, now, (x) => this.v2_alive(r, x, now));
@@ -1898,7 +1911,7 @@ Object.assign(Room.prototype, {
 		let b = null;
 		if (msg === 'ready' || msg === 'away') b = { op: msg };
 		else if (typeof msg === 'string' && msg.length <= 1024) try { b = JSON.parse(msg); } catch (e) {}
-		if (!b || typeof b !== 'object' || !['poll', 'ready', 'away', 'started', 'result', 'leave', 'leave_line', 'join_line', 'out'].includes(b.op)) {
+		if (!b || typeof b !== 'object' || !['poll', 'ready', 'away', 'started', 'connecting', 'result', 'leave', 'leave_line', 'join_line', 'out'].includes(b.op)) {
 			// (one that isn't a message (over 1 KB, binary, not JSON, no op it knows): nothing done, nothing answered, but
 			// counted against the member's rate as any (else a flood of them cost the object without end): MSG_CLOSE of them
 			// past it in a row, its socket closed)

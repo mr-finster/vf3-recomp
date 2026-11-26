@@ -449,6 +449,8 @@ private:
 	void watch_over(const tr::line &why);
 	// (the match watched done with: over, or gone at the lobby (a newer one in its place, or none) and what came of it run)
 	bool watch_ended() const;
+	uint32_t watch_frame_was = 0;       // (hotfix 4: a room watcher's frame shown, and when it last moved)
+	double watch_frame_at = 0;
 	bool watch_gone = false;            // (the lobby answered "no_match" for it: it has no more of it)
 	uint32_t watch_got = 0;             // (frames had of it, and when that last grew: none for a while, a newer match on, done)
 	double watch_got_at = 0, spec_at = 0;   // (spec_at: when it was begun: its start and first frames given two minutes)

@@ -332,16 +332,26 @@ thaw();
 	await act(A, 'result', { winner: 'disconnect', n: 1 }); await act(B, 'result', { winner: 'disconnect', n: 1 });
 	await act(A, 'started'); await act(B, 'started');
 	await act(A, 'result', { winner: 'disconnect', n: 2 }); await act(B, 'result', { winner: 'disconnect', n: 2 });
-	check('8 held: the two play on, their session to start again', [show(A.code), rec(A.code).t.restart, (await alarm_in(A.code)) <= 55000], ['PLAYING AAA/BBB [] s0', true, true]);
-	advance(56000); await alarm(A.code);
-	check('8 held, neither started in 55 s: void as a new pair (the newcomer to the front, AWAY)', [show(A.code), (rec(A.code) && rec(A.code).t.last || {}).why], ['SOLO AAA/- [BBB*] s0', 'connect']);
+	check('8 held: the two play on, their session to start again', [show(A.code), rec(A.code).t.restart, (await alarm_in(A.code)) <= 25000], ['PLAYING AAA/BBB [] s0', true, true]);
+	advance(26000); await alarm(A.code);
+	check('8 held, neither started in 25 s: void as a new pair (the newcomer to the front, AWAY)', [show(A.code), (rec(A.code) && rec(A.code).t.last || {}).why], ['SOLO AAA/- [BBB*] s0', 'connect']);
 }
-{   // (round 11c) a new pair that truly can't connect: still seated at 30 s (the holder's ending allowed for), void at 55 s
+{   // (round 11c) a new pair that truly can't connect: still seated at 30 s (the holder's ending allowed for), void at 50 s
+	// (hotfix 4: 25 s and the ending's 25, when the holder never says connecting)
 	const A = await create('PPP'), B = await enter(A.code, 'QQQ');
 	advance(31000); await alarm(A.code);
 	const at30 = show(A.code);
-	advance(25000); await alarm(A.code);
-	check('11c a pair that never connects: kept at 30 s, void at 55 s (the newcomer to the front, AWAY)', [at30, show(A.code), (rec(A.code).t.last || {}).why], ['CONNECTING PPP/QQQ [] s0', 'SOLO PPP/- [QQQ*] s0', 'connect']);
+	advance(20000); await alarm(A.code);
+	check('11c a pair that never connects: kept at 30 s, void at 50 s (the newcomer to the front, AWAY)', [at30, show(A.code), (rec(A.code).t.last || {}).why], ['CONNECTING PPP/QQQ [] s0', 'SOLO PPP/- [QQQ*] s0', 'connect']);
+}
+{   // (hotfix 4) the holder says connecting (its ending over) at 10 s: void 25 s after that, not at 50
+	const A = await create('PPP'), B = await enter(A.code, 'QQQ');
+	advance(10000); await alarm(A.code);
+	await act(A, 'connecting', { n: rec(A.code).t.n });
+	advance(24000); await alarm(A.code);
+	const at34 = show(A.code);
+	advance(2000); await alarm(A.code);
+	check('hotfix 4 connecting: kept at 34 s, void at 36 s (25 s from the holder\'s connecting)', [at34, show(A.code), (rec(A.code).t.last || {}).why], ['CONNECTING PPP/QQQ [] s0', 'SOLO PPP/- [QQQ*] s0', 'connect']);
 }
 {   // (held, then both start it: on, with PLAYING's own limit)
 	const A = await create('AAA'), B = await enter(A.code, 'BBB');
