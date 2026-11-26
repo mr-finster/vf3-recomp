@@ -104,6 +104,7 @@ public:
 	bool toast_showing() const { return m_toast_until || m_toast_wait > 0; }   // (up, or waiting for the menu to close)
 	bool m_vs_under = false;   // (the versus screen's names hidden under an open page)
 	std::string m_vs_rml;      // (its words as last laid out)
+	void keep_versus(double seconds) { if (versus_showing()) m_vs_until = std::max(m_vs_until, SDL_GetTicks() + uint64_t(seconds * 1000)); }   // (hotfix 5: held through a match's boot)
 	void hide_versus() { if (m_vs_until) m_vs_until = SDL_GetTicks(); }   // (gone at the next draw: a match over before its time)
 	// At the bottom in the middle over the game, while it's set: what the players are waited for (Press Start)
 	void set_banner(const std::string &title, const std::string &sub = "", const std::string &key = "");   // (key: a button, shown as one after the title)

@@ -321,7 +321,9 @@ void Online::room2_state(const Value &st)
 	for (const Value &w : st["line"].items) m.line.push_back(who_of(w));
 	const int was_pos = m.pos;
 	m.pos = num(you["pos"], -1, 99, -1);
+	const bool was_watcher = m.watcher;
 	m.watcher = truthy(you["watcher"]);
+	if ((m.watcher && !was_watcher) || (was_pos == 0 && m.pos > 0)) m.want_watch = true;   // (hotfix 5: a watcher, or one who just played, watches on)
 	m.watchers = num(st["watchers"], 0, 99);
 	const Value &mt = t["match"];
 	m.match_n = mt.kind == Value::object ? num(mt["n"], 0, 1 << 30, -1) : -1;

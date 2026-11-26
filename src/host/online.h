@@ -451,6 +451,9 @@ private:
 	bool watch_ended() const;
 	uint32_t watch_frame_was = 0;       // (hotfix 4: a room watcher's frame shown, and when it last moved)
 	double watch_frame_at = 0;
+	double catch_t0 = 0;                // (hotfix 5: a catch-up's start, its first frame, the passes the sound held it)
+	uint32_t catch_from = 0;
+	int catch_sound_held = 0;
 	bool watch_gone = false;            // (the lobby answered "no_match" for it: it has no more of it)
 	uint32_t watch_got = 0;             // (frames had of it, and when that last grew: none for a while, a newer match on, done)
 	double watch_got_at = 0, spec_at = 0;   // (spec_at: when it was begun: its start and first frames given two minutes)

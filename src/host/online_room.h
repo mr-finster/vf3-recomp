@@ -154,7 +154,8 @@ struct RoomMember
 	int started_n = -1;             // (the match number started was last said for: a rematch's PLAYING said too, harmless)
 	int reported_n = -1;            // (the match number a result was sent for)
 	bool result_armed = false;      // (both in the game since the last report: the next decided match is a new one)
-	bool want_watch = true;         // (in the line: the room's match watched; Stop watching turns it off)
+	bool want_watch = false;        // (hotfix 5: none on entering, the room page's WATCH button; back in the line after
+	                                // playing, or entered as a watcher: on; Stop watching turns it off)
 	double watch_retry_at = 0;
 	std::string seen_peer;          // (the opponent at the table last time: a new one is a new challenger)
 	std::string seen_token;         // (and that seat's token: a new seat but the same two seated again cold (a desync, a cut, a

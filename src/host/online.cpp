@@ -1087,7 +1087,7 @@ void Online::watch_begin(const std::string &w)
 	wid = w;
 	watch_sid = hex64(vfnet::watch::new_match_id());
 	watch_match = watch_next = 0;
-	watch_frame_was = 0; watch_frame_at = now;
+	watch_frame_was = 0; watch_frame_at = now; catch_t0 = 0;
 	snap_off = false;
 	watch_gone = false;
 	seen_at = -1e18;
@@ -2485,12 +2485,21 @@ bool Online::step(uint16_t input)
 			const size_t ahead = spec->total() > spec->frame() + 600 ? vf3net::Adapter::UNHEARD_AHEAD : 0;
 			const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(30);
 			while (adapter.midi_unheard_waiting() > ahead && std::chrono::steady_clock::now() < until) std::this_thread::sleep_for(std::chrono::microseconds(500));
-			if (adapter.midi_unheard_waiting() > ahead) return false;
+			if (adapter.midi_unheard_waiting() > ahead) { catch_sound_held++; return false; }
 		}
+		// (hotfix 5: how long a catch-up takes, logged once it's live)
+		if (!watch_shown && !catch_t0) { catch_t0 = now; catch_from = spec->frame(); catch_sound_held = 0; }
 		const int ran = spec->tick(&shown, catching ? 40.0 : 10.0);
 		if (ran) score.frame(board);
 		if (shown && !watch_shown) {   // (caught up: its first picture, the sound from now on)
 			watch_shown = true;
+			if (catch_t0) {
+				char b[160];
+				snprintf(b, sizeof b, "watching: caught up %u frames in %.1f s (%.0f a second), %d passes held for the sound", spec->frame() - catch_from, (now - catch_t0) / 1000.0,
+				         (spec->frame() - catch_from) * 1000.0 / std::max(1.0, now - catch_t0), catch_sound_held);
+				log_line(b);
+				catch_t0 = 0;
+			}
 			adapter.mute = false;
 			notices.push_back({ Notice::watching, tr::line(tr::WATCHING_P1_VS_P2, { { "p1", player_name(0) }, { "p2", player_name(1) } }) });
 		}
@@ -3520,7 +3529,7 @@ menu_page room2_page(Online &o, OnlineSettings &s, game_menu &menu, std::functio
 	} else if (member && !watcher)
 		ready = add({ m->me_ready ? tr::BUTTON_READY_ON : tr::BUTTON_READY_OFF, "", {}, {}, [&o, redo] { if (o.room2()) o.room2_set_ready(!o.room2()->me_ready); redo(); } }, "r2.ready");
 	if (watcher) join = add({ tr::BUTTON_JOIN_LINE, "", {}, {}, [&o, redo] { o.room2_line(true); redo(); } }, "r2.join");
-	if ((in_line || watcher) && !o.watching() && m->has_a && m->has_b) watch = add({ tr::BUTTON_WATCH, "", {}, {}, [&o, redo] { o.room2_watch(true); redo(); } }, "r2.watch");
+	if ((in_line || watcher) && !o.watching() && m->has_a && m->has_b) watch = add({ tr::BUTTON_WATCH, "", {}, {}, [&o, &menu] { o.room2_watch(true); menu.close(); } }, "r2.watch");   // (hotfix 5: the page closed at once, the VS screen and its catching up in its place)
 	if (in_line) leave_line = add({ tr::BUTTON_LEAVE_LINE, "", {}, {}, [&o, redo] { o.room2_line(false); redo(); } }, "r2.leaveline");
 	if (owner && !in_line)
 		copy = add({ tr::BUTTON_COPY_CODE, "", {}, {}, [&o, &menu] {
