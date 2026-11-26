@@ -4966,7 +4966,10 @@ int main(int argc, char **argv)
 		static uint64_t r2_vs_since = 0;   // (its line says how it's going only after a moment: a quick start never shows "catching up")
 		if (!r2_next_vs) r2_vs_since = 0;
 		else if (!r2_vs_since) r2_vs_since = SDL_GetTicks();
-		if (r2_next_vs) {
+		// (hotfix 2, foops: a watcher in the line who opened the room page saw it flash: the versus screen set again each frame
+		// under it. One owner: the room page while it's open, the versus screen down meanwhile)
+		if (r2_next_vs && menu.is_open()) menu.hide_versus();
+		else if (r2_next_vs) {
 			const std::string how = SDL_GetTicks() - r2_vs_since < 3000 ? std::string() : online.watching() ? online.watch_status() : online.status();
 			menu.show_versus({ tr::VS_PLAYER_1, r2m->a.name, tr::VS_PLAYER_2, r2m->b.name, how, online.watching() ? std::string(tr::WATCHING_HOW_TO_STOP) : std::string(),
 			                   false, r2m->a.country, r2m->b.country }, 1.0);
