@@ -38,7 +38,8 @@ constexpr double PING_MS = 15000;        // (the socket pinged: the lobby closes
 constexpr double WS_POLL_MS = 45000;     // (an open socket the lobby's said nothing on this long: asked (a poll on it, answered with a state))
 constexpr double WS_DEAD_MS = 2 * WS_POLL_MS;   // (nothing on it this long, the poll's answer neither: dead, closed, polling meanwhile)
 constexpr double CONNECT_GIVEUP_MS = 30000;
-constexpr double WIN_SEQUENCE_MS = 25000;   // (the arcade's end after a decision: the KO, the replay, the win poses, ~8-12 s)   // (a seated session not going while the match is on: disconnect told then)
+constexpr double WIN_SEQUENCE_MS = 25000;
+constexpr bool AUTO_AWAY = false;   // (reno, 26 Nov: no AWAY but the player's own (the menu's SKIP THIS TURN))   // (the arcade's end after a decision: the KO, the replay, the win poses, ~8-12 s)   // (a seated session not going while the match is on: disconnect told then)
 constexpr double PLAYON_AWAY_MS = 20000;   // (a play-on's loser: their rematch's Start not pressed in this long, AWAY)
 constexpr double BANNER_MS = 4000;       // (a moment's banner over the game)
 constexpr double REJOIN_MS = 12 * 3600e3; // (a membership kept in room2.txt asked back this long after it was written (when it was made):
@@ -1137,7 +1138,10 @@ void Online::room2_decided()
 	const bool lost_it = decided && in != 0 && !((in >> me) & 1);
 	// (reno, 22 Nov) Lost with no input of this player's at all in the match (away: their Start pressed for them at the
 	// seat's start): AWAY, passed over till READY again, so an empty chair isn't seated again and again
-	if (lost_it && !m.touched && !m.idle_away) {
+	// (reno, 26 Nov, the hotfix: never AWAY automatically, only from the menu's SKIP THIS TURN (D-19): this and the 20 s rule
+	// below are off. A loser with someone waiting goes back to the line by the line's own move ("out", round 9); with no one,
+	// the rematch waits)
+	if (AUTO_AWAY && lost_it && !m.touched && !m.idle_away) {
 		m.idle_away = true;
 		log("Rooms 2: lost with no input of this player's in the match (away): AWAY");
 		room2_set_ready(false, ",\"out\":" + std::to_string(m.reported_n));
@@ -1150,7 +1154,7 @@ void Online::room2_decided()
 	const bool out_now = !((score.players_now() >> me) & 1);
 	if (!lost_it || room2_moving_on() || m.playon_pressed || !out_now) m.playon_out_at = 0;
 	else if (!m.playon_out_at) m.playon_out_at = now;
-	else if (now - m.playon_out_at >= PLAYON_AWAY_MS && !m.idle_away) {
+	else if (AUTO_AWAY && now - m.playon_out_at >= PLAYON_AWAY_MS && !m.idle_away) {
 		m.idle_away = true;
 		log("Rooms 2: the rematch's Start not pressed in " + std::to_string(int(PLAYON_AWAY_MS / 1000)) + " s: AWAY, to the back of the line");
 		// (out: the decided match they lost and are out of: the lobby takes a play-on's loser off the table though both
