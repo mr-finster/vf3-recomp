@@ -2597,11 +2597,12 @@ bool Online::step(uint16_t input)
 			sel_recording = !(both_in && sel_won_last);
 			// (hotfix 2, foops: a holder whose win wasn't kept as one (a challenger who won, a forfeit, a void, a side changed):
 			// their last pick is the one they hold the table with; none known (won before any select of theirs): free once)
-			if (keep_rule && r2->stayer == (me == 0 ? "a" : "b") && sel_keep.col < 0 && sel_last.col >= 0) {
+			if (sel_won_last && keep_rule && r2->holder == (me == 0 ? "a" : "b") && sel_keep.col < 0 && sel_last.col >= 0) {
 				sel_keep = sel_last;
 				log_line("Rooms 2: the holder's pick not kept as a win's: their last pick kept instead");
 			}
-			sel_playing = keep_rule && r2->stayer == (me == 0 ? "a" : "b") && sel_keep.col >= 0;
+			// (hotfix 3: only the one who won the match just decided, never its loser: hotfix 2 locked a play-on's loser)
+			sel_playing = sel_won_last && keep_rule && r2->holder == (me == 0 ? "a" : "b") && sel_keep.col >= 0;
 			if (sel_playing)
 				log_line("Rooms 2: the winner keeps their fighter: the cursor to row " + std::to_string(sel_keep.row) + ", column " + std::to_string(sel_keep.col) +
 				         ", picked with " + std::to_string(sel_keep.press) + ", fighter " + std::to_string(sel_keep.fighter));
@@ -2622,7 +2623,9 @@ bool Online::step(uint16_t input)
 			int row = -1, col = -1;
 			const bool on = sel_cursor(me, row, col);
 			const SelPick *test_pick = test_picks.empty() ? nullptr : &test_picks[size_t(sel_ends) % test_picks.size()];
-			const SelPick *to = sel_playing ? &sel_keep : test_pick;
+			// (hotfix 3: the fighter's screen only (the mode's sub-screen 18): from the stage screen on, the player's own input)
+			const bool on_fighters = !board.profile->mode || board.ram[(board.profile->mode + 8) ^ 3] == 18;
+			const SelPick *to = !on_fighters ? nullptr : sel_playing ? &sel_keep : test_pick;
 			if (to) {
 				uint16_t steer = 0;
 				const int cyc = std::max(16, 2 * delay_now() + 8), c = int((at - std::min(at, sel_base)) % size_t(cyc));
